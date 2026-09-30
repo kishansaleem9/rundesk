@@ -9,6 +9,7 @@ import { SecurityModule } from '../security/security.module'
 import { WebhooksModule } from '../webhooks/webhooks.module'
 import { PlansModule } from '../plans/plans.module'
 import { CustomRolesModule } from '../custom-roles/custom-roles.module'
+import { RateLimitGuard } from '../../common/guards/rate-limit.guard'
 
 @Module({
   imports: [
@@ -28,7 +29,8 @@ import { CustomRolesModule } from '../custom-roles/custom-roles.module'
     }),
   ],
   controllers: [InvitationsController],
-  providers: [InvitationsService],
+  // RateLimitGuard for the invitee's routes (`found-30-sep/register-unthrottled`).
+  providers: [InvitationsService, RateLimitGuard],
   exports: [InvitationsService],
 })
 export class InvitationsModule {}

@@ -13,10 +13,12 @@ import {
   labels,
   customFieldDefinitions,
   customFieldValues,
+  workspaceMembers,
   type TaskTemplatePayload,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { isUuid } from '../../common/validation/uuid'
 import { TasksService } from '../tasks/tasks.service'
 import { SecurityService } from '../security/security.service'
 
@@ -29,6 +31,74 @@ const MAX_LABELS = 50
 const MAX_CUSTOM_FIELDS = 100
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
+
+/** One custom-field value as a template holds it (`TaskTemplatePayload`). */
+export type TemplateFieldValue = TaskTemplatePayload['customFieldValues'][number]['value']
+
+/**
+ * `found-30-sep/templates-null-array-field-values` — what a template may hold
+ * as a custom-field value: one text, number or yes/no, or a LIST OF TEXTS,
+ * which is how a People, Labels or Tasks field holds its value (§V2-01c, 0158).
+ * The payload's type was widened to `string[]` so that a template would not
+ * drop a task's people field, and this kept only the one-value shapes, so
+ * every write — create, save from a task, each PATCH with a payload — stored
+ * the list as null. Anything else (an object, a list holding anything but
+ * text) is still null.
+ */
+export function templateFieldValue(value: unknown): TemplateFieldValue {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value
+  if (Array.isArray(value) && value.every((v) => typeof v === 'string')) return [...value]
+  return null
+}
+
+/**
+ * THE FIELDS A TEMPLATE NEVER WRITES ONTO A TASK, and so never takes from one.
+ *
+ *   · `voting` — a vote is its voter's own: the field's route toggles the
+ *     caller's vote and nobody else's (`CustomFieldsService.setValue`). Copied
+ *     from a template, it would be cast on every task made from it, by people
+ *     who never saw that task.
+ *   · `files` — the ids are attachments of the task the template was saved
+ *     from, and a task made from it has none of them.
+ *   · `progress_auto` and `formula` — worked out on read; no value is stored.
+ */
+const NOT_FROM_TEMPLATES: ReadonlySet<string> = new Set(['voting', 'files', 'progress_auto', 'formula'])
+
+/** The fields whose value is a list a template may write: people, options, tasks. */
+const LIST_FIELDS: ReadonlySet<string> = new Set(['people', 'labels', 'tasks'])
+
+/**
+ * `found-30-sep/templates-null-array-field-values` — a template's value, as
+ * the field of that name in the new task's project can hold it, or `undefined`
+ * when it cannot and nothing is written.
+ *
+ * A LIST IS CHECKED AS THE FIELD'S OWN ROUTE CHECKS IT, because this write goes
+ * round that route (`CustomFieldsService.setValue`): people who are members of
+ * the workspace NOW, options the field defines, tasks in the workspace. What is
+ * not is left out, each entry once, and a list with nothing left is not
+ * written. A template is saved from one project and used in any, where a field
+ * of the same name has its own options; and somebody named in it may have left
+ * since. A list is never written into a one-value field, nor one value into a
+ * list field. One value into a one-value field is written as it always was.
+ */
+export function fitTemplateValue(
+  field: { type: string; options?: Array<{ value: string }> | null },
+  value: TemplateFieldValue | undefined,
+  known: { members: ReadonlySet<string>; tasks: ReadonlySet<string> },
+): TemplateFieldValue | undefined {
+  if (value === null || value === undefined) return undefined
+  if (NOT_FROM_TEMPLATES.has(field.type)) return undefined
+  const listField = LIST_FIELDS.has(field.type)
+  if (!Array.isArray(value)) return listField ? undefined : value
+  if (!listField) return undefined
+  const options = new Set((field.options ?? []).map((o) => o.value))
+  const allowed =
+    field.type === 'people' ? known.members
+    : field.type === 'tasks' ? known.tasks
+    : options
+  const kept = [...new Set(value)].filter((v) => allowed.has(v))
+  return kept.length ? kept : undefined
+}
 
 export interface TaskTemplateView {
   id: string
@@ -187,7 +257,8 @@ export class TaskTemplatesService {
    * workspace. Captures: title, description, priority, time estimate,
    * date offsets (computed relative to "today" at save time), labels,
    * checklists with items, one level of subtasks, and custom-field
-   * values keyed by definition name.
+   * values keyed by definition name — a People, Labels or Tasks field's
+   * list among them, and no votes or files (`NOT_FROM_TEMPLATES`).
    *
    * Status is intentionally NOT captured because each list has its
    * own custom-status pipeline — see TaskTemplatePayload docstring.
@@ -202,7 +273,7 @@ export class TaskTemplatesService {
     if (!ctx) throw new NotFoundException('Task not found')
     if (ctx.workspaceId !== workspaceId) throw new NotFoundException('Task not found in this workspace')
 
-    const payload = await this.snapshotTask(taskId)
+    const payload = await this.snapshotTask(taskId, { forTemplate: true })
     return this.create(workspaceId, actor, {
       name: dto.name,
       description: dto.description ?? null,
@@ -218,7 +289,8 @@ export class TaskTemplatesService {
    * Subtasks, checklists, labels (resolved by name within the
    * workspace — missing ones are auto-created with a neutral color),
    * and custom-field values (resolved by definition name within the
-   * target project) are all reconstructed.
+   * target project, each as far as that field can hold it —
+   * `fitTemplateValue`) are all reconstructed.
    *
    * Date offsets are interpreted as days from `now` so a template
    * with `dueDateOffsetDays: 7` always produces a task due in a week.
@@ -258,7 +330,7 @@ export class TaskTemplatesService {
     if (!task) throw new Error('Task creation returned no row')
 
     await this.materialiseChecklists(task.id, payload.checklists)
-    await this.materialiseCustomFieldValues(task.id, listCtx.projectId, payload.customFieldValues)
+    await this.materialiseTemplateValues(task.id, listCtx.projectId, workspaceId, payload.customFieldValues)
     await this.materialiseSubtasks(dto.listId, task.id, payload.subtasks, actor.id, now)
 
     // Bump usage count for ordering/discovery.
@@ -351,7 +423,14 @@ export class TaskTemplatesService {
     return row
   }
 
-  private async snapshotTask(taskId: string): Promise<TaskTemplatePayload> {
+  /**
+   * The task as a payload. `forTemplate` leaves out the fields a template never
+   * writes (`NOT_FROM_TEMPLATES`); a duplicate takes the task as it is.
+   */
+  private async snapshotTask(
+    taskId: string,
+    { forTemplate = false }: { forTemplate?: boolean } = {},
+  ): Promise<TaskTemplatePayload> {
     const [task] = await this.db
       .select()
       .from(tasks)
@@ -428,6 +507,7 @@ export class TaskTemplatesService {
       })),
       customFieldValues: valueRows
         .filter((r) => r.value && r.value.v !== null && r.value.v !== undefined)
+        .filter((r) => !forTemplate || !NOT_FROM_TEMPLATES.has(r.type))
         .map((r) => ({ fieldName: r.name, value: r.value.v ?? null })),
     }
   }
@@ -503,6 +583,70 @@ export class TaskTemplatesService {
       })
       .filter((r): r is { taskId: string; fieldId: string; value: any } => !!r)
 
+    if (rows.length === 0) return
+    await this.db.insert(customFieldValues).values(rows)
+  }
+
+  /**
+   * A TEMPLATE's custom-field values, onto the task made from it: each to the
+   * field of that name in the task's project, as far as `fitTemplateValue`
+   * says that field can hold it. The people and tasks a list names are asked
+   * of the database once each, and only ids shaped like ids are asked: an id
+   * that is not one would have Postgres refuse the whole query (`isUuid`).
+   */
+  private async materialiseTemplateValues(
+    taskId: string,
+    projectId: string,
+    workspaceId: string,
+    values: TaskTemplatePayload['customFieldValues'],
+  ) {
+    if (!values?.length) return
+    const defs = await this.db
+      .select({
+        id: customFieldDefinitions.id,
+        name: customFieldDefinitions.name,
+        type: customFieldDefinitions.type,
+        options: customFieldDefinitions.options,
+      })
+      .from(customFieldDefinitions)
+      .where(eq(customFieldDefinitions.projectId, projectId))
+    const byName = new Map(defs.map((d) => [d.name, d]))
+
+    const named = (type: string) =>
+      Array.from(
+        new Set(
+          values.flatMap((v) =>
+            byName.get(v.fieldName)?.type === type && Array.isArray(v.value) ? v.value.filter(isUuid) : [],
+          ),
+        ),
+      )
+    const people = named('people')
+    const taskIds = named('tasks')
+    const members = people.length
+      ? await this.db
+          .select({ id: workspaceMembers.userId })
+          .from(workspaceMembers)
+          .where(and(eq(workspaceMembers.workspaceId, workspaceId), inArray(workspaceMembers.userId, people)))
+      : []
+    const tasksHere = taskIds.length
+      ? await this.db
+          .select({ id: tasks.id })
+          .from(tasks)
+          .innerJoin(lists, eq(lists.id, tasks.listId))
+          .innerJoin(projects, eq(projects.id, lists.projectId))
+          .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+          .where(and(eq(spaces.workspaceId, workspaceId), inArray(tasks.id, taskIds)))
+      : []
+    const known = { members: new Set(members.map((m) => m.id)), tasks: new Set(tasksHere.map((t) => t.id)) }
+
+    const rows: Array<typeof customFieldValues.$inferInsert> = []
+    for (const v of values) {
+      const def = byName.get(v.fieldName)
+      if (!def) continue
+      const value = fitTemplateValue(def, v.value, known)
+      if (value === undefined) continue
+      rows.push({ taskId, fieldId: def.id, value: { v: value } })
+    }
     if (rows.length === 0) return
     await this.db.insert(customFieldValues).values(rows)
   }
@@ -629,12 +773,7 @@ export class TaskTemplatesService {
         .slice(0, MAX_CUSTOM_FIELDS)
         .map((v: any) => ({
           fieldName: String(v.fieldName).slice(0, 200),
-          value:
-            typeof v.value === 'string' ||
-            typeof v.value === 'number' ||
-            typeof v.value === 'boolean'
-              ? v.value
-              : null,
+          value: templateFieldValue(v.value),
         })),
     }
   }

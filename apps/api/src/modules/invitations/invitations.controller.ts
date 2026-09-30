@@ -9,9 +9,17 @@ import { AuthService } from '../auth/auth.service'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { JwtService } from '@nestjs/jwt'
 import { CustomRolesService } from '../custom-roles/custom-roles.service'
+import { RateLimit, RateLimitGuard } from '../../common/guards/rate-limit.guard'
+import { AUTH_ROUTE_LIMITS } from '../../common/guards/auth-route-limits'
 
 @ApiTags('invitations')
 @Controller('invitations')
+// The invitee's three routes answer anybody holding a link, so each is limited
+// per address (`found-30-sep/register-unthrottled`): opening the link a page's
+// budget, accepting or declining it sign-up's. On the class, as `AuthController`
+// has it, so a refusal comes before the handler reads the token; the routes
+// without `@RateLimit` (every one that needs a session) are not counted.
+@UseGuards(RateLimitGuard)
 export class InvitationsController {
   constructor(
     private readonly invitationsService: InvitationsService,
@@ -101,6 +109,7 @@ export class InvitationsController {
   }
 
   @Post('claim')
+  @RateLimit(AUTH_ROUTE_LIMITS.signUp)
   @ApiOperation({ summary: 'Claim an invitation and create an account if needed' })
   async claim(@Body() dto: { token: string; password?: string; fullName?: string }, @Req() req: any) {
     let currentUserId = req.user?.id as string | undefined
@@ -150,6 +159,7 @@ export class InvitationsController {
 
 
   @Post('decline')
+  @RateLimit(AUTH_ROUTE_LIMITS.signUp)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Decline an invitation — the recipient says no' })
   async decline(@Body() dto: { token: string }) {
@@ -157,6 +167,7 @@ export class InvitationsController {
   }
 
   @Get('preview')
+  @RateLimit(AUTH_ROUTE_LIMITS.invitationLink)
   @ApiOperation({ summary: 'Preview an invitation before claiming' })
   async preview(@Query('token') token: string) {
     return this.invitationsService.preview(token)

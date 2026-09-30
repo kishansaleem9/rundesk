@@ -33,16 +33,31 @@
  *     form;
  *   · Update existing template asks under the template's own name, then writes
  *     the form over it and keeps its checklists, subtasks and custom-field
- *     value, which the form cannot say;
+ *     values, which the form cannot say, as its panel says before the press;
  *   · a member, who lacks `template.manage`, is offered the first group only,
  *     and the API refuses their save (403).
+ *
+ * AND A PEOPLE OR LABELS FIELD'S LIST IS KEPT, `found-30-sep/templates-null-array-field-values`.
+ * The payload's type was widened to `string[]` so that a template would not
+ * drop a task's people field, and the service's normaliser kept only one-value
+ * shapes: every write stored the list as null. Measured on each write that
+ * shapes a payload, and on the task made from one:
+ *
+ *   · made through the API with a People and a Labels list, the template holds
+ *     both; Update existing template keeps them as lists, not null;
+ *   · a task with both fields set, saved as a template, keeps them, and a task
+ *     made from that template carries them in its own fields (read by SQL).
+ *
+ * ClickUp (help centre, "Use task templates", read from search excerpts): a
+ * template saved with "Import everything" includes "all task properties,
+ * fields, and settings", and "Custom Fields" leaves out only Formula Fields.
  *
  *   node test/e2e/create-modal-templates.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { signInApi, registerApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
@@ -53,7 +68,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 15
+const EXPECTED_CHECKS = 20
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -109,15 +124,10 @@ try {
   const LIST = must('make the chosen list', await A('/lists', { method: 'POST', body: { projectId: PROJECT, name: LIST_NAME } }))?.id
   if (!WS || !SPACE || !PROJECT || !LIST) throw new Error('the workspace, space, project or list came back without an id')
 
-  /* A member, who may use a template and may not make or change one. */
-  const anon = apiAs(null)
-  const registered = await anon('/auth/register', {
-    method: 'POST',
-    body: { email: MEMBER_EMAIL, displayName: `Member ${TAG}`, password: MEMBER_PASSWORD },
-  })
-  if (registered.status >= 300 || !registered.data?.accessToken) throw new Error(`could not register the member: ${said(registered)}`)
-  memberId = registered.data.user?.id ?? null
-  const M = apiAs(registered.data.accessToken)
+  /* A member, who may use a template and may not make or change one. `registerApi` waits out register's ten a minute. */
+  const registered = await registerApi(API, { email: MEMBER_EMAIL, displayName: `Member ${TAG}`, password: MEMBER_PASSWORD })
+  memberId = registered.user?.id ?? null
+  const M = apiAs(registered.accessToken)
   must('add the member', await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email: MEMBER_EMAIL, role: 'member' } }))
 
   /* The templates, staged through the API once the menu has been read without any. */
@@ -130,6 +140,18 @@ try {
     subtasks: [{ title: `Sub ${TAG}`, description: null, priority: 'low', timeEstimate: null, dueDateOffsetDays: null }],
   }
   const T1_MADE = { checklists: [{ title: 'Steps', items: ['Step one', 'Step two'] }], subtasks: [`Sub ${TAG}`] }
+  /*
+   * `found-30-sep/templates-null-array-field-values` — a People and a Labels
+   * field, whose values are LISTS: two people (the admin and the member, both
+   * in this workspace) and two of the Labels field's options.
+   */
+  const ADMIN_ID = auth.user?.id ?? null
+  if (!ADMIN_ID || !memberId) throw new Error('the admin or the member came back without an id')
+  const PEOPLE = `People ${TAG}`
+  const LABELS = `Labels ${TAG}`
+  const LISTS = { [PEOPLE]: [ADMIN_ID, memberId], [LABELS]: ['red', 'blue'] }
+  /** A payload's People and Labels values, as it holds them. */
+  const listsIn = (p) => Object.fromEntries([PEOPLE, LABELS].map((name) => [name, p?.customFieldValues?.find((v) => v.fieldName === name)?.value ?? null]))
   const T2_NAME = `Update me ${TAG}`
   const T2 = {
     title: `Old title ${TAG}`,
@@ -141,7 +163,11 @@ try {
     labels: ['old-tag'],
     checklists: [{ title: 'Kept list', items: [{ content: 'Kept item' }] }],
     subtasks: [{ title: `Kept sub ${TAG}`, description: null, priority: 'high', timeEstimate: null, dueDateOffsetDays: null }],
-    customFieldValues: [{ fieldName: `Budget ${TAG}`, value: 5 }],
+    customFieldValues: [
+      { fieldName: `Budget ${TAG}`, value: 5 },
+      { fieldName: PEOPLE, value: LISTS[PEOPLE] },
+      { fieldName: LABELS, value: LISTS[LABELS] },
+    ],
   }
 
   const templatesNow = async () => {
@@ -518,7 +544,7 @@ try {
   )
   await closeMenu(page)
 
-  // ══ 13–14. UPDATE EXISTING TEMPLATE ══════════════════════════════════════
+  // ══ 13–16. UPDATE EXISTING TEMPLATE ══════════════════════════════════════
   console.log('\n▶ Update existing template')
   const UPDATED = `Updated ${TAG}`
   await titleBox(page).fill(UPDATED, { timeout: 5000 }).catch(() => {})
@@ -531,6 +557,9 @@ try {
   const updateName = await nameBox.inputValue({ timeout: 2000 }).catch(() => null)
   // Read while the panel waits: choosing a template is not yet writing to it.
   const titleBeforePress = (await templateNamed(T2_NAME))?.payload?.title ?? null
+  // What the panel promises is kept, as shown beside the button, before it is pressed.
+  let updateHint = ''
+  await waitUntil(async () => (updateHint = await readText(page.getByTestId('quick-create-tpl-hint').filter({ visible: true }), { timeoutMs: 1000 })).length > 0, { timeoutMs: 5000 })
   await page.getByTestId('quick-create-tpl-confirm').click({ timeout: 5000 }).catch(() => {})
   let updated = null
   await waitUntil(async () => (updated = await templateNamed(T2_NAME))?.payload?.title === UPDATED, { timeoutMs: 10_000 })
@@ -543,11 +572,79 @@ try {
   )
   chk(
     updated?.payload?.title === UPDATED && JSON.stringify(beyondForm(updated.payload)) === JSON.stringify(beyondForm(T2_BEFORE)),
-    'and it keeps the template’s checklists, subtasks and custom-field value, which the form cannot say',
+    'and it keeps the template’s checklists, subtasks and custom-field values, which the form cannot say',
     `after the update it holds ${JSON.stringify(beyondForm(updated?.payload))}; before, ${JSON.stringify(beyondForm(T2_BEFORE))}`,
   )
+  /*
+   * THE PANEL'S PROMISE IS WHAT IS KEPT. It promised checklists and subtasks
+   * only, because the service turned a list-valued field to null on every
+   * PATCH: it was right about what it named and silent about the rest.
+   */
+  chk(
+    /its checklists, subtasks and custom-field values are kept/.test(updateHint),
+    'the Update panel says, before it is pressed, that the template keeps its checklists, subtasks and custom-field values',
+    `the panel read ${JSON.stringify(updateHint)}`,
+  )
+  // The update's merge shapes the payload again, and that is where a list turned to null.
+  chk(
+    JSON.stringify(listsIn(updated?.payload)) === JSON.stringify(LISTS),
+    'and the People and Labels values it kept are still lists, not null (read back through the API)',
+    `after the update it holds ${JSON.stringify(listsIn(updated?.payload))}; the lists were ${JSON.stringify(LISTS)}`,
+  )
 
-  // ══ 15. A MEMBER, WITHOUT template.manage ════════════════════════════════
+  // ══ 17–19. A PEOPLE OR LABELS LIST, IN A TEMPLATE AND BACK ═══════════════
+  console.log('\n▶ a People and a Labels field’s lists, in a template and in the task made from it')
+  // T2 as the server held it before any update: the create's own write.
+  chk(
+    JSON.stringify(listsIn(T2_BEFORE)) === JSON.stringify(LISTS),
+    'a template made through the API with a People and a Labels value holds both as lists (read back through the API)',
+    `it holds ${JSON.stringify(listsIn(T2_BEFORE))}; it was sent ${JSON.stringify(LISTS)}`,
+  )
+  /*
+   * From a TASK: the two fields made in this project, set on a task through
+   * their own route (which checks the people are members and the labels are
+   * options), and the task saved as a template.
+   */
+  const peopleField = must('make the People field', await A(`/workspaces/${WS}/projects/${PROJECT}/custom-fields`, { method: 'POST', body: { name: PEOPLE, type: 'people' } }))?.id
+  const labelsField = must('make the Labels field', await A(`/workspaces/${WS}/projects/${PROJECT}/custom-fields`, {
+    method: 'POST',
+    body: { name: LABELS, type: 'labels', options: [{ label: 'Red', value: 'red' }, { label: 'Blue', value: 'blue' }, { label: 'Green', value: 'green' }] },
+  }))?.id
+  const SOURCE = `Source ${TAG}`
+  const sourceId = must('make the task to save', await A('/tasks', { method: 'POST', body: { listId: LIST, title: SOURCE } }))?.id
+  if (!peopleField || !labelsField || !sourceId) throw new Error('the fields or the task came back without an id')
+  must('set the task’s people', await A(`/workspaces/${WS}/tasks/${sourceId}/custom-fields/${peopleField}`, { method: 'PUT', body: { value: LISTS[PEOPLE] } }))
+  must('set the task’s labels', await A(`/workspaces/${WS}/tasks/${sourceId}/custom-fields/${labelsField}`, { method: 'PUT', body: { value: LISTS[LABELS] } }))
+  const FROM_TASK = `From a task ${TAG}`
+  const fromTask = await A(`/workspaces/${WS}/task-templates/from-task/${sourceId}`, { method: 'POST', body: { name: FROM_TASK } })
+  const fromTaskHeld = fromTask.data?.id ? await A(`/workspaces/${WS}/task-templates/${fromTask.data.id}`) : null
+  chk(
+    fromTask.status >= 200 && fromTask.status < 300 && fromTaskHeld?.status === 200 && JSON.stringify(listsIn(fromTaskHeld.data?.payload)) === JSON.stringify(LISTS),
+    'a task whose People and Labels fields are set, saved as a template, keeps both as lists (read back through the API)',
+    `the save answered ${said(fromTask)}; read back ${fromTaskHeld ? said(fromTaskHeld) : 'never'}, it holds ${JSON.stringify(listsIn(fromTaskHeld?.data?.payload))}`,
+  )
+  /*
+   * AND BACK. What the schema widened the value for: a task made from the
+   * template has the people and labels its source had, in its own fields —
+   * read from the rows, not from any answer.
+   */
+  const RESTORED = `Restored ${TAG}`
+  const restored = fromTask.data?.id
+    ? await A(`/workspaces/${WS}/task-templates/${fromTask.data.id}/instantiate`, { method: 'POST', body: { listId: LIST, titleOverride: RESTORED } })
+    : { status: 0, error: { message: 'no template to make it from' } }
+  const restoredId = (await madeTasks(RESTORED))[0]?.id ?? null
+  const restoredFields = restoredId
+    ? Object.fromEntries((await sql`select d.name, v.value from custom_field_values v join custom_field_definitions d on d.id = v.field_id where v.task_id = ${restoredId}`)
+      .map((r) => [r.name, (typeof r.value === 'string' ? JSON.parse(r.value) : r.value)?.v ?? null]))
+    : {}
+  const restoredLists = { [PEOPLE]: restoredFields[PEOPLE] ?? null, [LABELS]: restoredFields[LABELS] ?? null }
+  chk(
+    restored.status >= 200 && restored.status < 300 && JSON.stringify(restoredLists) === JSON.stringify(LISTS),
+    'and a task made from that template carries both lists in its own People and Labels fields (read by SQL)',
+    `making it answered ${said(restored)}; ${restoredId ? `its fields hold ${JSON.stringify(restoredFields)}` : 'no task so titled'}; the source's were ${JSON.stringify(LISTS)}`,
+  )
+
+  // ══ 20. A MEMBER, WITHOUT template.manage ════════════════════════════════
   console.log('\n▶ a member without template.manage')
   const memberCtx = await browser.newContext({ viewport: { width: 1500, height: 1000 }, serviceWorkers: 'block' })
   const mpage = await memberCtx.newPage()

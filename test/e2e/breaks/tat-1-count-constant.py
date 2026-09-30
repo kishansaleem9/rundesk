@@ -5,10 +5,10 @@
 #   or "and the header's count follows the removal rather than staying where it was drawn"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
-a = """        data-count={attachments.length}
+a = """        data-count={count}
       >
         <span className="text-sm font-medium">{t('taskDetail.tab.attachments')}</span>
-        <span className="text-xs text-muted-foreground tabular-nums">{attachments.length}</span>"""
+        <span className="text-xs text-muted-foreground tabular-nums">{count}</span>"""
 b = """        data-count={1}
       >
         <span className="text-sm font-medium">{t('taskDetail.tab.attachments')}</span>

@@ -1191,6 +1191,13 @@
       "when": 1900000130036,
       "tag": "0169_project_template_tags",
       "breakpoints": true
+    },
+    {
+      "idx": 170,
+      "version": "7",
+      "when": 1900000130037,
+      "tag": "0170_task_attachments_task_index",
+      "breakpoints": true
     }
   ]
 }

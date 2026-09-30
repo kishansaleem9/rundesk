@@ -10,16 +10,22 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter'
 import { TenantDbInterceptor } from './common/database/tenant-db.interceptor'
 import { SHARED_DB_TOKEN } from './common/database/database.module'
 import { TenantDatabasesService } from './modules/tenant-databases/tenant-databases.service'
+import { describeTrustProxy, trustProxyFrom } from './common/http/trust-proxy'
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap')
+  // WHO IS ASKING (`found-30-sep/client-address-behind-nginx`). Behind nginx the
+  // socket is nginx's for everybody, and the client's address is the LAST
+  // X-Forwarded-For entry, the one nginx appended; the entries before it are
+  // the client's own to write. TRUST_PROXY counts the proxies in front (1 behind
+  // nginx) and Fastify trusts exactly that many hops, never every hop. Unset, the
+  // socket's address is the client's. The rate limiter, the workspace IP
+  // allowlist and a session's recorded address all read `req.ip`. Read before
+  // anything is built, so a value it cannot read stops the API here.
+  const trustProxy = trustProxyFrom(process.env.TRUST_PROXY)
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    // trustProxy lets Fastify derive the real client IP from X-Forwarded-For
-    // when running behind a reverse proxy (nginx). Required for the workspace
-    // IP-allowlist policy to see the true client IP in production. Off by
-    // default so a direct deployment isn't tricked by spoofed XFF headers.
-    new FastifyAdapter({ logger: false, trustProxy: process.env.TRUST_PROXY === 'true' }),
+    new FastifyAdapter({ logger: false, trustProxy }),
     // rawBody buffers the untouched request body onto `req.rawBody` while normal
     // JSON parsing continues for every route. The Stripe webhook
     // (POST /api/v1/billing/webhook) verifies its HMAC signature against these
@@ -81,6 +87,7 @@ async function bootstrap() {
   const port = process.env.PORT ?? 3001
   await app.listen(port, '0.0.0.0')
   logger.log(`API running on http://localhost:${port}/api/v1`)
+  logger.log(describeTrustProxy(trustProxy))
   if (swaggerEnabled) logger.log(`Swagger docs at http://localhost:${port}/api/docs`)
 }
 

@@ -1,0 +1,16 @@
+-- A task's files, found by the task (`found-30-sep/attachments-unordered`).
+--
+-- Every read of a task's attachments asks for them by `task_id`: the
+-- Attachments tab's list, the rows `getTask` carries, a comment's files, the
+-- merge that moves them, and the cascade when a task is deleted. The table had
+-- no index but its primary key, so each of those read the whole table: every
+-- file of every workspace, to open one task.
+--
+-- ON THE TASK ALONE, not on (task, created_at). Both reads now sort by
+-- `created_at, id`, and a task holds a handful of files, so the sort costs
+-- nothing. An index that handed the rows back in date order would also hide a
+-- read that forgot its ORDER BY: it would come back in the right order until
+-- the planner chose another plan. Rows found through this one come back in
+-- heap order, as a scan's do, so a read without the sort is wrong on every
+-- plan, and `task-attachments` sees it.
+CREATE INDEX IF NOT EXISTS "task_attachments_task_id_idx" ON "task_attachments" USING btree ("task_id");

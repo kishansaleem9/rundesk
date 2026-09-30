@@ -33,6 +33,25 @@
  * compared the card with the API's url and passed, because both were the same
  * dead address. The checks added below compare with what was LINKED.
  *
+ * THREE THINGS THE CARDS GOT WRONG, found while making this suite wait for what
+ * it reads (`found-30-sep/task-attachments-flaky`), and checked here since:
+ *
+ *   · THE TAB DREW ITS CARDS TWICE (`found-30-sep/attachments-tab-draws-twice`):
+ *     first from the task's own rows, with no links, then from its list, with
+ *     the upload form above them and every card 175 px lower. The panel's list
+ *     is held until the tab is drawn, and the first card is read the moment it
+ *     appears: where it is, and whether it has its Download link.
+ *   · THE FILES CAME BACK IN HEAP ORDER (`found-30-sep/attachments-unordered`).
+ *     ClickUp's help centre does not say what order its Attachments section
+ *     lists files in; its feedback board says there is no sort "beyond the
+ *     date modified". So the order they were attached, oldest first, as the
+ *     ledger read it. The fixture attaches file-1, file-2 and file-0, in that
+ *     order, which is neither their names' order nor their sizes', and then
+ *     rewrites their rows into the heap as file-2, file-0, file-1, so that a
+ *     read with no ORDER BY cannot come back right by luck.
+ *   · A CARD NAMED ITS UPLOADER BY ID (`found-30-sep/attachment-card-names-uploader-by-id`):
+ *     "1.0 KB · 978243e1-…". A card names who attached it.
+ *
  *   node test/e2e/task-attachments.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
@@ -50,7 +69,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 17
+const EXPECTED_CHECKS = 23
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -87,6 +106,14 @@ let sql = null
 const TAG = `e2e-attach-${Date.now()}`
 /** The fixture's own size, so "the count is 3" is not a claim about the database. */
 const SEEDED = 3
+/*
+ * THE ORDER THE FILES ARE ATTACHED IN, by their numbers: not their names'
+ * order and not their sizes' (file-i is i + 1 KB), so a read sorted by either
+ * of those comes back wrong. And the order their rows are then put in the
+ * heap: neither of those, nor this one, nor its reverse.
+ */
+const ATTACHED = [1, 2, 0]
+const IN_HEAP = [2, 0, 1]
 
 /*
  * EVERY CLICK IN THIS SUITE IS BOUNDED. A control one of this suite's own break
@@ -98,6 +125,12 @@ const SEEDED = 3
 try {
   const auth = await signInApi(API, ME.email, ME.password)
   const A = apiAs(auth.accessToken)
+  // Who attaches the files: the server's own name and id for the signed-in person.
+  const ME_ID = auth.user?.id ?? null
+  const ME_NAME = auth.user?.displayName ?? null
+  // Opened here, not only for the cleanup: the order checks write the rows'
+  // place in the heap, and read it.
+  sql = await openDb().catch(() => null)
   const workspaces = (await A('/workspaces')).data ?? []
   const workspaceId = workspaces[0]?.workspace?.id ?? workspaces[0]?.id
   if (!workspaceId) throw new Error('no workspace')
@@ -108,7 +141,10 @@ try {
   const task = (await A('/tasks', { method: 'POST', body: { listId: list.id, title: `Subject ${TAG}` } })).data
   if (!task?.id) throw new Error('could not make a task')
 
-  for (let i = 0; i < SEEDED; i += 1) {
+  // One at a time, awaited, in ATTACHED's order: each is its own request, so
+  // each row's `created_at` is later than the one before.
+  const idOf = {}
+  for (const i of ATTACHED) {
     const r = await A(`/tasks/${task.id}/attachments`, {
       method: 'POST',
       body: {
@@ -118,8 +154,47 @@ try {
         sizeBytes: 1024 * (i + 1),
       },
     })
-    if (r.status >= 400) throw new Error(`seeding attachment ${i} answered ${r.status}`)
+    if (r.status >= 400 || !r.data?.id) throw new Error(`seeding attachment ${i} answered ${r.status}`)
+    idOf[i] = r.data.id
   }
+  const attachedIds = ATTACHED.map((i) => idOf[i])
+  const heapIds = IN_HEAP.map((i) => idOf[i])
+  const nameOf = (id) => {
+    const i = Object.keys(idOf).find((k) => idOf[k] === id)
+    return i === undefined ? String(id) : `file-${i}`
+  }
+  const namesOf = (ids) => `[${ids.map(nameOf).join(', ')}]`
+
+  /*
+   * WRITTEN OUT OF HEAP ORDER (`found-30-sep/attachments-unordered`). A read
+   * with no ORDER BY hands rows back in the order a scan meets them, which is
+   * the order they sit in the table's pages. Rows written one after another
+   * usually sit in that order too, so such a read passed here by luck: on
+   * lane 4 it came back in another order only once autovacuum had freed space
+   * and each pooled connection wrote into a page of its own (9 seedings in 15).
+   * So the three rows are rewritten, unchanged, in IN_HEAP's order, in one
+   * statement, and their place is read back (`ctid`): a check below that finds
+   * them in the heap in the order they were attached proves nothing, and says so.
+   */
+  const heapOrder = async () =>
+    sql
+      ? ((await sql`select id from task_attachments where task_id = ${task.id} order by ctid`.catch(() => null)) ?? [])
+          .map((r) => r.id)
+      : []
+  let inHeap = await heapOrder()
+  let rewriteRefused = sql ? null : 'there is no database to rewrite them with'
+  for (let attempt = 0; !rewriteRefused && attempt < 5 && inHeap.join() !== heapIds.join(); attempt += 1) {
+    rewriteRefused = await sql`
+      with gone as (delete from task_attachments where task_id = ${task.id} returning *)
+      insert into task_attachments select * from gone
+      order by case id when ${heapIds[0]}::uuid then 0 when ${heapIds[1]}::uuid then 1 else 2 end`
+      .then(() => null, (err) => `rewriting them failed: ${err?.message ?? err}`)
+    inHeap = await heapOrder()
+  }
+  const outOfHeap = inHeap.length === SEEDED && inHeap.join() !== attachedIds.join()
+  const unproven = outOfHeap
+    ? ''
+    : `; but the heap holds them ${namesOf(inHeap)}${rewriteRefused ? ` (${rewriteRefused})` : ''}, so no order is proved`
 
   const seeded = await A(`/tasks/${task.id}/attachments`)
   const seededRows = seeded.data ?? []
@@ -129,10 +204,28 @@ try {
     `GET /tasks/:id/attachments answered ${seeded.status} with ${seededRows.length} rows against ${SEEDED} seeded`,
   )
 
+  const listedIds = seededRows.map((r) => r.id)
+  chk(
+    outOfHeap && listedIds.join() === attachedIds.join(),
+    'the list hands the files back in the order they were attached, oldest first — not in the order the heap holds them',
+    `the list answered ${namesOf(listedIds)}; they were attached ${namesOf(attachedIds)} and sit in the heap as ` +
+      `${namesOf(inHeap)}${unproven}`,
+  )
+
+  // The task's own rows: the second read, which the sheet counts from until the list answers.
+  const detail = await A(`/tasks/${task.id}`)
+  const detailIds = (detail.data?.attachments ?? []).map((r) => r.id)
+  chk(
+    detail.status === 200 && outOfHeap && detailIds.join() === attachedIds.join(),
+    'and the task itself carries its files in the same order',
+    `GET /tasks/:id answered ${detail.status} with its files ${namesOf(detailIds)}; they were attached ` +
+      `${namesOf(attachedIds)}${unproven}`,
+  )
+
   // -------------------------------------------------------------------------
   console.log('\n▶ the panel, frame `01:55`')
 
-  const ctx = await browser.newContext({ viewport: { width: 1500, height: 1000 } })
+  const ctx = await browser.newContext({ viewport: { width: 1500, height: 1000 }, serviceWorkers: 'block' })
   const page = await ctx.newPage()
 
   await page.goto(`${stack.base}/login`, { waitUntil: 'domcontentloaded' })
@@ -147,6 +240,29 @@ try {
     if (await fallback.isVisible().catch(() => false)) await fallback.click().catch(() => {})
   }
   await settleCookies()
+  /*
+   * THE PANEL'S LIST IS HELD UNTIL THE TAB HAS BEEN DRAWN
+   * (`found-30-sep/attachments-tab-draws-twice`). The panel drew the task's own
+   * rows while its `GET /tasks/:id/attachments` was on its way, then drew every
+   * card again when it answered, 175 px lower. Whether a run saw that depended
+   * on the race: when the list had answered before the tab was pressed (the
+   * sheet asks for it on opening, for the description's images), the tab drew
+   * once. Held, the tab is always drawn before its list, which is the case the
+   * checks below are about. Released as soon as the tab's header is shown — not
+   * after a fixed time — and only the GET is held.
+   */
+  const LIST = (u) => u.pathname === `/api/v1/tasks/${task.id}/attachments`
+  let releaseList = () => {}
+  const listGate = new Promise((resolve) => { releaseList = resolve })
+  let listHeld = false
+  // A handler's promise is nobody's to await, so its rejections are caught here.
+  const holdList = async (route) => {
+    if (route.request().method() !== 'GET') return route.continue().catch(() => {})
+    listHeld = true
+    await listGate
+    return route.continue().catch(() => {})
+  }
+  await page.route(LIST, holdList)
   await page.goto(
     `${stack.base}/app/${workspaceId}/${space.id}/${project.id}/${list.id}?task=${task.id}`,
     { waitUntil: 'domcontentloaded' },
@@ -155,29 +271,82 @@ try {
   if (!(await waitUntil(() => page.getByTestId('task-tab-overview').isVisible().catch(() => false), { timeoutMs: 25_000 }))) {
     throw new Error('the task sheet never mounted')
   }
+  /*
+   * THE FIRST CARD, READ THE MOMENT IT IS DRAWN: its box, and whether it has its
+   * Download link. A mutation observer's callback runs once the DOM has been
+   * changed and before anything is painted, and reading a box there lays the
+   * page out as it will be painted. Nothing is read of its text here.
+   */
+  await page.evaluate(() => {
+    window.__attachmentsFirstDraw = null
+    new MutationObserver((records, observer) => {
+      const card = document.querySelector('[data-testid="attachment-card"]')
+      if (!card) return
+      const r = card.getBoundingClientRect()
+      window.__attachmentsFirstDraw = {
+        id: card.getAttribute('data-attachment-id'),
+        box: { x: r.x, y: r.y, width: r.width, height: r.height },
+        download: !!card.querySelector('[data-testid="attachment-download"]'),
+      }
+      observer.disconnect()
+    }).observe(document.body, { childList: true, subtree: true })
+  })
   await page.getByTestId('task-tab-attachments').click({ timeout: 8000 }).catch(() => {})
+  const header = page.getByTestId('task-attachments-header')
+  // The tab is drawn, with whatever it draws before its list: its header is shown.
+  await waitUntil(async () => listHeld && (await header.isVisible().catch(() => false)), { timeoutMs: 20_000 })
+  releaseList()
   const cards = page.getByTestId('attachment-card')
   if (!(await waitUntil(async () => (await cards.count()) === SEEDED, { timeoutMs: 20_000 }))) {
     throw new Error(`the attachments panel drew ${await cards.count()} cards, not ${SEEDED}`)
   }
   /*
-   * AND THEN FOR THE PANEL'S OWN LIST, BECAUSE IT MOVES EVERY CARD
-   * (`found-30-sep/task-attachments-flaky`). The panel first draws the rows the
-   * task itself carries. Those have no url and no image type, so the cards have
+   * AND THEN FOR THE PANEL'S OWN LIST, BECAUSE IT MOVED EVERY CARD
+   * (`found-30-sep/task-attachments-flaky`). The panel drew the rows the task
+   * itself carries first. Those have no url and no image type, so the cards had
    * no links and a type tile for a thumbnail. When the panel's own
-   * `GET /tasks/:id/attachments` answers, it draws them again, with their links,
-   * and puts the upload and link form above them, 175 px lower. Measured on lane
+   * `GET /tasks/:id/attachments` answered, it drew them again, with their links,
+   * and put the upload and link form above them, 175 px lower. Measured on lane
    * 4, the list answered 180–370 ms after the tab was pressed in 7 runs of 20,
    * after the pointer had reached the first card. The card moved from under it
    * and its actions faded back to 0. When the list answered between the two box
    * reads below, the card's box was read at y 600 and the cluster's at 782.
-   * Only that list gives a card its links, so this section reads once every card
-   * has its Download link. Not a throw: a list that never answers leaves the
-   * checks below to fail in their own words.
+   * The panel now waits for its list and draws once
+   * (`found-30-sep/attachments-tab-draws-twice`, checked just below); the hover
+   * and box reads still come after every card has its Download link, which only
+   * that list gives it, so they read the panel as it stays. Not a throw: a list
+   * that never answers leaves the checks below to fail in their own words.
    */
   await waitForCount(cards.getByTestId('attachment-download'), SEEDED, { timeoutMs: 20_000 })
+  await page.unroute(LIST, holdList).catch(() => {})
 
-  const header = page.getByTestId('task-attachments-header')
+  /*
+   * DRAWN ONCE (`found-30-sep/attachments-tab-draws-twice`). The first card's
+   * box when it appeared, against its box now that the list has answered and
+   * every card has its links; and whether that first draw had its Download link,
+   * which only the list gives it. Before: drawn at y 600 from the task's own
+   * rows, with no links, then at y 775 once the list answered.
+   */
+  const firstDraw = await page.evaluate(() => window.__attachmentsFirstDraw ?? null).catch(() => null)
+  const firstDrawnCard = page.locator(`[data-testid="attachment-card"][data-attachment-id="${firstDraw?.id}"]`)
+  const settledBox = firstDraw ? await firstDrawnCard.boundingBox({ timeout: 6000 }).catch(() => null) : null
+  const boxText = (b) => (b ? JSON.stringify(Object.fromEntries(Object.entries(b).map(([k, v]) => [k, Math.round(v * 10) / 10]))) : 'no box')
+  chk(
+    !!firstDraw && !!settledBox && ['x', 'y', 'width', 'height'].every((k) => Math.abs(firstDraw.box[k] - settledBox[k]) <= 1),
+    'the first card is drawn where it stays — its box when it first appears is its box once the list has answered',
+    firstDraw
+      ? `${nameOf(firstDraw.id)}'s card was first drawn at ${boxText(firstDraw.box)}, and is at ${boxText(settledBox)} ` +
+        'once the list has answered'
+      : 'no card was ever drawn',
+  )
+  chk(
+    firstDraw?.download === true,
+    'and its first draw already has its Download link — the cards are drawn from the list, not from the task\'s own rows',
+    firstDraw
+      ? `${nameOf(firstDraw.id)}'s card was first drawn with no Download link, from rows that carry no url`
+      : 'no card was ever drawn',
+  )
+
   // DRAWN: the header is shown, and then its innerText leaves out a count hidden inside it.
   chk(
     (await header.isVisible().catch(() => false))
@@ -290,10 +459,12 @@ try {
    * THIS attachment's card, found by its id rather than by being first. These
    * checks read the first card's links and compared them with file-0's row, as
    * though the cards came in the order they were linked. They come in the order
-   * the API lists them, and it lists them unordered (no ORDER BY; the table has
+   * the API lists them, and it listed them unordered (no ORDER BY; the table had
    * no index on the task). Once autovacuum had run on lane 4, 9 seedings in 15
    * came back in another order, the first card was file-1 or file-2, and these
-   * three checks failed together (`found-30-sep/task-attachments-flaky`).
+   * three checks failed together (`found-30-sep/task-attachments-flaky`). The
+   * list is ordered now (`found-30-sep/attachments-unordered`), and file-0 is
+   * attached last here; these checks do not depend on either.
    */
   const firstRowCard = page.locator(`[data-testid="attachment-card"][data-attachment-id="${firstRow?.id}"]`)
   const download = firstRowCard.getByTestId('attachment-download')
@@ -357,6 +528,34 @@ try {
       ? `only ${anchors.length} anchors were found over ${SEEDED} cards, so "none of them is dead" would have been ` +
         'a claim about almost nothing'
       : `a link points at "${anchors.find((h) => !h || h === '#')}"`,
+  )
+
+  /*
+   * THE ORDER THE LIST GAVE, DRAWN (`found-30-sep/attachments-unordered`): the
+   * cards, in the document's order, against the order the files were attached.
+   */
+  const drawnIds = await cards.evaluateAll((els) => els.map((el) => el.getAttribute('data-attachment-id'))).catch(() => [])
+  chk(
+    outOfHeap && drawnIds.join() === attachedIds.join(),
+    'the panel draws the files in the order they were attached',
+    `the panel drew ${namesOf(drawnIds)}; they were attached ${namesOf(attachedIds)}${unproven}`,
+  )
+
+  /*
+   * WHO ATTACHED IT, BY NAME (`found-30-sep/attachment-card-names-uploader-by-id`).
+   * The card drew the uploader's id: "1.0 KB · 978243e1-…". Every card here was
+   * attached by the signed-in person, so every card names them as the server
+   * does, and none carries their id. What is read is what is shown.
+   */
+  const uploaderNames = (await page.getByTestId('attachment-uploader').filter({ visible: true }).allInnerTexts().catch(() => []))
+    .map((n) => n.trim())
+  const cardTexts = await cards.filter({ visible: true }).allInnerTexts().catch(() => [])
+  chk(
+    !!ME_NAME && !!ME_ID && uploaderNames.length === SEEDED && uploaderNames.every((n) => n === ME_NAME)
+      && cardTexts.length === SEEDED && cardTexts.every((text) => !text.includes(ME_ID)),
+    'each card names who attached it — the uploader\'s name, not their id',
+    `the ${cardTexts.length} cards read ${JSON.stringify(cardTexts.map((text) => text.replace(/\s+/g, ' ')))} and name ` +
+      `${JSON.stringify(uploaderNames)} as their uploader; the server calls them ${JSON.stringify(ME_NAME)} (${ME_ID})`,
   )
 
   // -------------------------------------------------------------------------
@@ -514,7 +713,9 @@ try {
   const frame = String(err?.stack ?? '').split('\n').find((l) => l.includes('task-attachments.mjs'))
   console.error('\n\x1b[31mSUITE ERROR\x1b[0m', err?.message ?? err, frame ? `\n  at ${frame.trim()}` : '')
 } finally {
-  sql = await openDb().catch(() => null)
+  // The handle the order checks opened, or one opened now: a run that stopped
+  // before them still cleans up.
+  if (!sql) sql = await openDb().catch(() => null)
   if (sql) {
     await sql`delete from tasks where title like ${'%' + TAG}`.catch(() => {})
     await sql`delete from lists where name like ${'%' + TAG}`.catch(() => {})

@@ -43,7 +43,7 @@
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { signInApi, registerApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
@@ -147,18 +147,13 @@ try {
   /*
    * PEOPLE, EACH WITH A SESSION OF THEIR OWN. `POST /auth/register` answers
    * with one, so reading as the teammate and being refused as the guest cost
-   * nothing out of the login route's ten a minute (`lib/signin.mjs`).
+   * nothing out of the login route's ten a minute (`lib/signin.mjs`). It has
+   * sign-up's ten a minute of its own, which `registerApi` waits out.
    */
   const register = async (label) => {
     const email = `${label.toLowerCase()}-${Date.now()}@rundesk.invalid`
-    const res = await fetch(`${API}/auth/register`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email, displayName: `${label} ${TAG}`, password: PERSON_PASSWORD }),
-    })
-    const body = await res.json().catch(() => null)
-    if (!res.ok || !body?.data?.accessToken) throw new Error(`could not register the ${label}: ${res.status}`)
-    return { email, id: body.data.user?.id, as: apiAs(body.data.accessToken) }
+    const made = await registerApi(API, { email, displayName: `${label} ${TAG}`, password: PERSON_PASSWORD })
+    return { email, id: made.user?.id, as: apiAs(made.accessToken) }
   }
   const join = async (who, role) => {
     const added = await A(`/workspaces/${workspaceId}/members`, { method: 'POST', body: { email: who.email, role } })

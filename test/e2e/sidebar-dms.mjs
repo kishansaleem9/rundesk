@@ -38,7 +38,7 @@ import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { LOGIN_NAV_TIMEOUT_MS, registerApi } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil } from './lib/wait.mjs'
 
@@ -152,19 +152,14 @@ try {
   let secondPeer = members.find((m) => m.userId && m.userId !== ME && m.userId !== peer.userId)
   if (!secondPeer) {
     const email = `dm-peer-${TAG}@rundesk.internal`
-    const made = await api('/auth/register', {
-      method: 'POST',
-      // `displayName`, not `name`. `RegisterDto` has required it all along and
-      // every other suite that registers a peer sends it; this one sent `name`
-      // and was never caught, because the branch only runs when the workspace
-      // does NOT already have a third member — so on a lane whose database had
-      // been used it never fired, and on a freshly restored one it threw
-      // before the first check. It refused this whole set in the sweep.
-      body: { email, password: 'Peer@12345!', displayName: `DM peer ${TAG}` },
-    })
-    if (made.status >= 300) {
-      throw new Error(`could not register a second peer: ${made.status} ${JSON.stringify(made.error)}`)
-    }
+    // `displayName`, not `name`. `RegisterDto` has required it all along and
+    // every other suite that registers a peer sends it; this one sent `name`
+    // and was never caught, because the branch only runs when the workspace
+    // does NOT already have a third member — so on a lane whose database had
+    // been used it never fired, and on a freshly restored one it threw
+    // before the first check. It refused this whole set in the sweep.
+    // `registerApi` throws on a refusal and waits out register's ten a minute.
+    await registerApi(`${B}/api/v1`, { email, password: 'Peer@12345!', displayName: `DM peer ${TAG}` })
     const added = await api(`/workspaces/${WS}/members`, { method: 'POST', body: { email } })
     if (added.status >= 300) {
       throw new Error(`could not add the second peer to the workspace: ${added.status} ${JSON.stringify(added.error)}`)

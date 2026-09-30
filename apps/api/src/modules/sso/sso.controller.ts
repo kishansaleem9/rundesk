@@ -18,6 +18,8 @@ import { PermissionsGuard, RequirePermissions } from '../custom-roles/permission
 import { SsoService, type SsoConnectionUpdate } from './sso.service'
 import { AuthService } from '../auth/auth.service'
 import { setAuthCookies } from '../auth/auth-cookies'
+import { RateLimit, RateLimitGuard } from '../../common/guards/rate-limit.guard'
+import { AUTH_ROUTE_LIMITS } from '../../common/guards/auth-route-limits'
 import type { SsoProvider } from '@rundesk/db'
 
 type CurrentUserPayload = { id: string; email: string }
@@ -63,6 +65,10 @@ export class SsoAdminController {
 
 @ApiTags('sso-auth')
 @Controller('auth/sso')
+// Every route here answers anybody with no session, so each is limited per
+// address (`found-30-sep/register-unthrottled`): the lookup while an email is
+// typed, the start and the two callbacks as the redirects of one sign-in.
+@UseGuards(RateLimitGuard)
 export class SsoAuthController {
   constructor(
     private sso: SsoService,
@@ -75,6 +81,7 @@ export class SsoAuthController {
    * "Sign in with SSO". Returns null when no enforced connection exists.
    */
   @Get('lookup')
+  @RateLimit(AUTH_ROUTE_LIMITS.ssoLookup)
   async lookup(@Query('email') email?: string) {
     if (!email) return { connection: null }
     const conn = await this.sso.findConnectionForEmail(email)
@@ -89,6 +96,7 @@ export class SsoAuthController {
   }
 
   @Get(':provider/start')
+  @RateLimit(AUTH_ROUTE_LIMITS.ssoRedirect)
   async start(
     @Param('provider') provider: string,
     @Query('workspaceId') workspaceId: string,
@@ -114,6 +122,7 @@ export class SsoAuthController {
   }
 
   @Get('oidc/callback')
+  @RateLimit(AUTH_ROUTE_LIMITS.ssoRedirect)
   async oidcCallback(@Query() query: Record<string, string>, @Res() res: any) {
     try {
       // Reconstruct the URL with all query params so openid-client can verify
@@ -132,6 +141,7 @@ export class SsoAuthController {
   }
 
   @Post('saml/callback')
+  @RateLimit(AUTH_ROUTE_LIMITS.ssoRedirect)
   @HttpCode(302)
   async samlCallback(@Body() body: { SAMLResponse: string; RelayState?: string }, @Res() res: any) {
     try {

@@ -23,7 +23,7 @@
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { signInApi, registerApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
@@ -80,12 +80,8 @@ try {
    */
   const memberEmail = `teamviewer-${stamp}@rundesk.invalid`
   const memberPass = 'Viewer@123!'
-  const registered = await fetch(`${API}/auth/register`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: memberEmail, displayName: `Team Viewer ${stamp}`, password: memberPass }),
-  })
-  if (!registered.ok) throw new Error(`could not register a plain member: ${registered.status}`)
+  // `registerApi` throws on a refusal and waits out register's ten a minute.
+  await registerApi(API, { email: memberEmail, displayName: `Team Viewer ${stamp}`, password: memberPass })
   await A(`/workspaces/${workspaceId}/members`, { method: 'POST', body: { email: memberEmail, role: 'member' } })
 
   // A team of this suite's own, so the list has something in it that is ours.

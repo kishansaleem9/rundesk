@@ -33,7 +33,7 @@
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { signInApi, registerApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
@@ -94,12 +94,8 @@ try {
   // ── Two people, and a third who has nothing ──────────────────────────────
   const register = async (label) => {
     const email = `teams-card-${label}-${stamp}@rundesk.invalid`
-    const res = await fetch(`${API}/auth/register`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email, displayName: `Card ${label} ${stamp}`, password: 'Viewer@123!' }),
-    })
-    if (!res.ok) throw new Error(`could not register ${label}: ${res.status}`)
+    // `registerApi` throws on a refusal and waits out register's ten a minute.
+    await registerApi(API, { email, displayName: `Card ${label} ${stamp}`, password: 'Viewer@123!' })
     const joined = await A(`/workspaces/${workspaceId}/members`, {
       method: 'POST', body: { email, role: 'member' },
     })

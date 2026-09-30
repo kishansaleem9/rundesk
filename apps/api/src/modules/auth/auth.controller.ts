@@ -6,6 +6,7 @@ import { AuthService } from './auth.service'
 import { LocalAuthGuard } from './guards/local-auth.guard'
 import { JwtAuthGuard } from './guards/jwt-auth.guard'
 import { RateLimit, RateLimitGuard } from '../../common/guards/rate-limit.guard'
+import { AUTH_ROUTE_LIMITS } from '../../common/guards/auth-route-limits'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { RegisterDto } from './dto/register.dto'
 import { SignupDto } from './dto/signup.dto'
@@ -45,7 +46,7 @@ export class AuthController {
   }
 
   @Post('signup')
-  @RateLimit({ limit: 10, windowMs: 60_000 })
+  @RateLimit(AUTH_ROUTE_LIMITS.signUp)
   @ApiOperation({ summary: 'Atomic organization signup with initial workspace and optional invites' })
   async signup(@Body() dto: SignupDto, @Req() req: FastifyRequest, @Res({ passthrough: true }) res: FastifyReply) {
     const bundle = await this.authService.signUp(dto, sessionMeta(req))
@@ -53,7 +54,15 @@ export class AuthController {
     return bundle
   }
 
+  /*
+   * SIGN-UP'S BUDGET, NOT NONE (`found-30-sep/register-unthrottled`). It makes an
+   * account and a workspace, as `signup` does, and had no limit beside its ten
+   * a minute. Limited rather than retired: the `/register` page still calls it,
+   * and eleven suites make their people with it (`registerApi` in
+   * test/e2e/lib/signin.mjs waits out a 429 as the server says).
+   */
   @Post('register')
+  @RateLimit(AUTH_ROUTE_LIMITS.signUp)
   @ApiOperation({ summary: 'Register a new user (creates a personal workspace) - DEPRECATED: use /signup' })
   async register(@Body() dto: RegisterDto, @Req() req: FastifyRequest, @Res({ passthrough: true }) res: FastifyReply) {
     const bundle = await this.authService.register(dto, sessionMeta(req))

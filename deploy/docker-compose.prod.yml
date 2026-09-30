@@ -64,6 +64,14 @@ services:
       REDIS_URL: redis://redis:6379
       MEILISEARCH_URL: http://meilisearch:7700
       PORT: 3001
+      # ONE PROXY IN FRONT, nginx (`found-30-sep/client-address-behind-nginx`).
+      # The socket the API sees is Docker's bridge gateway for every visitor, so
+      # without this each per-address limit (sign-in's ten a minute, the public
+      # routes' budgets) and the workspace IP allowlist saw one address for the
+      # whole site. 1 trusts exactly the entry nginx appends to X-Forwarded-For,
+      # never the ones before it, which the client writes. Raise it only for a
+      # proxy that appends in front of nginx (a CDN: 2); `true` is read as 1.
+      TRUST_PROXY: ${TRUST_PROXY:-1}
     # Bind only to loopback — nginx on the host proxies into this port.
     ports:
       - '127.0.0.1:${API_HOST_PORT:-3010}:3001'

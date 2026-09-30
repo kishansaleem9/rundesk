@@ -33,7 +33,7 @@
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { signInApi, registerApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil } from './lib/wait.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
@@ -264,23 +264,19 @@ try {
   console.log('\n▶ somebody else’s account is not yours to touch')
   otherEmail = `calpeer-${Date.now()}@rundesk.invalid`
   const otherPass = 'CalPeer@123!'
-  const reg = await fetch(`${API}/auth/register`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-        email: otherEmail,
-        // TAGGED, because a CONSTANT display name pollutes every later suite.
-        // This read `Cal Peer`, so each run of this file left another member of
-        // that name in the shared workspace — and `ai-assign` then failed a
-        // check that requires two candidates' reason sentences to differ,
-        // because `explainCandidate` names a person by their display name and
-        // two of them were called the same thing. One suite's litter, another
-        // suite's red baseline, with nothing connecting the two.
-        displayName: `Cal Peer ${TAG}`,
-        password: otherPass,
-      }),
+  // Through `registerApi`, which waits out register's ten a minute per address.
+  await registerApi(API, {
+    email: otherEmail,
+    // TAGGED, because a CONSTANT display name pollutes every later suite.
+    // This read `Cal Peer`, so each run of this file left another member of
+    // that name in the shared workspace — and `ai-assign` then failed a
+    // check that requires two candidates' reason sentences to differ,
+    // because `explainCandidate` names a person by their display name and
+    // two of them were called the same thing. One suite's litter, another
+    // suite's red baseline, with nothing connecting the two.
+    displayName: `Cal Peer ${TAG}`,
+    password: otherPass,
   })
-  if (!reg.ok) throw new Error(`could not register a second person: ${reg.status}`)
   await A(`/workspaces/${workspaceId}/members`, { method: 'POST', body: { email: otherEmail, role: 'member' } })
   const asOther = apiAs((await signInApi(API, otherEmail, otherPass)).accessToken)
 

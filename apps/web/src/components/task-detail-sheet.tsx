@@ -395,14 +395,48 @@ type Dependency = {
   related: { id: string; title: string; status: TaskStatus; priority: TaskPriority }
 }
 
+/** A task's file as `GET /tasks/:id/attachments` hands it back: the one shape a card is drawn from. */
 type Attachment = {
   id: string
   fileName: string
   fileSize?: number | null
   mimeType?: string | null
+  /** The uploader's id. A card never draws it (`found-30-sep/attachment-card-names-uploader-by-id`). */
   uploadedBy?: string | null
+  /** Who attached it, by name; null when their account is gone. */
+  uploaderName?: string | null
   createdAt?: string | null
   url?: string | null
+}
+
+/**
+ * A row of the task's own `attachments`: the table's columns, as `getTask`
+ * returns them — `contentType`, `sizeBytes`, `uploadedById`, and no url. It was
+ * typed as `Attachment`, which it is not, and the tab drew it as one: a type
+ * tile for every image, "—" for every size, and no links, until its own list
+ * answered and drew every card again (`found-30-sep/attachments-tab-draws-twice`).
+ */
+type TaskAttachmentRow = {
+  id: string
+  fileName: string
+  contentType?: string | null
+  sizeBytes?: number | null
+  uploadedById?: string | null
+  createdAt?: string | null
+}
+
+/** The task's own row in the card's shape, for when no list will answer. It has no url, so no links. */
+function attachmentFromTaskRow(row: TaskAttachmentRow): Attachment {
+  return {
+    id: row.id,
+    fileName: row.fileName,
+    fileSize: row.sizeBytes ?? null,
+    mimeType: row.contentType ?? null,
+    uploadedBy: row.uploadedById ?? null,
+    uploaderName: null,
+    createdAt: row.createdAt ?? null,
+    url: null,
+  }
 }
 
 /** Keep in sync with MAX_ATTACHMENT_BYTES in apps/api tasks.service.ts (Plan §4). */
@@ -438,7 +472,7 @@ type TaskDetail = {
   checklists: Checklist[]
   watchers?: Watcher[]
   dependencies?: Dependency[]
-  attachments?: Attachment[]
+  attachments?: TaskAttachmentRow[]
   recurrence?: { cadenceDays?: number | null; rule?: RecurrenceRule | null } | null
   parentTaskId?: string | null
   parent?: { id: string; title: string } | null
@@ -5864,7 +5898,7 @@ function AttachmentsPanel({
   inline,
 }: {
   taskId: string
-  inline: Attachment[]
+  inline: TaskAttachmentRow[]
 }) {
   const { t } = useTranslation()
   const caps = useTaskCaps()
@@ -5874,7 +5908,7 @@ function AttachmentsPanel({
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [draggingFiles, setDraggingFiles] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  // Probe the dedicated endpoint; fall back to inline list if 404.
+  // The panel's own list; null when the route is not there (404/405/501).
   const probe = useQuery({
     queryKey: ['task', taskId, 'attachments'],
     queryFn: async () => {
@@ -5887,8 +5921,28 @@ function AttachmentsPanel({
     },
   })
 
-  const attachments = probe.data ?? inline
-  const uploadWired = probe.data !== null && probe.data !== undefined
+  /*
+   * DRAWN ONCE, FROM ONE SHAPE (`found-30-sep/attachments-tab-draws-twice`).
+   * This drew `probe.data ?? inline`. Until the list answered, the cards were
+   * the task's own rows, which have no url and no image type: a "PNG" tile,
+   * "—" for the size, no Download and no Expand. When it answered, every card
+   * was drawn again, and the upload form, drawn only once the list had said
+   * the route exists, came in above them. Measured on lane 4: the list
+   * answered 80–720 ms after the tab was pressed, and every card then moved
+   * 175 px down, from under a pointer already resting on one.
+   *
+   * So the cards wait for the list, and are drawn from it alone. The task's own
+   * rows give the header its count meanwhile, and are drawn, as cards without
+   * links, only when no list will come: a route that is not there, or a read
+   * that failed. And the form is drawn from the start, unless the route is
+   * known not to be there, so it is above the cards before the first one is.
+   */
+  const listed = probe.data
+  const notWired = listed === null
+  const waiting = listed === undefined && !probe.isError
+  const attachments: Attachment[] = listed ?? (waiting ? [] : inline.map(attachmentFromTaskRow))
+  const count = waiting ? inline.length : attachments.length
+  const uploadWired = !notWired
   const addAttachment = useMutation({
     mutationFn: () =>
       api(`/tasks/${taskId}/attachments`, {
@@ -5982,10 +6036,10 @@ function AttachmentsPanel({
       <div
         className="flex items-baseline gap-2 pt-1"
         data-testid="task-attachments-header"
-        data-count={attachments.length}
+        data-count={count}
       >
         <span className="text-sm font-medium">{t('taskDetail.tab.attachments')}</span>
-        <span className="text-xs text-muted-foreground tabular-nums">{attachments.length}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
       </div>
       {/*
         THIS ZONE USED TO BE A PICTURE OF A DROP ZONE.
@@ -6095,7 +6149,13 @@ function AttachmentsPanel({
       )}
       </>)}
 
-      {attachments.length === 0 ? (
+      {waiting && inline.length > 0 ? (
+        // The task has files and its list has not answered: no card yet, rather
+        // than a card that will be drawn again.
+        <div className="py-2 text-xs text-muted-foreground" data-testid="task-attachments-waiting">
+          <InlineSkeleton />
+        </div>
+      ) : attachments.length === 0 ? (
         <EmptyState title={t('taskDetail.noFiles')} hint={t('taskDetail.noFilesHint')} />
       ) : (
         <div className="grid grid-cols-2 gap-2">
@@ -6137,9 +6197,23 @@ function AttachmentsPanel({
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium truncate">{a.fileName}</div>
-                  <div className="text-xs text-muted-foreground">
+                  {/*
+                    WHO ATTACHED IT, BY NAME. This drew `uploadedBy`, the
+                    uploader's id, so a card read "1.0 KB · 978243e1-64ba-…"
+                    (`found-30-sep/attachment-card-names-uploader-by-id`), and the
+                    id wrapped onto a second line: measured on lane 4, that line
+                    was 32 px, and it is what made the card 78 px where it is 74.
+                    The list hands back the name. One line, cut short rather than
+                    wrapped, so a long name does not change the card's height.
+                  */}
+                  <div className="truncate text-xs text-muted-foreground">
                     {formatBytes(a.fileSize)}
-                    {a.uploadedBy ? ` · ${a.uploadedBy}` : ''}
+                    {a.uploaderName ? (
+                      <>
+                        {' · '}
+                        <span data-testid="attachment-uploader">{a.uploaderName}</span>
+                      </>
+                    ) : null}
                   </div>
                 </div>
               </div>

@@ -74,6 +74,24 @@ lane_oauth_env () {
   export GITHUB_CLIENT_SECRET=e2e-lane-github-secret
 }
 
+# A LANE'S API TRUSTS ONE PROXY IN FRONT, AS PRODUCTION'S DOES
+# (`found-30-sep/client-address-behind-nginx`).
+#
+#   lane_proxy_env <k>   export TRUST_PROXY=1, the value docker-compose.prod.yml
+#                        runs the API with behind nginx
+#
+# A request with no X-Forwarded-For, which is every suite's but one, is read
+# from its socket exactly as before: 127.0.0.1, or the other loopback address
+# it chose. `auth-route-limits` stands a proxy of its own in front of the lane,
+# appending the address it saw as nginx does, and reads that a client forging
+# the header is still counted as the address the proxy saw, and that two
+# clients behind it count apart. Without this the lane trusts no proxy and
+# that half of the suite measures a different deployment from production's.
+# CI's API step sets the same.
+lane_proxy_env () {
+  export TRUST_PROXY=1
+}
+
 # IS THE STUB ON <port> RUNNING THE SOURCE IN <file>? Both stubs report a hash
 # of their own source at `/__control/version`; a stub from before a change, or
 # one too old to have the route at all, answers something else and is

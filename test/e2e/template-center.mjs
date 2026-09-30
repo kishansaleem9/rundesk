@@ -45,6 +45,16 @@
  * changed from its card, and a member without the key is refused. The two
  * people join the shared workspace for the run and are removed after it.
  *
+ * AND WHICH SPELLING A TAG IS SHOWN IN, `found-30-sep/template-tags-spelled-by-collation`.
+ * The facet showed `min(t)`: "Client" and "Q3" under C.UTF-8, which the lanes
+ * run, "client" and "q3" under en_US, which CI's Postgres runs. It is a rule
+ * now — the spelling most of a word's templates carry, then the one written
+ * last — so the seed spells "client" mostly in lower case and "Q3" mostly in
+ * upper, and whichever collation the database has, `min()` would disagree
+ * with the rule on one of them. (ClickUp forces a tag to lower case, from its
+ * feedback board, "Allow Tags to use capital letters"; Rundesk keeps the case
+ * each template was tagged in, so the facet has to choose.)
+ *
  *   node test/e2e/template-center.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
@@ -62,7 +72,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure. */
-const EXPECTED_CHECKS = 79
+const EXPECTED_CHECKS = 81
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -262,8 +272,9 @@ const settle = async (expected) => waitForCount(cards(), expected, { timeoutMs: 
 /*
  * `ledger-rows/row-1874` — the top row's menus as [value, shown label], read
  * only while the menu itself is drawn (Playwright counts no <option> visible,
- * so the select is the guard), lower-cased where a tag's spelling is the
- * database's choice between "Q3" and "q3".
+ * so the select is the guard), lower-cased where a check is about the words
+ * and their counts. Which spelling is shown is a rule of its own, checked
+ * unlowered (`found-30-sep/template-tags-spelled-by-collation`).
  */
 const optionsOf = (testId) =>
   page.locator(`[data-testid="${testId}"]`).filter({ visible: true }).locator('option').evaluateAll(
@@ -278,6 +289,30 @@ const tagsInDb = async (id) => {
   try {
     const [row] = await sql`select tags from project_templates where id = ${id ?? null}`
     return row ? row.tags : 'no such row'
+  } catch (e) {
+    return `unreadable: ${String(e?.message ?? e).split('\n')[0]}`
+  }
+}
+/*
+ * `found-30-sep/template-tags-spelled-by-collation` — the spelling of each of
+ * this run's tag words that a collation sorts FIRST, which is what `min(t)`
+ * showed. Asked with an explicit COLLATE each way, because the database's own
+ * is one of the two: C on the lanes, en_US in CI. Or why it could not be read.
+ */
+const firstSpellings = async () => {
+  if (!sql) return 'no DATABASE_URL to ask'
+  try {
+    const rows = await sql`
+      select lower(t) as word,
+             (array_agg(t order by t collate "C"))[1] as c,
+             (array_agg(t order by t collate "en-US-x-icu"))[1] as en_us
+      from project_templates, unnest(tags) as t
+      where workspace_id = ${WS} and name like ${`${TAG} %`}
+      group by lower(t)`
+    return {
+      C: Object.fromEntries(rows.map((r) => [r.word, r.c])),
+      enUS: Object.fromEntries(rows.map((r) => [r.word, r.en_us])),
+    }
   } catch (e) {
     return `unreadable: ${String(e?.message ?? e).split('\n')[0]}`
   }
@@ -538,6 +573,21 @@ try {
   chk(await waitUntil(async () => JSON.stringify(await tagMenu()) === JSON.stringify(TAGS_WANTED), { timeoutMs: 8_000 }),
     'Tags counts client 3, Q3 6 and Retro 1 — one word whatever the case it was tagged in, in alphabetical order',
     `it read ${JSON.stringify(await optionsOf('templates-facet-tag'))}`)
+  /*
+   * `found-30-sep/template-tags-spelled-by-collation` — AND IN WHICH SPELLING,
+   * not lower-cased this time. "client" is on two of its three templates and
+   * "Client" on one; "Q3" on four of six and "q3" on two; "Retro" is spelled
+   * once. The rule shows client, Q3, Retro. C sorts Client first and en-US q3,
+   * so a menu spelled by either collation's `min()` differs from it on one
+   * word — the database is asked which, so the seed is seen to tell them apart.
+   */
+  const SPELLED = [['client', 'client (3)'], ['Q3', 'Q3 (6)'], ['Retro', 'Retro (1)']]
+  const tagOptions = async () => (await optionsOf('templates-facet-tag')).slice(1)
+  const spelledNow = await waitUntil(async () => JSON.stringify(await tagOptions()) === JSON.stringify(SPELLED), { timeoutMs: 8_000 })
+  const firsts = await firstSpellings()
+  chk(spelledNow && firsts?.C?.client === 'Client' && firsts?.enUS?.q3 === 'q3',
+    'and shows each word in the spelling most of its templates carry — client, Q3, Retro — which neither collation sorts first for every word: C puts Client first, en-US q3 (asked with an explicit COLLATE)',
+    `it read ${JSON.stringify(await tagOptions())}; sorted first by C ${JSON.stringify(firsts?.C ?? firsts)}, by en-US ${JSON.stringify(firsts?.enUS ?? firsts)}`)
   const q3Option = (await optionsOf('templates-facet-tag')).find(([v]) => v.toLowerCase() === 'q3')?.[0] ?? 'Q3'
   const q3Ids = TAGGED('q3').map((i) => created[i])
   mark = browseCalls.length
@@ -801,6 +851,16 @@ try {
   chk(await waitUntil(async () => JSON.stringify(await tagMenu()) === JSON.stringify(TAGS_AFTER_EDIT), { timeoutMs: 10_000 }),
     'and the Tags facet follows — Retro 2, and Launch day gone',
     `it read ${JSON.stringify(await optionsOf('templates-facet-tag'))}`)
+  /*
+   * `found-30-sep/template-tags-spelled-by-collation` — the rule's second step.
+   * "Retro" has been on eng-c since the run began and "retro" was written on
+   * the saved template just now: one template each, so the one written last is
+   * shown. C sorts Retro first.
+   */
+  const SPELLED_AFTER_EDIT = [['client', 'client (3)'], ['Q3', 'Q3 (7)'], ['retro', 'retro (2)']]
+  chk(await waitUntil(async () => JSON.stringify(await tagOptions()) === JSON.stringify(SPELLED_AFTER_EDIT), { timeoutMs: 10_000 }),
+    'and a word carried as often in two spellings is shown in the one written last — retro, just written, over Retro',
+    `it read ${JSON.stringify(await tagOptions())}`)
   /*
    * WHO MAY. The route asks `template.manage`, the key that saves and deletes
    * a template. A plain member holds none and is refused with the guard's own

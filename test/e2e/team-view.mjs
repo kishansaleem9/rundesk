@@ -41,7 +41,7 @@
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { signInApi, registerApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
@@ -100,12 +100,8 @@ try {
    * be right about. One row would look correct however the grouping worked.
    */
   const mateEmail = `teammate-${Date.now()}@rundesk.invalid`
-  const reg = await fetch(`${API}/auth/register`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: mateEmail, displayName: `Omar ${TAG}`, password: 'Teammate@123!' }),
-  })
-  if (!reg.ok) throw new Error(`could not register a teammate: ${reg.status}`)
+  // `registerApi` throws on a refusal and waits out register's ten a minute.
+  await registerApi(API, { email: mateEmail, displayName: `Omar ${TAG}`, password: 'Teammate@123!' })
   await A(`/workspaces/${workspaceId}/members`, { method: 'POST', body: { email: mateEmail, role: 'member' } })
   const mateId = ((await A(`/workspaces/${workspaceId}/members`)).data ?? [])
     .find((m) => m.email === mateEmail)?.userId

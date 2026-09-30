@@ -161,6 +161,24 @@ type DependencyType = 'blocks' | 'blocked_by' | 'related_to'
 export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024 // 100 MB
 
 /**
+ * THE ORDER A TASK'S FILES ARE READ IN, by both reads of them: the list the
+ * Attachments tab draws (`listAttachments`) and the rows `getTask` carries
+ * (`found-30-sep/attachments-unordered`). Neither had an ORDER BY, so both came
+ * back in heap order. Measured on lane 4: once autovacuum had freed space, each
+ * pooled connection inserted into a page of its own, and 9 seedings of three
+ * links in 15 came back in another order than they were linked.
+ *
+ * The order they were attached, oldest first. ClickUp's help centre does not
+ * say what order its Attachments section lists files in; its feedback board
+ * asks for a sort because there is none "beyond the date modified". So by date,
+ * and oldest first, as the ledger read it ("a new file can land first or in
+ * the middle"): a file attached later lands after the ones already drawn and
+ * moves none of them. The id breaks a tie, since rows written in one
+ * transaction share `now()`.
+ */
+const ATTACHMENT_ORDER = [asc(taskAttachments.createdAt), asc(taskAttachments.id)]
+
+/**
  * How many of a member's open tasks one read returns (`getTasksForMember`).
  * Home asks for one more than it shows, so it knows when the list was cut and
  * can say "500+" rather than a confident 500.
@@ -3092,7 +3110,7 @@ export class TasksService {
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
         .where(and(eq(taskDependencies.taskId, taskId), eq(spaces.workspaceId, homeWorkspaceId))),
-      this.db.select().from(taskAttachments).where(eq(taskAttachments.taskId, taskId)),
+      this.db.select().from(taskAttachments).where(eq(taskAttachments.taskId, taskId)).orderBy(...ATTACHMENT_ORDER),
     ])
 
     /*
@@ -3168,18 +3186,54 @@ export class TasksService {
     // caller can't enumerate another workspace's / private container's files by
     // guessing task ids (IDOR).
     await this.assertTaskReadAccess(taskId, actorId)
-    const rows = await this.db.select().from(taskAttachments).where(eq(taskAttachments.taskId, taskId))
-    return Promise.all(rows.map(async (row) => ({
+    // Who attached each file, by name (`found-30-sep/attachment-card-names-uploader-by-id`):
+    // the card drew `uploadedBy`, which is an id, so it read "1.0 KB · 978243e1-…".
+    // A left join, so a file whose uploader has been deleted is still listed.
+    const rows = await this.db
+      .select({
+        id: taskAttachments.id,
+        fileName: taskAttachments.fileName,
+        sizeBytes: taskAttachments.sizeBytes,
+        contentType: taskAttachments.contentType,
+        uploadedById: taskAttachments.uploadedById,
+        createdAt: taskAttachments.createdAt,
+        storageKey: taskAttachments.storageKey,
+        uploaderName: users.displayName,
+      })
+      .from(taskAttachments)
+      .leftJoin(users, eq(users.id, taskAttachments.uploadedById))
+      .where(eq(taskAttachments.taskId, taskId))
+      .orderBy(...ATTACHMENT_ORDER)
+    return Promise.all(rows.map((row) => this.attachmentView(row)))
+  }
+
+  /**
+   * ONE SHAPE for a task's file, wherever the API hands one back: this list and
+   * the row `addAttachment` returns. `uploadedBy` stays the uploader's id, as
+   * before, for the callers that compare it; `uploaderName` is what a card draws.
+   */
+  private async attachmentView(row: {
+    id: string
+    fileName: string
+    sizeBytes: number
+    contentType: string
+    uploadedById: string | null
+    createdAt: Date
+    storageKey: string
+    uploaderName?: string | null
+  }) {
+    return {
       id: row.id,
       fileName: row.fileName,
       fileSize: row.sizeBytes,
       mimeType: row.contentType,
       uploadedBy: row.uploadedById,
+      uploaderName: row.uploaderName ?? null,
       createdAt: row.createdAt,
       storageKey: row.storageKey,
       kind: attachmentKind(row.storageKey),
       url: await this.attachmentUrl(row.storageKey),
-    })))
+    }
   }
 
   /**
@@ -3332,17 +3386,12 @@ export class TasksService {
     })
     // Make the uploaded file searchable under the `file` entity type (Plan §11.1).
     void this.indexAttachmentInSearch(row, taskId)
-    return {
-      id: row.id,
-      fileName: row.fileName,
-      fileSize: row.sizeBytes,
-      mimeType: row.contentType,
-      uploadedBy: row.uploadedById,
-      createdAt: row.createdAt,
-      storageKey: row.storageKey,
-      kind: attachmentKind(row.storageKey),
-      url: await this.attachmentUrl(row.storageKey),
-    }
+    const [uploader] = await this.db
+      .select({ displayName: users.displayName })
+      .from(users)
+      .where(eq(users.id, actorId))
+      .limit(1)
+    return this.attachmentView({ ...row, uploaderName: uploader?.displayName ?? null })
   }
 
   async removeAttachment(taskId: string, attachmentId: string, actorId: string) {

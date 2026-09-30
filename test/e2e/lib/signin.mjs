@@ -134,6 +134,41 @@ export async function signUpApi(base, body, { attempts = 4 } = {}) {
   }
 }
 
+/**
+ * Make somebody an account over the old `POST /auth/register` and return the
+ * session payload (`accessToken`, `user`, `workspaces` with their personal
+ * workspace), as the suites that need people of their own do.
+ *
+ * It has sign-up's budget now, ten a minute per address
+ * (`found-30-sep/register-unthrottled`), and in CI and on a lane every suite is
+ * one address: `assignee-picker` alone makes twelve people, and
+ * `assign-to-priorities` makes three just before it. So a 429 is waited out as
+ * the server says, as `signUpApi` does, and a 429 is refused before the handler
+ * runs, so a retry makes no second account. Anything else throws, naming the
+ * email and what the API said.
+ */
+export async function registerApi(base, body, { attempts = 4 } = {}) {
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(`${base}/auth/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const json = await res.json().catch(() => null)
+    if (json?.data?.accessToken) return json.data
+    if (!isRateLimited(res.status)) {
+      throw new Error(`could not register ${body?.email}: ${res.status} ${JSON.stringify(json).slice(0, 200)}`)
+    }
+    if (attempt >= attempts) {
+      throw new Error(`could not register ${body?.email}: rate limited ${attempts} times running`)
+    }
+    // Said, so a run that took a minute longer says why: this is the limit working.
+    const waitMs = retryAfterMs(res.headers.get('retry-after'), json?.error?.details?.retryAfter)
+    console.log(`  (registering ${body?.email}: ten a minute from this address, so waiting ${Math.round(waitMs / 1000)} s as the API says)`)
+    await sleep(waitMs)
+  }
+}
+
 /*
  * There is deliberately no `signInUi` here.
  *

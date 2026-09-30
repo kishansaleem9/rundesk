@@ -1006,8 +1006,14 @@ function SaveTemplateDialog({
       <DialogContent data-testid="templates-save-dialog">
         <DialogHeader>
           <DialogTitle>{t('templates.saveAsTemplate')}</DialogTitle>
+          {/*
+            `found-30-sep/template-save-dialog-says-admin-only` — who may save,
+            by the key the route asks (`template.manage`), under the name the
+            Roles tab gives it. It said "(admin only)" to managers and to
+            members granted the key, who are the people it is shown to.
+          */}
           <DialogDescription>
-            {t('templates.saveDescription')}
+            {t('templates.saveDescription', { permission: t('rolesTab.perm.templateManage') })}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">

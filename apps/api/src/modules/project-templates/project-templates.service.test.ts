@@ -4,8 +4,10 @@ import { BadRequestException, NotFoundException } from '@nestjs/common'
 import {
   ProjectTemplatesService,
   normalizeTemplateTags,
+  spellTagFacet,
   TEMPLATE_TAG_MAX_LENGTH,
   TEMPLATE_TAGS_MAX,
+  type TagSpelling,
 } from './project-templates.service'
 
 /**
@@ -171,5 +173,73 @@ describe('saving a template refuses its tags before it reads anything', () => {
       BadRequestException,
     )
     assert.equal(db.select.mock.callCount(), 0)
+  })
+})
+
+/*
+ * `found-30-sep/template-tags-spelled-by-collation` — the Tags facet showed each
+ * word in the spelling `min(t)` found: "Q3" under C.UTF-8 (the lanes), "q3"
+ * under en_US (CI). The label is now chosen by a rule with no collation in it:
+ * the spelling most templates carry, then the one written last, then the first
+ * by character code. The spellings arrive in whatever order the database hands
+ * them over, so each case is asked in both orders.
+ */
+describe('spellTagFacet — the spelling a Tags bucket shows', () => {
+  const at = (minute: number) => new Date(Date.UTC(2026, 8, 30, 1, minute))
+  const row = (spelling: string, uses: number, newest: Date, count: number): TagSpelling =>
+    ({ word: spelling.toLowerCase(), spelling, uses, newest, count })
+  const both = (rows: TagSpelling[]) => [spellTagFacet(rows), spellTagFacet([...rows].reverse())]
+
+  it('shows a word in the spelling most of its templates carry, not the one a collation sorts first', () => {
+    // C sorts "Client" and "Q3" first; en_US sorts "client" and "q3" first. The rule agrees with neither.
+    for (const buckets of both([row('Client', 1, at(9), 3), row('client', 2, at(1), 3), row('Q3', 4, at(1), 6), row('q3', 2, at(9), 6)])) {
+      assert.deepEqual(buckets.map((b) => b.value).sort(), ['Q3', 'client'])
+    }
+  })
+
+  it('between spellings carried as often, shows the one written last', () => {
+    for (const buckets of both([row('Retro', 1, at(1), 2), row('retro', 1, at(5), 2)])) {
+      assert.deepEqual(buckets, [{ value: 'retro', count: 2 }])
+    }
+    for (const buckets of both([row('Retro', 1, at(5), 2), row('retro', 1, at(1), 2)])) {
+      assert.deepEqual(buckets, [{ value: 'Retro', count: 2 }])
+    }
+  })
+
+  it('between spellings carried as often and written at once, shows the same one whichever the database hands over first', () => {
+    for (const buckets of both([row('q3', 1, at(1), 1), row('Q3', 1, at(1), 1)])) {
+      assert.deepEqual(buckets, [{ value: 'Q3', count: 1 }])
+    }
+  })
+
+  it('counts a word once per template whatever its spellings, not the sum of their uses', () => {
+    // One template carrying "Q3" and "q3" (written around the normaliser) and one carrying "Q3": two templates.
+    assert.deepEqual(spellTagFacet([row('Q3', 2, at(1), 2), row('q3', 1, at(1), 2)]), [{ value: 'Q3', count: 2 }])
+  })
+
+  it('keeps the words in the order they come, one bucket each', () => {
+    const buckets = spellTagFacet([row('client', 2, at(1), 3), row('Client', 1, at(1), 3), row('Q3', 4, at(1), 6), row('Retro', 1, at(1), 1)])
+    assert.deepEqual(buckets, [{ value: 'client', count: 3 }, { value: 'Q3', count: 6 }, { value: 'Retro', count: 1 }])
+  })
+
+  it('reads a newest write handed over as text as the time it names', () => {
+    const rows = [
+      { word: 'retro', spelling: 'Retro', uses: 1, newest: '2026-09-30 01:01:00+00', count: 2 },
+      { word: 'retro', spelling: 'retro', uses: 1, newest: '2026-09-30 01:05:00+00', count: 2 },
+    ]
+    assert.deepEqual(spellTagFacet(rows), [{ value: 'retro', count: 2 }])
+  })
+})
+
+describe('browse — the Tags facet is spelled by the rule', () => {
+  it('hands the facet the spelling most templates carry, with the word\'s own count', async () => {
+    const { db } = fakeDb([[], [], [], [], [], [], []])
+    const spellings = [
+      { word: 'client', spelling: 'Client', uses: 1, newest: new Date(), count: 3 },
+      { word: 'client', spelling: 'client', uses: 2, newest: new Date(0), count: 3 },
+    ]
+    const withExecute = { ...db, execute: mock.fn(async () => spellings) }
+    const found = await service(withExecute).browse(WS)
+    assert.deepEqual(found.facets.tag, [{ value: 'client', count: 3 }])
   })
 })

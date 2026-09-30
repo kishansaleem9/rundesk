@@ -77,6 +77,43 @@ no-op (the deploy job fails with `Error: missing server host`):
    pushes auto-deploy. Run `./deploy/deploy.sh migrate` as well only if there are
    new DB migrations to apply.
 
+## The client's address, behind nginx
+
+The API only ever talks to nginx (and to Docker's `docker-proxy`, which relays
+the loopback port), so the socket it sees is the same for every visitor. Who
+is really asking is the last entry of `X-Forwarded-For`: nginx appends the
+address it saw (`$proxy_add_x_forwarded_for`) to whatever the client sent, so
+every entry before the last is the client's own writing.
+
+`TRUST_PROXY` says how many proxies stand in front of the API, and the API
+trusts exactly that many hops. `docker-compose.prod.yml` sets it to 1 (and
+`env.production.template` says the same), which is right for this stack. Every
+per-address rule reads the result: sign-in's ten attempts a minute, sign-up's
+ten, the public pages' budgets, and a workspace's IP allowlist.
+
+- **Unset or `false`** means no proxy: fine for an API reached directly, but
+  behind nginx every visitor is one address, so each limit is the whole site's.
+- **`true`** is read as 1. (It used to trust every hop, which let a client name
+  its own address in `X-Forwarded-For`.)
+- **A CDN or load balancer in front of nginx** that appends too: set 2.
+- Anything else stops the API at boot with a line naming `TRUST_PROXY`.
+
+The API's boot log says which it is using: `Client address: X-Forwarded-For,
+trusting the one proxy in front (TRUST_PROXY=1)`. To check it end to end, send
+a forged header through nginx and read what the API saw, with a session of a
+member of the workspace:
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" -H 'X-Forwarded-For: 198.51.100.1' \
+  "https://<host>/api/v1/workspaces/<workspace-id>/security-settings"
+```
+
+Its `currentIp` must be your own address, not `198.51.100.1`, and not the
+same address for two people on different networks.
+
+Only nginx may reach the API's port. With 1 hop trusted, anything that reaches
+the port directly could write the header nginx normally writes.
+
 ## Other commands
 
 | Command | Purpose |

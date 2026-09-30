@@ -777,9 +777,10 @@ async function main() {
 
   // ═══ email (test sender) ═══════════════════════════════════════════════════
   sec('email (transactional sender)')
-  // /email/test is disabled in production (403) and would otherwise send a real
-  // email — so we only probe that the route exists and is correctly guarded.
-  reach('POST /email/test (probe — disabled in prod)', await call('POST','/email/test',{ body:{ to:'qa@example.com' } }), [400,403])
+  // /email/test sends only for a super admin, and never in production — so we
+  // only probe that the route exists and is correctly guarded: asked with no
+  // session it is refused 401 (`found-30-sep/test-email-route-open`).
+  reach('POST /email/test (probe — super admin only, disabled in prod)', await call('POST','/email/test',{ body:{ to:'qa@example.com' } }), [401,403])
 
   // ═══ sample-data ═══════════════════════════════════════════════════════════
   sec('sample-data (demo seeder)')

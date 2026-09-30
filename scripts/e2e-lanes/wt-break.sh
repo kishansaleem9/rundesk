@@ -123,6 +123,7 @@ restart() {
     lane_model_env "$LANE"
     lane_search_env "$LANE"
     lane_oauth_env "$LANE"
+    lane_proxy_env "$LANE"
     nohup node --require "$TSX/dist/preflight.cjs" \
       --import "file://$TSX/dist/loader.mjs" \
       dist/apps/api/src/main.js > "/tmp/claude-0/api-v$LANE.log" 2>&1 &

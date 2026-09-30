@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 381 items, 53 open, 8 partly fixed, 320 closed, counted from this file's headings on 30 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 395 items, 58 open, 8 partly fixed, 329 closed, counted from this file's headings on 30 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1625,7 +1625,7 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 
 *To close:* read `ok` (or `must`) in those 137 conditions, or bind those suites with `noAnswer: 'throw'`. Add a gate that refuses a status compared with `<` and no lower bound, with a planted case and a mutation.
 
-### `found-30-sep/client-address-behind-nginx` — open (security, small; found closing `found-30-sep/public-routes-unthrottled`)
+### `found-30-sep/client-address-behind-nginx` — **closed** (security, small; found closing `found-30-sep/public-routes-unthrottled`)
 
 **Behind nginx, every visitor may be one address, so each per-address limit is the whole site's**
 
@@ -1633,7 +1633,34 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 
 *To close:* trust exactly one hop, nginx (`trustProxy: 1` or its address), and set it in the production compose. Check it through nginx with a forged `X-Forwarded-For`.
 
-### `found-30-sep/test-email-route-open` — open (security, small; found closing `found-30-sep/public-routes-unthrottled`)
+*Closed, 30 September* (by an agent on lane 3; merged and measured again here). The API now trusts exactly the hops it has. `TRUST_PROXY` is the number of proxies in front (`trustProxyFrom`, `apps/api/src/common/http/trust-proxy.ts`), and it is handed to Fastify as a number. Fastify's reference defines that as "Trust the nth hop from the front-facing proxy server as the client". nginx's `$proxy_add_x_forwarded_for` is "the 'X-Forwarded-For' client request header field with the `$remote_addr` variable appended to it". So behind nginx, `1` makes `req.ip` the entry nginx appended, never one the client wrote.
+
+The other values:
+- `true` is read as 1. It was Fastify's `true`, which trusts every hop and answers the first entry, the client's own.
+- Unset or `false` means no proxy.
+- Anything else stops the API at boot, naming the variable, and the boot log says which setting it runs with.
+
+It is not an address list. Behind Docker the socket is the bridge gateway (docker-proxy relays the loopback port), not nginx's 127.0.0.1. A range wide enough to cover it would also trust a client on a private network.
+
+Where it is set:
+- `deploy/docker-compose.prod.yml` sets `TRUST_PROXY: ${TRUST_PROXY:-1}`, and `env.production.template` says 1.
+- `deploy/README.md` explains it, with a check through nginx using a forged header.
+- The vhost's comment names the hop the API trusts.
+- The lanes run the API as production does (`lane_proxy_env`, in all four launchers), and so does CI's API step.
+
+The same address feeds more than the limiter. The workspace IP allowlist and the security settings' `currentIp` saw Docker's gateway for everyone in production, so the allowlist could not tell one visitor from another either.
+
+Checks:
+- `auth-route-limits` (new) puts a proxy of its own in front of the lane's API. It forwards from 127.0.0.5 and appends the address it saw, as nginx does. Three checks:
+  - the API reads a client's address as the proxy saw it, not the one it wrote (`currentIp`);
+  - a client naming a different address on each of 11 sign-ins is still held to sign-in's ten;
+  - a second client behind the same proxy has a budget of its own.
+
+  Before (lane 3 on HEAD's API, which ignores `1`): the API read 127.0.0.5 for everybody, the counter was `127.0.0.5 | 12`, and the second client was refused with 429. After: all three hold; the counters are `127.0.0.3 | 11` and `127.0.0.4 | 1`, and no forged address appears.
+- `trust-proxy.test.ts` (new, 5 tests) drives a real Fastify at nginx's socket for each value, including `true` and a CDN's second hop.
+- Break patches: `arl-1` (every hop trusted again) reddens four checks: the API read the forged `198.51.100.23` as the client, and the forged-header burst was answered 11 of 11. `arl-2` (no hop trusted) reddens two: the API read `127.0.0.5`, and the second client was refused. `arl-13` and `arl-14` redden their unit tests.
+
+### `found-30-sep/test-email-route-open` — **closed** (security, small; found closing `found-30-sep/public-routes-unthrottled`)
 
 **`POST /email/test` sends mail for anybody outside production**
 
@@ -1641,13 +1668,48 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 
 *To close:* an admin guard, or no route outside development; a check that an anonymous caller is refused.
 
-### `found-30-sep/register-unthrottled` — open (security, small; found closing `found-30-sep/public-routes-unthrottled`)
+*Closed, 30 September* (by an agent on lane 3; merged and measured again here). `POST /email/test` is the super-admin console's now, gated as `OpsController` and `OrganizationsController` are:
+- `JwtAuthGuard` on the route, so an anonymous caller is refused 401 before the body is read;
+- then `user.role !== 'super_admin'` is refused 403, "Super admin access required".
+
+Production still refuses everybody, and `vps-master-test.sh`'s probe now expects 401.
+
+Checks:
+- `auth-route-limits` (new) has three: an anonymous caller is refused 401, an ordinary member 403, and a super admin may still send one, to an `@rundesk.invalid` address. Before, on lane 3, the anonymous caller and the member were each answered 201 `{ ok: true }`.
+- `email.controller.test.ts` (new, 4 tests): the guard is on the route; a member and a workspace admin are refused with nothing sent; a super admin sends one; production refuses even a super admin.
+- Break patches: `arl-3` (the guard gone) reddens the anonymous and the member checks, each answered 201. `arl-4` (the role check gone) reddens the member’s. `arl-15` and `arl-16` redden their unit tests.
+
+### `found-30-sep/register-unthrottled` — **closed** (security, small; found closing `found-30-sep/public-routes-unthrottled`)
 
 **The old `POST /auth/register` makes accounts with no limit, beside signup's ten a minute**
 
 *Evidence, 30 September, read:* `AuthController.register` is deprecated but routed, and carries no `@RateLimit`. Each call makes an account and a workspace. The invitation routes (`claim`, `decline`, `preview`) and `sso/lookup` have none either.
 
 *To close:* limit or retire `register`, decide the invitation and SSO routes' budgets, and check a burst on each.
+
+*Closed, 30 September* (by an agent on lane 3; merged and measured again here). ClickUp documents limits for its API alone: "The ClickUp API applies rate limits per token", 100 a minute on Free Forever, Unlimited and Business, and 429 past it. Of invitations it says only that they "never expire, but the link in the email is only valid for a short time". Its help centre says nothing of limits on signing up, on invitations or on SSO (read through search results; the sites are blocked here). So the safe rule: per address, far above one person and far below a flood, and no route that makes an account without a limit.
+
+`register` is limited, not retired. The web's `/register` page still calls it, though nothing links to it, and eleven suites make their people with it. The budgets are `AUTH_ROUTE_LIMITS`, beside the guard:
+- **Ten a minute**: register, with sign-up's own policy object, and an invitation's claim (which makes an account or signs one in) and its decline.
+- **A page's 120** (`PUBLIC_ROUTE_LIMITS.page`): opening an invitation's link.
+- **60**: the SSO lookup, asked while an email is typed. Unlimited, it enumerated which workspace signs in with SSO for any domain.
+- **30**: SSO's start and both callbacks. There is no password to guess through them, but each costs a discovery fetch, a code exchange or a signature check against every enabled SAML connection.
+
+Past each, 429 with a Retry-After. The invitation sender's routes and SSO's settings are not counted. The eleven suites call `registerApi` (`lib/signin.mjs`), which waits out a 429 as `signUpApi` does and says so.
+
+Checks:
+- `auth-route-limits` (new, 17 checks), registered in CI (250 in `postgres-harnesses`).
+  - An ordinary visitor is answered by all eight routes.
+  - A burst one past each budget, in one fresh minute, is refused with 429 and a Retry-After.
+  - Another address still registers.
+  - After the window every route answers the same address again.
+  - Before, on lane 3: every burst was answered whole, 3/17 in all. After: 17/17, three times.
+- `auth-route-limits.test.ts` (new, 14 tests): each route carries its budget behind the guard, register's is sign-up's own object, the 11th registration from one address is refused, and the routes with a session are never counted.
+- `arl-1…18`: 12 aimed at the suite and 6 unit claims, each reddening what it names (lane 3, baseline 17/17).
+- Regression on lane 3, straight after the new suite: 33 suites and 519 checks, all green, and no check met a 429. `assignee-picker` registers twelve people, and `registerApi` waited 49 s for its eleventh, as it says in the log.
+
+Found while building it: `found-30-sep/register-counted-apart-from-signup`, `found-30-sep/sign-in-time-tells-an-account`, `found-30-sep/password-hash-holds-the-event-loop` and `found-30-sep/oauth-routes-unthrottled`.
+- Merged here and run again, with the lanes restarted on the new scripts (`TRUST_PROXY=1`): `auth-route-limits` 17/17 alone on lane 5, then on lanes 5 and 7 twelve suites that sign up, register, invite or read the public routes, all green, 235 checks, none meeting a 429 (public-route-limits 11, assign-to-priorities 30, create-modal-templates 15, clip-links 20, teams-empty-state 21, sidebar-dms 14, teams-destination 14, team-view 13, teams-person-cards 17, calendar-accounts 37, comment-recording 33, assignee-picker 10).
 
 ### `found-30-sep/public-pages-read-429-as-gone` — **closed** (visible bug, small; found closing `found-30-sep/public-routes-unthrottled`)
 
@@ -1678,7 +1740,7 @@ Checks:
 - `pbz-1..10` are new: 8 aimed at the suite and 2 unit claims. The break runner measures the suite's after this commit.
 - Regression on lanes 5 and 7, the pages that read the public routes and two that boot the app: all green, 104 checks (public-doc-page 12, clip-links 20, hook-portal-access 11, stable-images 6, stale-chunk-recovery 27, addressability-live 28); `public-pages-busy` 10/10 on both lanes.
 
-### `found-30-sep/attachments-tab-draws-twice` — open (visible bug, small; found closing `found-30-sep/task-attachments-flaky`)
+### `found-30-sep/attachments-tab-draws-twice` — **closed** (visible bug, small; found closing `found-30-sep/task-attachments-flaky`)
 
 **The Attachments tab draws its cards from the task's own rows, then again from its list, and every card jumps 175 px**
 
@@ -1691,7 +1753,19 @@ Checks:
 
 *To close:* draw the cards once, from one shape, and keep the form from moving cards already drawn. Check that the first card's box does not change after it is first drawn, and that its first draw has its links.
 
-### `found-30-sep/attachments-unordered` — open (visible bug, small; found closing `found-30-sep/task-attachments-flaky`)
+*Closed, 30 September* (by an agent on lane 4; merged and measured again here). ClickUp's help centre says nothing of how the Attachments section draws while it loads. A card's actions come up when you "hover over an attachment" ("Delete attachments"), so a card that moves from under the pointer loses them. Measured first on lane 4, with the panel's list held until the tab had been drawn: the first card was drawn at y 600, 74 px tall, from the task's own rows and with no Download; when the list answered it was at y 775 and 78 px (three runs of three).
+- The tab's cards wait for its own list and are drawn from it alone. Meanwhile the grid shows a loading line and the header counts the task's own rows.
+- Those rows, typed now as what they are (`TaskAttachmentRow`), are drawn only when no list will come: a route that is not there, or a read that failed. They are then cards without links.
+- The upload and link form is drawn from the start, unless the route is known not to be there, so it is above the cards before the first one is.
+- Measured after: the first card is drawn at y 775, 74 px, with its Download link, and stays there.
+
+Checks: `task-attachments`, 17 → 23 checks, with the two items below. The panel's list is held until the tab's header is shown, and a mutation observer reads the first card the moment it is drawn: "the first card is drawn where it stays — its box when it first appears is its box once the list has answered" and "and its first draw already has its Download link — the cards are drawn from the list, not from the task's own rows".
+- Before, both failed in three runs of three. After, 23/23 in nine runs, three in a row each at `f499cf6` (twice) and at `cb21d14`.
+- `atd-1` (the task's rows drawn while the list is on its way) reddens the Download check (22/23); `atd-2` (and the form drawn only once the list answers) reddens the box check and the Download check (21/23). The twelve `tat-*` patches still redden theirs; `tat-1` is re-aimed at the header's new count.
+- Regression on lane 4, AFTER: the eleven suites that open the tab or read attachments, 288 checks, all green.
+- Merged here with 0170 applied to every lane database and `rundesk_pristine`, and run again on lane 5: `task-attachments` 23/23, attach-on-create 14, clip-created-card 26, task-cover 42, all green.
+
+### `found-30-sep/attachments-unordered` — **closed** (visible bug, small; found closing `found-30-sep/task-attachments-flaky`)
 
 **A task's attachments come back in whatever order Postgres finds them**
 
@@ -1703,7 +1777,17 @@ Checks:
 
 *To close:* find out which order ClickUp lists a task's attachments in and give both reads that order. Check it with files written out of heap order.
 
-### `found-30-sep/attachment-card-names-uploader-by-id` — open (visible bug, small; found closing `found-30-sep/task-attachments-flaky`)
+*Closed, 30 September* (by an agent on lane 4; merged and measured again here). ClickUp's help centre does not say what order the Attachments section lists files in. Its feedback board says there is no sort: "ClickUp provides no option to sort attachments within tasks or spaces" ("Add Sorting Options for Attachments (by Date and File Type)"), and "a massive list of attachments without the ability to sort (beyond the date modified)". So by date. The direction is not said, and this follows the ledger, which expected a new file to land last: the order they were attached, oldest first. A file attached later then moves no card already drawn.
+- `listAttachments` and `getTask`'s attachments sort by `created_at, id`, one constant for both. The id breaks a tie between rows written in one transaction.
+- 0170 indexes `task_attachments` on `task_id`, in the migration and the schema: every read of a task's files, and the cascade when a task is deleted, read the whole table. On the task alone, not with the date, because an index in date order would hand rows back sorted to a read that forgot its ORDER BY. The schema pushed onto the pristine dump differs from the shared reference by that index alone, and lane 4 with 0170 applied read as no drift against it.
+
+Checks: `task-attachments` attaches file-1, file-2 and file-0 in that order, then rewrites their rows into the heap as file-2, file-0, file-1 and reads their `ctid` back. "the list hands the files back in the order they were attached, oldest first — not in the order the heap holds them", "and the task itself carries its files in the same order" and "the panel draws the files in the order they were attached".
+- Before, all three failed in three runs of three: [file-2, file-0, file-1], the heap's order. After, all pass.
+- `tasks-attachments-read.test.ts` is new, 5 tests: 0/5 against the old service, 5/5 after.
+- `ato-1` (the list unsorted) reddens the list's and the panel's order (21/23), on a lane that has the index; `ato-2` (the task's rows unsorted) the task's (22/23); `ato-3` (newest first) all three (20/23). `ato-4` and `ato-5` redden their unit tests.
+- After the merge every lane database needs 0170 before `fleet-restart.sh` will start its API.
+
+### `found-30-sep/attachment-card-names-uploader-by-id` — **closed** (visible bug, small; found closing `found-30-sep/task-attachments-flaky`)
 
 **An attachment card names its uploader by user id**
 
@@ -1711,7 +1795,16 @@ Checks:
 
 *To close:* hand back the uploader's name, or draw it from the members the page already holds. Check that the card shows a name.
 
-### `found-30-sep/template-save-dialog-says-admin-only` — open (visible bug, small; found closing `ledger-rows/row-1874`)
+*Closed, 30 September* (by an agent on lane 4; merged and measured again here). ClickUp's help centre does not say what a card shows besides its preview, and the ledger asked for a name. `listAttachments` reads the uploader's name through a LEFT join, so a file whose uploader's account is gone is still listed, and hands back `uploaderName` beside `uploadedBy`, which stays the id. The row `addAttachment` returns has the same shape. The card draws "1.0 KB · Super Admin" on one line, cut short rather than wrapped. Measured before: every card read "… · 978243e1-64ba-4709-b874-4ea6228b5ed7". The id wrapped onto a second line of 32 px, which is what made the card 78 px where it is 74.
+
+Checks: "each card names who attached it — the uploader's name, not their id" reads every card's shown text against the name the server gives the one who attached them.
+- Before, it failed in three runs of three. After, it passes.
+- Unit tests: the LEFT join, `uploaderName: null` for a gone uploader, and `addAttachment`'s row naming its uploader.
+- `aup-1` (the card draws the id) and `aup-2` (the list names nobody) redden it (22/23 each); `aup-3` (an inner join) and `aup-4` (the new row names nobody) redden their unit tests.
+
+Found while building them: `found-30-sep/comment-files-unordered`, `found-30-sep/comment-file-index-only-in-a-migration`, `found-30-sep/attachment-card-draws-no-date`, `found-30-sep/attachments-have-no-download-all`, `found-30-sep/schema-reference-reads-the-main-tree` and `found-30-sep/agent-worktrees-build-main-packages` (measured again).
+
+### `found-30-sep/template-save-dialog-says-admin-only` — **closed** (visible bug, small; found closing `ledger-rows/row-1874`)
 
 **The Template Center's save dialog says "(admin only)", in all four locales, though the route asks `template.manage`**
 
@@ -1719,13 +1812,49 @@ Checks:
 
 *To close:* drop the parenthesis in the four locales, or say who may save by the key, and check the dialog's words for a member who holds it.
 
-### `found-30-sep/template-tags-spelled-by-collation` — open (visible bug, small; found closing `ledger-rows/row-1874`)
+*Closed, 30 September* (built by an agent on lane 6; merged and measured again here). ClickUp's help centre (read through search excerpts):
+- "Members and above can create, edit, apply, and delete" List and Folder templates.
+- "Everyone, including guests with edit or full edit permissions, can create, edit, apply, and delete task templates".
+- "Admins only" is one of the choices for sharing a template, not a rule for saving one.
+
+Measured first, on lane 6 at `f499cf6`, as a member granted `template.manage`: the dialog read "Snapshot an existing project’s lists and tasks into a reusable template (admin only)."
+
+- `templates.saveDescription` says who may save, by the key and under the name the Roles tab gives it: "Anyone with the “Manage templates” permission can save one; managers and admins have it by default."
+- The name is `rolesTab.perm.templateManage`, interpolated, so the two cannot drift. Four locales.
+
+Checks:
+- `project-template-key` had 4 checks and has 5. The dialog, read as the member granted the key, names the permission and does not say admins only.
+- It is there rather than in `template-center`, whose people are a manager and a plain member, and whose shared workspace would keep a custom role a killed run left.
+- Before, 4/5 on lane 6. After, 5/5, and again on `cb21d14` and `6db885c`.
+- `ptk-7` is new and reddens it.
+
+### `found-30-sep/template-tags-spelled-by-collation` — **closed** (visible bug, small; found closing `ledger-rows/row-1874`)
 
 **The Tags menu shows each word in whichever spelling the database's collation sorts first**
 
 *Evidence, 30 September:* the facet shows one spelling per word, `min(t)`. "Q3" sorts first under C.UTF-8 (the lanes) and "q3" under en_US. The filter matches any case, so only the label changes, and `template-center` compares lower-cased.
 
 *To close:* choose the spelling by a rule (the most used, then the newest), not by collation, and check a word saved as "Q3" and "q3" shows the same label on both collations.
+
+*Closed, 30 September* (built by an agent on lane 6; merged and measured again here). ClickUp's help centre ("Organize templates with tags", read through search excerpts): "Tags live at the Space level", and a template's tags are chosen from "the tag icon under the template name". Its feedback board says tags "are currently forced to be lowercase, no matter what you write or rename it to", so ClickUp shows one spelling. Rundesk keeps the case each template was tagged in, so the facet chooses one (`found-30-sep/template-tags-keep-their-case` asks the owner which).
+
+Measured first, on lane 6 at `f499cf6` (C.UTF-8):
+- The menu read "Client (3)", though "client" is on two of the three.
+- After an edit it read "Retro (2)", though "retro" had just been written.
+- Asked with an explicit COLLATE, en-US sorts "q3" first, so CI's en_US Postgres showed "q3 (6)" where four of six carry "Q3".
+
+- The facet's query returns each spelling with how many templates carry it, when one last wrote it (`updated_at`, which only a save and a tags edit move), and the word's own count.
+- `spellTagFacet` shows the spelling most templates carry, then the one written last, then the first by character code. No collation decides it.
+- The order of the words and their counts are as before.
+
+Checks:
+- `template-center` had 79 checks and has 81.
+  - The menu shows client, Q3 and Retro. The database, asked with COLLATE "C" and "en-US-x-icu", sorts Client first under C and q3 first under en-US, so each check stays meaningful on either collation.
+  - After the edit, it shows retro over Retro.
+- Before, 79/81 on lane 6. After, 81/81, and again on `cb21d14` and `6db885c`.
+- `template-center-34` (the collation's first spelling) and `-35` (a tie given to the first written) are new, each reddening its check.
+- `template-center-17`'s anchor went with `group by lower(t)`. It is re-aimed at the word column and still reddens its check.
+- `ptt-17` and `ptt-18` are unit claims, each reddening its test in `project-templates.service.test.ts` (7 tests new).
 
 ### `found-30-sep/no-save-list-or-folder-as-template` — open (feature, medium; found closing `ledger-rows/row-1874`)
 
@@ -1751,13 +1880,46 @@ Checks:
 
 *To close:* measure what in that directory is not also in `test/e2e/breaks/`, move anything still meant to be run, and delete the rest, with the README saying where patches live.
 
-### `found-30-sep/templates-null-array-field-values` — open (visible bug, small; found closing `ledger-rows/row-1060`)
+### `found-30-sep/templates-null-array-field-values` — **closed** (visible bug, small; found closing `ledger-rows/row-1060`)
 
 **A task template stores a list- or people-valued custom field as `null` on every write**
 
 *Evidence, 30 September, measured on lane 3 by the agent that built row-1060:* `TaskTemplatesService.normalisePayload` keeps a `customFieldValues[].value` only if it is a string, number or boolean, and turns anything else into `null`. But the schema widened `value` to `string[]` (`packages/db/src/schema/task-templates.ts:73-77`) precisely so that a template would not silently drop a task's people field. It runs on create, on save-from-task and on every PATCH that carries a payload. A template created with `[{fieldName:'People', value:['u1','u2']},{fieldName:'Budget', value:5}]` is stored as `People: null, Budget: 5`. So Update existing template keeps scalar custom-field values and cannot keep an array one, and its panel promises only checklists and subtasks.
 
 *To close:* keep an array of strings in `normalisePayload`, with a unit test each way and a patch that reddens it. Then the Update panel may promise custom fields too.
+
+*Closed, 30 September* (built by an agent on lane 6; merged and measured again here). ClickUp's help centre ("Use task templates", read through search excerpts; the site is blocked here): a task template saved with Import everything "will include all task properties, fields, and settings", and of its custom fields only one kind is named as left out: "Custom Fields: Include Custom Fields (Note: Formula Fields are not included)".
+
+Measured first, on lane 6 at `f499cf6`:
+- A template made with a People list (two members) and a Labels list (two options) read back both as null.
+- So did a task with both fields set, saved as a template.
+- The task made from that template got both fields as null.
+- The Update panel read "its checklists and subtasks are kept".
+
+- `normalisePayload` keeps a list of texts (`templateFieldValue`). An object, or a list holding anything else, is still null. Create, save from a task and every PATCH with a payload go through it.
+- A list kept in a template reaches the task made from it. On the way it is checked as the field's own route checks it, because this write goes round that route:
+  - people who are members of the workspace now, options the target field defines, and tasks in the workspace, each once;
+  - a list with nothing left is not written;
+  - a list never goes into a one-value field (`fitTemplateValue`);
+  - only id-shaped ids are asked of Postgres.
+- A template never takes or writes a Voting or Files value. A vote is its voter's own (the route toggles only the caller's), and a Files value names the source task's attachments.
+- The Update panel says "its checklists, subtasks and custom-field values are kept". Four locales.
+
+Checks:
+- `create-modal-templates` had 15 checks and has 20. The new ones:
+  - a template made through the API keeps both lists;
+  - Update keeps them as lists;
+  - the panel says so before it is pressed;
+  - a task saved as a template keeps them;
+  - a task made from it carries both, read by SQL.
+- One sentence changed from "custom-field value" to "custom-field values", since the template it compares now holds three.
+- Before, 15/20 on lane 6 (the five new checks red). After, 20/20, and again on `cb21d14` and `6db885c`.
+- `create-modal-templates-16..20` are new, each reddening the check it claims on lane 6. `create-modal-templates-3` claims the renamed sentence and reddens it.
+- `ttv-1..5` are unit claims, each reddening its test in `task-templates.service.test.ts` (11 tests new). The API's unit tests: 1785/1785.
+- Regression on lane 6: `template-center` 81, `project-template-key` 5, `space-wizard` 23, `space-create-menu` 32, `space-default-permission` 36, `like-literal` 5, `sidebar-sections` 25, `role-permissions-web` 5, all green.
+
+Found while building it: `found-30-sep/template-values-written-unchecked`, `found-30-sep/duplicate-copies-votes-and-files`, `found-30-sep/save-as-template-words-promise-every-field` and `found-30-sep/suite-runs-leave-accounts-behind`.
+- Merged here and run again: on lane 5 `create-modal-templates` 20/20, and on lane 7 `template-center` 81/81, `project-template-key` 5/5, space-wizard 23, like-literal 5, role-permissions-web 5 and space-default-permission 36, all green.
 
 ### `found-30-sep/template-submit-ignores-the-form` — open (visible bug, small; found closing `ledger-rows/row-1060`)
 
@@ -1827,6 +1989,8 @@ Found while closing it: `found-30-sep/menu-items-take-a-press-while-closing`, `f
 
 *To close:* have the agent brief (or a helper) link `@rundesk/*` to the worktree the way `link_own_packages` does, and check that a worktree's bundle carries its own `packages/ui`.
 
+*Measured again, 30 September, by the agent closing the attachments items:* a bundle built at 04:52 from its worktree at `f499cf6` carried `getAttribute("data-state")==="closed"`, from `cb21d14`'s `dropdown-menu.tsx`, which neither the worktree's `apps/web` nor its `packages/ui` held. So a BEFORE bundle can carry the main tree's work in progress, as well as an AFTER one missing the worktree's.
+
 ### `found-30-sep/save-as-template-asks-no-description` — open (feature, small; found closing `ledger-rows/row-1060`)
 
 **Save as template in the create modal takes no description, and Update's picker has no search**
@@ -1859,6 +2023,158 @@ Checks:
 - `public-doc-page` is new, with 12 checks and nothing stubbed but one failure the browser answers on purpose, registered in CI (245 in `postgres-harnesses`). It opens a doc's link signed in nowhere and reads the title, the date, the icon, the words and the blocks the page registers (a ticked to-do, a table, a callout and an embedded list's name). Opening the link asks the API for nothing it refuses, and the page is read-only. A link never made, a link turned off, and an archived doc's link each say "Doc not found". Sharing again makes a new link and the old one stays closed. A 500 says the doc could not be loaded. Before, 5/12 on lane 1's build of 29 September: the six drawing checks and the failure's sentence failed, and nothing asked for was refused only because nothing was drawn. With the envelope read and the embed still live, the blocks check failed on lane 5 (10 of the first 11). After, 12/12 on lane 5, twice: before and after its page read was reshaped for the text-reads gate.
 - `pdp-1..13` are new: each names the check it reddens (the envelope read as the doc, the heading, the date, the icon, a block unregistered, a page that takes typing, a failure called a revoked link and a 404 called a failure, a link turned off that stays, an archived doc that opens, a new link that is the old one, a lookup that ignores the slug, and the live embed mounted again). Against a 12/12 baseline on lane 1, eleven redden the check they name at `77aed0c`, and `pdp-3` at `73c520c`: at `77aed0c` it reddened nothing, because the doc was written in the same second as the page drew "now", and the suite now dates its doc in the past. `pdp-13` reddened the blocks check but not the one it names, at either commit: the suite's embed named no list, so even the live view asked the API for nothing, and "asks the API for nothing it refuses" could not fail. The embed now names a list of the suite's own, and `pdp-13` reddens its check with the request it makes as nobody, `401 /api/v1/tasks/list/<the list>` (10/12, measured on lane 7 with a bundle built with the patch and the source restored, sha1 checked). The refused requests are read last in the section, after the network has gone quiet.
 - Regression on lanes 5 and 7: the ten suites that read, share, archive or route to docs, all green, 170 checks (doc-boundaries 17, doc-level-controls 7, doc-write-levels 5, doc-trash-level 5, menu-offers 9, command-palette 43, doc-import 16, doc-task-links 13, stale-chunk-recovery 27, addressability-live 28).
+
+### `found-30-sep/register-counted-apart-from-signup` — open (security, small; found closing `found-30-sep/register-unthrottled`)
+
+**Register and sign-up count apart, so an address makes twenty accounts a minute**
+
+*Evidence, 30 September, read:*
+- `POST /auth/register` now has sign-up's own policy, but the guard counts per route (`AuthController.register:POST:<ip>:<minute>` beside `AuthController.signup:POST:…`). One address makes ten accounts a minute through each.
+- The old route is still routed for two callers:
+  - the web's `/register` page, which nothing in the app links to;
+  - eleven suites, which make their people with it through `registerApi`.
+
+*To close:* one of two.
+- Retire it: move the suites to sign-up or a fixture of their own, send `/register` to `/sign-up`, and check that the old route answers 404 or 410.
+- Keep it: give the two routes one counter (a bucket name in `RateLimitOptions`), and check that ten across the two refuses the eleventh.
+
+### `found-30-sep/sign-in-time-tells-an-account` — open (security, small; found closing `found-30-sep/register-unthrottled`)
+
+**Sign-in answers an unknown email at once and a real one after a password hash, so its time says whether an account exists**
+
+*Evidence, 30 September:* in `AuthService.validateUser`, an email with no account throws "Invalid credentials" before any hashing. A real account's wrong password throws the same words after `compareSync` at cost 12, about 290 ms here. Sign-in's ten a minute per address slows the enumeration but does not stop it, and many addresses do not stop at all. Measured on lane 3 from 127.0.0.7, four sign-ins alternating, a wrong password each time: an email with no account was answered 401 in 30 and 15 ms, a real (throwaway) account in 384 and 407 ms.
+
+*To close:* compare against a fixed dummy hash when there is no account, so both answers take a hash. Check that the two 401s take times within a few milliseconds of each other.
+
+### `found-30-sep/password-hash-holds-the-event-loop` — open (performance, small; found closing `found-30-sep/register-unthrottled`)
+
+**Every password hash holds the API's one thread for about 290 ms**
+
+*Evidence, 30 September:* `hashSync(…, 12)` measured 351, 291 and 286 ms on this machine. Five places use the sync form:
+- sign-up, register, reset-password and an invitation's claim hash;
+- sign-in compares.
+
+While one runs, no other request is answered. Each is now within ten a minute per address, but a flood from many addresses, each within its ten, stalls every user's requests.
+
+*To close:* bcryptjs's async `hash` and `compare`, which yield between rounds, or a worker. Check that a burst of sign-ins does not delay a plain read by more than a hash's time.
+
+### `found-30-sep/oauth-routes-unthrottled` — open (security, small; found closing `found-30-sep/register-unthrottled`)
+
+**The social sign-in and connection redirects have no limit, beside SSO's thirty**
+
+*Evidence, 30 September, read:* none of these carries a `@RateLimit`:
+- `GET /auth/oauth/providers`, `/auth/oauth/:provider` and `/auth/oauth/:provider/callback`;
+- `GET /integrations/oauth/:provider/callback`.
+
+A callback exchanges a code with the provider, as SSO's does.
+
+*To close:* SSO's redirect budget (30) for the start and the callbacks, and check a burst on each. `/auth/oauth/providers` needs care:
+- CI's "Start the API" step polls it once a second for up to a minute;
+- the login page asks it once per load.
+
+So it wants a page's budget or none, not thirty.
+
+### `found-30-sep/comment-files-unordered` — open (visible bug, small; found closing `found-30-sep/attachments-unordered`)
+
+**A comment's files come back in whatever order Postgres finds them**
+
+*Evidence, 30 September, read:* `listComments` reads each comment's files from `task_attachments` with no ORDER BY (`tasks.service.ts`, "Hydrate per-comment attachments"). It is the third read of a task's files, and the one the item did not name. A comment with several files draws them in heap order, as the Attachments tab did.
+
+*To close:* sort them by `ATTACHMENT_ORDER`, and check with a comment's files written out of heap order.
+
+### `found-30-sep/comment-file-index-only-in-a-migration` — open (schema, small; found closing `found-30-sep/attachments-unordered`)
+
+**The index on a task file's comment exists only where 0043 ran**
+
+*Evidence, 30 September, read, not measured on a migrated database:* 0043 creates `task_attachments_comment_id_idx`, and the drizzle schema does not declare it. The pristine dump, the schema reference, the lanes and CI are built by push and have no such index; a database migrated through 0043 has it. The drift gate compares a lane with the push-built reference, so it cannot see this.
+
+*To close:* declare it in the schema (and push it to the lanes), or drop it by a migration, then look for other indexes that live in a migration only.
+
+### `found-30-sep/attachment-card-draws-no-date` — open (parity, small; found closing `found-30-sep/attachment-card-names-uploader-by-id`)
+
+**An attachment card does not say when the file was attached**
+
+*Evidence, 30 September:* ClickUp's attached files carry a date. A feedback request says it "hides the year in timestamps for comments and attached files (showing only day/month or relative times like 'Oct 12')". The card draws the size and the uploader. The list already hands back `createdAt`.
+
+*To close:* find where ClickUp draws the date, draw it on the card, and check it.
+
+### `found-30-sep/attachments-have-no-download-all` — open (parity, small; found closing `found-30-sep/attachments-tab-draws-twice`)
+
+**The Attachments section has no Download all**
+
+*Evidence, 30 September:* ClickUp: "you can download all your task attachments into a zipped file by clicking the download icon in the upper-right corner of the Attachments section" (help centre, through search excerpts). Rundesk has no such control and no route for it.
+
+*To close:* a zip of the task's files under its read rule, links left out or listed, and the icon; check the zip's entries against the list.
+
+### `found-30-sep/schema-reference-reads-the-main-tree` — open (test tooling, small; found closing `found-30-sep/attachments-unordered`)
+
+**A worktree with a migration is refused by its own `fleet-restart.sh`, and working round it can rebuild the shared reference**
+
+*Evidence, 30 September:* `schema_ref_ensure` (`lane-env.sh`) keys and builds its reference from `/home/user/rundesk`, whichever checkout calls it. A lane served from a worktree whose migration adds an index reads as drift ("extra: index task_attachments …") and is refused. The way round, used here and by `ledger-rows/row-850` before it, is a reference of the worktree's own in `SCHEMA_REF_DIR`, keyed to the main tree's hash. If the main tree's schema changes while such a reference is in use, the key stops matching, and `schema_ref_ensure` rebuilds into that directory, from the main tree, into the shared database name `rundesk_schema_ref`, under a lock held in that directory only, so two shells can rebuild the shared database at once.
+
+*To close:* build and key the reference from the calling checkout, name its database after its directory, and check both with a worktree that adds an index.
+
+### `found-30-sep/suite-runs-leave-accounts-behind` — open (test tooling, medium; found closing `found-30-sep/templates-null-array-field-values`)
+
+**Suites leave the people they sign up, and the workspaces and spaces they "delete", on every run, not only a killed one**
+
+*Evidence, 30 September, lane 6:*
+- One clean run of each suite left behind:
+  - `template-center`: the two people it signs up, with their organizations and personal workspaces. It takes them out of the shared workspace, but their accounts stay.
+  - `project-template-key`: three accounts and organizations, its workspace (archived, not deleted) with its two saved templates, and a custom role.
+  - `like-literal` and `role-permissions-web`: their accounts (two each, with organizations and personal workspaces) and their own workspace, archived.
+  - `space-default-permission`: its account, organization and personal workspace.
+  - `template-center`'s applied space, `space-default-permission`'s five spaces and `space-create-menu`'s space: archived in the shared Main Workspace.
+- This session's runs left 34 accounts, 34 organizations, 42 workspaces and 18 archived shared-workspace spaces. They were removed by hand.
+- Before it, lane 6 already held 627 `@rundesk.invalid` accounts (114 of them `tc-`), 292 archived workspaces, and 148 archived spaces in Main Workspace out of its 158.
+- `create-modal-templates` shows how to clean up: it deletes its workspace by id and its member's own organization, membership and account.
+
+It is the wider form of `found-30-sep/killed-suites-leave-members-behind`: most of what is left is left by runs that ended well.
+
+*To close:* have each suite delete what it made, as `create-modal-templates` does: accounts, their organizations, and workspaces and spaces removed rather than archived. Sweep tagged leftovers at the start of a run, and check that a run leaves no row it made.
+
+### `found-30-sep/template-values-written-unchecked` — open (visible bug, small; found closing `found-30-sep/templates-null-array-field-values`)
+
+**A template's one-value custom field is written onto the new task unchecked, whatever the same-named field there is**
+
+*Evidence, 30 September, read and not yet measured:*
+- `fitTemplateValue` now checks a list against the target field: members, options, tasks, never votes or files.
+- A one-value field is still written "as it always was": into whichever field of that name the list's project has.
+- So a template saved from one project writes text into another project's Number field, an option its Dropdown does not define, or an address into an Email field the route would refuse.
+- The field's own route (`CustomFieldsService.setValue`) refuses each of these with 400.
+
+*To close:* check a template's one-value values as the route does, with the route's validation shared rather than copied. Check it with a template applied in a project whose same-named field has another type or other options.
+
+### `found-30-sep/duplicate-copies-votes-and-files` — open (visible bug, small; found closing `found-30-sep/templates-null-array-field-values`)
+
+**Duplicate copies a Voting field's votes and a Files field's attachment ids onto the copy**
+
+*Evidence, 30 September, read and not yet measured:*
+- `duplicateTask` snapshots the task and writes every value it holds (`materialiseCustomFieldValues`), unchecked.
+- A Voting field's copy then carries votes its voters never cast on it; the field's route only ever toggles the caller's own vote.
+- A Files field's copy names the original task's attachments, which are not copied with it.
+- Templates no longer take either (`NOT_FROM_TEMPLATES`); duplicate was left as it was, being outside these items.
+
+*To close:* research what ClickUp's duplicate does with Voting and Files fields, do the same, and check both on a duplicated task.
+
+### `found-30-sep/template-tags-keep-their-case` — open (decision, small; found closing `found-30-sep/template-tags-spelled-by-collation`)
+
+**ClickUp forces a tag to lower case; Rundesk keeps each template's own spelling, so the Tags facet has to choose one**
+
+*Evidence, 30 September:*
+- ClickUp's feedback board ("Allow Tags to use capital letters", read through search excerpts): tags "are currently forced to be lowercase, no matter what you write or rename it to". Template Center tags are the Space's tags.
+- Rundesk keeps the case typed on each template (`ledger-rows/row-1874`), and the facet now shows the most-used spelling.
+- A card and the facet can show the same word in two cases.
+
+*To close:* the owner decides whether template tags keep their case, as now, or are stored lower-cased as ClickUp's are. If they are lower-cased, migrate the stored tags, and check that the facet and the cards agree.
+
+### `found-30-sep/save-as-template-words-promise-every-field` — open (copy, small; found closing `found-30-sep/templates-null-array-field-values`)
+
+**The task sheet's Save as template says it captures "custom-field values", and a Voting or Files field's is left out**
+
+*Evidence, 30 September:* `taskTemplates.saveDescription` reads "Capture this task — title, description, priority, checklists, subtasks, labels, and custom-field values". A template now keeps every custom-field value but votes and files (`NOT_FROM_TEMPLATES`), and never did keep a Formula or Progress (Auto) value, which are worked out on read.
+
+*To close:* say which fields are not captured, in the four locales, and check the words on the sheet.
 
 ### `found-30-sep/public-cdn-url-makes-every-object-public` — open (security, small; found closing `resume-defects/resume-7`)
 

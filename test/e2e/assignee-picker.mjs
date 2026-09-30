@@ -35,7 +35,7 @@
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { signInApi, registerApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
@@ -103,21 +103,17 @@ try {
   /*
    * TWELVE people, so the ninth is a real person and not a rounding argument.
    * Named with a leading letter that sorts late, and the one this suite assigns
-   * is deliberately the LAST of them.
+   * is deliberately the LAST of them. Registering has sign-up's ten a minute per
+   * address, so the eleventh may be told to wait; `registerApi` waits it out.
    */
   const mates = []
   for (let i = 0; i < 12; i += 1) {
     const email = `zz${i}-${Date.now()}@rundesk.invalid`
-    const reg = await fetch(`${API}/auth/register`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        email,
-        displayName: `Zebra ${String(i).padStart(2, '0')} ${TAG}`,
-        password: 'Teammate@123!',
-      }),
+    await registerApi(API, {
+      email,
+      displayName: `Zebra ${String(i).padStart(2, '0')} ${TAG}`,
+      password: 'Teammate@123!',
     })
-    if (!reg.ok) throw new Error(`could not register mate ${i}: ${reg.status}`)
     await A(`/workspaces/${workspaceId}/members`, { method: 'POST', body: { email, role: 'member' } })
     mates.push(email)
   }

@@ -16,6 +16,14 @@
  * may read. ClickUp (help centre "Templates", search snippets): a template is
  * saved from what its saver has in front of them.
  *
+ * AND THE SAVE DIALOG SAYS WHO MAY SAVE, `found-30-sep/template-save-dialog-says-admin-only`.
+ * It read "(admin only)" in all four locales, to the managers and the members
+ * granted the key who are the only people it is shown to. It names the key
+ * now, under the name the Roles tab gives it, and is read here as the member
+ * granted it. ClickUp (help centre, "Use List templates" and "Use Folder
+ * templates", search excerpts): "Members and above can create, edit, apply,
+ * and delete" them, and a task template anybody with edit rights.
+ *
  *   node test/e2e/project-template-key.mjs --api 3021 --dist /tmp/claude-0/dist-1
  */
 import path from 'node:path'
@@ -23,7 +31,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
-import { waitUntil } from './lib/wait.mjs'
+import { waitUntil, readText } from './lib/wait.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
@@ -32,7 +40,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 4
+const EXPECTED_CHECKS = 5
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -168,15 +176,31 @@ try {
     // What the page offers waits on the person's keys.
     await waitUntil(async () => (await page.getByTestId('templates-save-open').count()) > 0, { timeoutMs: 4000 })
     const n = await page.getByTestId('templates-save-open').count().catch(() => -1)
+    // And what its dialog says, to whoever is offered it: read as shown, once it is.
+    let words = ''
+    if (n > 0) {
+      await page.getByTestId('templates-save-open').click({ timeout: 8000 }).catch(() => {})
+      await waitUntil(async () => (words = await readText(page.getByTestId('templates-save-dialog').filter({ visible: true }), { timeoutMs: 1000 })).length > 0, { timeoutMs: 8000 })
+    }
     await ctx.close().catch(() => {})
-    return n
+    return { n, words }
   }
   const designerSees = await offered(designer)
   const plainSees = await offered(plain)
   chk(
-    designerSees === 1 && plainSees === 0,
+    designerSees.n === 1 && plainSees.n === 0,
     'the templates page offers Save as template to the member granted template.manage, and not to a plain member',
-    `designer ${designerSees}; plain ${plainSees}`,
+    `designer ${designerSees.n}; plain ${plainSees.n}`,
+  )
+  /*
+   * `found-30-sep/template-save-dialog-says-admin-only` — the words the member
+   * granted the key reads in the dialog: who may save, by the key, and not
+   * "(admin only)", which they are not and which did not stop them.
+   */
+  chk(
+    designerSees.words.includes('Anyone with the “Manage templates” permission can save one') && !/admin only/i.test(designerSees.words),
+    'the save dialog tells the member granted template.manage who may save — anyone with the “Manage templates” permission — and not that saving is for admins only',
+    `the dialog read ${JSON.stringify(designerSees.words.split('\n').slice(0, 3).join(' | '))}`,
   )
 } catch (err) {
   failed += 1

@@ -91,6 +91,7 @@ for k in "${LANES[@]}"; do
     lane_model_env "$k"
     lane_search_env "$k"
     lane_oauth_env "$k"
+    lane_proxy_env "$k"
     nohup node --require "$TSX/dist/preflight.cjs" \
       --import "file://$TSX/dist/loader.mjs" \
       dist/apps/api/src/main.js > "/tmp/claude-0/api-v$k.log" 2>&1 &

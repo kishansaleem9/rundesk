@@ -28,7 +28,7 @@ import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { signInApi, registerApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
 import { storeBase, storeRequests } from './lib/store.mjs'
@@ -196,17 +196,14 @@ try {
    * and a personal workspace. The admin this suite signs in as is a platform
    * admin, whom the rule lets in as the workspace guard does, so the member who
    * watches a members-only clip is somebody who is a member and nothing more.
+   * `registerApi` waits out register's ten a minute per address.
    */
   const register = async (label) => {
     const email = `clip-${label}-${Date.now()}@rundesk.invalid`
-    const body = await fetch(`${API}/auth/register`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email, displayName: `${label} ${TAG}`, password: PERSON_PASSWORD }),
-    }).then((r) => r.json(), () => null)
-    const own = body?.data?.workspaces?.[0]?.id ?? null
-    if (!body?.data?.accessToken || !own) throw new Error(`could not register the ${label}`)
-    const as = apiAs(body.data.accessToken)
+    const made = await registerApi(API, { email, displayName: `${label} ${TAG}`, password: PERSON_PASSWORD })
+    const own = made.workspaces?.[0]?.id ?? null
+    if (!own) throw new Error(`the ${label} was registered with no workspace of their own`)
+    const as = apiAs(made.accessToken)
     workspacesMade.push({ id: own, as })
     return { email, as, own }
   }

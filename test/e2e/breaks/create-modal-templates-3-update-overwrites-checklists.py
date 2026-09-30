@@ -5,7 +5,7 @@
 # checklists, subtasks and custom-field values as empty lists, and a template's
 # whole checklist goes because somebody corrected its title from the modal.
 #
-# Reddens: create-modal-templates: "and it keeps the template’s checklists, subtasks and custom-field value, which the form cannot say"
+# Reddens: create-modal-templates: "and it keeps the template’s checklists, subtasks and custom-field values, which the form cannot say"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = "        : api<TaskTemplate>(`/workspaces/${workspaceId}/task-templates/${panel.template.id}`, { method: 'PATCH', body })\n"

@@ -49,7 +49,8 @@ export type TemplateFacets = {
   createdBy: Array<FacetBucket & { name: string }>
   /**
    * And **Tags**: one bucket per word whatever its case, alphabetical. The
-   * value is one spelling of it, and `tag=` matches any.
+   * value is the spelling most of its templates carry (`spellTagFacet`), and
+   * `tag=` matches any.
    */
   tag: FacetBucket[]
 }
@@ -105,6 +106,51 @@ export function normalizeTemplateTags(value: unknown): string[] {
 /** `db.execute`'s rows, whichever shape the driver hands them back in. */
 function rowsOf<T>(found: unknown): T[] {
   return (Array.isArray(found) ? found : ((found as { rows?: unknown[] })?.rows ?? [])) as T[]
+}
+
+/**
+ * One spelling of one tag word over the facet's corpus: how many templates
+ * carry it as spelled, when one of them last wrote it, and how many templates
+ * carry the word in any spelling.
+ */
+export type TagSpelling = {
+  word: string
+  spelling: string
+  uses: number
+  newest: Date | string | null
+  count: number
+}
+
+/**
+ * `found-30-sep/template-tags-spelled-by-collation` — WHICH SPELLING THE TAGS
+ * FACET SHOWS for a word saved in more than one ("Q3" and "q3").
+ *
+ * It was `min(t)`, the spelling the database's collation sorts first: "Q3"
+ * under C.UTF-8, which the lanes run, and "q3" under en_US, which CI's
+ * Postgres runs. The filter matches any case, so only the label moved, but it
+ * moved with the server's locale. Now a rule, and no collation in it:
+ *
+ *   1. the spelling the MOST templates carry — what the workspace mostly calls it;
+ *   2. then the one written MOST RECENTLY — a template's tags are written when
+ *      it is saved and when they are changed, which is when `updated_at` moves;
+ *   3. then the first by character code, so that no two servers disagree.
+ *
+ * Each word's count is its own (templates carrying it in any spelling), never
+ * the sum of its spellings' uses: a row written around the normaliser with both
+ * spellings is one template. The words keep the order they come in.
+ */
+export function spellTagFacet(rows: TagSpelling[]): FacetBucket[] {
+  const time = (v: Date | string | null) => (v instanceof Date ? v.getTime() : v ? Date.parse(v) || 0 : 0)
+  const beats = (a: TagSpelling, b: TagSpelling) =>
+    a.uses !== b.uses ? a.uses > b.uses
+    : time(a.newest) !== time(b.newest) ? time(a.newest) > time(b.newest)
+    : a.spelling < b.spelling
+  const chosen = new Map<string, TagSpelling>()
+  for (const r of rows) {
+    const held = chosen.get(r.word)
+    if (!held || beats(r, held)) chosen.set(r.word, r)
+  }
+  return [...chosen.values()].map((r) => ({ value: String(r.spelling), count: Number(r.count) || 0 }))
 }
 
 /** `other` is a real bucket: `category`/`use_case` are nullable on purpose. */
@@ -615,6 +661,9 @@ export class ProjectTemplatesService implements OnModuleInit {
      * "unknown" one. TAGS unnests the array and groups by `lower()`, one bucket
      * per word whatever its case, and counts TEMPLATES (distinct ids), so a row
      * written around the normaliser with a word twice is still counted once.
+     * Each spelling comes back with its own uses and newest write, and
+     * `spellTagFacet` chooses the one shown by rule rather than by collation
+     * (`found-30-sep/template-tags-spelled-by-collation`).
      */
     const [typeRows, complexityRows, categoryRows, useCaseRows, builtInRows, creatorRows, tagFound] = await Promise.all([
       this.db
@@ -640,11 +689,18 @@ export class ProjectTemplatesService implements OnModuleInit {
         .groupBy(projectTemplates.createdById, users.displayName)
         .orderBy(sql`lower(${users.displayName})`, projectTemplates.createdById),
       this.db.execute(sql`
-        select min(t) as value, count(distinct ${projectTemplates.id})::int as count
-        from ${projectTemplates}, unnest(${projectTemplates.tags}) as t
-        where ${countBasis}
-        group by lower(t)
-        order by lower(t)`),
+        with tagged as (
+          select ${projectTemplates.id} as id, ${projectTemplates.updatedAt} as written, t as spelling, lower(t) as word
+          from ${projectTemplates}, unnest(${projectTemplates.tags}) as t
+          where ${countBasis}
+        )
+        select s.word, s.spelling, s.uses, s.newest, w.count
+        from (
+          select word, spelling, count(distinct id)::int as uses, max(written) as newest
+          from tagged group by word, spelling
+        ) s
+        join (select word, count(distinct id)::int as count from tagged group by word) w on w.word = s.word
+        order by s.word`),
     ])
 
     const tally = (rows: Array<{ value: string | null; count: number }>, nullKey = '∅') => {
@@ -673,7 +729,7 @@ export class ProjectTemplatesService implements OnModuleInit {
         category: CATEGORY_BUCKETS.map((v) => ({ value: v, count: categoryCounts.get(v) ?? 0 })),
         useCase: USE_CASE_BUCKETS.map((v) => ({ value: v, count: useCaseCounts.get(v) ?? 0 })),
         createdBy: creatorRows.map((r) => ({ value: String(r.value), name: r.name, count: Number(r.count) || 0 })),
-        tag: rowsOf<{ value: string; count: number }>(tagFound).map((r) => ({ value: String(r.value), count: Number(r.count) || 0 })),
+        tag: spellTagFacet(rowsOf<TagSpelling>(tagFound)),
       },
     }
   }
