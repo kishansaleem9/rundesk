@@ -40,7 +40,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 19
+const EXPECTED_CHECKS = 20
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -235,8 +235,9 @@ try {
   const linkOf = async (workspaceId, storageKey) =>
     storageKey ? ((await A(`/workspaces/${workspaceId}/clips/link`, { method: 'POST', body: { storageKey } })).data ?? {}) : {}
   /*
-   * A clip's title as the library reads it. Read, not assumed: the lane's store
-   * keeps no object metadata, so there a clip is called by its file name.
+   * A clip's title as the library reads it, from the metadata its upload
+   * carried. The lane's store kept none until 30 September, and there a clip
+   * was called by its file name (`found-30-sep/store-stub-drops-object-metadata`).
    */
   const titleOf = async (workspaceId, storageKey) =>
     ((await A(`/workspaces/${workspaceId}/clips`)).data ?? []).find((c) => c.storageKey === storageKey)?.title ?? null
@@ -521,6 +522,11 @@ try {
   )
 
   const closedTitle = await titleOf(BLOCKED_WS, closedKey)
+  chk(
+    closedTitle === `Members only ${TAG}`,
+    'and the library calls the clip by the title it was recorded with — the store keeps a clip’s metadata, as S3 does',
+    `the library calls it ${JSON.stringify(closedTitle)}`,
+  )
   const memberCtx = await browser.newContext({ viewport: { width: 1300, height: 900 }, serviceWorkers: 'block' })
   const memberPage = await memberCtx.newPage()
   await memberPage.goto(`${stack.base}/login`, { waitUntil: 'domcontentloaded' })

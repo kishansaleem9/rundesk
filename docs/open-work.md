@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 371 items, 48 open, 8 partly fixed, 315 closed, counted from this file's headings on 30 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 371 items, 47 open, 8 partly fixed, 316 closed, counted from this file's headings on 30 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1719,7 +1719,7 @@ Measured first, on lane 5, in a browser signed in nowhere: the heading was empty
 
 Checks:
 - `public-doc-page` is new, with 12 checks and nothing stubbed but one failure the browser answers on purpose, registered in CI (245 in `postgres-harnesses`). It opens a doc's link signed in nowhere and reads the title, the date, the icon, the words and the blocks the page registers (a ticked to-do, a table, a callout and an embedded list's name). Opening the link asks the API for nothing it refuses, and the page is read-only. A link never made, a link turned off, and an archived doc's link each say "Doc not found". Sharing again makes a new link and the old one stays closed. A 500 says the doc could not be loaded. Before, 5/12 on lane 1's build of 29 September: the six drawing checks and the failure's sentence failed, and nothing asked for was refused only because nothing was drawn. With the envelope read and the embed still live, the blocks check failed on lane 5 (10 of the first 11). After, 12/12 on lane 5, twice: before and after its page read was reshaped for the text-reads gate.
-- `pdp-1..13` are new: each names the check it reddens (the envelope read as the doc, the heading, the date, the icon, a block unregistered, a page that takes typing, a failure called a revoked link and a 404 called a failure, a link turned off that stays, an archived doc that opens, a new link that is the old one, a lookup that ignores the slug, and the live embed mounted again). The break runner measures them on lane 1 after this commit.
+- `pdp-1..13` are new: each names the check it reddens (the envelope read as the doc, the heading, the date, the icon, a block unregistered, a page that takes typing, a failure called a revoked link and a 404 called a failure, a link turned off that stays, an archived doc that opens, a new link that is the old one, a lookup that ignores the slug, and the live embed mounted again). Against a 12/12 baseline on lane 1, eleven redden the check they name at `77aed0c`, and `pdp-3` at `73c520c`: at `77aed0c` it reddened nothing, because the doc was written in the same second as the page drew "now", and the suite now dates its doc in the past. `pdp-13` reddens the blocks check but not the one it names, at either commit: the suite's embed names no list, so even the live view asks the API for nothing, and "asks the API for nothing it refuses" cannot fail. (The refused requests are also read last in the section now, after the network has gone quiet.) The embed is to name a real list of the suite's own, and `pdp-13` to be measured again.
 - Regression on lanes 5 and 7: the ten suites that read, share, archive or route to docs, all green, 170 checks (doc-boundaries 17, doc-level-controls 7, doc-write-levels 5, doc-trash-level 5, menu-offers 9, command-palette 43, doc-import 16, doc-task-links 13, stale-chunk-recovery 27, addressability-live 28).
 
 ### `found-30-sep/public-cdn-url-makes-every-object-public` — open (security, small; found closing `resume-defects/resume-7`)
@@ -1754,13 +1754,26 @@ Checks:
 
 *To close:* throttle the public routes per address, and check that a burst is refused with 429 while an ordinary viewer is not.
 
-### `found-30-sep/store-stub-drops-object-metadata` — open (test tooling, small; found closing `resume-defects/resume-7`)
+### `found-30-sep/store-stub-drops-object-metadata` — **closed** (test tooling, small; found closing `resume-defects/resume-7`)
 
 **The lanes' store stub keeps no object metadata, so a clip's title and length read back wrong on every lane and in CI**
 
 *Evidence, 30 September:* a presigned PUT carries `x-amz-meta-title` and `x-amz-meta-durationseconds`, and `scripts/e2e-lanes/s3-stub.mjs` stores only the bytes and the type. So a clip's title reads back as its file name and its length as 0, in the library, in search and on the clip page. Real R2 keeps them.
 
 *To close:* keep and return the `x-amz-meta-*` headers in the stub, with a case in `check-s3-stub.mjs` and a mutation that reddens it. Then a suite may read a clip's title as it was recorded.
+
+*Closed, 30 September.* Measured first: a presigned PUT does not carry its metadata as headers. The SDK's presigner hoists every `x-amz-meta-*` into the URL's query string (a probe presigned `title` and `durationseconds`: both were query parameters, and `host` was the only signed header). A PUT the API sends itself carries them as headers. The stub read neither.
+
+- The stub keeps both: the query's `x-amz-meta-*` and the headers', names lowercased, as S3 answers them.
+- HEAD and GET answer them as `x-amz-meta-*` headers. A value that is not printable ASCII is answered RFC 2047-encoded (`=?UTF-8?B?…?=`), as S3 answers such a value. A header could not carry it as it stands.
+- A copy with `REPLACE` takes the request's metadata, and a plain copy keeps the source's, as S3 does.
+
+Checks:
+- `check-s3-stub.mjs` has four new cases against the real `R2Service`: HEAD answers what a presigned PUT carried in its URL; a value that is not ASCII comes back RFC 2047-encoded; a PUT's metadata headers are kept; a `REPLACE` copy does not keep the source's. 30 cases hold, and 29 of 29 mutations bite, six of them new (a PUT keeps nothing, the URL is not read, the headers are not read, HEAD does not answer, non-ASCII answered as sent, `REPLACE` keeps the source's).
+- `clip-links` has a 20th check: the library calls a clip by the title it was recorded with. Before, 19/20 on lane 5: the library called it `1790736374973-Members_only_e2e-cliplinks-….webm`, its storage file name. After, 20/20, once the lane's stub was restarted on the new source (it reports the file's hash, which the lane scripts compare).
+- Regression on lanes 5 and 7, the nine suites that store or read objects, all green, 179 checks (clip-links 20, clip-created-card 26, clip-library 2, clip-setup 14, object-key-boundaries 23, comment-recording 33, workspace-delete-for-good 5, task-cover 42, attach-on-create 14). `csl-26` (the library calls a clip by its file name) is new, aimed at the new check; the break runner measures it after this commit.
+
+Not measured here: whether R2 itself answers a non-ASCII metadata value RFC 2047-encoded, as S3 does. If it does, a clip titled with an accent would read back encoded in the library; the product reads `head.Metadata?.title` as it is.
 
 ### `found-30-sep/task-attachments-flaky` — open (test tooling, small; found closing `resume-defects/resume-7`)
 

@@ -81,7 +81,7 @@ const SOURCE = createHash('sha1').update(readFileSync(new URL(import.meta.url)))
 const BUCKET = arg('bucket', 'rundesk-test')
 const STRICT = process.argv.includes('--strict')
 
-/** key → { body: Buffer, contentType: string, at: Date } */
+/** key → { body: Buffer, contentType: string, meta: Record<string, string>, at: Date } */
 const objects = new Map()
 // Armed by `POST /__control/fail-next-put`, and consumed by the PUT it fires on.
 let failNextPut = false
@@ -134,6 +134,43 @@ const readBody = (req) =>
     req.on('end', () => resolve(Buffer.concat(chunks)))
     req.on('error', reject)
   })
+
+/*
+ * AN OBJECT'S USER METADATA, KEPT AND ANSWERED AS S3 DOES
+ * (`found-30-sep/store-stub-drops-object-metadata`). A clip's title, length and
+ * recorder travel as `x-amz-meta-*`, and the product reads them back with HEAD
+ * (`ClipsService` → `head.Metadata`). This stub kept only the bytes and the
+ * type, so on every lane and in CI a clip's title read back as its file name
+ * and its length as 0, while real R2 keeps them.
+ *
+ * A PRESIGNED PUT CARRIES THEM IN ITS QUERY STRING: the SDK's presigner hoists
+ * every `x-amz-meta-*` header into the URL (measured: `x-amz-meta-title` and
+ * `x-amz-meta-durationseconds` among the URL's parameters, `host` the only
+ * signed header). A PUT the API sends itself carries them as headers. Both are
+ * read; names lowercased, as S3 answers them.
+ */
+const metaOf = (req, url) => {
+  const meta = {}
+  for (const [name, value] of url.searchParams) {
+    if (name.toLowerCase().startsWith('x-amz-meta-')) meta[name.toLowerCase()] = value
+  }
+  for (const [name, value] of Object.entries(req.headers)) {
+    if (name.startsWith('x-amz-meta-')) meta[name] = String(value)
+  }
+  return meta
+}
+/*
+ * AS RESPONSE HEADERS. A value that is not printable ASCII cannot be a header
+ * as it stands (Node refuses it), and S3 answers such a value RFC 2047-encoded,
+ * `=?UTF-8?B?…?=`, which the SDK hands over as it is. So does this.
+ */
+const metaHeaders = (meta = {}) =>
+  Object.fromEntries(
+    Object.entries(meta).map(([name, value]) => [
+      name,
+      /^[\x20-\x7e]*$/.test(value) ? value : `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`,
+    ]),
+  )
 
 const server = createServer(async (req, res) => {
   let url
@@ -333,6 +370,8 @@ const server = createServer(async (req, res) => {
       const copied = {
         body: Buffer.from(src.body),
         contentType: replace ? req.headers['content-type'] ?? 'application/octet-stream' : src.contentType,
+        // REPLACE takes the request's metadata, COPY (the default) the source's, as S3 does.
+        meta: replace ? metaOf(req, url) : { ...(src.meta ?? {}) },
         at: new Date(),
       }
       objects.set(key, copied)
@@ -347,6 +386,7 @@ const server = createServer(async (req, res) => {
     objects.set(key, {
       body,
       contentType: req.headers['content-type'] ?? 'application/octet-stream',
+      meta: metaOf(req, url),
       at: new Date(),
     })
     res.writeHead(200, { etag: `"${key.length}-${body.length}"` })
@@ -362,13 +402,13 @@ const server = createServer(async (req, res) => {
       res.writeHead(404)
       return res.end()
     }
-    res.writeHead(200, { 'content-type': found.contentType, 'content-length': found.body.length })
+    res.writeHead(200, { 'content-type': found.contentType, 'content-length': found.body.length, ...metaHeaders(found.meta) })
     return res.end()
   }
 
   if (req.method === 'GET') {
     if (!found) return s3Error(res, 404, 'NoSuchKey', `no object at ${key}`)
-    res.writeHead(200, { 'content-type': found.contentType, 'content-length': found.body.length })
+    res.writeHead(200, { 'content-type': found.contentType, 'content-length': found.body.length, ...metaHeaders(found.meta) })
     return res.end(found.body)
   }
 

@@ -92,7 +92,7 @@ async function main() {
   const out: Record<string, unknown> = {}
   try {
     out.configured = r2.configured
-    const putUrl = await r2.presignPutObject(KEY, 'image/png')
+    const putUrl = await r2.presignPutObject(KEY, 'image/png', { title: 'Launch walkthrough', durationseconds: '42', caption: 'Café' })
     out.presignedHost = new URL(putUrl).host
     out.presignedSigned = new URL(putUrl).searchParams.has('X-Amz-Signature')
     const put = await fetch(putUrl, { method: 'PUT', body: BYTES, headers: { 'content-type': 'image/png' } })
@@ -100,6 +100,8 @@ async function main() {
     const head = await r2.headObject(KEY)
     out.headLength = head.ContentLength
     out.headType = head.ContentType
+    // What a clip's title and length are read back from: the metadata the PUT carried.
+    out.headMeta = head.Metadata ?? null
     out.roundTrip = (await r2.getObject(KEY)).equals(BYTES)
     const getUrl = await r2.getObjectUrl(KEY)
     const got = await fetch(getUrl)
@@ -127,11 +129,14 @@ async function main() {
       .then(() => 'copied').catch((e: Error) => e.name)
     out.copyRoundTrip = await r2.getObject('tasks/probe/copy.bin').then((b) => b.equals(BYTES)).catch(() => false)
     out.copyHeadType = await r2.headObject('tasks/probe/copy.bin').then((h) => h.ContentType).catch((e: Error) => e.name)
+    // A REPLACE copy (how the product copies) carries the metadata it was given, not the source's.
+    out.copyMeta = await r2.headObject('tasks/probe/copy.bin').then((h) => h.Metadata ?? null).catch((e: Error) => e.name)
     out.copyMissing = await r2.copyObject('tasks/probe/never.png', 'tasks/probe/copy-of-nothing.png', { contentType: 'image/png' })
       .then(() => 'copied').catch((e: Error) => e.name)
     out.copyOfNothingStored = await r2.headObject('tasks/probe/copy-of-nothing.png').then(() => true).catch(() => false)
     // A PUT the API signs in its HEADER, not its query — how it uploads by itself.
-    out.directPut = await r2.putObject('tasks/probe/direct.png', BYTES, 'image/png').then(() => 'stored').catch((e: Error) => e.name)
+    out.directPut = await r2.putObject('tasks/probe/direct.png', BYTES, 'image/png', { title: 'Sent by the API' }).then(() => 'stored').catch((e: Error) => e.name)
+    out.directMeta = await r2.headObject('tasks/probe/direct.png').then((h) => h.Metadata ?? null).catch((e: Error) => e.name)
     out.directRoundTrip = await r2.getObject('tasks/probe/direct.png').then((b) => b.equals(BYTES)).catch(() => false)
     // A URL signed for one second, asked for after two: its window has passed.
     // X-Amz-Date is to the second, so two whole seconds are waited and a bit.
@@ -226,6 +231,16 @@ if (out.none !== undefined) {
   chk(out.putStatus === 200, 'a presigned PUT is accepted', `the PUT answered ${out.putStatus}`)
   chk(out.headLength === 28 && out.headType === 'image/png', 'HEAD reports the size and type that were stored', `HEAD said ${out.headLength} / ${out.headType}`)
   chk(out.roundTrip === true, 'getObject returns the bytes that were PUT, unchanged', 'the bytes came back different')
+  chk(
+    out.headMeta?.title === 'Launch walkthrough' && out.headMeta?.durationseconds === '42',
+    'HEAD answers the metadata a presigned PUT carried in its URL — what a clip’s title and length are read back from',
+    `HEAD's metadata was ${JSON.stringify(out.headMeta)}`,
+  )
+  chk(
+    out.headMeta?.caption === `=?UTF-8?B?${Buffer.from('Café', 'utf8').toString('base64')}?=`,
+    'and a value that is not ASCII comes back RFC 2047-encoded, as S3 answers it',
+    `the caption came back as ${JSON.stringify(out.headMeta?.caption)}`,
+  )
   chk(out.signedGetStatus === 200 && out.signedGetBytes === true, 'and a signed getObjectUrl serves those same bytes — the path a cover renders through', `the signed GET answered ${out.signedGetStatus}`)
   chk(Array.isArray(out.listed) && out.listed.length === 1 && out.listed[0] === 'tasks/probe/cover.png', 'ListObjectsV2 finds the object under its prefix', `it listed ${JSON.stringify(out.listed)}`)
   chk(
@@ -247,6 +262,11 @@ if (out.none !== undefined) {
     `the API's own PUT answered ${out.directPut}; round trip ${out.directRoundTrip}`,
   )
   chk(
+    out.directMeta?.title === 'Sent by the API',
+    'and the metadata such a PUT carries in its headers is kept too',
+    `HEAD on it gave ${JSON.stringify(out.directMeta)}`,
+  )
+  chk(
     out.expiredGet === 403 && out.freshGet === 200,
     'a presigned GET past its window is refused, as S3 refuses one, while one signed now is served — so a URL that dies can be seen to',
     `past its window it answered ${out.expiredGet}; signed now, ${out.freshGet}`,
@@ -260,6 +280,11 @@ if (out.none !== undefined) {
     out.copyHeadType === 'application/x-rundesk-copy',
     'and carries the type the copy asked for, since it replaces the metadata',
     `HEAD on the copy said ${out.copyHeadType}`,
+  )
+  chk(
+    out.copyMeta !== null && typeof out.copyMeta === 'object' && out.copyMeta.title === undefined,
+    'and it does not keep the source’s metadata when it replaces it',
+    `HEAD on the copy gave ${JSON.stringify(out.copyMeta)}`,
   )
   chk(
     out.copyMissing === 'NoSuchKey' && out.copyOfNothingStored === false,
@@ -354,6 +379,13 @@ if (process.argv.includes('--mutate')) {
     ['a stale stub reports the source on disk', 'return res.end(JSON.stringify({ source: SOURCE }))', "return res.end(JSON.stringify({ source: 'stale' }))"],
     ['control routes are logged as bucket traffic', "  if (url.pathname === '/__control/fail-next-put' && req.method === 'POST') {", "  requests.push({ n: ++requestSeq, method: req.method, bucket, key })\n  if (url.pathname === '/__control/fail-next-put' && req.method === 'POST') {"],
     ['a presigned URL is served past its window, forever', 'if (pastItsWindow(url.searchParams)) return', 'if (false) return'],
+    // `found-30-sep/store-stub-drops-object-metadata`: the metadata is kept, answered, and replaced by a REPLACE copy.
+    ['a PUT keeps no metadata, as the stub did', '      meta: metaOf(req, url),\n      at: new Date(),', '      meta: {},\n      at: new Date(),'],
+    ['a presigned PUT’s metadata in its URL is not read', "if (name.toLowerCase().startsWith('x-amz-meta-')) meta[name.toLowerCase()] = value", 'void value'],
+    ['a PUT’s metadata headers are not read', "if (name.startsWith('x-amz-meta-')) meta[name] = String(value)", 'void value'],
+    ['HEAD does not answer the metadata', "'content-length': found.body.length, ...metaHeaders(found.meta) })\n    return res.end()\n", "'content-length': found.body.length })\n    return res.end()\n"],
+    ['a value that is not ASCII is answered as it was sent', '/^[\\x20-\\x7e]*$/.test(value) ? value :', '/^[\\x20-\\x7e]*$/.test(value) || true ? value.replace(/[^\\x20-\\x7e]/g, \'?\') :'],
+    ['a REPLACE copy keeps the source’s metadata', 'meta: replace ? metaOf(req, url) : { ...(src.meta ?? {}) },', 'meta: { ...(src.meta ?? {}) },'],
   ]
   console.log('\n▶ and each mutation of the stub reddens a case')
   for (const [label, from, to] of MUTATIONS) {
