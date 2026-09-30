@@ -3,6 +3,17 @@
  * LIMITED PER ADDRESS; BEHIND A PROXY THE ADDRESS IS THE ONE THE PROXY SAW; AND
  * THE TEST EMAIL IS A SUPER ADMIN'S (`found-30-sep/register-unthrottled`,
  * `found-30-sep/client-address-behind-nginx`, `found-30-sep/test-email-route-open`).
+ * ONE ROUTE MAKES AN ACCOUNT, AND SIGNING IN WITH GOOGLE OR MICROSOFT AND
+ * CONNECTING AN INTEGRATION ARE LIMITED TOO
+ * (`found-30-sep/register-counted-apart-from-signup`, `found-30-sep/oauth-routes-unthrottled`).
+ *
+ * `POST /auth/register` then had sign-up's ten a minute on a counter of its
+ * own, so an address made ten accounts a minute through each. It is retired:
+ * it answers 410 and makes nothing, and sign-up's burst below is the one
+ * account-making budget there is. Google's and Microsoft's sign-in start and
+ * callback, and an integration's OAuth callback, had no limit beside SSO's
+ * thirty; they have SSO's thirty now, and the providers list the login page
+ * and CI's readiness poll ask stays unlimited.
  *
  * `POST /auth/register` made an account and a workspace per request with no
  * limit, beside sign-up's ten a minute; the invitee's routes (`claim`,
@@ -52,7 +63,7 @@
  */
 import http from 'node:http'
 import { randomBytes } from 'node:crypto'
-import { signInApi, registerApi } from './lib/signin.mjs'
+import { signInApi, signUpApi } from './lib/signin.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
@@ -61,7 +72,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 17
+const EXPECTED_CHECKS = 22
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -80,7 +91,14 @@ const SIGN_UP_LIMIT = 10
 const INVITATION_LINK_LIMIT = 120
 const SSO_LOOKUP_LIMIT = 60
 const SSO_REDIRECT_LIMIT = 30
+const OAUTH_REDIRECT_LIMIT = 30
 const SIGN_IN_LIMIT = 10
+/**
+ * How many asks for the sign-in providers are all answered: past a page's
+ * budget (120), since CI's readiness poll asks once a second for a minute and
+ * every login page load asks once. The route is left unlimited on purpose.
+ */
+const PROVIDERS_BURST = 121
 const WINDOW_MS = 60_000
 /** Where the loopback answers as somebody else. */
 const OTHER_ADDRESS = '127.0.0.2'
@@ -267,7 +285,7 @@ try {
   workspacesMade.push({ id: WS, as: A })
 
   /* An ordinary member: an account of their own, made the way the suites make people. */
-  const member = await registerApi(API, { email: mail('member'), displayName: `Member ${TAG}`, password: PASSWORD })
+  const member = await signUpApi(API, { email: mail('member'), fullName: `Member ${TAG}`, password: PASSWORD, organizationName: `Member ${TAG}` })
   if (member.workspaces?.[0]?.id) workspacesMade.push({ id: member.workspaces[0].id, as: apiAs(member.accessToken) })
 
   /* Three invitations into it, each read by its link as its invitee would: one opened, one accepted, one declined. */
@@ -307,6 +325,26 @@ try {
   )
 
   // -------------------------------------------------------------------------
+  console.log('\n▶ one route makes an account: the old register route is retired')
+
+  /*
+   * THE OLD ROUTE, AS AN OLD CLIENT WOULD ASK IT: its own body, a new email.
+   * Then sign-up with the same email, which is 201 only if the email is still
+   * free, so nothing was made. Both before the burst window, from 127.0.0.1:
+   * one sign-up in this minute, of the ten.
+   */
+  const registerEmail = mail('old-register')
+  const oldRoute = await visit('/auth/register', { method: 'POST', body: { email: registerEmail, displayName: `Old register ${TAG}`, password: PASSWORD } })
+  const stillFree = await visit('/auth/signup', { method: 'POST', body: { email: registerEmail, fullName: `Old register ${TAG}`, password: PASSWORD, organizationName: `Old register ${TAG}` } })
+  if (stillFree.data?.workspaces?.[0]?.id) workspacesMade.push({ id: stillFree.data.workspaces[0].id, as: apiAs(stillFree.data.accessToken) })
+  if (oldRoute.data?.workspaces?.[0]?.id) workspacesMade.push({ id: oldRoute.data.workspaces[0].id, as: apiAs(oldRoute.data.accessToken) })
+  chk(
+    oldRoute.status === 410 && /POST \/auth\/signup/.test(oldRoute.error?.message ?? '') && stillFree.status === 201 && !!stillFree.data?.accessToken,
+    'the old register route is retired: it answers 410 naming sign-up, and makes nothing — sign-up with the same email then makes the account',
+    `register answered ${said(oldRoute)}; sign-up with the same email answered ${said(stillFree)}`,
+  )
+
+  // -------------------------------------------------------------------------
   console.log('\n▶ behind a proxy that appends the address it saw, as nginx does')
 
   proxy = await startProxy()
@@ -324,8 +362,8 @@ try {
 
   /* Each route, and what its own answer is: the thing it does, or its own refusal, never the limiter's. */
   const ROUTES = {
-    register: {
-      ask: () => visit('/auth/register', { method: 'POST', body: { email: mail('burst'), displayName: `Burst ${TAG}`, password: PASSWORD } }),
+    signup: {
+      ask: () => visit('/auth/signup', { method: 'POST', body: { email: mail('burst'), fullName: `Burst ${TAG}`, password: PASSWORD, organizationName: `Burst ${TAG}` } }),
       first: (r) => r.status === 201 && !!r.data?.accessToken,
       answered: (r) => (r.status === 201 && !!r.data?.accessToken) || r.status === 409,
     },
@@ -368,6 +406,24 @@ try {
       first: (r) => r.status === 302 && /\/login\?ssoError=/.test(r.location ?? ''),
       answered: (r) => r.status === 302 && /\/login\?ssoError=/.test(r.location ?? ''),
     },
+    /* Signing in with Google: sent to Google, or back to sign-in where the lane holds no sign-in keys. */
+    oauthStart: {
+      ask: () => visit('/auth/oauth/google'),
+      first: (r) => r.status === 302 && /\/login\?error=oauth_|^https:\/\/accounts\.google\.com\//.test(r.location ?? ''),
+      answered: (r) => r.status === 302 && /\/login\?error=oauth_|^https:\/\/accounts\.google\.com\//.test(r.location ?? ''),
+    },
+    /* Google's answer coming back with a state nobody issued: sent back to sign-in, saying why. */
+    oauthCallback: {
+      ask: () => visit(`/auth/oauth/google/callback?state=${TAG}-no-such-state&code=nothing`),
+      first: (r) => r.status === 302 && /\/login\?ssoError=/.test(r.location ?? ''),
+      answered: (r) => r.status === 302 && /\/login\?ssoError=/.test(r.location ?? ''),
+    },
+    /* A connection's answer coming back with a state nobody issued: sent to the app, saying it failed. */
+    integrationCallback: {
+      ask: () => visit(`/integrations/oauth/gcal/callback?state=${TAG}-no-such-state&code=nothing`),
+      first: (r) => r.status === 302 && /\/app\?oauth=error/.test(r.location ?? ''),
+      answered: (r) => r.status === 302 && /\/app\?oauth=error/.test(r.location ?? ''),
+    },
   }
   /* The asks before it, and `n` more from the same address: every answer the route gave it in the window. */
   const flood = async (name, earlier, n) => {
@@ -401,33 +457,33 @@ try {
   /* An ordinary visitor: one ask of each, as a person makes. Each is the first of its route's burst below. */
   const first = {}
   for (const name of Object.keys(ROUTES)) first[name] = await ROUTES[name].ask(0)
-  if (first.register.data?.workspaces?.[0]?.id) workspacesMade.push({ id: first.register.data.workspaces[0].id, as: apiAs(first.register.data.accessToken) })
+  if (first.signup.data?.workspaces?.[0]?.id) workspacesMade.push({ id: first.signup.data.workspaces[0].id, as: apiAs(first.signup.data.accessToken) })
   if (ROUTES.claim.first(first.claim)) pendingInvitations.delete('accepter')
   if (ROUTES.decline.first(first.decline)) pendingInvitations.delete('decliner')
   const firstMissed = Object.entries(first).filter(([name, res]) => !ROUTES[name].first(res))
   chk(
     firstMissed.length === 0,
-    'an ordinary visitor is answered by every route: registers (201, a session), opens an invitation’s link (200, whose it is), accepts it (201, a session), declines another (200), asks whether an email signs in through SSO (200), and SSO’s start and callbacks answer as they do (404 with no SSO set up, 302 back to sign-in)',
+    'an ordinary visitor is answered by every route: signs up (201, a session), opens an invitation’s link (200, whose it is), accepts it (201, a session), declines another (200), asks whether an email signs in through SSO (200), and SSO’s, Google’s and a connection’s redirects answer as they do (404 with no SSO set up, 302 on to the provider or back to the app)',
     firstMissed.map(([name, res]) => `${name} answered ${said(res)}${res.location ? ` → ${res.location.slice(0, 80)}` : ''}`).join('; '),
   )
 
-  /* REGISTER: the same email ten more times from the same address, 11 in the window. */
-  const registerTally = tally(await flood('register', [first.register], SIGN_UP_LIMIT), ROUTES.register.answered)
+  /* SIGN-UP: the same email ten more times from the same address, 11 in the window. */
+  const signUpTally = tally(await flood('signup', [first.signup], SIGN_UP_LIMIT), ROUTES.signup.answered)
   chk(
-    heldTo(registerTally, SIGN_UP_LIMIT),
-    'a burst of 11 registrations from one address in one minute: 10 are answered by the route (the first makes an account, nine more find the email taken), and the eleventh is refused with 429 and a Retry-After',
-    tallySays(registerTally),
+    heldTo(signUpTally, SIGN_UP_LIMIT),
+    'a burst of 11 sign-ups from one address in one minute: 10 are answered by the route (the first makes an account, nine more find the email taken), and the eleventh is refused with 429 and a Retry-After',
+    tallySays(signUpTally),
   )
 
   /* Somebody else, in the same minute. */
-  const elsewhere = await visit('/auth/register', { from: OTHER_ADDRESS, method: 'POST', body: { email: mail('elsewhere'), displayName: `Elsewhere ${TAG}`, password: PASSWORD } })
+  const elsewhere = await visit('/auth/signup', { from: OTHER_ADDRESS, method: 'POST', body: { email: mail('elsewhere'), fullName: `Elsewhere ${TAG}`, password: PASSWORD, organizationName: `Elsewhere ${TAG}` } })
   if (elsewhere.data?.workspaces?.[0]?.id) workspacesMade.push({ id: elsewhere.data.workspaces[0].id, as: apiAs(elsewhere.data.accessToken) })
   chk(
-    heldTo(registerTally, SIGN_UP_LIMIT) && elsewhere.status === 201 && !!elsewhere.data?.accessToken,
-    'the refusal is the address’s alone: another address registering in the same minute makes its account',
-    heldTo(registerTally, SIGN_UP_LIMIT)
-      ? `from ${OTHER_ADDRESS} registering answered ${said(elsewhere)}${elsewhere.status === 0 ? ` (where the loopback holds only 127.0.0.1, give it ${OTHER_ADDRESS})` : ''}`
-      : `registering never refused the first address (${tallySays(registerTally)}), so another address being served shows nothing`,
+    heldTo(signUpTally, SIGN_UP_LIMIT) && elsewhere.status === 201 && !!elsewhere.data?.accessToken,
+    'the refusal is the address’s alone: another address signing up in the same minute makes its account',
+    heldTo(signUpTally, SIGN_UP_LIMIT)
+      ? `from ${OTHER_ADDRESS} signing up answered ${said(elsewhere)}${elsewhere.status === 0 ? ` (where the loopback holds only 127.0.0.1, give it ${OTHER_ADDRESS})` : ''}`
+      : `signing up never refused the first address (${tallySays(signUpTally)}), so another address being served shows nothing`,
   )
 
   /* THE INVITEE'S THREE ROUTES. */
@@ -476,6 +532,39 @@ try {
     tallySays(samlTally),
   )
 
+  /* GOOGLE'S AND MICROSOFT'S SIGN-IN, AND A CONNECTION'S ANSWER: SSO's thirty each. */
+  const oauthStartTally = tally(await flood('oauthStart', [first.oauthStart], OAUTH_REDIRECT_LIMIT), ROUTES.oauthStart.answered)
+  chk(
+    heldTo(oauthStartTally, OAUTH_REDIRECT_LIMIT),
+    'a burst of 31 starts of signing in with Google from one address: 30 are sent on, and the one past them is refused with 429 and a Retry-After',
+    tallySays(oauthStartTally),
+  )
+  const oauthCallbackTally = tally(await flood('oauthCallback', [first.oauthCallback], OAUTH_REDIRECT_LIMIT), ROUTES.oauthCallback.answered)
+  chk(
+    heldTo(oauthCallbackTally, OAUTH_REDIRECT_LIMIT),
+    'a burst of 31 Google sign-in callbacks from one address: 30 are sent back to sign-in, and the one past them is refused with 429 and a Retry-After',
+    tallySays(oauthCallbackTally),
+  )
+  const integrationCallbackTally = tally(await flood('integrationCallback', [first.integrationCallback], OAUTH_REDIRECT_LIMIT), ROUTES.integrationCallback.answered)
+  chk(
+    heldTo(integrationCallbackTally, OAUTH_REDIRECT_LIMIT),
+    'a burst of 31 integration OAuth callbacks from one address: 30 are sent back to the app, and the one past them is refused with 429 and a Retry-After',
+    tallySays(integrationCallbackTally),
+  )
+
+  /*
+   * THE PROVIDERS LIST, LEFT ALONE: the login page asks it once per load, and
+   * CI's "Start the API" step polls it once a second for up to a minute, from
+   * 127.0.0.1 like everything else there. Past a page's budget, all answered.
+   */
+  const providersAnswers = await burst(PROVIDERS_BURST, () => visit('/auth/oauth/providers'))
+  const providersTally = tally(providersAnswers, (r) => r.status === 200 && typeof r.data?.google === 'boolean')
+  chk(
+    providersTally.answered === PROVIDERS_BURST && providersTally.refused === 0 && providersTally.other.length === 0,
+    'the sign-in providers are answered to every ask, 121 from one address in one minute: the login page asks once per load and CI’s readiness poll once a second',
+    tallySays(providersTally),
+  )
+
   /*
    * BEHIND THE PROXY: client A names a different address on every sign-in, as
    * a client escaping a per-address limit would; client B names none.
@@ -511,8 +600,10 @@ try {
    * asked in a new window too.
    */
   const tallies = {
-    register: registerTally, preview: previewTally, claim: claimTally, decline: declineTally,
-    lookup: lookupTally, start: startTally, oidcCallback: oidcTally, samlCallback: samlTally, 'sign-in through the proxy': proxiedTally,
+    signup: signUpTally, preview: previewTally, claim: claimTally, decline: declineTally,
+    lookup: lookupTally, start: startTally, oidcCallback: oidcTally, samlCallback: samlTally,
+    oauthStart: oauthStartTally, oauthCallback: oauthCallbackTally, integrationCallback: integrationCallbackTally,
+    'sign-in through the proxy': proxiedTally,
   }
   const refusals = burstAnswers.filter(refusedWell)
   const backAt = Math.max(windowEnd(W * WINDOW_MS), ...refusals.map((a) => a.at + Number(a.retryAfter) * 1000)) + 1000

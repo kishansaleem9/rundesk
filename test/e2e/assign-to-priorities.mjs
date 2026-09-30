@@ -43,7 +43,7 @@
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi, registerApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
@@ -145,14 +145,14 @@ try {
     insert into tasks (list_id, title) values (${list.id}, ${`Priority field ${TAG}`}) returning id`
 
   /*
-   * PEOPLE, EACH WITH A SESSION OF THEIR OWN. `POST /auth/register` answers
+   * PEOPLE, EACH WITH A SESSION OF THEIR OWN. `POST /auth/signup` answers
    * with one, so reading as the teammate and being refused as the guest cost
    * nothing out of the login route's ten a minute (`lib/signin.mjs`). It has
-   * sign-up's ten a minute of its own, which `registerApi` waits out.
+   * ten a minute of its own, which `signUpApi` waits out.
    */
   const register = async (label) => {
     const email = `${label.toLowerCase()}-${Date.now()}@rundesk.invalid`
-    const made = await registerApi(API, { email, displayName: `${label} ${TAG}`, password: PERSON_PASSWORD })
+    const made = await signUpApi(API, { email, fullName: `${label} ${TAG}`, password: PERSON_PASSWORD, organizationName: `${label} ${TAG}` })
     return { email, id: made.user?.id, as: apiAs(made.accessToken) }
   }
   const join = async (who, role) => {

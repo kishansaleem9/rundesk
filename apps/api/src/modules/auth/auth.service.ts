@@ -3,11 +3,11 @@ import { JwtService } from '@nestjs/jwt'
 import { ConfigService } from '@nestjs/config'
 import { randomUUID, randomBytes, createHash } from 'node:crypto'
 import { and, eq, isNull, desc, sql } from 'drizzle-orm'
-import { compareSync, hashSync } from 'bcryptjs'
 import { users, sessions, organizations, organizationMembers, workspaces, workspaceMembers, invitations, passwordResets, emailVerifications, taskTypes, featureFlags, DEFAULT_TASK_TYPES } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { signupFeatureRows } from './signup-features'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { NO_ACCOUNT_HASH, passwords } from '../../common/security/password-hash'
 import { UsersService } from '../users/users.service'
 import { WorkspacesService } from '../workspaces/workspaces.service'
 import { FeatureFlagsService } from '../feature-flags/feature-flags.service'
@@ -15,7 +15,6 @@ import { EmailService } from '../email/email.service'
 import { SecurityService } from '../security/security.service'
 import { WorkspaceSecuritySettingsService } from '../security/workspace-security-settings.service'
 import { isIpAllowed } from '../security/ip-allowlist.util'
-import type { RegisterDto } from './dto/register.dto'
 import type { SignupDto } from './dto/signup.dto'
 
 type SessionMeta = { userAgent?: string; ip?: string }
@@ -62,8 +61,32 @@ export class AuthService {
 
   async validateUser(email: string, password: string) {
     const user = await this.usersService.findByEmail(email)
-    if (!user?.passwordHash) throw new UnauthorizedException('Invalid credentials')
+    /*
+     * EVERY "INVALID CREDENTIALS" TAKES ONE HASH
+     * (`found-30-sep/sign-in-time-tells-an-account`).
+     *
+     * An email with no account and an account with no password (it signs in
+     * through SSO, Google or Microsoft only) were answered here before any
+     * hashing, in 15–30 ms; a real account's wrong password after a compare at
+     * cost 12, in about 400. The same words at two speeds said whether an
+     * account exists. Each now compares the password with `NO_ACCOUNT_HASH`,
+     * made at the same cost, and throws the answer away.
+     */
+    if (!user?.passwordHash) {
+      await passwords.compare(password, NO_ACCOUNT_HASH)
+      throw new UnauthorizedException('Invalid credentials')
+    }
 
+    /*
+     * THE COMPARE STARTS NOW, BESIDE THE POLICY'S READ, on a worker: a real
+     * account's refusal then takes a hash, not a hash and then the two
+     * queries an email with no account never makes, and a locked account's
+     * refusal waits for this compare instead of making a second one. Caught at
+     * once so a failed read below does not leave its rejection unheard;
+     * `await` still sees it.
+     */
+    const matches = passwords.compare(password, user.passwordHash)
+    matches.catch(() => undefined)
     const { settings } = await this.securitySettings.getEffectiveForUser(user.id)
     const now = new Date()
 
@@ -71,12 +94,15 @@ export class AuthService {
     // Enforcement stays server-side (a locked account cannot log in), but the
     // client always sees the SAME generic "Invalid credentials" message — a
     // distinct "account locked" response would let an attacker enumerate which
-    // emails belong to real accounts.
+    // emails belong to real accounts. And in the same TIME: a lock answered
+    // before any hashing said the account exists as plainly as the words would,
+    // so the refusal waits for the account's compare and does not read it.
     if (settings.lockoutEnabled && user.lockedUntil && new Date(user.lockedUntil) > now) {
+      await matches
       throw new UnauthorizedException('Invalid credentials')
     }
 
-    if (!compareSync(password, user.passwordHash)) {
+    if (!(await matches)) {
       if (settings.lockoutEnabled) {
         const attempts = (user.failedLoginAttempts ?? 0) + 1
         if (attempts >= settings.lockoutThreshold) {
@@ -95,6 +121,18 @@ export class AuthService {
     // Successful login clears any failed-attempt state.
     if ((user.failedLoginAttempts ?? 0) > 0 || user.lockedUntil) {
       await this.db.update(users).set({ failedLoginAttempts: 0, lockedUntil: null }).where(eq(users.id, user.id))
+    }
+
+    /*
+     * A HASH MADE AT A LOWER COST IS MADE AGAIN, now that the password is known.
+     * Changing a password in the profile hashed it at cost 10, and such an
+     * account's wrong password answered in a quarter of the time the others
+     * take. OWASP's password storage cheat sheet: "wait until the user next
+     * authenticates, then re-hash their password with the new work factor".
+     */
+    if (passwords.needsRehash(user.passwordHash)) {
+      const passwordHash = await passwords.hash(password)
+      await this.db.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, user.id))
     }
 
     return user
@@ -304,6 +342,8 @@ export class AuthService {
     await this.enforcePasswordPolicy(dto.password, { requireStrong: true, blockBreached: false })
 
     const appUrl = this.config.get<string>('APP_URL', 'http://localhost:5173')
+    // On a worker, and before the transaction: not a connection held open while it hashes.
+    const passwordHash = await passwords.hash(dto.password)
 
     const result = await this.db.transaction(async (tx) => {
       // 1. Create user
@@ -312,7 +352,7 @@ export class AuthService {
         .values({
           email: dto.email.toLowerCase(),
           displayName: dto.fullName,
-          passwordHash: hashSync(dto.password, 12),
+          passwordHash,
           emailVerified: false,
         })
         .returning()
@@ -485,23 +525,6 @@ export class AuthService {
       await this.issueEmailVerification(user.id, user.email, user.displayName)
     }
     return { ok: true }
-  }
-
-  /** @deprecated Use signUp for new accounts */
-  async register(dto: RegisterDto, meta: SessionMeta = {}) {
-    const existing = await this.usersService.findByEmail(dto.email)
-    if (existing) throw new ConflictException('Email already in use')
-
-    await this.enforcePasswordPolicy(dto.password, { requireStrong: true, blockBreached: false })
-
-    const user = await this.usersService.create({
-      email: dto.email,
-      displayName: dto.displayName,
-      passwordHash: hashSync(dto.password, 12),
-    })
-
-    await this.workspacesService.createPersonalWorkspace(user.id, user.displayName)
-    return this.login(user, meta)
   }
 
   /**
@@ -678,10 +701,12 @@ export class AuthService {
       blockBreached: settings.blockBreachedPasswords,
     })
 
+    // On a worker, and before the transaction: not a connection held open while it hashes.
+    const passwordHash = await passwords.hash(newPassword)
     await this.db.transaction(async (tx) => {
       await tx
         .update(users)
-        .set({ passwordHash: hashSync(newPassword, 12), updatedAt: new Date() })
+        .set({ passwordHash, updatedAt: new Date() })
         .where(eq(users.id, row.userId))
 
       await tx

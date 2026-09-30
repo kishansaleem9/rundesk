@@ -2,8 +2,9 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { describe, it, mock } from 'node:test'
 import { UnauthorizedException } from '@nestjs/common'
-import { hashSync } from 'bcryptjs'
+import { compareSync, getRounds, hashSync } from 'bcryptjs'
 import { AuthService, hashRefreshToken } from './auth.service'
+import { NO_ACCOUNT_HASH, PASSWORD_HASH_COST, passwords } from '../../common/security/password-hash'
 
 // AuthService has a wide constructor; these unit tests exercise only
 // `assertTotpSatisfied` (2FA-at-login) and the `validateUser` enumeration fix,
@@ -212,6 +213,153 @@ describe('AuthService.validateUser (no lockout enumeration)', () => {
     assert.equal(setCalls.length, 1)
     assert.equal(setCalls[0].failedLoginAttempts, 1)
     assert.equal(setCalls[0].lockedUntil, undefined)
+  })
+})
+
+/*
+ * EVERY REFUSED SIGN-IN TAKES ONE HASH (`found-30-sep/sign-in-time-tells-an-account`).
+ *
+ * The compares are counted on the one hasher the service uses; each refusal
+ * must be answered after exactly one, whatever the account. What each takes
+ * on a lane is measured by `password-hash-time.mjs`.
+ */
+describe('AuthService.validateUser — every refusal takes one hash, whether or not the account exists', () => {
+  const settings = {
+    getEffectiveForUser: async () => ({
+      settings: { lockoutEnabled: true, lockoutThreshold: 5, lockoutDurationMinutes: 30 },
+    }),
+  }
+  /** The service's compares, recorded, each answering as bcrypt would. */
+  function countingCompares() {
+    const calls: Array<[string, string]> = []
+    const spy = mock.method(passwords, 'compare', async (plain: string, hashed: string) => {
+      calls.push([plain, hashed])
+      return compareSync(plain, hashed)
+    })
+    return { calls, restore: () => spy.mock.restore() }
+  }
+  const refusedAsInvalid = (err: any) => err instanceof UnauthorizedException && err.message === 'Invalid credentials'
+
+  it('an email with no account is refused after a compare with NO_ACCOUNT_HASH', async () => {
+    const { calls, restore } = countingCompares()
+    try {
+      const { svc } = makeService({ usersService: { findByEmail: async () => null }, securitySettings: settings })
+      await assert.rejects(() => svc.validateUser('nobody@b.com', 'Guess@12345!'), refusedAsInvalid)
+      assert.deepEqual(calls, [['Guess@12345!', NO_ACCOUNT_HASH]])
+    } finally {
+      restore()
+    }
+  })
+
+  it('an account with no password, which signs in through SSO or Google only, is refused after the same compare', async () => {
+    const { calls, restore } = countingCompares()
+    try {
+      const user = { id: 'u1', email: 'sso@b.com', passwordHash: null, failedLoginAttempts: 0, lockedUntil: null, isActive: true }
+      const { svc } = makeService({ usersService: { findByEmail: async () => user }, securitySettings: settings })
+      await assert.rejects(() => svc.validateUser('sso@b.com', 'Guess@12345!'), refusedAsInvalid)
+      assert.deepEqual(calls, [['Guess@12345!', NO_ACCOUNT_HASH]])
+    } finally {
+      restore()
+    }
+  })
+
+  it('a locked account is refused after one compare, its own, whose answer is not read: the right password is refused too', async () => {
+    const { calls, restore } = countingCompares()
+    try {
+      const stored = hashSync('correct-horse', 4)
+      const user = {
+        id: 'u1',
+        email: 'a@b.com',
+        passwordHash: stored,
+        failedLoginAttempts: 0,
+        lockedUntil: new Date(Date.now() + 60 * 60 * 1000),
+        isActive: true,
+      }
+      const { svc } = makeService({ usersService: { findByEmail: async () => user }, securitySettings: settings })
+      await assert.rejects(() => svc.validateUser('a@b.com', 'correct-horse'), refusedAsInvalid)
+      assert.deepEqual(calls, [['correct-horse', stored]])
+    } finally {
+      restore()
+    }
+  })
+
+  it('a locked account’s refusal is not sent before its compare has finished', async () => {
+    let finish: (matched: boolean) => void = () => undefined
+    const spy = mock.method(passwords, 'compare', () => new Promise<boolean>((resolve) => (finish = resolve)))
+    try {
+      const user = {
+        id: 'u1',
+        email: 'a@b.com',
+        passwordHash: hashSync('correct-horse', 4),
+        failedLoginAttempts: 0,
+        lockedUntil: new Date(Date.now() + 60 * 60 * 1000),
+        isActive: true,
+      }
+      const { svc } = makeService({ usersService: { findByEmail: async () => user }, securitySettings: settings })
+      const outcome = svc.validateUser('a@b.com', 'wrong-horse').then(() => 'signed in', (err: any) => (refusedAsInvalid(err) ? 'refused' : String(err)))
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      assert.equal(await Promise.race([outcome, 'still comparing']), 'still comparing', 'the lock was answered before the compare finished')
+      finish(true)
+      assert.equal(await outcome, 'refused')
+    } finally {
+      spy.mock.restore()
+    }
+  })
+
+  it('an account’s compare starts before its sign-in policy is read, so the policy’s queries are not added to a refusal’s time', async () => {
+    const order: string[] = []
+    const spy = mock.method(passwords, 'compare', async () => {
+      order.push('compare')
+      return false
+    })
+    try {
+      const user = { id: 'u1', email: 'a@b.com', passwordHash: hashSync('correct-horse', 4), failedLoginAttempts: 0, lockedUntil: null, isActive: true }
+      const policy = {
+        getEffectiveForUser: async () => {
+          order.push('policy')
+          return { settings: { lockoutEnabled: true, lockoutThreshold: 5, lockoutDurationMinutes: 30 } }
+        },
+      }
+      const { svc } = makeService({ usersService: { findByEmail: async () => user }, securitySettings: policy })
+      await assert.rejects(() => svc.validateUser('a@b.com', 'wrong-horse'), refusedAsInvalid)
+      assert.deepEqual(order, ['compare', 'policy'])
+    } finally {
+      spy.mock.restore()
+    }
+  })
+
+  it('a real account’s wrong password is compared with its own hash, once', async () => {
+    const { calls, restore } = countingCompares()
+    try {
+      const stored = hashSync('correct-horse', 4)
+      const user = { id: 'u1', email: 'a@b.com', passwordHash: stored, failedLoginAttempts: 0, lockedUntil: null, isActive: true }
+      const { svc } = makeService({ usersService: { findByEmail: async () => user }, securitySettings: settings })
+      await assert.rejects(() => svc.validateUser('a@b.com', 'wrong-horse'), refusedAsInvalid)
+      assert.deepEqual(calls, [['wrong-horse', stored]])
+    } finally {
+      restore()
+    }
+  })
+
+  it('NO_ACCOUNT_HASH costs what a real password’s hash costs, so the refusals take the same time', () => {
+    assert.equal(getRounds(NO_ACCOUNT_HASH), PASSWORD_HASH_COST)
+  })
+
+  it('a right password on a hash made at cost 10 signs in, and the account’s hash is made again at 12', async () => {
+    const user = { id: 'u1', email: 'a@b.com', passwordHash: hashSync('correct-horse', 10), failedLoginAttempts: 0, lockedUntil: null, isActive: true }
+    const { svc, setCalls } = makeService({ usersService: { findByEmail: async () => user }, securitySettings: settings })
+    assert.equal((await svc.validateUser('a@b.com', 'correct-horse')).id, 'u1')
+    const rehashed = setCalls.find((set) => typeof set.passwordHash === 'string')
+    assert.ok(rehashed, `no new hash was written: ${JSON.stringify(setCalls)}`)
+    assert.equal(getRounds(rehashed.passwordHash), PASSWORD_HASH_COST)
+    assert.equal(compareSync('correct-horse', rehashed.passwordHash), true)
+  })
+
+  it('a right password on a hash at today’s cost writes no new hash', async () => {
+    const user = { id: 'u1', email: 'a@b.com', passwordHash: hashSync('correct-horse', PASSWORD_HASH_COST), failedLoginAttempts: 0, lockedUntil: null, isActive: true }
+    const { svc, setCalls } = makeService({ usersService: { findByEmail: async () => user }, securitySettings: settings })
+    assert.equal((await svc.validateUser('a@b.com', 'correct-horse')).id, 'u1')
+    assert.deepEqual(setCalls, [])
   })
 })
 

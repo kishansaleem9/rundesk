@@ -67,7 +67,7 @@
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi, registerApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
@@ -134,8 +134,8 @@ try {
   const LIST = must('make the chosen list', await A('/lists', { method: 'POST', body: { projectId: PROJECT, name: LIST_NAME } }))?.id
   if (!WS || !SPACE || !PROJECT || !LIST) throw new Error('the workspace, space, project or list came back without an id')
 
-  /* A member, who may use a template and may not make or change one. `registerApi` waits out register's ten a minute. */
-  const registered = await registerApi(API, { email: MEMBER_EMAIL, displayName: `Member ${TAG}`, password: MEMBER_PASSWORD })
+  /* A member, who may use a template and may not make or change one. `signUpApi` waits out sign-up's ten a minute. */
+  const registered = await signUpApi(API, { email: MEMBER_EMAIL, fullName: `Member ${TAG}`, password: MEMBER_PASSWORD, organizationName: `Member ${TAG}` })
   memberId = registered.user?.id ?? null
   const M = apiAs(registered.accessToken)
   must('add the member', await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email: MEMBER_EMAIL, role: 'member' } }))

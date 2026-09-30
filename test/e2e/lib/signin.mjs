@@ -110,10 +110,22 @@ export async function signInApi(base, email, password, { attempts = 4 } = {}) {
 }
 
 /**
- * Sign somebody up over HTTP and return the session payload — for the suites
- * that call the API directly rather than through `local-stack.mjs`, whose
- * proxy retries the same 429. Sign-up shares login's budget and its window, and
- * a 429 is refused before the handler runs, so retrying makes no second account.
+ * Sign somebody up over HTTP and return the session payload (`accessToken`,
+ * `user`, `workspaces` with the one sign-up made) — for the suites that call
+ * the API directly rather than through `local-stack.mjs`, whose proxy retries
+ * the same 429, and the one way a suite makes a person of its own.
+ *
+ * Sign-up has ten a minute per address, and in CI and on a lane every suite is
+ * one address: `assignee-picker` alone makes twelve people. So a 429 is waited
+ * out as the server says, and said in the log, so a run that took a minute
+ * longer says why: that is the limit working. A 429 is refused before the
+ * handler runs, so a retry makes no second account. Anything else throws,
+ * naming the email and what the API said.
+ *
+ * The old `POST /auth/register`, which eleven suites made their people with
+ * through a `registerApi` here, is retired and answers 410
+ * (`found-30-sep/register-counted-apart-from-signup`): it made accounts on a
+ * counter of its own, beside sign-up's.
  */
 export async function signUpApi(base, body, { attempts = 4 } = {}) {
   for (let attempt = 1; ; attempt++) {
@@ -130,41 +142,8 @@ export async function signUpApi(base, body, { attempts = 4 } = {}) {
     if (attempt >= attempts) {
       throw new Error(`could not sign up ${body?.email}: rate limited ${attempts} times running`)
     }
-    await sleep(retryAfterMs(res.headers.get('retry-after'), json?.error?.details?.retryAfter))
-  }
-}
-
-/**
- * Make somebody an account over the old `POST /auth/register` and return the
- * session payload (`accessToken`, `user`, `workspaces` with their personal
- * workspace), as the suites that need people of their own do.
- *
- * It has sign-up's budget now, ten a minute per address
- * (`found-30-sep/register-unthrottled`), and in CI and on a lane every suite is
- * one address: `assignee-picker` alone makes twelve people, and
- * `assign-to-priorities` makes three just before it. So a 429 is waited out as
- * the server says, as `signUpApi` does, and a 429 is refused before the handler
- * runs, so a retry makes no second account. Anything else throws, naming the
- * email and what the API said.
- */
-export async function registerApi(base, body, { attempts = 4 } = {}) {
-  for (let attempt = 1; ; attempt++) {
-    const res = await fetch(`${base}/auth/register`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    const json = await res.json().catch(() => null)
-    if (json?.data?.accessToken) return json.data
-    if (!isRateLimited(res.status)) {
-      throw new Error(`could not register ${body?.email}: ${res.status} ${JSON.stringify(json).slice(0, 200)}`)
-    }
-    if (attempt >= attempts) {
-      throw new Error(`could not register ${body?.email}: rate limited ${attempts} times running`)
-    }
-    // Said, so a run that took a minute longer says why: this is the limit working.
     const waitMs = retryAfterMs(res.headers.get('retry-after'), json?.error?.details?.retryAfter)
-    console.log(`  (registering ${body?.email}: ten a minute from this address, so waiting ${Math.round(waitMs / 1000)} s as the API says)`)
+    console.log(`  (signing up ${body?.email}: ten a minute from this address, so waiting ${Math.round(waitMs / 1000)} s as the API says)`)
     await sleep(waitMs)
   }
 }

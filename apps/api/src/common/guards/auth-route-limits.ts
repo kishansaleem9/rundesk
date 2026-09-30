@@ -1,8 +1,9 @@
 import { PUBLIC_ROUTE_LIMITS, type RateLimitOptions } from './rate-limit.guard'
 
 /**
- * WHAT MAKING AN ACCOUNT, ANSWERING AN INVITATION AND SIGNING IN THROUGH SSO
- * MAY ASK, PER ADDRESS (`found-30-sep/register-unthrottled`).
+ * WHAT MAKING AN ACCOUNT, ANSWERING AN INVITATION AND SIGNING IN THROUGH SSO,
+ * GOOGLE OR MICROSOFT MAY ASK, PER ADDRESS (`found-30-sep/register-unthrottled`,
+ * `found-30-sep/oauth-routes-unthrottled`).
  *
  * Each of these answers anybody, with no session, and the key such a request
  * has is its address (`req.ip`, which behind nginx is the visitor's only as
@@ -18,17 +19,18 @@ import { PUBLIC_ROUTE_LIMITS, type RateLimitOptions } from './rate-limit.guard'
  */
 export const AUTH_ROUTE_LIMITS = {
   /**
-   * Making an account, by any route, and answering an invitation. Sign-up's own
-   * ten a minute (`POST /auth/signup` has had it since it was made), now also:
-   *  - `POST /auth/register`, the old route to the same thing: an account and a
-   *    workspace, a password hashed at cost 12 on the event loop. Deprecated
-   *    but still routed (the `/register` page and the suites call it), and it
-   *    had no limit, so it was sign-up's without the ten;
+   * Making an account, and answering an invitation. Sign-up's own ten a minute
+   * (`POST /auth/signup` has had it since it was made), now also:
    *  - `POST /invitations/claim`, which makes the invitee's account (or signs
    *    an existing one in) and hands back a session;
    *  - `POST /invitations/decline`, the claim's other answer.
    * One person does each once. An office accepting its invitations together
    * behind one address shares the ten, as it shares sign-in's.
+   *
+   * `POST /auth/signup` is the one route that makes an account with no
+   * invitation. The old `POST /auth/register` made one too, on a counter of
+   * its own, so an address made ten a minute through each; it is retired and
+   * answers 410 (`found-30-sep/register-counted-apart-from-signup`).
    */
   signUp: { limit: 10, windowMs: 60_000 },
   /**
@@ -59,4 +61,23 @@ export const AUTH_ROUTE_LIMITS = {
    * the provider and this server.
    */
   ssoRedirect: { limit: 30, windowMs: 60_000 },
+  /**
+   * The redirects of signing in with Google or Microsoft, and of connecting an
+   * integration (`found-30-sep/oauth-routes-unthrottled`): the start,
+   * `GET /auth/oauth/:provider`, the provider's answer coming back,
+   * `GET /auth/oauth/:provider/callback`, and a connection's answer,
+   * `GET /integrations/oauth/:provider/callback`. SSO's thirty, for SSO's
+   * reasons: one of each per sign-in or connection, no password guessed
+   * through them, but a callback with a live state exchanges its code with the
+   * provider (a flood spends the instance's standing with Google and
+   * Microsoft) and writes an account, a link or a failure.
+   *
+   * `GET /auth/oauth/providers` is not here, and has no limit: it reads two
+   * settings and touches nothing, so the limiter's counter, a write per
+   * request, would cost more than the answer. The login page asks it once per
+   * load, and CI's "Start the API" step polls it once a second, for up to a
+   * minute, as its readiness probe — the health checks are unlimited for the
+   * same reason (`PUBLIC_ROUTE_LIMITS`).
+   */
+  oauthRedirect: { limit: 30, windowMs: 60_000 },
 } as const satisfies Record<string, RateLimitOptions>

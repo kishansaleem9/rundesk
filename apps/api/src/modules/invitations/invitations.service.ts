@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto'
 import { organizations, invitations, organizationMembers, workspaceMembers, users, workspaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { passwords } from '../../common/security/password-hash'
 import { EmailService } from '../email/email.service'
 import { ConfigService } from '@nestjs/config'
 import { WorkspaceSecuritySettingsService } from '../security/workspace-security-settings.service'
@@ -360,13 +361,14 @@ export class InvitationsService {
         const strengthProblem = this.securitySettings.passwordStrengthProblem(dto.password)
         if (strengthProblem) throw new BadRequestException(strengthProblem)
 
-        const { hashSync } = await import('bcryptjs')
+        // On a worker (`found-30-sep/password-hash-holds-the-event-loop`), not the API's one thread.
+        const passwordHash = await passwords.hash(dto.password)
         const [newUser] = await tx
           .insert(users)
           .values({
             email: invite.email,
             displayName: dto.fullName,
-            passwordHash: hashSync(dto.password, 12),
+            passwordHash,
             emailVerified: true,
           })
           .returning()

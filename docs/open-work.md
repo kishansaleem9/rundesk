@@ -2078,7 +2078,7 @@ Checks:
 - `pdp-1..13` are new: each names the check it reddens (the envelope read as the doc, the heading, the date, the icon, a block unregistered, a page that takes typing, a failure called a revoked link and a 404 called a failure, a link turned off that stays, an archived doc that opens, a new link that is the old one, a lookup that ignores the slug, and the live embed mounted again). Against a 12/12 baseline on lane 1, eleven redden the check they name at `77aed0c`, and `pdp-3` at `73c520c`: at `77aed0c` it reddened nothing, because the doc was written in the same second as the page drew "now", and the suite now dates its doc in the past. `pdp-13` reddened the blocks check but not the one it names, at either commit: the suite's embed named no list, so even the live view asked the API for nothing, and "asks the API for nothing it refuses" could not fail. The embed now names a list of the suite's own, and `pdp-13` reddens its check with the request it makes as nobody, `401 /api/v1/tasks/list/<the list>` (10/12, measured on lane 7 with a bundle built with the patch and the source restored, sha1 checked). The refused requests are read last in the section, after the network has gone quiet.
 - Regression on lanes 5 and 7: the ten suites that read, share, archive or route to docs, all green, 170 checks (doc-boundaries 17, doc-level-controls 7, doc-write-levels 5, doc-trash-level 5, menu-offers 9, command-palette 43, doc-import 16, doc-task-links 13, stale-chunk-recovery 27, addressability-live 28).
 
-### `found-30-sep/register-counted-apart-from-signup` — open (security, small; found closing `found-30-sep/register-unthrottled`)
+### `found-30-sep/register-counted-apart-from-signup` — **closed** (security, small; found closing `found-30-sep/register-unthrottled`)
 
 **Register and sign-up count apart, so an address makes twenty accounts a minute**
 
@@ -2092,7 +2092,39 @@ Checks:
 - Retire it: move the suites to sign-up or a fixture of their own, send `/register` to `/sign-up`, and check that the old route answers 404 or 410.
 - Keep it: give the two routes one counter (a bucket name in `RateLimitOptions`), and check that ten across the two refuses the eleventh.
 
-### `found-30-sep/sign-in-time-tells-an-account` — open (security, small; found closing `found-30-sep/register-unthrottled`)
+
+*Closed, 30 September.* Retired, not given a shared counter. Its two callers were read first:
+- **The web's `/register` page**, which nothing in the app links to; the landing and login pages send people to `/sign-up`.
+- **Eleven suites** that made their people with `registerApi`. They only needed a person with a password and a session, which is what `signUpApi` gives the 123 suites that already make their people through sign-up.
+
+The route was also the odd path out. It kept the email as typed where sign-up lowercases it: on lane 3 it made `Probe-case2-…` beside `probe-case2-…`, and the look-alike signed in. It was also a fifth password-hashing site, deprecated in its own summary. A bucket shared with sign-up would have added a concept to the guard to keep that alive.
+
+So:
+- `POST /auth/register` answers **410 Gone**, naming `POST /auth/signup`, and reads, hashes and makes nothing. It is 410 rather than 404 because the route existed and was removed on purpose (MDN: the resource "is no longer available at the origin server and … this condition is likely to be permanent"), and an old client is told where to go.
+- `/register` redirects to `/sign-up` before anything loads. Its page, its lazy route and the eight i18n keys only it read are gone.
+- The eleven suites and `auth-route-limits` call `signUpApi`, which now says in the log when it waits out the ten a minute. Sign-up is the one route that makes an account without an invitation, so an address makes ten a minute, not twenty.
+
+Checks:
+- `auth-route-limits` (22 checks, from 17):
+  - the old route answers 410 naming sign-up, and sign-up with the same email then makes the account (so the old route made none);
+  - sign-up's burst replaces register's: 10 answered, the eleventh refused with 429 and a Retry-After;
+  - another address signs up in the same minute.
+
+  Before (lane 3, HEAD's API): the old route answered 201 with a session, and sign-up then answered 409. After: all hold, and the counters have no `AuthController.register` row.
+- `auth-route-limits.test.ts`: the retired handler takes no arguments, throws 410 naming sign-up, calls nothing and carries no budget; the eleventh sign-up from one address is refused.
+- `register-sends-to-sign-up.test.ts` (web, new): `/register` redirects to `/sign-up` with `replace`, and its page is gone.
+- A browser on lane 3 with this bundle opened `/register` and landed on `/sign-up`.
+- Break patches:
+  - `arl-19` (the old route makes accounts again, through sign-up's service, unlimited) reddens the retirement check (201 with a session), and `arl-20` its unit test;
+  - `arl-5` and `arl-17` (sign-up's limit removed) replace register's two, whose anchor went with the route;
+  - `arl-12` now names the sign-up sentences;
+  - `arl-30` (the redirect removed) reddens the web test.
+- Regression on lane 3: the eleven suites, and the rest of the 44 that sign up, invite or use OAuth, with `public-route-limits` and the new suite. 749 of 750 checks passed, the one a flake of `sw-api-cache`'s menu reading, 5/5 on rerun (`found-30-sep/sw-api-cache-reads-the-menu-box-once`). `assignee-picker` waited twice for sign-up's ten a minute, as it says in the log.
+
+Found while building it: `found-30-sep/sign-in-reads-the-email-as-typed`.
+- Merged here and run again on lanes 4, 5 and 7: `auth-route-limits` 22/22, `password-hash-time` 4/4, and the eleven suites that now sign their people up (`create-modal-templates` 26, `clip-links` 20, `assign-to-priorities` 30, `assignee-picker` 10, `calendar-accounts` 37, `comment-recording` 33, `sidebar-dms` 14, `team-view` 13, `teams-destination` 14, `teams-empty-state` 21, `teams-person-cards` 17), all green, 261 checks.
+
+### `found-30-sep/sign-in-time-tells-an-account` — **closed** (security, small; found closing `found-30-sep/register-unthrottled`)
 
 **Sign-in answers an unknown email at once and a real one after a password hash, so its time says whether an account exists**
 
@@ -2100,7 +2132,43 @@ Checks:
 
 *To close:* compare against a fixed dummy hash when there is no account, so both answers take a hash. Check that the two 401s take times within a few milliseconds of each other.
 
-### `found-30-sep/password-hash-holds-the-event-loop` — open (performance, small; found closing `found-30-sep/register-unthrottled`)
+
+*Closed, 30 September.* OWASP's authentication cheat sheet: "The recommended code will go through the same process no matter what the user or the password is, allowing the application to return in approximately the same response time."
+
+Read whole, `validateUser` refused three kinds of sign-in before any hashing:
+- an email with no account;
+- an account with no password (made by SSO, SCIM, Google or Microsoft);
+- a locked account (the default policy locks at the fifth wrong password, for 30 minutes).
+
+A disabled account is refused only after a successful compare.
+
+Now:
+- No account, and no password: the password is compared with `NO_ACCOUNT_HASH`, a bcrypt hash at cost 12 of 32 random bytes nobody kept (`common/security/password-hash.ts`), and the answer is thrown away.
+- A real account's compare starts beside the read of its sign-in policy, not after it. A locked account's refusal waits for that compare without reading it.
+- A hash made at a lower cost is made again at 12 on the next successful sign-in, as OWASP's password storage cheat sheet advises ("wait until the user next authenticates, then re-hash"). The profile's password change had hashed at 10, so such an account's wrong password was refused in a quarter of the time.
+
+Checks:
+- `password-hash-time` (new, 4 checks, registered in CI after `auth-route-limits`; 251 in `postgres-harnesses`):
+  - every sign-in leaves from a loopback address of its own, so no limit interferes;
+  - nine rounds of the three kinds, taken in turn after a warm-up of each, are compared by median, and must be within a fifth of each other. A missing hash is nine tenths of a refusal, and a lane's machine is shared: under a load average of 5, single refusals ranged 311–579 ms.
+  - Before (lane 3, HEAD's API): no account 6–20 ms, a real account's wrong password 361–844 ms, a locked account 10–19 ms.
+  - After, seven runs, 4/4 each: at a load of 2.2 the three medians were 346 / 345 / 338 ms and 326 / 330 / 329 ms (1 to 7 ms apart), and at a load of 14, 502 / 512 / 541 ms.
+- `auth.service.test.ts` (9 new tests):
+  - an email with no account, and an account with no password, are refused after one compare with `NO_ACCOUNT_HASH`;
+  - a locked account after one compare, its own, whose answer is not read, and its refusal is not sent before that compare ends;
+  - a real account's wrong password is compared once with its own hash, and the compare starts before the policy is read;
+  - `NO_ACCOUNT_HASH` costs 12;
+  - a right password on a cost-10 hash is re-hashed at 12, and one at 12 is not.
+- Break patches:
+  - `pht-1` (the no-account compare removed): no account 6 ms against 337;
+  - `pht-3` (the lock answered before its compare): 11 ms against 340;
+  - `pht-11` (the no-account hash at cost 10): 94 ms against 339;
+  - `pht-2`, `pht-4`, `pht-5` and `pht-12` redden their unit tests.
+
+Found while building it: `found-30-sep/lockout-counts-overlapping-attempts-once`. Four wrong passwords sent at once counted as one, and the account locked at the eighth.
+- Merged here and run again on lanes 4, 5 and 7: `auth-route-limits` 22/22, `password-hash-time` 4/4, and the eleven suites that now sign their people up (`create-modal-templates` 26, `clip-links` 20, `assign-to-priorities` 30, `assignee-picker` 10, `calendar-accounts` 37, `comment-recording` 33, `sidebar-dms` 14, `team-view` 13, `teams-destination` 14, `teams-empty-state` 21, `teams-person-cards` 17), all green, 261 checks.
+
+### `found-30-sep/password-hash-holds-the-event-loop` — **closed** (performance, small; found closing `found-30-sep/register-unthrottled`)
 
 **Every password hash holds the API's one thread for about 290 ms**
 
@@ -2112,7 +2180,50 @@ While one runs, no other request is answered. Each is now within ten a minute pe
 
 *To close:* bcryptjs's async `hash` and `compare`, which yield between rounds, or a worker. Check that a burst of sign-ins does not delay a plain read by more than a hash's time.
 
-### `found-30-sep/oauth-routes-unthrottled` — open (security, small; found closing `found-30-sep/register-unthrottled`)
+
+*Closed, 30 September.* Every password hash and compare in the API goes through one module, `common/security/password-hash.ts`, and runs on worker threads:
+- up to `min(4, cores − 1)`, started when first needed and kept, idle ones `unref`'d;
+- each runs bcryptjs's sync form, one job at a time;
+- if no worker can be had, bcryptjs's async form on the event loop: never a failed sign-in.
+
+Not bcryptjs's async `hash`/`compare` alone. Its README says the async API splits "an operation into small chunks", and its source runs each chunk for up to 100 ms (`MAX_EXECUTION_TIME`) before yielding with `setImmediate`. Node runs every immediate queued before a turn in that turn, so with eight hashes in flight each turn is about 800 ms of hashing. Measured beside eight concurrent compares, a plain read waited:
+- 686 ms (median) with the async form;
+- 288 ms with the sync one;
+- 0.7 ms with a worker.
+
+Node's own guide: "the Event Loop should orchestrate client requests, not fulfill them itself".
+
+The sites moved:
+- sign-in's compare;
+- sign-up's and reset-password's hashes, each now before its transaction;
+- an invitation's claim;
+- the profile's password change, now at cost 12 (it was 10);
+- the TOTP backup codes, which stay at 10.
+- `register`'s went with the route (`found-30-sep/register-counted-apart-from-signup`).
+
+A unit test holds that no module of the API but the hasher imports bcryptjs.
+
+Checks:
+- `password-hash-time`, "while eight sign-ins hash at once, a plain read is answered in a small part of one sign-in's time". A `GET /health` is sent every 20 ms, each without waiting for the one before, until the last sign-in is answered, and the reads' median must be under a quarter of a refused sign-in's median.
+  - Sent one after another instead, HEAD's API passed it: reads held 1,753, 782 and 417 ms were three slow samples among many quick ones, median 6 ms. So they are sent on the clock.
+  - Before (HEAD's API): eight sign-ins took 3.1–6.7 s, all answered together, and the reads' median was 861–3,359 ms.
+  - After: 1–3 ms at a load of 2–5, and 11 ms at 14 (where one stretch waited 613 ms for a core).
+- `password-hash.test.ts` (new, 7 tests):
+  - a hash is bcrypt at cost 12;
+  - a 10 ms timer ticks at least ten times during a cost-12 compare (0 to 3 on the event loop);
+  - `NO_ACCOUNT_HASH`'s cost, and that it matches nothing;
+  - `needsRehash`;
+  - with no workers, and after a worker dies mid-compare, the answer still comes;
+  - no other module imports bcryptjs.
+- Break patches:
+  - `pht-6` (`compareSync` again): reads' median 1,253 ms;
+  - `pht-8` (bcryptjs's async form, no worker): 242–423 ms;
+  - `pht-7`, `pht-9` and `pht-10` (sign-up's `hashSync` again) redden their unit tests.
+
+Found while building it: `found-30-sep/password-change-unthrottled`.
+- Merged here and run again on lanes 4, 5 and 7: `auth-route-limits` 22/22, `password-hash-time` 4/4, and the eleven suites that now sign their people up (`create-modal-templates` 26, `clip-links` 20, `assign-to-priorities` 30, `assignee-picker` 10, `calendar-accounts` 37, `comment-recording` 33, `sidebar-dms` 14, `team-view` 13, `teams-destination` 14, `teams-empty-state` 21, `teams-person-cards` 17), all green, 261 checks.
+
+### `found-30-sep/oauth-routes-unthrottled` — **closed** (security, small; found closing `found-30-sep/register-unthrottled`)
 
 **The social sign-in and connection redirects have no limit, beside SSO's thirty**
 
@@ -2127,6 +2238,83 @@ A callback exchanges a code with the provider, as SSO's does.
 - the login page asks it once per load.
 
 So it wants a page's budget or none, not thirty.
+
+
+*Closed, 30 September.* ClickUp lets people "sign up for a ClickUp account with Google rather than a username and password" and sign in with Microsoft (help centre, search excerpts), and documents no limit on either. So the house rule, and SSO's number: `AUTH_ROUTE_LIMITS.oauthRedirect`, 30 a minute per address, for:
+- Google's and Microsoft's start, `GET /auth/oauth/:provider`, and callback, `GET /auth/oauth/:provider/callback`. `RateLimitGuard` is on `OAuthController`'s class, so a refusal comes before the state cookie is read.
+- An integration's callback, `GET /integrations/oauth/:provider/callback`, which exchanges a code with the provider or writes a failure onto the integration's card. The guard is on that handler alone, since every other route of its controller needs a session.
+
+`GET /auth/oauth/providers` has no policy and is never counted:
+- it reads two settings, so the limiter's counter, a write per request, would cost more than the answer;
+- it is CI's readiness probe (polled once a second for up to a minute) and the login page's once-per-load ask, like the health checks, which are unlimited for the same reason.
+
+Checks:
+- `auth-route-limits`:
+  - a burst of 31 in one fresh minute from one address, on each of the three routes, is refused past 30 with 429 and a Retry-After;
+  - the visitor is answered again after the window;
+  - 121 asks for the providers in the same minute are all answered.
+
+  Before (lane 3, HEAD's API): the three bursts were answered 31 of 31 each, and the after-window check had nothing to come back from; 17/22 in all. After: 22/22, four times. The counters read `OAuthController.start`, `OAuthController.callback` and `IntegrationConnectionsController.oauthCallback` at 31 each, with no providers row.
+- `auth-route-limits.test.ts`: the three routes carry `oauthRedirect` behind the guard; the providers route is never counted (200 asks, no row); the integrations routes with a session are not counted.
+- Break patches:
+  - `arl-21`, `arl-22` and `arl-23` (a route's limit removed) each redden its burst and the after-window check;
+  - `arl-24` (the controller's guard removed) reddens both of Google's bursts;
+  - `arl-26` (the budget doubled) reddens all three;
+  - `arl-25` (the providers list given thirty) reddens the providers check: 30 answered and 91 refused, CI's own poll among them;
+  - `arl-27`, `arl-28` and `arl-29` redden their unit tests.
+- Regression on lane 3: the suites that start or finish an OAuth grant (`personal-calendar-connect`, `integration-error-card`, `app-catalogue`, `oauth-start-readiness`, `meetings-connect-calendar`, `planner-gates`, `planner-onboarding`, `search-sources`, `calendar-accounts`), all green, none meeting a 429.
+- Merged here and run again on lanes 4, 5 and 7: `auth-route-limits` 22/22, `password-hash-time` 4/4, and the eleven suites that now sign their people up (`create-modal-templates` 26, `clip-links` 20, `assign-to-priorities` 30, `assignee-picker` 10, `calendar-accounts` 37, `comment-recording` 33, `sidebar-dms` 14, `team-view` 13, `teams-destination` 14, `teams-empty-state` 21, `teams-person-cards` 17), all green, 261 checks.
+
+### `found-30-sep/lockout-counts-overlapping-attempts-once` — open (security, small; found closing `found-30-sep/sign-in-time-tells-an-account`)
+
+**Wrong passwords sent at once are counted as one toward the lockout**
+
+*Evidence, 30 September:* `validateUser` reads `failedLoginAttempts` with the account and writes back that number plus one, so attempts that overlap each write the same next number. Measured on lane 3 (`found-probes.mjs`, each sign-in from its own address):
+- four wrong passwords sent at once to a fresh account left `failed_login_attempts` at 1;
+- four more, one at a time, locked it only at the eighth wrong password, where the policy locks at five.
+
+With many addresses, an attacker who sends in parallel multiplies the guesses the lockout allows.
+
+*To close:* count in one statement (`set failed_login_attempts = failed_login_attempts + 1`, locking in the same `UPDATE` at the threshold). Check that N wrong passwords sent at once leave N counted.
+
+### `found-30-sep/sign-in-reads-the-email-as-typed` — open (visible bug, small; found closing `found-30-sep/register-counted-apart-from-signup`)
+
+**Sign-up keeps an email in lowercase, and sign-in looks it up as typed**
+
+*Evidence, 30 September:*
+- Sign-up stores `dto.email.toLowerCase()`.
+- `validateUser` calls `findByEmail(email)`, an exact match, with the email as the login form sent it (`login-page.tsx` sends it untouched).
+- Measured on lane 3: an account signed up as `probe-found-…-case@rundesk.invalid` signed in as typed (200), and with the first letter capitalized was refused 401 "Invalid credentials".
+
+*To close:* compare emails case-insensitively at sign-in, and at every other lookup by email (forgot-password, invitations, adding a member). Check sign-in with a capital letter.
+
+### `found-30-sep/password-change-unthrottled` — open (security, small; found closing `found-30-sep/password-hash-holds-the-event-loop`)
+
+**Changing the password guesses the current one with no limit, and keeps every other session**
+
+*Evidence, 30 September, read:* `POST /users/me/change-password` (`users.controller.ts`, `UsersService.changePassword`) has no `@RateLimit`:
+- It compares `currentPassword` with the account's hash on every request. A stolen session can guess the password behind it at one hash each, with no sign-in limit and no lockout.
+- The new password is checked for length only (8), not the strength policy that sign-up, reset and an invitation's claim enforce.
+- Other sessions are kept, where reset-password revokes them all.
+
+Its hash now runs on a worker at cost 12 (it was 10, on the event loop); that is this change's only effect on the route.
+
+*To close:*
+- a per-user limit (sign-in's ten a minute, or reset's);
+- the workspace's password policy;
+- revoke the other sessions, as reset does;
+- a check of each.
+
+### `found-30-sep/sw-api-cache-reads-the-menu-box-once` — open (suite, small; found closing `found-30-sep/password-hash-holds-the-event-loop`)
+
+**`sw-api-cache` reads the account menu's box once, as it appears**
+
+*Evidence, 30 September:*
+- "and the topbar's Sign out — its menu inside a 1440×900 window — does the same for a member" failed once on lane 3, at load 9, with `menu fits false`. Everything else in the check held: planted, signed out, the cache gone, the refresh 401.
+- Rerun alone at once it passed, 5/5.
+- The check evaluates `document.querySelector('[role=menu]').getBoundingClientRect().bottom <= window.innerHeight` once, as soon as `menu-sign-out` is attached. A menu still being placed, or still opening, reads as not fitting.
+
+*To close:* wait for the menu's box to be stable (two equal reads a frame apart), and check it with the menu placed past the window's foot.
 
 ### `found-30-sep/comment-files-unordered` — **closed** (visible bug, small; found closing `found-30-sep/attachments-unordered`)
 

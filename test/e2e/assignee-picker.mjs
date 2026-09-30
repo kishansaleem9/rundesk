@@ -35,7 +35,7 @@
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi, registerApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
@@ -103,16 +103,17 @@ try {
   /*
    * TWELVE people, so the ninth is a real person and not a rounding argument.
    * Named with a leading letter that sorts late, and the one this suite assigns
-   * is deliberately the LAST of them. Registering has sign-up's ten a minute per
-   * address, so the eleventh may be told to wait; `registerApi` waits it out.
+   * is deliberately the LAST of them. Signing up has ten a minute per
+   * address, so the eleventh may be told to wait; `signUpApi` waits it out.
    */
   const mates = []
   for (let i = 0; i < 12; i += 1) {
     const email = `zz${i}-${Date.now()}@rundesk.invalid`
-    await registerApi(API, {
+    await signUpApi(API, {
       email,
-      displayName: `Zebra ${String(i).padStart(2, '0')} ${TAG}`,
+      fullName: `Zebra ${String(i).padStart(2, '0')} ${TAG}`,
       password: 'Teammate@123!',
+      organizationName: `Zebra ${String(i).padStart(2, '0')} ${TAG}`,
     })
     await A(`/workspaces/${workspaceId}/members`, { method: 'POST', body: { email, role: 'member' } })
     mates.push(email)

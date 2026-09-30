@@ -28,7 +28,7 @@ import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi, registerApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
 import { storeBase, storeRequests } from './lib/store.mjs'
@@ -192,17 +192,17 @@ try {
     insert into tasks (list_id, title) values (${list.id}, ${`Clip link subject ${TAG}`}) returning id`
 
   /*
-   * PEOPLE WITH SESSIONS OF THEIR OWN. `POST /auth/register` answers with one,
-   * and a personal workspace. The admin this suite signs in as is a platform
+   * PEOPLE WITH SESSIONS OF THEIR OWN. `POST /auth/signup` answers with one,
+   * and a workspace of their own. The admin this suite signs in as is a platform
    * admin, whom the rule lets in as the workspace guard does, so the member who
    * watches a members-only clip is somebody who is a member and nothing more.
-   * `registerApi` waits out register's ten a minute per address.
+   * `signUpApi` waits out sign-up's ten a minute per address.
    */
   const register = async (label) => {
     const email = `clip-${label}-${Date.now()}@rundesk.invalid`
-    const made = await registerApi(API, { email, displayName: `${label} ${TAG}`, password: PERSON_PASSWORD })
+    const made = await signUpApi(API, { email, fullName: `${label} ${TAG}`, password: PERSON_PASSWORD, organizationName: `${label} ${TAG}` })
     const own = made.workspaces?.[0]?.id ?? null
-    if (!own) throw new Error(`the ${label} was registered with no workspace of their own`)
+    if (!own) throw new Error(`the ${label} was signed up with no workspace of their own`)
     const as = apiAs(made.accessToken)
     workspacesMade.push({ id: own, as })
     return { email, as, own }

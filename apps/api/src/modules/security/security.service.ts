@@ -2,10 +2,16 @@ import { Injectable, Inject, BadRequestException, NotFoundException } from '@nes
 import { and, eq, desc, or, like, gte, lte } from 'drizzle-orm'
 import * as crypto from 'crypto'
 import * as OTPAuth from 'otpauth'
-import * as bcrypt from 'bcryptjs'
 import { userTotpSecrets, apiKeys, auditLogs, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { passwords } from '../../common/security/password-hash'
+
+/**
+ * A backup code's hash cost. Not a password's 12: a code is 40 random bits, and
+ * a sign-in with one compares it with up to ten stored codes in turn.
+ */
+const BACKUP_CODE_HASH_COST = 10
 
 // ─── TOTP / 2FA ───────────────────────────────────────────────────────────────
 
@@ -53,7 +59,8 @@ export class SecurityService {
 
     // Generate 10 backup codes
     const rawCodes = Array.from({ length: 10 }, () => crypto.randomBytes(5).toString('hex').toUpperCase())
-    const hashedCodes = await Promise.all(rawCodes.map((c) => bcrypt.hash(c, 10)))
+    // On the workers, as every password hash is (`found-30-sep/password-hash-holds-the-event-loop`).
+    const hashedCodes = await Promise.all(rawCodes.map((c) => passwords.hash(c, BACKUP_CODE_HASH_COST)))
 
     await this.db
       .update(userTotpSecrets)
@@ -82,7 +89,7 @@ export class SecurityService {
     // Check backup codes
     const codes = (row.backupCodes as string[]) ?? []
     for (let i = 0; i < codes.length; i++) {
-      if (await bcrypt.compare(code, codes[i])) {
+      if (await passwords.compare(code, codes[i])) {
         // Remove used backup code
         const remaining = codes.filter((_, idx) => idx !== i)
         await this.db.update(userTotpSecrets).set({ backupCodes: remaining }).where(eq(userTotpSecrets.userId, userId))

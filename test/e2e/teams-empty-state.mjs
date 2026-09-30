@@ -36,7 +36,7 @@
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi, registerApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
@@ -366,8 +366,8 @@ try {
    */
   const memberEmail = `teams-empty-${stamp}@rundesk.invalid`
   const memberPass = 'Viewer@123!'
-  // `registerApi` throws on a refusal and waits out register's ten a minute.
-  await registerApi(API, { email: memberEmail, displayName: `Empty Viewer ${stamp}`, password: memberPass })
+  // `signUpApi` throws on a refusal and waits out sign-up's ten a minute.
+  await signUpApi(API, { email: memberEmail, fullName: `Empty Viewer ${stamp}`, password: memberPass, organizationName: `Empty Viewer ${stamp}` })
   const added = await A(`/workspaces/${workspaceId}/members`, {
     method: 'POST',
     body: { email: memberEmail, role: 'member' },

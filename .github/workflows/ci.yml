@@ -630,11 +630,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs TWO HUNDRED AND FIFTY — every suite in the repo but the
+    # The job now runs TWO HUNDRED AND FIFTY-ONE — every suite in the repo but the
     # six in `browser-suites`, which `check-suites-registered.mjs` now enforces
     # rather than this comment asserting it. At the measured 1.1 minutes each
-    # that is about 275 minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155 → 156 → 158 → 159 → 160 → 161 → 162 → 163 → 164 → 165 → 166 → 167 → 168 → 169 → 170 → 171 → 172 → 173 → 174 → 175 → 176 → 177 → 178 → 179 → 180 → 181 → 182 → 183 → 184 → 185 → 186 → 187 → 188 → 189 → 190 → 191 → 192 → 193 → 194 → 195 → 196 → 197 → 198 → 199 → 200 → 201 → 202 → 203 → 204 → 205 → 206 → 207 → 208 → 216 → 217 → 218 → 219 → 220 → 221 → 222 → 223 → 224 → 225 → 227 → 229 → 231 → 232 → 233 → 234 → 236 → 237 → 241 → 242 → 243 → 244 → 245 → 246 → 247 → 248 → 249 → 250.
+    # that is about 276 minutes plus setup. The count has gone
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155 → 156 → 158 → 159 → 160 → 161 → 162 → 163 → 164 → 165 → 166 → 167 → 168 → 169 → 170 → 171 → 172 → 173 → 174 → 175 → 176 → 177 → 178 → 179 → 180 → 181 → 182 → 183 → 184 → 185 → 186 → 187 → 188 → 189 → 190 → 191 → 192 → 193 → 194 → 195 → 196 → 197 → 198 → 199 → 200 → 201 → 202 → 203 → 204 → 205 → 206 → 207 → 208 → 216 → 217 → 218 → 219 → 220 → 221 → 222 → 223 → 224 → 225 → 227 → 229 → 231 → 232 → 233 → 234 → 236 → 237 → 241 → 242 → 243 → 244 → 245 → 246 → 247 → 248 → 249 → 250 → 251.
     #
     # The limit is 300, raised from 270 when the job reached 227 suites: about
     # 250 minutes plus setup against 270 left a margin smaller than one slow
@@ -1917,24 +1917,41 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
-      # `found-30-sep/register-unthrottled`, `found-30-sep/client-address-behind-nginx`
-      # and `found-30-sep/test-email-route-open`. Making an account (register,
-      # sign-up) and answering an invitation (claim, decline) have ten a minute
-      # per address, an invitation's link a page's 120, SSO's lookup 60 and its
-      # start and callbacks 30: a burst one past each is refused with 429 and a
-      # Retry-After, another address is still served, and the visitor is served
-      # again after the window. Through a proxy of the suite's own that appends the
-      # address it saw, as nginx does, a client forging X-Forwarded-For is still
-      # counted as itself and two clients count apart (the API step's
-      # TRUST_PROXY: '1'). The test email refuses anybody but a super admin.
-      # Every burst starts as a fresh minute begins and the suite ends once it
-      # has passed: about two minutes, nearly all of it waiting on the clock.
-      - name: Signing up, invitations and SSO are limited per address, read through a proxy as nginx's
+      # `found-30-sep/register-unthrottled`, `found-30-sep/client-address-behind-nginx`,
+      # `found-30-sep/test-email-route-open`, `found-30-sep/register-counted-apart-from-signup`
+      # and `found-30-sep/oauth-routes-unthrottled`. Making an account (sign-up,
+      # the one route that does; the old register route answers 410) and
+      # answering an invitation (claim, decline) have ten a minute per address,
+      # an invitation's link a page's 120, SSO's lookup 60, and SSO's, Google's
+      # and an integration's redirects 30: a burst one past each is refused with
+      # 429 and a Retry-After, another address is still served, and the visitor
+      # is served again after the window; the sign-in providers list, CI's own
+      # readiness probe above, answers 121 in a minute. Through a proxy of the
+      # suite's own that appends the address it saw, as nginx does, a client
+      # forging X-Forwarded-For is still counted as itself and two clients count
+      # apart (the API step's TRUST_PROXY: '1'). The test email refuses anybody
+      # but a super admin. Every burst starts as a fresh minute begins and the
+      # suite ends once it has passed: about two minutes, nearly all of it
+      # waiting on the clock.
+      - name: Signing up, invitations, SSO and Google are limited per address, read through a proxy as nginx's
         if: '!cancelled()'
         run: node test/e2e/auth-route-limits.mjs --api 3011
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
+
+      # `found-30-sep/sign-in-time-tells-an-account` and
+      # `found-30-sep/password-hash-holds-the-event-loop`. A refused sign-in
+      # takes one hash's time whether the email has no account, a real
+      # account's wrong password or a locked account: medians of nine each,
+      # within a fifth of each other. Eight sign-ins hashing at once leave `GET /health`
+      # answered in under a quarter of a sign-in's time (hashes run on worker
+      # threads). Every sign-in leaves from a loopback address of its own
+      # (127.0.9.x) and the accounts are made from 127.0.0.8, so no budget the
+      # other steps share is spent: about twenty seconds.
+      - name: A refused sign-in takes one hash's time, and hashing holds up no other request
+        if: '!cancelled()'
+        run: node test/e2e/password-hash-time.mjs --api 3011
 
       # What a read shows depends on who is reading. The Teams preview listed
       # every member's open tasks with no viewer, so private spaces, projects,

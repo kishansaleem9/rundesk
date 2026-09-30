@@ -38,7 +38,7 @@ import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { LOGIN_NAV_TIMEOUT_MS, registerApi } from './lib/signin.mjs'
+import { LOGIN_NAV_TIMEOUT_MS, signUpApi } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil } from './lib/wait.mjs'
 
@@ -143,23 +143,23 @@ try {
    * THE SECOND PEER IS MADE, not looked for. The seed ships two users, so a
    * workspace has two members and there is nobody to have a second
    * conversation with — which is why the count could only ever be 1 and why
-   * the patch went unnoticed. `POST /auth/register` makes a user (with a
-   * personal workspace of their own, which nothing here touches) and
+   * the patch went unnoticed. `POST /auth/signup` makes a user (with a
+   * workspace of their own, which nothing here touches) and
    * `POST /workspaces/:id/members` puts them in this one; neither leaves
    * anything behind that another suite reads, because the email carries this
-   * run's tag.
+   * run's tag. `@rundesk.invalid`, because sign-up mails a verification link.
    */
   let secondPeer = members.find((m) => m.userId && m.userId !== ME && m.userId !== peer.userId)
   if (!secondPeer) {
-    const email = `dm-peer-${TAG}@rundesk.internal`
-    // `displayName`, not `name`. `RegisterDto` has required it all along and
-    // every other suite that registers a peer sends it; this one sent `name`
-    // and was never caught, because the branch only runs when the workspace
-    // does NOT already have a third member — so on a lane whose database had
-    // been used it never fired, and on a freshly restored one it threw
-    // before the first check. It refused this whole set in the sweep.
-    // `registerApi` throws on a refusal and waits out register's ten a minute.
-    await registerApi(`${B}/api/v1`, { email, password: 'Peer@12345!', displayName: `DM peer ${TAG}` })
+    const email = `dm-peer-${TAG}@rundesk.invalid`
+    // The body is sign-up's (`fullName`, `organizationName`). This branch
+    // once sent `name` where the old register route wanted `displayName`, and
+    // was never caught, because it only runs when the workspace does NOT
+    // already have a third member — so on a lane whose database had been used
+    // it never fired, and on a freshly restored one it threw before the first
+    // check. It refused this whole set in the sweep.
+    // `signUpApi` throws on a refusal and waits out sign-up's ten a minute.
+    await signUpApi(`${B}/api/v1`, { email, password: 'Peer@12345!', fullName: `DM peer ${TAG}`, organizationName: `DM peer ${TAG}` })
     const added = await api(`/workspaces/${WS}/members`, { method: 'POST', body: { email } })
     if (added.status >= 300) {
       throw new Error(`could not add the second peer to the workspace: ${added.status} ${JSON.stringify(added.error)}`)

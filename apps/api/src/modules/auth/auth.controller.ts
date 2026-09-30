@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Req, Res, HttpCode, HttpStatus, Get, Query, Delete, Param } from '@nestjs/common'
+import { Controller, Post, Body, UseGuards, Req, Res, HttpCode, HttpStatus, Get, Query, Delete, Param, GoneException } from '@nestjs/common'
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiBody } from '@nestjs/swagger'
 import { ConfigService } from '@nestjs/config'
 import type { FastifyReply, FastifyRequest } from 'fastify'
@@ -8,7 +8,6 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard'
 import { RateLimit, RateLimitGuard } from '../../common/guards/rate-limit.guard'
 import { AUTH_ROUTE_LIMITS } from '../../common/guards/auth-route-limits'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { RegisterDto } from './dto/register.dto'
 import { SignupDto } from './dto/signup.dto'
 import { LoginDto } from './dto/login.dto'
 import { REFRESH_TOKEN_COOKIE, clearAuthCookies, setAuthCookies } from './auth-cookies'
@@ -55,19 +54,25 @@ export class AuthController {
   }
 
   /*
-   * SIGN-UP'S BUDGET, NOT NONE (`found-30-sep/register-unthrottled`). It makes an
-   * account and a workspace, as `signup` does, and had no limit beside its ten
-   * a minute. Limited rather than retired: the `/register` page still calls it,
-   * and eleven suites make their people with it (`registerApi` in
-   * test/e2e/lib/signin.mjs waits out a 429 as the server says).
+   * RETIRED: ONE WAY TO MAKE AN ACCOUNT, AND ONE COUNTER FOR IT
+   * (`found-30-sep/register-counted-apart-from-signup`).
+   *
+   * The old route made an account and a personal workspace, as `signup` does,
+   * with sign-up's ten a minute on a counter of its own: one address made ten
+   * accounts a minute through each. It was also the odd path out: it kept the
+   * email as typed where sign-up lowercases it, so `Ada@…` could be made
+   * beside `ada@…`. Its two callers were an unlinked `/register` page, which
+   * now sends to `/sign-up`, and eleven suites making their people, which make
+   * them through sign-up as a hundred-odd others already did (`signUpApi`).
+   *
+   * 410, not 404: the route was here and is gone on purpose, and an old client
+   * is told where the one that replaced it is. Nothing is read, hashed or
+   * made, so nothing needs a limit.
    */
   @Post('register')
-  @RateLimit(AUTH_ROUTE_LIMITS.signUp)
-  @ApiOperation({ summary: 'Register a new user (creates a personal workspace) - DEPRECATED: use /signup' })
-  async register(@Body() dto: RegisterDto, @Req() req: FastifyRequest, @Res({ passthrough: true }) res: FastifyReply) {
-    const bundle = await this.authService.register(dto, sessionMeta(req))
-    this.issueCookies(res, bundle)
-    return bundle
+  @ApiOperation({ summary: 'Retired: answers 410. Make an account with POST /auth/signup' })
+  register(): never {
+    throw new GoneException('POST /auth/register has been retired. Make an account with POST /auth/signup.')
   }
 
   @Post('login')

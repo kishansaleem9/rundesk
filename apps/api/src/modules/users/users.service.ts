@@ -2,7 +2,7 @@ import { Injectable, Inject, UnauthorizedException, BadRequestException } from '
 import { ACCENT_PALETTE } from '@rundesk/feature-flags'
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
-import * as bcrypt from 'bcryptjs'
+import { passwords } from '../../common/security/password-hash'
 import {
   users,
   userNotepads,
@@ -320,9 +320,11 @@ export class UsersService {
     const user = await this.findById(userId)
     if (!user) throw new BadRequestException('User not found')
     if (!user.passwordHash) throw new BadRequestException('Account uses SSO; set a password via reset flow')
-    const ok = await bcrypt.compare(currentPassword, user.passwordHash)
+    // On a worker, and at the cost every other hash has (`found-30-sep/password-hash-holds-the-event-loop`):
+    // this one hashed at 10, on the event loop.
+    const ok = await passwords.compare(currentPassword, user.passwordHash)
     if (!ok) throw new UnauthorizedException('Current password is incorrect')
-    const passwordHash = await bcrypt.hash(newPassword, 10)
+    const passwordHash = await passwords.hash(newPassword)
     await this.db
       .update(users)
       .set({ passwordHash, updatedAt: new Date() })

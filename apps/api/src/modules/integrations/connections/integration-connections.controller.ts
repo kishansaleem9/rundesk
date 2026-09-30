@@ -6,6 +6,8 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../../auth/guards/workspace-member.guard'
 import { CurrentUser } from '../../../common/decorators/current-user.decorator'
 import { PermissionsGuard, RequirePermissions } from '../../custom-roles/permissions.guard'
+import { RateLimit, RateLimitGuard } from '../../../common/guards/rate-limit.guard'
+import { AUTH_ROUTE_LIMITS } from '../../../common/guards/auth-route-limits'
 
 @ApiTags('integrations:connections')
 @Controller()
@@ -105,7 +107,16 @@ export class IntegrationConnectionsController {
     return this.svc.getOAuthStartUrl(workspaceId, user.id, provider, { personal: true })
   }
 
+  /*
+   * THIRTY A MINUTE PER ADDRESS (`found-30-sep/oauth-routes-unthrottled`): the
+   * provider sends the browser here once per connection, and anybody may ask it.
+   * A callback whose signed state still reads exchanges its code with the
+   * provider and writes the connection, or writes the failure onto its card.
+   * The guard is on this route alone: every other route here needs a session.
+   */
   @Get('integrations/oauth/:provider/callback')
+  @UseGuards(RateLimitGuard)
+  @RateLimit(AUTH_ROUTE_LIMITS.oauthRedirect)
   @ApiOperation({ summary: 'OAuth callback for workspace integrations' })
   async oauthCallback(
     @Param('provider') provider: string,

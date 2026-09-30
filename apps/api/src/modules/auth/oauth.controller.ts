@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Param, Query, Req, Res } from '@nestjs/common'
+import { BadRequestException, Controller, Get, Param, Query, Req, Res, UseGuards } from '@nestjs/common'
 import { ApiOperation, ApiTags } from '@nestjs/swagger'
 import { ConfigService } from '@nestjs/config'
 import type { FastifyReply, FastifyRequest } from 'fastify'
@@ -6,6 +6,8 @@ import { AuthService } from './auth.service'
 import { OAuthService } from './oauth.service'
 import { setAuthCookies } from './auth-cookies'
 import { isOAuthProvider } from './oauth.util'
+import { RateLimit, RateLimitGuard } from '../../common/guards/rate-limit.guard'
+import { AUTH_ROUTE_LIMITS } from '../../common/guards/auth-route-limits'
 
 // Short-lived httpOnly cookie holding the signed OAuth `state`. SameSite=Lax so
 // it survives the top-level GET redirect back from the provider.
@@ -18,9 +20,16 @@ type RequestWithCookies = FastifyRequest & { cookies?: Record<string, string | u
  * Google / Microsoft social login (Plan §1.1). All three routes use @Res()
  * directly (no passthrough): the two flow routes issue 302 redirects and the
  * providers route returns a plain object the global interceptor envelopes.
+ *
+ * The start and the callback have SSO's redirect budget, thirty a minute per
+ * address (`AUTH_ROUTE_LIMITS.oauthRedirect`, `found-30-sep/oauth-routes-unthrottled`);
+ * the guard is on the class, as `AuthController` has it, so a refusal comes
+ * before the state cookie is read. `providers` has no policy and is never
+ * counted: see `oauthRedirect` for why.
  */
 @ApiTags('auth-oauth')
 @Controller('auth/oauth')
+@UseGuards(RateLimitGuard)
 export class OAuthController {
   constructor(
     private readonly oauth: OAuthService,
@@ -49,6 +58,7 @@ export class OAuthController {
   }
 
   @Get(':provider')
+  @RateLimit(AUTH_ROUTE_LIMITS.oauthRedirect)
   @ApiOperation({ summary: 'Start Google/Microsoft OAuth login — 302 to the provider authorize endpoint' })
   start(@Param('provider') provider: string, @Res() res: FastifyReply) {
     if (!isOAuthProvider(provider)) {
@@ -65,6 +75,7 @@ export class OAuthController {
   }
 
   @Get(':provider/callback')
+  @RateLimit(AUTH_ROUTE_LIMITS.oauthRedirect)
   @ApiOperation({ summary: 'OAuth provider redirect target — mints a session and bounces to /sso-complete' })
   async callback(
     @Param('provider') provider: string,

@@ -36,7 +36,7 @@
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi, registerApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
@@ -274,8 +274,8 @@ try {
    */
   const outsiderEmail = `outsider-${stamp}@rundesk.invalid`
   const outsiderPass = 'Outsider@123!'
-  // `registerApi` waits out register's ten a minute per address.
-  await registerApi(API, { email: outsiderEmail, displayName: `Zoya Outsider ${stamp}`, password: outsiderPass })
+  // `signUpApi` waits out sign-up's ten a minute per address.
+  await signUpApi(API, { email: outsiderEmail, fullName: `Zoya Outsider ${stamp}`, password: outsiderPass, organizationName: `Zoya Outsider ${stamp}` })
   await A(`/workspaces/${workspaceId}/members`, { method: 'POST', body: { email: outsiderEmail, role: 'member' } })
   const outsiderId = ((await A(`/workspaces/${workspaceId}/members`)).data ?? [])
     .find((m) => m.email === outsiderEmail)?.userId
