@@ -463,6 +463,11 @@ jobs:
       - name: A stale stub is stopped before its replacement starts
         run: bash scripts/e2e-lanes/stub-down-selfcheck.sh --mutate
 
+      # A worktree linked by link-worktree.sh builds its own workspace packages,
+      # not the main checkout's (`found-30-sep/agent-worktrees-build-main-packages`).
+      - name: A worktree builds its own packages, and that check bites
+        run: bash scripts/e2e-lanes/link-worktree-selfcheck.sh --mutate
+
       # The unit claims found their test files by walking the repository, and
       # took an agent worktree's unpatched copy under .claude/ for this tree's
       # (unit-claims-read-a-nested-checkout).

@@ -9,6 +9,10 @@ names must fail. `scripts/e2e-lanes/wt-break.sh` drives that loop against an
 isolated worktree and its own database lane, so a patch can never reach the tree
 you are working in.
 
+## Where they live
+
+Here, and only here: `wt-break.sh`, `check-break-patches.py`, `check-break-claims.mjs` and the unit-claims gate all read `test/e2e/breaks/`. A second copy, `test/e2e/break-patches/`, was committed in `95b4d67` (288 patches and a README) as a resume point and never read by anything after; by 30 September 214 of its 287 shared names differed from the live patch, re-aimed since, and its one patch of its own (`teams-empty-state-1-one-card`) named an anchor and a check sentence neither of which exists any more. It was removed (`found-30-sep/legacy-break-patches-directory`).
+
 ## Why they are in git
 
 They were not, until 21 September. They lived in `/tmp/claude-0/breaks` on a

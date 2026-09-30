@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 395 items, 58 open, 8 partly fixed, 329 closed, counted from this file's headings on 30 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 395 items, 56 open, 8 partly fixed, 331 closed, counted from this file's headings on 30 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1872,13 +1872,17 @@ Checks:
 
 *To close:* tag the people a suite makes (as its templates are tagged) and sweep tagged leftovers at the start of the next run, and check that a killed run's people are gone after the next one.
 
-### `found-30-sep/legacy-break-patches-directory` — open (test tooling, small; found closing `ledger-rows/row-1874`)
+### `found-30-sep/legacy-break-patches-directory` — **closed** (test tooling, small; found closing `ledger-rows/row-1874`)
 
 **`test/e2e/break-patches/` holds old copies of patches that no gate reads, some of which no longer apply**
 
 *Evidence, 30 September:* `test/e2e/break-patches/template-center-10-clear-forgets-an-axis.py` (20 September) and `space-create-menu-5-twolists.py` no longer apply. `check-break-patches.py` reads `test/e2e/breaks/`, so nothing notices.
 
 *To close:* measure what in that directory is not also in `test/e2e/breaks/`, move anything still meant to be run, and delete the rest, with the README saying where patches live.
+
+*Closed, 30 September.* Measured first: `test/e2e/break-patches/` held 288 patches and a README, committed in `95b4d67` as a resume point and changed by nothing since. 287 of its names are also in `test/e2e/breaks/`, and 214 of those differ, the live copy having been re-aimed since. Its one patch of its own, `teams-empty-state-1-one-card`, anchors on `).map((card) => (` in `workspace-teams-page.tsx`, which occurs 0 times now, and claims "there are the frame's two explainer cards", which `teams-empty-state.mjs` no longer says. Nothing reads the directory: `wt-break.sh`, `check-break-patches.py`, `check-break-claims.mjs` and the unit-claims gate all read `test/e2e/breaks/`.
+- The directory is removed, the one patch of its own with it (nothing to move: it is aimed at nothing).
+- `test/e2e/breaks/README.md` says where patches live and what became of the copy.
 
 ### `found-30-sep/templates-null-array-field-values` — **closed** (visible bug, small; found closing `ledger-rows/row-1060`)
 
@@ -1981,13 +1985,24 @@ Found while closing it: `found-30-sep/menu-items-take-a-press-while-closing`, `f
 
 *To close:* let a closing layer ignore Escape (in the shared dropdown, or by scoping the exit so it unmounts sooner), and check that an Escape during a menu's exit reaches what is under it.
 
-### `found-30-sep/agent-worktrees-build-main-packages` — open (test tooling, small; found closing `found-30-sep/menus-drop-a-press-while-closing`)
+### `found-30-sep/agent-worktrees-build-main-packages` — **closed** (test tooling, small; found closing `found-30-sep/menus-drop-a-press-while-closing`)
 
 **An agent worktree linked as the brief says builds `packages/*` from the main checkout**
 
 *Evidence, 30 September:* `apps/web/node_modules` linked wholesale to the main checkout's resolves `@rundesk/ui -> ../../../../packages/ui` against the main checkout. A `packages/ui` change built there was not in the bundle: `menu-reopen` would have measured nothing. `wt-break.sh`'s `link_own_packages` already builds its worktrees a `node_modules` whose `@rundesk/*` point at the worktree.
 
 *To close:* have the agent brief (or a helper) link `@rundesk/*` to the worktree the way `link_own_packages` does, and check that a worktree's bundle carries its own `packages/ui`.
+
+*Closed, 30 September.*
+- `scripts/e2e-lanes/link-worktree.sh <worktree>` gives each workspace directory of a worktree a real `node_modules` of symlinks to the main checkout's entries, with `@rundesk/*` pointed at the worktree's own `packages/*`, as `wt-break.sh`'s `link_own_packages` does for the break worktrees. A symlinked `node_modules` is replaced; a real one is refreshed. `--check` only reads, and names every `@rundesk/*` link that leaves the worktree.
+- Measured on the live agent worktrees: one agent had built its own links already (11 into its packages); another had none yet.
+- The agent briefs now tell a worktree that changes `packages/*` to run it before building.
+
+Checks: `link-worktree-selfcheck.sh --mutate`, in preflight and CI's verify job, 8 cases on a throwaway tree:
+- the web's `@rundesk/ui` and the api's `@rundesk/db` resolve into the tree, and its other packages still come from the main checkout;
+- `--check` agrees, and linking twice changes nothing;
+- a tree linked wholesale (its `node_modules` a symlink to the main checkout's) is caught by `--check`, and linking it fixes it;
+- and a helper that points `@rundesk/*` at the main checkout's packages is caught.
 
 *Measured again, 30 September, by the agent closing the attachments items:* a bundle built at 04:52 from its worktree at `f499cf6` carried `getAttribute("data-state")==="closed"`, from `cb21d14`'s `dropdown-menu.tsx`, which neither the worktree's `apps/web` nor its `packages/ui` held. So a BEFORE bundle can carry the main tree's work in progress, as well as an AFTER one missing the worktree's.
 
