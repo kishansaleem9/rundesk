@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, integer, doublePrecision, type AnyPgColumn } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, uuid, integer, doublePrecision, type AnyPgColumn, index } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { spaces } from './spaces'
@@ -66,7 +66,11 @@ export const goalKeyResults = pgTable('goal_key_results', {
   position:     integer('position').notNull().default(0),
   createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:    timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => [
+  // Made by 0026. Declared here as well: a database built by
+  // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+  index('idx_goal_key_results_goal').on(t.goalId, t.position),
+])
 
 export const goalKeyResultsRelations = relations(goalKeyResults, ({ one }) => ({
   goal:  one(goals, { fields: [goalKeyResults.goalId], references: [goals.id] }),

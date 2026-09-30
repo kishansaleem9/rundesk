@@ -1705,7 +1705,7 @@ Checks:
   - After the window every route answers the same address again.
   - Before, on lane 3: every burst was answered whole, 3/17 in all. After: 17/17, three times.
 - `auth-route-limits.test.ts` (new, 14 tests): each route carries its budget behind the guard, register's is sign-up's own object, the 11th registration from one address is refused, and the routes with a session are never counted.
-- `arl-1…18`: 12 aimed at the suite and 6 unit claims, each reddening what it names (lane 3, baseline 17/17).
+- `arl-1…18`: 12 aimed at the suite and 6 unit claims, each reddening what it names (lane 3, baseline 17/17). The break runner measured the twelve again at 32bfebb (lane 1): each reddens, 12 to 16 of 17 against 17/17.
 - Regression on lane 3, straight after the new suite: 33 suites and 519 checks, all green, and no check met a 429. `assignee-picker` registers twelve people, and `registerApi` waited 49 s for its eleventh, as it says in the log.
 
 Found while building it: `found-30-sep/register-counted-apart-from-signup`, `found-30-sep/sign-in-time-tells-an-account`, `found-30-sep/password-hash-holds-the-event-loop` and `found-30-sep/oauth-routes-unthrottled`.
@@ -1737,7 +1737,7 @@ The fix:
 Checks:
 - `public-pages-busy` is new, with 10 checks, registered in CI (249 in `postgres-harnesses`). Its refusals are answered in the browser, since a real 429 would spend the lane's budget for a minute. It covers the doc, the clip and the portal: each refused says so and in how many seconds, and asks again by itself once the wait is over; "Try again now" asks at once. A portal already drawn stays drawn when its 45-second refresh is refused (the page's clock is jumped 46 seconds). A 500 says the portal could not be loaded, and an unknown link says it is unavailable. Before, 1/10 on lane 5: every check failed but the last. After, 10/10.
 - `branding-retry.test.ts` is new, with 5 tests.
-- `pbz-1..10` are new: 8 aimed at the suite and 2 unit claims. The break runner measures the suite's after this commit.
+- `pbz-1..10` are new: 8 aimed at the suite and 2 unit claims. The break runner measured the eight at 8c1b727 (lane 1): each reddens against a 10/10 baseline, `pbz-1` four checks, `pbz-2` and `pbz-3` three, the other five one each.
 - Regression on lanes 5 and 7, the pages that read the public routes and two that boot the app: all green, 104 checks (public-doc-page 12, clip-links 20, hook-portal-access 11, stable-images 6, stale-chunk-recovery 27, addressability-live 28); `public-pages-busy` 10/10 on both lanes.
 
 ### `found-30-sep/attachments-tab-draws-twice` — **closed** (visible bug, small; found closing `found-30-sep/task-attachments-flaky`)
@@ -1761,7 +1761,7 @@ Checks:
 
 Checks: `task-attachments`, 17 → 23 checks, with the two items below. The panel's list is held until the tab's header is shown, and a mutation observer reads the first card the moment it is drawn: "the first card is drawn where it stays — its box when it first appears is its box once the list has answered" and "and its first draw already has its Download link — the cards are drawn from the list, not from the task's own rows".
 - Before, both failed in three runs of three. After, 23/23 in nine runs, three in a row each at `f499cf6` (twice) and at `cb21d14`.
-- `atd-1` (the task's rows drawn while the list is on its way) reddens the Download check (22/23); `atd-2` (and the form drawn only once the list answers) reddens the box check and the Download check (21/23). The twelve `tat-*` patches still redden theirs; `tat-1` is re-aimed at the header's new count.
+- `atd-1` (the task's rows drawn while the list is on its way) reddens the Download check (22/23); `atd-2` (and the form drawn only once the list answers) reddens the box check and the Download check (21/23). The twelve `tat-*` patches still redden theirs; `tat-1` is re-aimed at the header's new count. The break runner measured `atd-1` and `atd-2` again at 8c1b727 (lane 1): 22/23 and 21/23 against 23/23.
 - Regression on lane 4, AFTER: the eleven suites that open the tab or read attachments, 288 checks, all green.
 - Merged here with 0170 applied to every lane database and `rundesk_pristine`, and run again on lane 5: `task-attachments` 23/23, attach-on-create 14, clip-created-card 26, task-cover 42, all green.
 
@@ -1784,7 +1784,7 @@ Checks: `task-attachments`, 17 → 23 checks, with the two items below. The pane
 Checks: `task-attachments` attaches file-1, file-2 and file-0 in that order, then rewrites their rows into the heap as file-2, file-0, file-1 and reads their `ctid` back. "the list hands the files back in the order they were attached, oldest first — not in the order the heap holds them", "and the task itself carries its files in the same order" and "the panel draws the files in the order they were attached".
 - Before, all three failed in three runs of three: [file-2, file-0, file-1], the heap's order. After, all pass.
 - `tasks-attachments-read.test.ts` is new, 5 tests: 0/5 against the old service, 5/5 after.
-- `ato-1` (the list unsorted) reddens the list's and the panel's order (21/23), on a lane that has the index; `ato-2` (the task's rows unsorted) the task's (22/23); `ato-3` (newest first) all three (20/23). `ato-4` and `ato-5` redden their unit tests.
+- `ato-1` (the list unsorted) reddens the list's and the panel's order (21/23), on a lane that has the index; `ato-2` (the task's rows unsorted) the task's (22/23); `ato-3` (newest first) all three (20/23). `ato-4` and `ato-5` redden their unit tests. Measured again by the break runner at 8c1b727 (lane 1): 21, 22 and 20 of 23.
 - After the merge every lane database needs 0170 before `fleet-restart.sh` will start its API.
 
 ### `found-30-sep/attachment-card-names-uploader-by-id` — **closed** (visible bug, small; found closing `found-30-sep/task-attachments-flaky`)
@@ -1800,7 +1800,7 @@ Checks: `task-attachments` attaches file-1, file-2 and file-0 in that order, the
 Checks: "each card names who attached it — the uploader's name, not their id" reads every card's shown text against the name the server gives the one who attached them.
 - Before, it failed in three runs of three. After, it passes.
 - Unit tests: the LEFT join, `uploaderName: null` for a gone uploader, and `addAttachment`'s row naming its uploader.
-- `aup-1` (the card draws the id) and `aup-2` (the list names nobody) redden it (22/23 each); `aup-3` (an inner join) and `aup-4` (the new row names nobody) redden their unit tests.
+- `aup-1` (the card draws the id) and `aup-2` (the list names nobody) redden it (22/23 each); `aup-3` (an inner join) and `aup-4` (the new row names nobody) redden their unit tests. Measured again by the break runner at 8c1b727 (lane 1): 22/23 each.
 
 Found while building them: `found-30-sep/comment-files-unordered`, `found-30-sep/comment-file-index-only-in-a-migration`, `found-30-sep/attachment-card-draws-no-date`, `found-30-sep/attachments-have-no-download-all`, `found-30-sep/schema-reference-reads-the-main-tree` and `found-30-sep/agent-worktrees-build-main-packages` (measured again).
 
@@ -1826,7 +1826,7 @@ Checks:
 - `project-template-key` had 4 checks and has 5. The dialog, read as the member granted the key, names the permission and does not say admins only.
 - It is there rather than in `template-center`, whose people are a manager and a plain member, and whose shared workspace would keep a custom role a killed run left.
 - Before, 4/5 on lane 6. After, 5/5, and again on `cb21d14` and `6db885c`.
-- `ptk-7` is new and reddens it.
+- `ptk-7` is new and reddens it. The break runner measured it at 8c1b727 (lane 1): 4/5 against 5/5.
 
 ### `found-30-sep/template-tags-spelled-by-collation` — **closed** (visible bug, small; found closing `ledger-rows/row-1874`)
 
@@ -1852,7 +1852,7 @@ Checks:
   - The menu shows client, Q3 and Retro. The database, asked with COLLATE "C" and "en-US-x-icu", sorts Client first under C and q3 first under en-US, so each check stays meaningful on either collation.
   - After the edit, it shows retro over Retro.
 - Before, 79/81 on lane 6. After, 81/81, and again on `cb21d14` and `6db885c`.
-- `template-center-34` (the collation's first spelling) and `-35` (a tie given to the first written) are new, each reddening its check.
+- `template-center-34` (the collation's first spelling) and `-35` (a tie given to the first written) are new, each reddening its check. The break runner measured them at 8c1b727 (lane 1): 79 and 80 of 81 against 81/81.
 - `template-center-17`'s anchor went with `group by lower(t)`. It is re-aimed at the word column and still reddens its check.
 - `ptt-17` and `ptt-18` are unit claims, each reddening its test in `project-templates.service.test.ts` (7 tests new).
 
@@ -1918,7 +1918,7 @@ Checks:
   - a task made from it carries both, read by SQL.
 - One sentence changed from "custom-field value" to "custom-field values", since the template it compares now holds three.
 - Before, 15/20 on lane 6 (the five new checks red). After, 20/20, and again on `cb21d14` and `6db885c`.
-- `create-modal-templates-16..20` are new, each reddening the check it claims on lane 6. `create-modal-templates-3` claims the renamed sentence and reddens it.
+- `create-modal-templates-16..20` are new, each reddening the check it claims on lane 6. The break runner measured them at 8c1b727 (lane 1): 18, 19, 16, 18 and 19 of 20 against 20/20. `create-modal-templates-3` claims the renamed sentence and reddens it.
 - `ttv-1..5` are unit claims, each reddening its test in `task-templates.service.test.ts` (11 tests new). The API's unit tests: 1785/1785.
 - Regression on lane 6: `template-center` 81, `project-template-key` 5, `space-wizard` 23, `space-create-menu` 32, `space-default-permission` 36, `like-literal` 5, `sidebar-sections` 25, `role-permissions-web` 5, all green.
 
@@ -2097,13 +2097,60 @@ So it wants a page's budget or none, not thirty.
 
 *To close:* sort them by `ATTACHMENT_ORDER`, and check with a comment's files written out of heap order.
 
-### `found-30-sep/comment-file-index-only-in-a-migration` — open (schema, small; found closing `found-30-sep/attachments-unordered`)
+### `found-30-sep/comment-file-index-only-in-a-migration` — **closed** (schema, small; found closing `found-30-sep/attachments-unordered`)
 
 **The index on a task file's comment exists only where 0043 ran**
 
 *Evidence, 30 September, read, not measured on a migrated database:* 0043 creates `task_attachments_comment_id_idx`, and the drizzle schema does not declare it. The pristine dump, the schema reference, the lanes and CI are built by push and have no such index; a database migrated through 0043 has it. The drift gate compares a lane with the push-built reference, so it cannot see this.
 
 *To close:* declare it in the schema (and push it to the lanes), or drop it by a migration, then look for other indexes that live in a migration only.
+
+*Closed, 30 September,* for every index and check, not only this one. Production runs `drizzle-kit migrate`, which reads the migrations. The lanes, CI and a fresh deploy run `drizzle-kit push`, which reads only the schema.
+
+Measured first:
+- A reader over the 172 migrations, in the journal's order, was compared with the schema source. The migrations leave 22 indexes and 11 checks that the schema does not declare.
+- Three of the indexes are unique: `uq_projects_default_container_per_space` (0129), `uq_object_shares_email` (0085) and `uq_workspace_groups_alias` (0090).
+- The checks: 0036's status scope, 0039's channel notification level, 0085's one principal per share, 0090's presence and time-off range, 0134's view visibility, 0136's space default permission, 0140's two AI value bounds, 0141's calendar provider and 0150's AI run status.
+- Unique constraints, tables and foreign keys were compared the same way. Every foreign key a migration makes (160) is declared, with the same ON DELETE. Every unique constraint is declared. One table is not (below).
+
+What it cost, measured:
+- Lanes 3 and 4 held rows that production refuses. Three spaces each had two hidden list containers, made 60–170 ms apart on 23–25 September. One view had the visibility "everybody".
+- On lane 5 with the index dropped, `list-under-space`'s new check made six lists at once in a new space. That made six containers, and the space listed one of the six lists. With the index there was one container, and all six were listed.
+
+What changed:
+- 21 indexes and 11 checks are declared in 20 schema files, each under the name and definition its migration gives it.
+- `idx_docs_public_share_id` is not declared. It duplicated `docs_public_share_id_unique` on the same column, so 0171 drops it, and a migrated database and a pushed one hold the same indexes.
+- The definitions were compared on scratch databases, both built from the pristine dump. One is the old push plus the migrations' own statements. The other is a push of the new schema. They describe the same (`schema_describe`, 2379 lines each, no difference), and their 458 index and constraint names are the same.
+- The lanes: on lanes 3 and 4, the extra containers were folded into the first (their lists moved with them) and the stray view was removed. The indexes and checks were put on lanes 1–7 and the pristine database, and the reference was rebuilt from the new source. Lanes 1–7 report no drift. Lanes 8–10 were already behind (no `announcement_views`, among others) and are not running.
+
+Checks:
+- `check-schema-declares-migrations.mjs` reads the migrations in the journal's order, and the schema. It fails on anything a migration leaves that the schema does not declare by name: an index, a check or unique constraint, or a table.
+- It also fails on anything the schema declares that no migration makes, unless the baseline made it. The baseline is 39 tables and 19 names, declared in 2e31089 with migrations 0000–0009, on tables no migration creates; production has them from its first push.
+- A column that a migration writes `UNIQUE` counts as declared by `.unique()` on that column. 0048's webhook token is one: Postgres calls it `inbound_webhooks_token_key`, and a push calls it `inbound_webhooks_token_unique`.
+- Before, the gate found 33 differences; after, none. `check-schema-declares-migrations-cases.mjs`: 24 cases hold, and 21 of 21 mutations bite. Both run in preflight and in CI's verify job.
+- `list-under-space` has a 14th check: six lists made at once share one container, and all six are listed. It fails 13/14 without the index and passes 14/14 with it (lane 5). The suite then deletes the space it raced in, by SQL, so a lane without the index keeps no extra containers.
+- `lus-4` removes the index from the schema; the break runner measures it next.
+- Regression on lanes 5 and 7: the 20 suites that read or write these tables, all green, 461 checks (`list-under-space` 14, `view-visibility` 23, `share-levels` 6, `calendar-accounts` 37, `meeting-tags` 4, `public-doc-page` 12, `folder-dialog` 29, `status-write-access` 4, `doc-trash-level` 5, `user-group-access` 8, `ai-value` 23, `ai-activity-filters` 34, `settings-depth` 62, `person-panel` 60, `container-delete-keys` 10, `archived-tasks-access` 7, `chat-message-actions` 73, `goal-access` 13, `teams-destination` 14, `task-attachments` 23).
+
+Found while closing it: `found-30-sep/task-labels-left-in-production`.
+
+Not measured here: production itself. Every index and check above is one that production already has from its migrations. 0171 is the only change it will see.
+
+### `found-30-sep/unit-claims-refuse-an-uncommitted-batch` — open (test tooling, small; found closing `found-30-sep/comment-file-index-only-in-a-migration`)
+
+**Preflight's unit-claims step fails every batch that changes `apps/` or `packages/` before it is committed**
+
+*Evidence, 30 September:* `check-unit-claims.mjs` ends by asking `git status --porcelain -- apps packages`, and fails on any line, so that a break patch left applied is caught. A batch under test has lines there by definition. The step failed on this batch (the 20 schema files and 0171) and on batches 145–148, each time with every claim reddening (110 of 110 here), and each commit message has had to explain it. A patch left applied on top of an uncommitted batch reads the same as the batch alone, so the step cannot tell them apart.
+
+*To close:* compare the tree with its own state before the first patch, as a run from elsewhere already does for the main checkout, rather than with HEAD. Add a case and a mutation.
+
+### `found-30-sep/task-labels-left-in-production` — open (schema, small; found closing `found-30-sep/comment-file-index-only-in-a-migration`)
+
+**A table that migration 0001 made is still in production, and nothing reads it**
+
+*Evidence, 30 September, read, not measured on production:* 0001 creates `task_labels` (id, task_id, name, color), with a foreign key to tasks. The schema replaced it with `labels` and `task_label_assignments`, and no migration drops it or moves its rows. Nothing in the API, the web, the scripts or the suites names it. A migrated database has the table; a pushed one does not. The schema gate lets it be, by name, and gives this item as the reason.
+
+*To close:* find out whether production's `task_labels` holds rows. If it is empty, drop it in a migration and take it off the gate's list. If it holds rows, decide first whether they move to `task_label_assignments`.
 
 ### `found-30-sep/attachment-card-draws-no-date` — open (parity, small; found closing `found-30-sep/attachment-card-names-uploader-by-id`)
 
@@ -2258,7 +2305,7 @@ Found while building it: `found-30-sep/client-address-behind-nginx`, `found-30-s
 Checks:
 - `check-s3-stub.mjs` has four new cases against the real `R2Service`: HEAD answers what a presigned PUT carried in its URL; a value that is not ASCII comes back RFC 2047-encoded; a PUT's metadata headers are kept; a `REPLACE` copy does not keep the source's. 30 cases hold, and 29 of 29 mutations bite, six of them new (a PUT keeps nothing, the URL is not read, the headers are not read, HEAD does not answer, non-ASCII answered as sent, `REPLACE` keeps the source's).
 - `clip-links` has a 20th check: the library calls a clip by the title it was recorded with. Before, 19/20 on lane 5: the library called it `1790736374973-Members_only_e2e-cliplinks-….webm`, its storage file name. After, 20/20, once the lane's stub was restarted on the new source (it reports the file's hash, which the lane scripts compare).
-- Regression on lanes 5 and 7, the nine suites that store or read objects, all green, 179 checks (clip-links 20, clip-created-card 26, clip-library 2, clip-setup 14, object-key-boundaries 23, comment-recording 33, workspace-delete-for-good 5, task-cover 42, attach-on-create 14). `csl-26` (the library calls a clip by its file name) is new, aimed at the new check; the break runner measures it after this commit.
+- Regression on lanes 5 and 7, the nine suites that store or read objects, all green, 179 checks (clip-links 20, clip-created-card 26, clip-library 2, clip-setup 14, object-key-boundaries 23, comment-recording 33, workspace-delete-for-good 5, task-cover 42, attach-on-create 14). `csl-26` (the library calls a clip by its file name) is new, aimed at the new check. The break runner measured it at cb21d14 (lane 2): 17/20 against 20/20, reddening the new check and the two that read the clip page's title.
 
 Not measured here: whether R2 itself answers a non-ASCII metadata value RFC 2047-encoded, as S3 does. If it does, a clip titled with an accent would read back encoded in the library; the product reads `head.Metadata?.title` as it is.
 

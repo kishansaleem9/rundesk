@@ -1,5 +1,5 @@
-import { pgTable, text, timestamp, uuid, unique, index } from 'drizzle-orm/pg-core'
-import { relations } from 'drizzle-orm'
+import { pgTable, text, timestamp, uuid, unique, index, uniqueIndex } from 'drizzle-orm/pg-core'
+import { relations, sql } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { users } from './users'
 
@@ -36,6 +36,9 @@ export const workspaceGroups = pgTable(
     unique('uq_workspace_groups_workspace_name').on(t.workspaceId, t.name),
     index('idx_workspace_groups_workspace').on(t.workspaceId),
     index('idx_workspace_groups_external').on(t.workspaceId, t.externalId),
+    // Made by 0090. Declared here as well: a database built by
+    // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+    uniqueIndex('uq_workspace_groups_alias').on(t.workspaceId, sql`lower(${t.alias})`).where(sql`${t.alias} IS NOT NULL`),
   ],
 )
 

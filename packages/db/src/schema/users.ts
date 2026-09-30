@@ -1,6 +1,6 @@
-import { pgTable, text, timestamp, boolean, uuid, jsonb, integer } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, uuid, jsonb, integer, check } from 'drizzle-orm/pg-core'
 import type { PlannerSettings } from './time-blocks'
-import { relations } from 'drizzle-orm'
+import { relations, sql } from 'drizzle-orm'
 import { userRoleEnum, oauthProviderEnum } from './enums'
 import { workspaceMembers } from './workspaces'
 import { sessions } from './auth'
@@ -197,7 +197,11 @@ export const users = pgTable('users', {
   plannerSettings: jsonb('planner_settings').$type<PlannerSettings | null>(),
   createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => [
+  // Made by 0090. Declared here as well: a database built by
+  // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+  check('users_presence_status_check', sql`${t.presenceStatus} IS NULL OR ${t.presenceStatus} IN ('online', 'away', 'busy', 'offline')`),
+])
 
 export const oauthAccounts = pgTable('oauth_accounts', {
   id:           uuid('id').primaryKey().defaultRandom(),

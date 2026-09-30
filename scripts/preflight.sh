@@ -24,6 +24,8 @@ step "typecheck (turbo run typecheck)"  bash -c 'pnpm exec turbo run typecheck >
 step "api unit tests"                   bash -c 'cd apps/api && pnpm exec tsx --test $(find src -name "*.test.ts") > /tmp/preflight-api.log 2>&1'
 step "web unit tests"                   bash -c 'cd apps/web && ../../packages/db/node_modules/.bin/tsx --test $(find src -name "*.test.ts" -o -name "*.test.tsx" | tr "\n" " ") > /tmp/preflight-web.log 2>&1'
 step "migration guardrail"              node scripts/check-migration-order.mjs
+step "what a migration makes, the schema declares" node scripts/check-schema-declares-migrations.mjs
+step "and the schema gate can fail too"  node scripts/check-schema-declares-migrations-cases.mjs --mutate
 step "every workspace write is guarded" node scripts/check-workspace-guards.mjs
 step "a workspace role list is stated once" node scripts/check-role-lists.mjs
 step "and that gate can fail too"      node scripts/check-role-lists-cases.mjs --mutate

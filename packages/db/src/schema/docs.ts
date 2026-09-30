@@ -28,7 +28,11 @@ export const docs = pgTable('docs', {
   publicShareEnabledAt: timestamp('public_share_enabled_at', { withTimezone: true }),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => [
+  // Made by 0084. Declared here as well: a database built by
+  // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+  index('idx_docs_archived').on(t.isArchived, t.archivedAt),
+])
 
 export const docsRelations = relations(docs, ({ one, many }) => ({
   workspace: one(workspaces, { fields: [docs.workspaceId], references: [workspaces.id] }),

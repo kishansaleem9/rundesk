@@ -1,5 +1,5 @@
-import { pgTable, text, timestamp, uuid, boolean, integer, jsonb, primaryKey, index } from 'drizzle-orm/pg-core'
-import { relations } from 'drizzle-orm'
+import { pgTable, text, timestamp, uuid, boolean, integer, jsonb, primaryKey, index, check } from 'drizzle-orm/pg-core'
+import { relations, sql } from 'drizzle-orm'
 import { lists } from './lists'
 import { users } from './users'
 import { viewTypeEnum } from './enums'
@@ -41,7 +41,11 @@ export const taskViews = pgTable('task_views', {
   config:      jsonb('config').$type<Record<string, unknown>>().notNull().default({}),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => [
+  // Made by 0134. Declared here as well: a database built by
+  // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+  check('chk_task_views_visibility', sql`${t.visibility} IN ('everyone', 'private', 'protected')`),
+])
 
 /**
  * §V2-07 "Autosave for me" — the one switch in that panel that is explicitly

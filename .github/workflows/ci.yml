@@ -136,6 +136,17 @@ jobs:
       - name: Migration sequence guardrail
         run: node scripts/check-migration-order.mjs
 
+      # Production runs `drizzle-kit migrate`; the lanes, this workflow and a
+      # fresh deploy run `drizzle-kit push`, which reads only the schema. On 30
+      # September 22 indexes and 11 checks existed only in migrations, three of
+      # the indexes unique, so every test ran on a database that accepted what
+      # production refuses (`found-30-sep/comment-file-index-only-in-a-migration`).
+      - name: What a migration makes, the schema declares
+        run: node scripts/check-schema-declares-migrations.mjs
+
+      - name: And the schema gate can fail
+        run: node scripts/check-schema-declares-migrations-cases.mjs --mutate
+
       # Step 6 of the re-audit applies deliberately-broken edits to the tree to
       # prove a check can fail. On a shared tree, a `git add -A` eventually
       # catches one — and one reached `43f7b57`, hiding the Add-fields button

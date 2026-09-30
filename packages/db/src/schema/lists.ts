@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, boolean, integer, uniqueIndex } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, uuid, boolean, integer, uniqueIndex, index, check } from 'drizzle-orm/pg-core'
 import { relations, sql } from 'drizzle-orm'
 import { projects } from './projects'
 import { spaces } from './spaces'
@@ -71,6 +71,11 @@ export const lists = pgTable('lists', {
   uqNameActive: uniqueIndex('uq_lists_project_name_active')
     .on(t.projectId, sql`lower(${t.name})`)
     .where(sql`${t.isArchived} = false`),
+  // Made by 0036, 0084 and 0124. Declared here as well: a database built by
+  // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+  archived: index('idx_lists_archived').on(t.isArchived, t.archivedAt),
+  bySpace: index('idx_lists_space').on(t.spaceId),
+  statusScope: check('lists_status_scope_check', sql`${t.statusScope} IN ('list', 'project', 'space')`),
 }))
 
 export const listsRelations = relations(lists, ({ one, many }) => ({

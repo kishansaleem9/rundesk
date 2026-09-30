@@ -41,6 +41,9 @@ export const taskExternalLinks = pgTable(
   (t) => ({
     byTask:      index('task_external_links_task_idx').on(t.taskId),
     byWorkspace: index('task_external_links_workspace_idx').on(t.workspaceId),
+    // Made by 0079. Declared here as well: a database built by
+    // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+    byComment: index('task_external_links_comment_idx').on(t.commentId),
   }),
 )
 

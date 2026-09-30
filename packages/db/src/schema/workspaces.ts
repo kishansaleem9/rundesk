@@ -1,5 +1,5 @@
-import { pgTable, text, timestamp, boolean, uuid, unique, uniqueIndex, index, integer, jsonb, date } from 'drizzle-orm/pg-core'
-import { relations } from 'drizzle-orm'
+import { pgTable, text, timestamp, boolean, uuid, unique, uniqueIndex, index, integer, jsonb, date, check } from 'drizzle-orm/pg-core'
+import { relations, sql } from 'drizzle-orm'
 import { userRoleEnum, orgRoleEnum } from './enums'
 import { users } from './users'
 import { featureFlags } from './feature-flags'
@@ -102,7 +102,12 @@ export const workspaces = pgTable('workspaces', {
   aiHourlyRateCents:    integer('ai_hourly_rate_cents').notNull().default(5000),
   createdAt:      timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:      timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => [
+  // Made by 0140. Declared here as well: a database built by
+  // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+  check('workspaces_ai_minutes_saved_sane', sql`${t.aiMinutesSavedPerRun} >= 0 AND ${t.aiMinutesSavedPerRun} <= 480`),
+  check('workspaces_ai_hourly_rate_sane', sql`${t.aiHourlyRateCents} >= 0 AND ${t.aiHourlyRateCents} <= 10000000`),
+])
 
 /** Company-wide days off. Excluded from working days everywhere workDays is. */
 export const workspaceHolidays = pgTable(

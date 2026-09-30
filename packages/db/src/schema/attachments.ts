@@ -25,6 +25,9 @@ export const taskAttachments = pgTable(
   // not (task, created_at): see the migration for why the order is the reads'.
   (t) => ({
     byTask: index('task_attachments_task_id_idx').on(t.taskId),
+    // Made by 0043. Declared here as well: a database built by
+    // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+    byComment: index('task_attachments_comment_id_idx').on(t.commentId),
   }),
 )
 

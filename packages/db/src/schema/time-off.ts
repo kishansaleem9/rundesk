@@ -1,5 +1,5 @@
-import { pgTable, text, timestamp, uuid, date, index } from 'drizzle-orm/pg-core'
-import { relations } from 'drizzle-orm'
+import { pgTable, text, timestamp, uuid, date, index, check } from 'drizzle-orm/pg-core'
+import { relations, sql } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { users } from './users'
 
@@ -26,6 +26,9 @@ export const timeOff = pgTable(
   (t) => [
     index('idx_time_off_workspace_range').on(t.workspaceId, t.startsOn, t.endsOn),
     index('idx_time_off_user').on(t.userId),
+    // Made by 0090. Declared here as well: a database built by
+    // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+    check('time_off_range_check', sql`${t.endsOn} >= ${t.startsOn}`),
   ],
 )
 

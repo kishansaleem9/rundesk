@@ -1,5 +1,5 @@
-import { pgTable, text, timestamp, uuid, integer, index, uniqueIndex } from 'drizzle-orm/pg-core'
-import { relations } from 'drizzle-orm'
+import { pgTable, text, timestamp, uuid, integer, index, uniqueIndex, check } from 'drizzle-orm/pg-core'
+import { relations, sql } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { users } from './users'
 
@@ -48,6 +48,9 @@ export const aiUsage = pgTable(
     // The activity log's default read is "this workspace, newest first, of this
     // status"; without the status leg it is a filter applied after the scan.
     index('idx_ai_usage_workspace_status').on(t.workspaceId, t.status, t.createdAt),
+    // Made by 0150. Declared here as well: a database built by
+    // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+    check('ai_usage_status_check', sql`${t.status} IN ('succeeded', 'failed')`),
   ],
 )
 

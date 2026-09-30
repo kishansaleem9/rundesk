@@ -124,6 +124,9 @@ export const tasks = pgTable('tasks', {
   // The Trash lists binned tasks newest-first and the nightly purge scans by
   // age; both read this column and nothing else.
   index('idx_tasks_deleted_at').on(t.deletedAt),
+  // Made by 0084. Declared here as well: a database built by
+  // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+  index('idx_tasks_archived').on(t.isArchived, t.archivedAt),
 ])
 
 export const taskAssignees = pgTable('task_assignees', {

@@ -24,6 +24,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { openDb } from './lib/db.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -32,7 +33,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran": a selector matching nothing reports a clean sweep. */
-const EXPECTED_CHECKS = 13
+const EXPECTED_CHECKS = 14
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -174,6 +175,39 @@ try {
     'a second one reuses the same container rather than making another',
     `containers: ${made.data?.projectId} vs ${second.data?.projectId}`,
   )
+
+  /*
+   * AT ONCE, NOT ONE AFTER THE OTHER (`found-30-sep/comment-file-index-only-in-a-migration`).
+   * The first lists of a space, made together, each find no container and each
+   * insert one. `uq_projects_default_container_per_space` refuses all but the
+   * first, and `defaultContainerForSpace` reads the winner back, on a database
+   * that has the index. Only migration 0129 made it, so a database built by
+   * push had none: lanes 3 and 4 held two containers for one space, and the
+   * space's listing reads one container, so a list made in the same breath as
+   * another was missing from its space.
+   */
+  const raceSpace = await A('/spaces', { method: 'POST', body: { workspaceId, name: `Space-list race ${stamp}` } })
+  const raced = await Promise.all(Array.from({ length: 6 }, (_, i) =>
+    A('/lists', { method: 'POST', body: { spaceId: raceSpace.data?.id, name: `Raced list ${i} ${stamp}` } })))
+  const racedContainers = new Set(raced.map((r) => r.data?.projectId).filter(Boolean))
+  const racedListed = ((await A(`/lists/space/${raceSpace.data?.id}`)).data ?? [])
+    .filter((l) => l.name.startsWith('Raced list '))
+  chk(
+    raced.every((r) => r.status < 400) && racedContainers.size === 1 && racedListed.length === 6,
+    'six lists made at once in a new space share one container, and the space lists all six',
+    `answers ${raced.map((r) => r.status).join(',')}; ${racedContainers.size} container(s); ` +
+      `the space lists ${racedListed.length} of the 6`,
+  )
+  /*
+   * And taken back, its containers and lists with it (both cascade from the
+   * space). Where the index is missing, as `lus-4` makes it, the extra
+   * containers would stay, and the lane could not be given the index back
+   * until somebody folded them by hand.
+   */
+  const db = await openDb()
+  if (!db) throw new Error('no DATABASE_URL — this suite takes back the space it raced in')
+  await db`delete from spaces where id = ${raceSpace.data?.id ?? null}`
+  await db.end({ timeout: 5 })
 
   // ── Not invisible: the property that makes this approach safe ─────────────
   chk(

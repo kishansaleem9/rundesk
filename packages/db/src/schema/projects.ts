@@ -1,5 +1,5 @@
-import { pgTable, text, timestamp, uuid, boolean, integer } from 'drizzle-orm/pg-core'
-import { relations } from 'drizzle-orm'
+import { pgTable, text, timestamp, uuid, boolean, integer, index, uniqueIndex } from 'drizzle-orm/pg-core'
+import { relations, sql } from 'drizzle-orm'
 import { spaces } from './spaces'
 import { lists } from './lists'
 import { users } from './users'
@@ -41,7 +41,13 @@ export const projects = pgTable('projects', {
   isDefaultContainer: boolean('is_default_container').notNull().default(false),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => [
+  // Made by 0034, 0084 and 0129. Declared here as well: a database built by
+  // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+  index('idx_projects_folder').on(t.folderId),
+  index('idx_projects_archived').on(t.isArchived, t.archivedAt),
+  uniqueIndex('uq_projects_default_container_per_space').on(t.spaceId).where(sql`${t.isDefaultContainer}`),
+])
 
 export const projectsRelations = relations(projects, ({ one, many }) => ({
   space: one(spaces, { fields: [projects.spaceId], references: [spaces.id] }),

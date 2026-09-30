@@ -1,5 +1,5 @@
-import { pgTable, text, timestamp, uuid, boolean, jsonb } from 'drizzle-orm/pg-core'
-import { relations } from 'drizzle-orm'
+import { pgTable, text, timestamp, uuid, boolean, jsonb, index, check } from 'drizzle-orm/pg-core'
+import { relations, sql } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { projects } from './projects'
 import { users } from './users'
@@ -64,7 +64,12 @@ export const spaces = pgTable('spaces', {
   presetKey:   text('preset_key'),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => [
+  // Made by 0084 and 0136. Declared here as well: a database built by
+  // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+  index('idx_spaces_archived').on(t.isArchived, t.archivedAt),
+  check('chk_spaces_default_permission', sql`${t.defaultPermission} IN ('view', 'comment', 'edit', 'admin')`),
+])
 
 export const spacesRelations = relations(spaces, ({ one, many }) => ({
   workspace: one(workspaces, { fields: [spaces.workspaceId], references: [workspaces.id] }),

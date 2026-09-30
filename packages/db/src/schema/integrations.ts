@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, uuid, integer } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, uuid, integer, index } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { users } from './users'
@@ -22,7 +22,11 @@ export const slackIntegrations = pgTable('slack_integrations', {
   createdById:  uuid('created_by_id').references(() => users.id),
   createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:    timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => [
+  // Made by 0002. Declared here as well: a database built by
+  // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+  index('slack_integrations_workspace_id_idx').on(t.workspaceId),
+])
 
 /**
  * Per-channel Slack routing rules (Plan §12): route events (optionally scoped to
@@ -41,7 +45,11 @@ export const slackRoutingRules = pgTable('slack_routing_rules', {
   isEnabled:    boolean('is_enabled').notNull().default(true),
   createdById:  uuid('created_by_id').references(() => users.id),
   createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => [
+  // Made by 0050. Declared here as well: a database built by
+  // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+  index('slack_routing_rules_workspace_idx').on(t.workspaceId),
+])
 
 export const slackRoutingRulesRelations = relations(slackRoutingRules, ({ one }) => ({
   workspace: one(workspaces, { fields: [slackRoutingRules.workspaceId], references: [workspaces.id] }),

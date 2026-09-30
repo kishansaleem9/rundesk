@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, boolean, index, uniqueIndex } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, uuid, boolean, index, uniqueIndex, check } from 'drizzle-orm/pg-core'
 import { relations, sql } from 'drizzle-orm'
 import { users } from './users'
 import { workspaces } from './workspaces'
@@ -73,6 +73,9 @@ export const userCalendarAccounts = pgTable(
       .on(t.userId, t.workspaceId)
       .where(sql`is_default`),
     index('idx_user_calendar_accounts_user').on(t.userId, t.workspaceId),
+    // Made by 0141. Declared here as well: a database built by
+    // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+    check('user_calendar_accounts_provider', sql`${t.provider} IN ('gcal', 'outlook')`),
   ],
 )
 

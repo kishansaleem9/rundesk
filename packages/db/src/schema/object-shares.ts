@@ -1,4 +1,5 @@
-import { pgTable, text, timestamp, uuid, index, uniqueIndex } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, uuid, index, uniqueIndex, check } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { users } from './users'
 import { containerRoleEnum } from './enums'
@@ -34,5 +35,10 @@ export const objectShares = pgTable(
     index('idx_object_shares_user').on(t.userId),
     index('idx_object_shares_ws').on(t.workspaceId),
     uniqueIndex('uq_object_shares_user').on(t.objectType, t.objectId, t.userId),
+    // Made by 0085. Declared here as well: a database built by
+    // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+    uniqueIndex('uq_object_shares_email').on(t.objectType, t.objectId, sql`lower(${t.invitedEmail})`).where(sql`${t.invitedEmail} IS NOT NULL`),
+    index('idx_object_shares_email').on(sql`lower(${t.invitedEmail})`),
+    check('object_shares_principal_check', sql`(${t.userId} IS NOT NULL) <> (${t.invitedEmail} IS NOT NULL)`),
   ],
 )

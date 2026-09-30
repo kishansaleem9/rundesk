@@ -45,6 +45,9 @@ export const meetings = pgTable(
     index('meetings_workspace_idx').on(t.workspaceId),
     index('meetings_workspace_start_idx').on(t.workspaceId, t.startsAt),
     index('meetings_task_idx').on(t.taskId),
+    // Made by 0127. Declared here as well: a database built by
+    // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+    index('idx_meetings_tags').using('gin', t.tags),
   ],
 )
 

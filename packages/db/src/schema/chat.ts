@@ -1,5 +1,5 @@
-import { pgTable, text, timestamp, uuid, boolean, jsonb, integer, type AnyPgColumn, uniqueIndex, index } from 'drizzle-orm/pg-core'
-import { relations } from 'drizzle-orm'
+import { pgTable, text, timestamp, uuid, boolean, jsonb, integer, type AnyPgColumn, uniqueIndex, index, check } from 'drizzle-orm/pg-core'
+import { relations, sql } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { spaces } from './spaces'
 import { users } from './users'
@@ -29,7 +29,11 @@ export const chatChannels = pgTable('chat_channels', {
   createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
   archivedAt:  timestamp('archived_at', { withTimezone: true }),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => [
+  // Made by 0060. Declared here as well: a database built by
+  // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+  index('chat_channels_space_idx').on(t.spaceId),
+])
 
 export const chatChannelMembers = pgTable(
   'chat_channel_members',
@@ -49,6 +53,9 @@ export const chatChannelMembers = pgTable(
   },
   (t) => ({
     uniqMember: uniqueIndex('chat_channel_members_unique').on(t.channelId, t.userId),
+    // Made by 0039. Declared here as well: a database built by
+    // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+    notificationLevel: check('chat_channel_members_notification_level_check', sql`${t.notificationLevel} IN ('all', 'mentions', 'none')`),
   }),
 )
 
@@ -101,6 +108,9 @@ export const chatMessages = pgTable('chat_messages', {
   // migrated instances but not on fresh ones is the kind of difference that
   // shows up as "it's slow on staging" months later.
   byCall: index('chat_messages_call_idx').on(t.callId),
+  // Made by 0099. Declared here as well: a database built by
+  // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+  forwardedFrom: index('idx_chat_messages_forwarded_from').on(t.forwardedFromId),
 }))
 
 // Chat message edit history (Plan §6.3). Each time a message is edited we
@@ -136,7 +146,11 @@ export const chatMessageAttachments = pgTable('chat_message_attachments', {
   storageKey:  text('storage_key').notNull(),
   uploadedById: uuid('uploaded_by_id').references(() => users.id, { onDelete: 'set null' }),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => [
+  // Made by 0051. Declared here as well: a database built by
+  // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+  index('chat_message_attachments_message_idx').on(t.messageId),
+])
 
 export const chatMessageAttachmentsRelations = relations(chatMessageAttachments, ({ one }) => ({
   channel: one(chatChannels, { fields: [chatMessageAttachments.channelId], references: [chatChannels.id] }),

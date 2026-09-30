@@ -93,6 +93,9 @@ export const folders = pgTable(
     uniqueIndex('uq_folders_space_name_active')
       .on(t.spaceId, sql`lower(${t.name})`)
       .where(sql`${t.isArchived} = false`),
+    // Made by 0084. Declared here as well: a database built by
+    // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
+    index('idx_folders_archived').on(t.isArchived, t.archivedAt),
   ],
 )
 
