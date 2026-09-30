@@ -21,6 +21,17 @@ type PublicDoc = {
   updatedAt: string
 }
 
+/**
+ * Why the doc did not load. A 404 is a link that no longer opens (revoked,
+ * archived or never made) and the page says so; anything else is a failure to
+ * load it, which is not the same sentence.
+ */
+class PublicDocError extends Error {
+  constructor(readonly status: number) {
+    super(status === 404 ? 'Not found' : 'Failed to load')
+  }
+}
+
 function PublicDocViewer() {
   const { slug } = Route.useParams() as { slug: string }
 
@@ -31,8 +42,14 @@ function PublicDocViewer() {
       // public share link resolves on whatever hostname it's opened from — not
       // only the one pinned in VITE_DEV_API_ORIGIN.
       const res = await fetch(`/api/v1/public/docs/${encodeURIComponent(slug)}`)
-      if (!res.ok) throw new Error(res.status === 404 ? 'Not found' : 'Failed to load')
-      return (await res.json()) as PublicDoc
+      if (!res.ok) throw new PublicDocError(res.status)
+      // Every answer is wrapped as `{ data, meta, error }` (ResponseInterceptor):
+      // the doc is `data`. Read as the doc itself, the envelope drew no title,
+      // "Invalid Date" and an empty page
+      // (found-30-sep/public-doc-page-reads-the-envelope).
+      const body = (await res.json().catch(() => null)) as { data?: PublicDoc | null } | null
+      if (!body?.data) throw new PublicDocError(res.status)
+      return body.data
     },
     retry: false,
   })
@@ -70,11 +87,19 @@ function PublicDocViewer() {
   }
 
   if (docQuery.isError || !docQuery.data) {
+    const gone = docQuery.error instanceof PublicDocError && docQuery.error.status === 404
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-background gap-2">
-        <h1 className="text-2xl font-display font-semibold">Doc not found</h1>
+      <div
+        className="min-h-screen flex flex-col items-center justify-center bg-background gap-2"
+        data-testid={gone ? 'public-doc-not-found' : 'public-doc-failed'}
+      >
+        <h1 className="text-2xl font-display font-semibold">
+          {gone ? 'Doc not found' : 'This doc could not be loaded'}
+        </h1>
         <p className="text-sm text-muted-foreground">
-          This share link may have been revoked or the doc has been archived.
+          {gone
+            ? 'This share link may have been revoked or the doc has been archived.'
+            : 'Something went wrong while loading it. Try again in a moment.'}
         </p>
       </div>
     )
@@ -92,16 +117,24 @@ function PublicDocViewer() {
       )}
       <main className="mx-auto max-w-3xl px-6 py-12">
         <header className="mb-8 flex items-start gap-3">
-          {doc.icon && <span className="text-3xl">{doc.icon}</span>}
+          {doc.icon && (
+            <span className="text-3xl" data-testid="public-doc-icon">
+              {doc.icon}
+            </span>
+          )}
           <div className="flex-1">
-            <h1 className="font-display text-3xl font-semibold tracking-tight">{doc.title}</h1>
+            <h1 className="font-display text-3xl font-semibold tracking-tight" data-testid="public-doc-title">
+              {doc.title}
+            </h1>
             <p className="mt-1 text-xs text-muted-foreground">
               Public shared doc · last updated{' '}
-              {new Date(doc.updatedAt).toLocaleString()}
+              <time dateTime={doc.updatedAt} data-testid="public-doc-updated">
+                {new Date(doc.updatedAt).toLocaleString()}
+              </time>
             </p>
           </div>
         </header>
-        <article className="prose prose-sm dark:prose-invert max-w-none">
+        <article className="prose prose-sm dark:prose-invert max-w-none" data-testid="public-doc-content">
           <EditorContent editor={editor} />
         </article>
         <footer className="mt-16 border-t border-border/40 pt-4 text-[11px] text-muted-foreground">

@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 361 items, 42 open, 8 partly fixed, 311 closed, counted from this file's headings on 30 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 361 items, 41 open, 8 partly fixed, 312 closed, counted from this file's headings on 30 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1617,13 +1617,30 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - `STUB_GATE_MUTANT_TIMEOUT_MS` sets the limit for a slower machine.
 - After: the two gates together, 22 of 22 and 11 of 11, at load ~10.
 
-### `found-30-sep/public-doc-page-reads-the-envelope` — open (visible bug, small; found closing `resume-defects/resume-7`)
+### `found-30-sep/public-doc-page-reads-the-envelope` — **closed** (visible bug, small; found closing `resume-defects/resume-7`)
 
 **The public doc page takes the API's `{ data, meta, error }` envelope for the doc**
 
 *Evidence, 30 September, read and not yet measured:* `apps/web/src/routes/d.$slug.tsx` does `(await res.json()) as PublicDoc`, but `GET /public/docs/:slug` is wrapped like every answer (`ResponseInterceptor`). So `/d/<slug>` would draw no title, "last updated Invalid Date" and no content. No suite opens the page in a browser: `doc-boundaries` reads the API only.
 
 *To close:* measure it in a browser, read the doc from `data`, and check that a public doc's title and content are drawn and a revoked or unknown slug says so.
+
+*Closed, 30 September.* ClickUp's help centre ("Share locations and items with a public link", "Share Docs", read through search results):
+- anyone with a Doc's public link "can view the item on a web browser and they do not need a ClickUp account";
+- "publicly shared items are view only";
+- turning "Share link with anyone" off stops the link.
+
+Measured first, on lane 5, in a browser signed in nowhere: the heading was empty, the line under it read "Public shared doc · last updated Invalid Date", and the editor drew nothing. A server failure said "Doc not found" and that the link "may have been revoked".
+
+- `/d/<slug>` reads the doc from `data`.
+- A 404 says "Doc not found", as before. Any other failure says "This doc could not be loaded", not that the link was revoked.
+- The date is a `<time>` carrying the time the server holds, drawn in the visitor's own format.
+- Once the doc was drawn, its embedded list was not what the page meant. `ListEmbedStatic` set `addNodeView: undefined` so that a visitor would see the list's cached name, but Tiptap reads an `undefined` field as "ask the parent". So the page mounted the signed-in embed, which asked the API for the list as nobody, was refused twice (401), and told the visitor "This list has no tasks yet". It is `null` now, and the visitor sees the list's name.
+
+Checks:
+- `public-doc-page` is new, with 12 checks and nothing stubbed but one failure the browser answers on purpose, registered in CI (245 in `postgres-harnesses`). It opens a doc's link signed in nowhere and reads the title, the date, the icon, the words and the blocks the page registers (a ticked to-do, a table, a callout and an embedded list's name). Opening the link asks the API for nothing it refuses, and the page is read-only. A link never made, a link turned off, and an archived doc's link each say "Doc not found". Sharing again makes a new link and the old one stays closed. A 500 says the doc could not be loaded. Before, 5/12 on lane 1's build of 29 September: the six drawing checks and the failure's sentence failed, and nothing asked for was refused only because nothing was drawn. With the envelope read and the embed still live, the blocks check failed on lane 5 (10 of the first 11). After, 12/12 on lane 5, twice: before and after its page read was reshaped for the text-reads gate.
+- `pdp-1..13` are new: each names the check it reddens (the envelope read as the doc, the heading, the date, the icon, a block unregistered, a page that takes typing, a failure called a revoked link and a 404 called a failure, a link turned off that stays, an archived doc that opens, a new link that is the old one, a lookup that ignores the slug, and the live embed mounted again). The break runner measures them on lane 1 after this commit.
+- Regression on lanes 5 and 7: the ten suites that read, share, archive or route to docs, all green, 170 checks (doc-boundaries 17, doc-level-controls 7, doc-write-levels 5, doc-trash-level 5, menu-offers 9, command-palette 43, doc-import 16, doc-task-links 13, stale-chunk-recovery 27, addressability-live 28).
 
 ### `found-30-sep/public-cdn-url-makes-every-object-public` — open (security, small; found closing `resume-defects/resume-7`)
 

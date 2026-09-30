@@ -96,9 +96,14 @@ export const ListEmbed = Node.create({
  * no token to read the list with. Registering it keeps the block from being
  * stripped when the shared doc is parsed; the cached name is what a visitor
  * sees.
+ *
+ * `null`, not `undefined`: Tiptap reads an `undefined` field as "ask the
+ * parent", so the public page mounted ListEmbed's own view, which asked the
+ * API for the list as nobody (401) and told the visitor the list had no tasks
+ * (found-30-sep/public-doc-page-reads-the-envelope).
  */
 export const ListEmbedStatic = ListEmbed.extend({
-  addNodeView: undefined,
+  addNodeView: null,
 
   renderHTML({ HTMLAttributes, node }) {
     return [
