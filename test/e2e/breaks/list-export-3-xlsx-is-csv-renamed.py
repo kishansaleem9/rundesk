@@ -21,7 +21,7 @@
 #   "and no cell in the sheet is a formula"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
-a = "      body: format === 'xlsx' ? toXlsx(name, headers, cells) : toCsv(headers, cells),\n"
+a = "      body: format === 'xlsx' ? await toXlsx(name, headers, cells) : toCsv(headers, cells),\n"
 b = "      body: toCsv(headers, cells),\n"
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

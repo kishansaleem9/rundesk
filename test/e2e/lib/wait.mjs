@@ -24,12 +24,39 @@
  * Poll until `predicate()` is truthy, or give up. Returns whether it converged,
  * so the caller still fails when it genuinely never happens — the point is to
  * stop failing when it happens a little later than expected.
+ *
+ * A QUESTION THAT NEVER ANSWERS IS A NO (`found-30-sep/a-hung-page-outlasts-every-wait`).
+ * This awaited the predicate before it looked at the deadline, so a predicate
+ * that never settled held the wait for ever: a Playwright call to a page whose
+ * renderer had stopped answering. `task-attachments`' baseline went silent for
+ * fourteen minutes that way, under a 20 s wait, and ended only at the break
+ * runner's 900 s kill as one unexplained failed check. Each look now races the
+ * time left, with a grace so a look started just before the deadline still
+ * gets its answer, as it did before; a look still pending then counts as no,
+ * and the wait gives up. The grace is 15 s because predicates wait inside
+ * themselves: the longest waits 8 s (`comment-slash-commands`), and two 5 s
+ * waits run back to back in `list-export`. So every predicate in the tree that
+ * answers at all still answers, and one that never does costs its deadline
+ * plus 15 s instead of the run.
  */
-export async function waitUntil(predicate, { timeoutMs = 8000, stepMs = 150 } = {}) {
+const PENDING = Symbol('pending')
+export const LAST_LOOK_GRACE_MS = 15_000
+/** `promise`, or PENDING if it has not settled within `ms`. */
+export async function settledWithin(promise, ms) {
+  let timer
+  try {
+    return await Promise.race([promise, new Promise((resolve) => { timer = setTimeout(resolve, ms, PENDING) })])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+export async function waitUntil(predicate, { timeoutMs = 8000, stepMs = 150, lastLookGraceMs = LAST_LOOK_GRACE_MS } = {}) {
   const deadline = Date.now() + timeoutMs
   for (;;) {
     try {
-      if (await predicate()) return true
+      const left = deadline - Date.now()
+      const answer = await settledWithin(Promise.resolve().then(predicate), Math.max(left, lastLookGraceMs))
+      if (answer !== PENDING && answer) return true
     } catch {
       // A navigation mid-poll invalidates the execution context; that is a
       // reason to look again, not to fail.
@@ -40,10 +67,12 @@ export async function waitUntil(predicate, { timeoutMs = 8000, stepMs = 150 } = 
 }
 
 /** Read a page's text, tolerating a navigation happening underneath. */
-export async function textOf(page) {
+export async function textOf(page, { timeoutMs = 5000 } = {}) {
   for (let attempt = 0; attempt < 8; attempt++) {
     try {
-      return await page.evaluate(() => document.body?.innerText ?? '')
+      // A page that never answers is read as empty, not waited on for ever.
+      const text = await settledWithin(page.evaluate(() => document.body?.innerText ?? ''), timeoutMs)
+      return text === PENDING ? '' : text
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 200))
     }
@@ -109,6 +138,6 @@ export async function readText(locator, { timeoutMs = 8000 } = {}) {
  * Returns a boolean like `waitUntil`, so the caller still writes its own named
  * check and still fails when the count genuinely never arrives.
  */
-export async function waitForCount(locator, expected, { timeoutMs = 15000 } = {}) {
-  return waitUntil(async () => (await locator.count()) === expected, { timeoutMs })
+export async function waitForCount(locator, expected, { timeoutMs = 15000, lastLookGraceMs } = {}) {
+  return waitUntil(async () => (await locator.count()) === expected, { timeoutMs, lastLookGraceMs })
 }

@@ -2102,7 +2102,7 @@ Checks:
 Found while closing it: `found-30-sep/menu-items-take-a-press-while-closing`, `found-30-sep/leaving-menu-takes-the-next-escape` and `found-30-sep/agent-worktrees-build-main-packages`.
 - Merged here and run again: `menu-reopen` 11/11 on lane 5, and on lanes 5 and 7 nine suites that press the shared dropdown's buttons, all green, 205 checks (task-menu 37, menu-offers 9, assign-to-priorities 30, create-modal-templates 15, sidebar-sections 25, space-create-menu 32, comment-plus-menu 19, create-task-chevron 9, folder-dialog 29). Its suite moved onto lib/fixture.mjs's one client.
 
-### `found-30-sep/menu-items-take-a-press-while-closing` — open (visible bug, small; found closing `found-30-sep/menus-drop-a-press-while-closing`)
+### `found-30-sep/menu-items-take-a-press-while-closing` — **closed** (visible bug, small; found closing `found-30-sep/menus-drop-a-press-while-closing`)
 
 **A double-click on a menu row runs it twice: the second press lands on the leaving menu**
 
@@ -2110,13 +2110,100 @@ Found while closing it: `found-30-sep/menu-items-take-a-press-while-closing`, `f
 
 *To close:* decide what a second press on a leaving menu does. Either nothing (refuse selection in `DropdownMenuItem` while its menu reads `closed`), or it reaches what is under the menu (`pointer-events: none` on closed content). Check a double-click on a row runs it once.
 
-### `found-30-sep/leaving-menu-takes-the-next-escape` — open (visible bug, small; found closing `found-30-sep/menus-drop-a-press-while-closing`)
+
+*Closed, 30 September* (built by an agent on lane 6). ClickUp's help centre ("Task settings menu", read through search results) says the task menu opens from its ellipsis, and "Favorite" is one of its rows. Nothing there, or in its feature requests, covers a row pressed twice. So this holds to the safe rule: a press runs a row once.
+
+Measured first, on lane 6, with `menu-reopen` holding each menu's exit where it starts:
+- a double-click on the task menu's "Add to favorites" sent two toggles, and the task ended as it began;
+- two presses, the second once the exit was held, did the same;
+- so did a double-click on the chat header menu's "Add to favorites", whose action is the row's own `onClick`.
+
+Every BEFORE run, at `6db885c`, `9b5ced3` and `7751d5a`. Radix's `MenuItem` selects on any click, and a leaving menu is still the top layer, so it takes presses.
+
+- A row of the shared dropdown (`DropdownMenuItem`, and the checkbox and radio rows) does nothing when pressed while the menu its button opened reads `closed`. The row's `onClick` is not called, Radix's selection is refused, and Enter on a row goes the same way.
+- The press is not let through to the page under the menu. The person aimed at the row, still drawn; under the task menu's rows are the sheet's fields, and its overlay, which closes the sheet.
+- The menu asked is the top one, not a submenu. A submenu also closes on its own while its menu stays open (the pointer or focus leaves it). The first version asked the row's nearest menu, and `assign-to-priorities` caught it: a press on "Add to" › a person found its submenu `closed` and the menu `open`, the row had run on HEAD, and the guard refused it. Choosing a row closes the whole menu, so the top menu's state is the one that says a choice was made.
+- An open menu's rows run as before, however fast they are pressed again, and so does a row that keeps its menu open.
+
+Checks:
+- `menu-reopen` gains four rounds, eight checks. Each round checks that its press landed where it claims.
+- Three rounds read the pin back from the server once every toggle has been answered: changed, and the page sent one toggle. The server's toggle can take two sent together for one (`found-30-sep/favorite-toggle-races-itself`).
+- The fourth: a submenu closed while its menu stays open still runs its row (the task on your priorities).
+- Before, the three pin checks failed on every run. After, 24/24 three times running at `7751d5a` (the agent's).
+- `menu-reopen-5`, `-6`, `-10` and `-11` are new, each measured on lane 6:
+  - the guard removed: the three pin checks, two toggles each;
+  - every row press refused: the three pin checks, their three "landed" checks and the submenu round;
+  - the row's own `onClick` run before the guard: the chat row's pin check alone;
+  - the guard asking the nearest menu: the submenu round alone.
+- Regression on lane 6, at `7751d5a` on its own API: 12 suites, all green, 267 checks. They include task-menu 37, assign-to-priorities 30, create-modal-templates 33, space-create-menu 32, folder-dialog 29, task-merge 28, sidebar-sections 25 and comment-plus-menu 19.
+
+Found while closing it: `found-30-sep/a-double-click-on-a-dialog-row-shuts-the-dialog` and `found-30-sep/favorite-toggle-races-itself`.
+- Merged here with the wait and zip changes below and run again on lane 6: `menu-reopen` 26/26 three runs in a row, and `list-export` 30, `comment-slash-commands` 10, `task-menu` 37, `folder-dialog` 29, `chat-message-actions` 73, `assign-to-priorities` 30, `create-modal-templates` 33, `task-header-status` 15 and `video1-fast-items` 92, all green, 427 checks.
+
+### `found-30-sep/leaving-menu-takes-the-next-escape` — **closed** (visible bug, small; found closing `found-30-sep/menus-drop-a-press-while-closing`)
 
 **An Escape pressed while a menu is leaving is taken by the leaving menu**
 
 *Evidence, 30 September, lane 6:* with the exit held, an Escape pressed after the task menu closed came back `defaultPrevented`, the menu still in the page. With no menu in the page it did not. The create modal already works round one case of it (a comment's "+" menu took the Escape meant for the modal). Radix offers no prop to let a leaving layer pass an Escape through untouched.
 
 *To close:* let a closing layer ignore Escape (in the shared dropdown, or by scoping the exit so it unmounts sooner), and check that an Escape during a menu's exit reaches what is under it.
+
+
+*Closed, 30 September* (built by an agent on lane 6). ClickUp's help centre says Esc closes "any task or window" ("Use keyboard shortcuts", read through search results). Two of its feature requests ask that an Escape close an open menu first rather than the whole task. Nothing covers an Escape pressed while a menu is leaving. So this holds to the safe rule: once a menu has closed, an Escape belongs to what is under it.
+
+Measured first, on lane 6, with the exit held:
+- a second Escape after the task menu closed reached the page marked `defaultPrevented`;
+- in the create modal, whose menus stop the Escape that closes them, the second Escape never reached the modal, and the modal stayed open.
+
+Every BEFORE run. Radix keeps a closed menu's layer at the top of its stack until the exit ends, only the top answers an Escape, and no prop lets it pass one by untouched: `preventDefault` is the only way to skip its dismissal, and it marks the Escape.
+
+- An Escape during a menu's exit now ends the exit. The shared dropdown hands the content the `animationend` Radix's Presence waits for, and commits the unmount at once (`flushSync`). It does so from a window listener in the capture phase, before the layer's own. The layer leaves the stack with its listener, and the Escape goes on untouched.
+- An open menu takes its Escape as before, and the caller's `onEscapeKeyDown` still decides. The exit plays in full unless an Escape arrives during it.
+
+Checks:
+- `menu-reopen` gains five checks:
+  - the task's ⋯: the second Escape reaches the page unmarked;
+  - the create modal's Templates menu: the second Escape closes the modal;
+  - beside them, the open menu: Escape closes the Templates menu and the modal stays.
+  Each leaving round checks that its Escape landed in the exit, and the outcomes require it.
+- Before, the two Escape checks failed on every run. After, 24/24 three times running at `7751d5a`.
+- `menu-reopen-7`, `-8` and `-9` are new, each measured on lane 6:
+  - no listener: the two Escape checks;
+  - the listener in the bubble phase: the two Escape checks, and five rounds that hold an exit after an Escape, because the listener then ends the exit the same Escape began;
+  - the caller's `onEscapeKeyDown` dropped for open menus too: the open-menu check and both checks of the modal round.
+- `menu-reopen-1`, which draws Radix's content straight, now reddens the two Escape checks with its four, and `-4` reddens all 24.
+- Regression on lane 6: the same 12 suites, all green, 267 checks.
+
+Found while closing it: `found-30-sep/comment-says-a-leaving-menu-keeps-its-escape`.
+- A review of the change named a way it could fail. A layer opened over the leaving menu, a dialog from the menu's own row, or a second menu, would count itself second in Radix's stack while the Escape ends the exit, and so let the Escape by. Measured on lane 6, it does not happen. The task menu's "Merge", pressed with the menu's exit held, opens its dialog over the leaving menu, and an Escape then closes the dialog. A second menu cannot be opened during the exit at all: a leaving modal menu keeps pointer events off the page until it has gone, and the user menu's button, pressed then, did nothing. `menu-reopen` holds the dialog's case in two checks, 24 → 26. `menu-reopen-12` (the Escape that ends the exit is stopped as well) is aimed at the dialog's check.
+- The two comments that still said a leaving menu takes the next Escape are reworded (`found-30-sep/comment-says-a-leaving-menu-keeps-its-escape`, below).
+- Merged here with the wait and zip changes below and run again on lane 6: `menu-reopen` 26/26 three runs in a row, and `list-export` 30, `comment-slash-commands` 10, `task-menu` 37, `folder-dialog` 29, `chat-message-actions` 73, `assign-to-priorities` 30, `create-modal-templates` 33, `task-header-status` 15 and `video1-fast-items` 92, all green, 427 checks.
+
+### `found-30-sep/a-double-click-on-a-dialog-row-shuts-the-dialog` — open (visible bug, small; found closing `found-30-sep/menu-items-take-a-press-while-closing`)
+
+**A double-click on a menu row that opens a dialog opens it and shuts it again**
+
+*Evidence, 30 September, lane 6:* on the task menu's "Merge", two presses 156–218 ms apart, as a person double-clicks at their own pace. The first opened the Merge dialog 25–66 ms later. The second landed on the dialog's overlay, and the dialog read `closed` 11–36 ms after it and was gone 267–429 ms later. 9 rounds of 9, on three builds: HEAD at `9b5ced3`, the first guard at `9b5ced3`, and the final one at `7751d5a`. The row guard cannot see this press, which never reaches the row: a modal Radix dialog takes a press on its overlay as a press outside, and closes. Measured on Merge only. The task menu's other rows that open a Radix dialog from `onSelect` (Description history, Convert, Email) presumably share it; Archive and Delete ask through `window.confirm`, which is not this. Probe: `menus2-work/probe-dialog-row.mjs` in the agent's scratchpad (logs `probe-dialog-row-{before,after,final}*.log`).
+
+*To close:* research what ClickUp does with a double-click on a row that opens a dialog. Then decide what the second press does. Either nothing: the dialog refuses an outside press that follows its opening press within a double-click's interval, or it opens once the menu has gone, as the comment "+" menu's creators do. Or what it does now. Check a double-click on Merge leaves the dialog open.
+
+### `found-30-sep/favorite-toggle-races-itself` — open (behaviour, small; found closing `found-30-sep/menu-items-take-a-press-while-closing`)
+
+**Two favourite toggles sent together can both pin**
+
+*Evidence, 30 September:* `FavoritesService.toggle` reads the row, then deletes it or inserts one (`onConflictDoNothing`), with no lock or transaction. Two toggles in flight together can both read "not pinned" and both answer `favorited: true`. Seen once on lane 6 (`7751d5a`'s API): under `menu-reopen-10`, which runs the chat header row's `onClick` on both presses of a double-click, the channel ended pinned, where two toggles taken in turn unpin it. `menu-reopen` now reads the wire as well as the server for that reason. Nothing in the app sends two at once now (the star is disabled while one is pending, and the menu rows run once), so it shows only across two tabs or clients.
+
+*To close:* make the toggle one statement or one serialised transaction, and check that two toggles sent together leave the entity as it was.
+
+### `found-30-sep/comment-says-a-leaving-menu-keeps-its-escape` — **closed** (stale doc, small; found closing `found-30-sep/leaving-menu-takes-the-next-escape`)
+
+**Two comments still say a leaving menu takes the next Escape**
+
+*Evidence, 30 September:* `apps/web/src/components/task-detail-sheet.tsx`, over the comment "+" menu's `createChosen`, says "While it animates out the menu also keeps its Escape layer, which takes the first Escape and marks it handled". `apps/web/src/components/quick-create-modal.tsx`, over Create Task ▾, gives "a comment's "+" menu still unmounting took the one meant for the modal" as a reason. Now an Escape during a menu's exit ends the exit and goes on unmarked. The code both explain is still right: the "+" menu opens the modal from `onCloseAutoFocus` for the cursor's sake, and an open menu's Escape is still marked, so the modal's menus still stop it.
+
+*To close:* reword both to the present behaviour, keeping the reasons that still hold.
+
+*Closed, 30 September,* with `found-30-sep/leaving-menu-takes-the-next-escape`: the comment over the comment "+" menu's creators says the menu kept its Escape layer while it animated out, that it no longer does, and that the focus trap is still why the creators wait; the one over Create Task ▾ says an open Radix layer marks its Escape, and that a leaving one once took the modal's. Comments only.
 
 ### `found-30-sep/agent-worktrees-build-main-packages` — **closed** (test tooling, small; found closing `found-30-sep/menus-drop-a-press-while-closing`)
 
@@ -2742,7 +2829,7 @@ holds objects in memory, and a task past 1 GiB was not staged.
 *To close:* carry the envelope's message on the `ApiError`, show it where it is meant for the reader (the 400s),
 and check it with a cap lowered for the run, or with a HEAD stubbed to answer past it.
 
-### `found-30-sep/two-zip-writers` — open (code, small; found closing `found-30-sep/attachments-have-no-download-all`)
+### `found-30-sep/two-zip-writers` — **closed** (code, small; found closing `found-30-sep/attachments-have-no-download-all`)
 
 **The xlsx export carries a ZIP writer and a CRC table of its own**
 
@@ -2752,13 +2839,27 @@ Two writers of one format drift apart the way the duplicated lists in this ledge
 
 *To close:* write the workbook with `zipStream`, and check `list-export`'s xlsx checks still pass.
 
-### `found-30-sep/a-hung-page-outlasts-every-wait` — open (test tooling, small; found running `task-attachments`' break set at `7751d5a`)
+
+*Closed, 30 September.* `toXlsx` hands the workbook's five parts to `zipStream`, deflated and with no time given, so each is dated 1980-01-01 as before, and the private writer and its CRC table are gone (`xlsx.ts`, 218 → 104 lines). It is async now, and the list export awaits it.
+- `xlsx.test.ts` reads the workbook back with Info-ZIP: the five parts, every CRC tested, the cells inline strings with no formula, and a sheet name with a colon made safe; and two exports of the same rows 2.1 s apart are the same bytes. `tzw-1` (each part dated now) and `tzw-2` (the sheet left out) each redden their test, run against sandbox copies.
+- `list-export-3` anchored on the old call and is re-anchored on `await toXlsx(…)`.
+- Regression on lane 6: `list-export` 30/30, whose xlsx checks open the workbook the one writer now makes, with the batch's other suites, all green, 427 checks.
+
+### `found-30-sep/a-hung-page-outlasts-every-wait` — **closed** (test tooling, small; found running `task-attachments`' break set at `7751d5a`)
 
 **A wait whose question never answers waits for ever, whatever its timeout says**
 
 *Evidence, 30 September, lane 1:* the break runner's baseline of `task-attachments` at `7751d5a` printed "▶ the panel, frame `01:55`" at 12:18:41, then nothing for fourteen minutes, until it was stopped. The lane's API saw the signed-in page open its socket and close it at 12:18:54, as the page left for the task's address, and then no request at all. Every wait in that section has a timeout of 30 s or less. `waitUntil` (`test/e2e/lib/wait.mjs`) awaits its predicate before it looks at the deadline, so a predicate that never settles holds it for ever. The likeliest such predicate is a Playwright call to a page whose renderer stopped answering: an agent had measured 5.4 GB free with no swap half an hour before, with three browsers and a preflight running. Read, not proven: the run left no trace of which call it was in. The suite ends only at its runner's 900 s kill, reported as one failed check. 151 suites call `waitUntil`, 1,072 times. The same suite passed 32/32 on lane 5, at the same code, half an hour earlier.
 
 *To close:* race each predicate against the time left, and count one still pending at the deadline as a no. `waitForCount` goes through `waitUntil`; `textOf`, whose `page.evaluate` has no timeout, needs the same. Check it with a predicate that never settles: the wait returns false at its deadline.
+
+
+*Closed, 30 September.* `waitUntil` races each look against the time left (`settledWithin`, `test/e2e/lib/wait.mjs`). A look still pending at the deadline, plus a grace, counts as no, and the wait gives up. A throw is still a reason to look again.
+- The grace is 15 s (`LAST_LOOK_GRACE_MS`, and `lastLookGraceMs` per call), because predicates wait inside themselves. Across the 1,072 calls, the longest such wait is 8 s (`comment-slash-commands`), and `list-export` runs two 5 s waits back to back. Every predicate that answers at all still answers as before. One that never does costs its deadline plus 15 s instead of the run.
+- `waitForCount` goes through it. `textOf` gives a page that never answers 5 s a look, eight looks, then reads it as empty.
+- `scripts/check-wait-helper.mjs` states the contract in 15 assertions: a predicate that never settles, or stops answering part-way, is a no at the deadline; a true one is a yes, and a false one a no no sooner than the deadline; a look begun before the deadline that answers within the grace counts; a throw is looked past; the default grace outlasts the longest wait inside a predicate; and the same for `waitForCount` and `textOf`. Each case that could hang runs under its own watchdog, so a mutant that waits for ever fails a named case.
+- Against the committed helper, 7 of 15 fail: the five that hang, and the grace. With it, 15 of 15 hold, and 7 of 7 mutations fail a case (the race removed, a pending look read as yes, the deadline never read, no grace, a throw read as the end, a 2 s grace, `textOf` without its bound). The check runs in preflight and CI.
+- Regression on lane 6 with the new helper: `comment-slash-commands` 10, `list-export` 30, `task-menu` 37, `folder-dialog` 29, `chat-message-actions` 73, `task-header-status` 15 and `video1-fast-items` 92 (the suites whose predicates wait longest inside themselves), `menu-reopen` 26 three times and three more, all green, 427 checks.
 
 ### `found-30-sep/schema-reference-reads-the-main-tree` — **closed** (test tooling, small; found closing `found-30-sep/attachments-unordered`)
 

@@ -1,4 +1,4 @@
-import { deflateRawSync } from 'node:zlib'
+import { zipStream } from './zip-stream'
 
 /**
  * A real .xlsx, with no dependency.
@@ -80,96 +80,6 @@ function sheetXml(headers: string[], rows: unknown[][]): string {
 /* The ZIP container. PKZIP, deflate, no data descriptors, no ZIP64.   */
 /* ------------------------------------------------------------------ */
 
-const CRC_TABLE = (() => {
-  const table = new Int32Array(256)
-  for (let i = 0; i < 256; i += 1) {
-    let c = i
-    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
-    table[i] = c
-  }
-  return table
-})()
-
-function crc32(buf: Buffer): number {
-  let c = -1
-  for (let i = 0; i < buf.length; i += 1) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8)
-  return (c ^ -1) >>> 0
-}
-
-/*
- * A fixed timestamp rather than "now": two exports of the same list then differ
- * only where the data differs, which is what makes the break test in
- * `list-export.mjs` able to say the bytes changed BECAUSE the code changed.
- * 1980-01-01 is the earliest a ZIP can express.
- */
-const DOS_TIME = 0
-const DOS_DATE = 33 // (1980-1980)<<9 | 1<<5 | 1
-
-type Entry = { name: string; body: Buffer }
-
-function zip(entries: Entry[]): Buffer {
-  const locals: Buffer[] = []
-  const centrals: Buffer[] = []
-  let offset = 0
-
-  for (const entry of entries) {
-    const name = Buffer.from(entry.name, 'utf8')
-    const deflated = deflateRawSync(entry.body)
-    const crc = crc32(entry.body)
-
-    const local = Buffer.alloc(30 + name.length)
-    local.writeUInt32LE(0x04034b50, 0)
-    local.writeUInt16LE(20, 4) // version needed
-    local.writeUInt16LE(0, 6) // flags
-    local.writeUInt16LE(8, 8) // deflate
-    local.writeUInt16LE(DOS_TIME, 10)
-    local.writeUInt16LE(DOS_DATE, 12)
-    local.writeUInt32LE(crc, 14)
-    local.writeUInt32LE(deflated.length, 18)
-    local.writeUInt32LE(entry.body.length, 22)
-    local.writeUInt16LE(name.length, 26)
-    local.writeUInt16LE(0, 28)
-    name.copy(local, 30)
-
-    const central = Buffer.alloc(46 + name.length)
-    central.writeUInt32LE(0x02014b50, 0)
-    central.writeUInt16LE(20, 4) // version made by
-    central.writeUInt16LE(20, 6) // version needed
-    central.writeUInt16LE(0, 8)
-    central.writeUInt16LE(8, 10)
-    central.writeUInt16LE(DOS_TIME, 12)
-    central.writeUInt16LE(DOS_DATE, 14)
-    central.writeUInt32LE(crc, 16)
-    central.writeUInt32LE(deflated.length, 20)
-    central.writeUInt32LE(entry.body.length, 24)
-    central.writeUInt16LE(name.length, 28)
-    central.writeUInt16LE(0, 30) // extra
-    central.writeUInt16LE(0, 32) // comment
-    central.writeUInt16LE(0, 34) // disk
-    central.writeUInt16LE(0, 36) // internal attrs
-    central.writeUInt32LE(0, 38) // external attrs
-    central.writeUInt32LE(offset, 42)
-    name.copy(central, 46)
-
-    locals.push(local, deflated)
-    centrals.push(central)
-    offset += local.length + deflated.length
-  }
-
-  const centralBlock = Buffer.concat(centrals)
-  const end = Buffer.alloc(22)
-  end.writeUInt32LE(0x06054b50, 0)
-  end.writeUInt16LE(0, 4)
-  end.writeUInt16LE(0, 6)
-  end.writeUInt16LE(entries.length, 8)
-  end.writeUInt16LE(entries.length, 10)
-  end.writeUInt32LE(centralBlock.length, 12)
-  end.writeUInt32LE(offset, 16)
-  end.writeUInt16LE(0, 20)
-
-  return Buffer.concat([...locals, centralBlock, end])
-}
-
 const CONTENT_TYPES =
   '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
   '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
@@ -200,7 +110,15 @@ function safeSheetName(name: string): string {
   return (cleaned || 'Sheet1').slice(0, 31)
 }
 
-export function toXlsx(sheetName: string, headers: string[], rows: unknown[][]): Buffer {
+/**
+ * THE ONE ZIP WRITER (`found-30-sep/two-zip-writers`). This file carried a ZIP
+ * writer and a CRC table of its own, buffered, beside `zip-stream.ts`, which
+ * Download all streams its archives through. Two writers of one format drift
+ * apart, so the workbook's five parts go through `zipStream` too, deflated. No
+ * time is given, so every entry is dated 1980-01-01, the earliest a ZIP can
+ * say: two exports of the same list differ only where the data does.
+ */
+export async function toXlsx(sheetName: string, headers: string[], rows: unknown[][]): Promise<Buffer> {
   const workbook =
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
@@ -208,11 +126,18 @@ export function toXlsx(sheetName: string, headers: string[], rows: unknown[][]):
     `<sheets><sheet name="${safeSheetName(sheetName)}" sheetId="1" r:id="rId1"/></sheets>` +
     '</workbook>'
 
-  return zip([
-    { name: '[Content_Types].xml', body: Buffer.from(CONTENT_TYPES, 'utf8') },
-    { name: '_rels/.rels', body: Buffer.from(ROOT_RELS, 'utf8') },
-    { name: 'xl/workbook.xml', body: Buffer.from(workbook, 'utf8') },
-    { name: 'xl/_rels/workbook.xml.rels', body: Buffer.from(WORKBOOK_RELS, 'utf8') },
-    { name: 'xl/worksheets/sheet1.xml', body: Buffer.from(sheetXml(headers, rows), 'utf8') },
-  ])
+  const parts: Array<[string, string]> = [
+    ['[Content_Types].xml', CONTENT_TYPES],
+    ['_rels/.rels', ROOT_RELS],
+    ['xl/workbook.xml', workbook],
+    ['xl/_rels/workbook.xml.rels', WORKBOOK_RELS],
+    ['xl/worksheets/sheet1.xml', sheetXml(headers, rows)],
+  ]
+  const chunks: Buffer[] = []
+  for await (const chunk of zipStream(
+    parts.map(([name, xml]) => ({ name, method: 'deflate' as const, open: async () => Buffer.from(xml, 'utf8') })),
+  )) {
+    chunks.push(chunk)
+  }
+  return Buffer.concat(chunks)
 }

@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { flushSync } from 'react-dom'
 import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu'
 import { Check, ChevronRight, Circle } from 'lucide-react'
 import { cn } from '../lib/cn'
@@ -48,6 +49,50 @@ export const DropdownMenuSubContent = React.forwardRef<
 DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayName
 
 /*
+ * AN ESCAPE PRESSED WHILE A MENU IS LEAVING IS NOT THE MENU'S
+ * (`found-30-sep/leaving-menu-takes-the-next-escape`).
+ *
+ * Radix keeps a closed menu's layer in its stack until the exit animation
+ * ends, and the layer's Escape listener (on the document, capture phase) still
+ * answers for the top of that stack. So an Escape pressed while the menu
+ * leaves is the leaving menu's: Radix marks it `defaultPrevented` and spends it
+ * closing a menu that is already closed, and the caller's `onEscapeKeyDown`
+ * runs on it. The create modal's menus stop there the Escape that closes them,
+ * so that it does not close the modal too; the second Escape, meant for the
+ * modal, stopped there as well, and the modal stayed. A Radix layer under the
+ * menu would not hear it either: only the top of the stack answers Escape.
+ *
+ * Radix has no prop to let a layer pass an Escape by untouched: calling
+ * `preventDefault` is the only way to skip its dismissal, and that marks the
+ * Escape. So an Escape during the exit ends the exit. The content is handed the
+ * `animationend` its Presence is waiting for, and the unmount is committed at
+ * once (`flushSync`): the layer's cleanup takes it out of the stack and removes
+ * its listener. This listener is on the window, in the capture phase, so it
+ * runs before the layer's. The Escape then goes on to what is under the menu,
+ * as it would once the menu had gone, which it now has.
+ *
+ * Only a menu that reads `closed` is ended. An open menu takes its Escape as
+ * before, and the caller's `onEscapeKeyDown` still decides what it does.
+ */
+function useEscapeEndsTheExit(node: HTMLElement | null) {
+  React.useEffect(() => {
+    if (!node) return
+    const win = node.ownerDocument.defaultView
+    if (!win) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || node.getAttribute('data-state') !== 'closed') return
+      const exit = win.getComputedStyle(node).animationName.split(',')[0].trim()
+      if (!exit || exit === 'none') return
+      flushSync(() => {
+        node.dispatchEvent(new AnimationEvent('animationend', { animationName: exit }))
+      })
+    }
+    win.addEventListener('keydown', onKeyDown, true)
+    return () => win.removeEventListener('keydown', onKeyDown, true)
+  }, [node])
+}
+
+/*
  * A MENU THAT IS CLOSING DISMISSES NOTHING
  * (`found-30-sep/menus-drop-a-press-while-closing`).
  *
@@ -67,7 +112,7 @@ DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayNam
  * the menu: by the time the layer asks, it says `open` again. The caller's
  * `onPointerDownOutside` runs first, an open menu is dismissed as before, and
  * the exit animation is unchanged. Every menu drawn with `DropdownMenuContent`
- * below gets it.
+ * below gets it, and the Escape rule under it (`useEscapeEndsTheExit`).
  */
 const ReopenableContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
@@ -84,6 +129,7 @@ const ReopenableContent = React.forwardRef<
     doc.addEventListener('pointerdown', read, true)
     return () => doc.removeEventListener('pointerdown', read, true)
   }, [node])
+  useEscapeEndsTheExit(node)
   const setRefs = React.useCallback(
     (el: HTMLDivElement | null) => {
       setNode(el)
@@ -131,13 +177,65 @@ export const DropdownMenuContent = React.forwardRef<
 ))
 DropdownMenuContent.displayName = DropdownMenuPrimitive.Content.displayName
 
+/*
+ * A ROW OF A MENU THAT IS LEAVING RUNS NOTHING
+ * (`found-30-sep/menu-items-take-a-press-while-closing`).
+ *
+ * The first press of a double-click chooses the row and the menu closes. The
+ * second lands on the same row, which is still in the page for the exit
+ * animation and still takes presses. Radix's `Item` selects on any click,
+ * without asking whether its menu is open, so the row ran twice: the task
+ * menu's "Add to favorites" pinned the task and unpinned it, and two presses
+ * 127–179 ms apart, as a person double-clicks, did the same.
+ *
+ * So a press on a row whose menu reads `closed` does nothing. The caller's
+ * `onClick` is not called, and the click is prevented, which is how Radix's
+ * own handler (the selection, and with it `onSelect`) is told to stand aside.
+ * The keyboard goes the same way: Enter on a row is a click. The press is not
+ * let through to what is under the menu: the person aimed at the row they could
+ * see, not at the page beneath it. An open menu's rows run as before, and so
+ * does a row that keeps its menu open, however quickly it is pressed again.
+ *
+ * THE MENU THAT DECIDES IS THE ONE THE BUTTON OPENED, not a submenu. Choosing
+ * any row closes the whole menu (Radix closes it from the top), so that is
+ * the state that says a choice has been made. A submenu also closes on its own
+ * while its menu stays open, when the pointer or focus leaves it. The task
+ * menu's "Add to" › a person, pressed as `assign-to-priorities` presses it,
+ * found its submenu `closed` and the menu `open` at the press, and the row ran
+ * on HEAD. That press is a first one, and it still runs. A submenu names the
+ * row that opened it (`aria-labelledby`), and that row sits in its parent menu,
+ * so the walk goes up through those to the top.
+ */
+const topMenuOf = (row: Element): Element | null => {
+  let menu = row.closest('[data-radix-menu-content]')
+  while (menu) {
+    const opener = row.ownerDocument.getElementById(menu.getAttribute('aria-labelledby') ?? '')
+    const parent = opener?.matches('[role="menuitem"][aria-haspopup="menu"]')
+      ? opener.closest('[data-radix-menu-content]')
+      : null
+    if (!parent || parent === menu) return menu
+    menu = parent
+  }
+  return null
+}
+const inLeavingMenu = (row: Element) => topMenuOf(row)?.getAttribute('data-state') === 'closed'
+const onlyWhileOpen =
+  (onClick: React.MouseEventHandler<HTMLDivElement> | undefined): React.MouseEventHandler<HTMLDivElement> =>
+  (event) => {
+    if (inLeavingMenu(event.currentTarget)) {
+      event.preventDefault()
+      return
+    }
+    onClick?.(event)
+  }
+
 export const DropdownMenuItem = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item> & {
     inset?: boolean
     destructive?: boolean
   }
->(({ className, inset, destructive, ...props }, ref) => (
+>(({ className, inset, destructive, onClick, ...props }, ref) => (
   <DropdownMenuPrimitive.Item
     ref={ref}
     className={cn(
@@ -149,6 +247,7 @@ export const DropdownMenuItem = React.forwardRef<
       className,
     )}
     {...props}
+    onClick={onlyWhileOpen(onClick)}
   />
 ))
 DropdownMenuItem.displayName = DropdownMenuPrimitive.Item.displayName
@@ -156,7 +255,7 @@ DropdownMenuItem.displayName = DropdownMenuPrimitive.Item.displayName
 export const DropdownMenuCheckboxItem = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.CheckboxItem>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.CheckboxItem>
->(({ className, children, checked, ...props }, ref) => (
+>(({ className, children, checked, onClick, ...props }, ref) => (
   <DropdownMenuPrimitive.CheckboxItem
     ref={ref}
     className={cn(
@@ -165,6 +264,7 @@ export const DropdownMenuCheckboxItem = React.forwardRef<
     )}
     checked={checked}
     {...props}
+    onClick={onlyWhileOpen(onClick)}
   >
     <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
       <DropdownMenuPrimitive.ItemIndicator>
@@ -179,7 +279,7 @@ DropdownMenuCheckboxItem.displayName = DropdownMenuPrimitive.CheckboxItem.displa
 export const DropdownMenuRadioItem = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.RadioItem>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.RadioItem>
->(({ className, children, ...props }, ref) => (
+>(({ className, children, onClick, ...props }, ref) => (
   <DropdownMenuPrimitive.RadioItem
     ref={ref}
     className={cn(
@@ -187,6 +287,7 @@ export const DropdownMenuRadioItem = React.forwardRef<
       className,
     )}
     {...props}
+    onClick={onlyWhileOpen(onClick)}
   >
     <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
       <DropdownMenuPrimitive.ItemIndicator>

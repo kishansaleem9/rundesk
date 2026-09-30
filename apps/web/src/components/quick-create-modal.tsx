@@ -2251,10 +2251,10 @@ function TaskForm({
               modal closes on any Escape that reaches the document, and one
               spent closing this menu must not throw away the half-filled task.
               Stopped here rather than read as `defaultPrevented` there, since
-              any Radix layer on the page marks its Escape so — a comment's "+"
-              menu still unmounting took the one meant for the modal. (That
-              menu now opens the modal only once it has gone,
-              `found-29-sep/comment-plus-menu-keeps-focus-after-create`.)
+              any open Radix layer on the page marks its Escape so. (A leaving
+              menu once took the one meant for the modal as well; an Escape
+              during a menu's exit now ends the exit and goes on unmarked,
+              `found-30-sep/leaving-menu-takes-the-next-escape`.)
             */}
             <DropdownMenuContent
               align="end"

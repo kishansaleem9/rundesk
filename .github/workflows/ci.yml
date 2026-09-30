@@ -257,6 +257,13 @@ jobs:
       - name: The chain helper holds its contract
         run: node scripts/check-chain-helper.mjs --mutate
 
+      # And the wait helper 151 suites call. It awaited its question before it
+      # looked at the deadline, so a question a hung page never answered held a
+      # 20 s wait for fourteen minutes, until the break runner's kill
+      # (`found-30-sep/a-hung-page-outlasts-every-wait`).
+      - name: A wait gives up at its deadline
+        run: node scripts/check-wait-helper.mjs --mutate
+
       # Every gate that re-runs itself against a mutant goes through one runner.
       # spawnSync's timeout signals the mutant alone: ended mid-probe, a stub
       # gate's mutant left its stub listening and its probe in apps/api, and
@@ -3075,7 +3082,11 @@ jobs:
       # leaving layer took the press as outside and shut the menu it had just
       # become. The page holds the exit so the press lands in it, on four menus
       # of the shared dropdown, and one menu opens and closes the ordinary way.
-      - name: A menu pressed while it closes opens and stays open
+      # In the same held exit, a row pressed a second time runs once, read back
+      # from the server (`found-30-sep/menu-items-take-a-press-while-closing`),
+      # and a second Escape goes on to what is under the menu: the create modal
+      # closes (`found-30-sep/leaving-menu-takes-the-next-escape`).
+      - name: A menu pressed while it closes opens and stays open, and takes no second row press or Escape
         if: '!cancelled()'
         run: node test/e2e/menu-reopen.mjs --api 3011 --dist apps/web/dist
         env:

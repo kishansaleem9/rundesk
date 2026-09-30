@@ -2901,7 +2901,7 @@ export class TasksService {
           format === 'xlsx'
             ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             : 'text/csv; charset=utf-8',
-        body: format === 'xlsx' ? toXlsx(name, boardHeaders, boardCells) : toCsv(boardHeaders, boardCells),
+        body: format === 'xlsx' ? await toXlsx(name, boardHeaders, boardCells) : toCsv(boardHeaders, boardCells),
       }
     }
 
@@ -2917,7 +2917,7 @@ export class TasksService {
         format === 'xlsx'
           ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
           : 'text/csv; charset=utf-8',
-      body: format === 'xlsx' ? toXlsx(name, headers, cells) : toCsv(headers, cells),
+      body: format === 'xlsx' ? await toXlsx(name, headers, cells) : toCsv(headers, cells),
     }
   }
 

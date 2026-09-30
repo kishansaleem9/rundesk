@@ -8208,9 +8208,12 @@ function CommentPlusMenu({
    * "+" behind the modal. Measured on lane 2, 29 September: the cursor in the
    * closing menu at 77ms and on the "+" at 185ms. A name typed at once went
    * into the closing menu; typed a moment later it went to the "+", whose first
-   * space opened this menu again under the modal. While it animates out the
-   * menu also keeps its Escape layer, which takes the first Escape and marks it
-   * handled (the modal, which ignores the mark, closed on it all the same).
+   * space opened this menu again under the modal. While it animated out the
+   * menu also kept its Escape layer, which took the first Escape and marked it
+   * handled (the modal, which ignores the mark, closed on it all the same). A
+   * leaving menu no longer does: an Escape during its exit ends the exit and
+   * goes on unmarked (`found-30-sep/leaving-menu-takes-the-next-escape`). The
+   * focus trap is still the reason the creators wait.
    *
    * So a row only says which creator was chosen, and the modal opens from
    * `onCloseAutoFocus`, the point at which the menu, its focus trap and its
