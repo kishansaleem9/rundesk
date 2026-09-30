@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 378 items, 52 open, 8 partly fixed, 318 closed, counted from this file's headings on 30 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 381 items, 54 open, 8 partly fixed, 319 closed, counted from this file's headings on 30 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1746,13 +1746,65 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 
 *To close:* research how ClickUp applies a template to a form that already holds values, then apply what was typed (or say, before Create, which fields the template will replace), and check it with a suite.
 
-### `found-30-sep/menus-drop-a-press-while-closing` — open (visible bug, small; found closing `ledger-rows/row-1060`)
+### `found-30-sep/menus-drop-a-press-while-closing` — **closed** (visible bug, small; found closing `ledger-rows/row-1060`)
 
 **A dropdown pressed while the last one is still closing opens and shuts again at once**
 
 *Evidence, 30 September, measured on lane 3 by the agent:* a closed `DropdownMenu` stays mounted through its exit animation. A press on the trigger in that window opens the new menu, and 3 ms later the leaving layer takes it as a press outside and closes it. In a scratch loop under load: 2 of 6 rounds, with the old menu still mounted 355 ms after closing; 0 of 10 once the loop waited for it to go. Measured on the create modal's Templates menu only. It comes from the shared `@rundesk/ui` dropdown's exit animation, so other menus on it presumably share it. `create-modal-templates` waits for the old menu to leave before pressing.
 
 *To close:* measure it on two other menus, then make a closing layer ignore presses on a trigger (or drop the exit animation's outside-press handling), and check that a press during the exit opens the menu and it stays open.
+
+*Closed, 30 September* (built by an agent on lane 6, merged and measured again here). ClickUp's help centre ("Task settings menu", "List, Folder, and Space settings", read through search results):
+- "In the upper-right corner, click the ellipsis ... icon to open the task settings menu";
+- a List's settings open from "the ellipsis (...) icon to the right of a List".
+
+A press on a menu's button opens its menu. Nothing there depends on how recently the menu closed.
+
+Measured first, on lane 6, on four menus of the shared dropdown: the task's ⋯, the sidebar's ⋯ on a list, the sidebar's + on a space and the top bar's user menu. A press during the exit re-opened the menu 4–16 ms after the press. In the same millisecond the leaving layer took the press as a press outside (`pointerDownOutside`), and the menu was shut 3–8 ms later. Focus-outside played no part: a modal Radix menu refuses it. It was every menu drawn by `DropdownMenuContent`, not the Templates menu alone.
+
+- `DropdownMenuContent` now draws `ReopenableContent`, which refuses the outside press of a layer that was already closing when the press began. The button's own toggle decides.
+- "Was closing" is read in the capture phase, before the button's handler re-opens the menu.
+- The caller's `onPointerDownOutside` runs first. An open menu is dismissed by a press outside it as before, and the exit animation is unchanged.
+- One line of `DropdownMenuContent` changed, so `swc-7`'s anchor still holds.
+
+Checks:
+- `menu-reopen` is new, with 11 checks, registered in CI (248 in `postgres-harnesses`).
+- The page holds each menu's exit where it starts, so the second press lands in it. Each round checks that it did: the old menu in the page, `data-state="closed"`.
+- Four menus open again and stay open. The task's ⋯ also opens with one press, closes with another, and closes on a press away from it.
+- Before, 7/11 on lane 6's build of HEAD, four times: the four "opens the menu again" checks. After, 11/11 four times running on the final code.
+- `menu-reopen-1..4` are new, each measured on lane 6:
+  - the fix removed: the four reopen checks;
+  - the state read after the reopen: the same four;
+  - every outside press refused: the two ordinary close checks;
+  - a press that opens nothing: all eleven.
+- Regression on lane 6: the 29 suites that press the shared dropdown's buttons, all green, 492 checks. They include task-menu 37, assign-to-priorities 30, task-merge 28, menu-offers 9, space-create-menu 32, sidebar-sections 25, comment-plus-menu 19, create-task-chevron 9, folder-dialog 29, person-panel 60, task-cover 42 and brain-entry-points 20.
+
+Found while closing it: `found-30-sep/menu-items-take-a-press-while-closing`, `found-30-sep/leaving-menu-takes-the-next-escape` and `found-30-sep/agent-worktrees-build-main-packages`.
+- Merged here and run again: `menu-reopen` 11/11 on lane 5, and on lanes 5 and 7 nine suites that press the shared dropdown's buttons, all green, 205 checks (task-menu 37, menu-offers 9, assign-to-priorities 30, create-modal-templates 15, sidebar-sections 25, space-create-menu 32, comment-plus-menu 19, create-task-chevron 9, folder-dialog 29). Its suite moved onto lib/fixture.mjs's one client.
+
+### `found-30-sep/menu-items-take-a-press-while-closing` — open (visible bug, small; found closing `found-30-sep/menus-drop-a-press-while-closing`)
+
+**A double-click on a menu row runs it twice: the second press lands on the leaving menu**
+
+*Evidence, 30 September, lane 6:* on the task menu's "Add to favorites", a double-click sent two toggles, 0–3 ms apart, and two presses 127–179 ms apart did the same. The task was pinned and unpinned, 6 of 6 rounds, on HEAD's build and on the fixed one. Radix's `MenuItem` selects on click with no open-state check, and a leaving menu's content still takes presses (`probe-dblclick.mjs` in the agent's scratchpad).
+
+*To close:* decide what a second press on a leaving menu does. Either nothing (refuse selection in `DropdownMenuItem` while its menu reads `closed`), or it reaches what is under the menu (`pointer-events: none` on closed content). Check a double-click on a row runs it once.
+
+### `found-30-sep/leaving-menu-takes-the-next-escape` — open (visible bug, small; found closing `found-30-sep/menus-drop-a-press-while-closing`)
+
+**An Escape pressed while a menu is leaving is taken by the leaving menu**
+
+*Evidence, 30 September, lane 6:* with the exit held, an Escape pressed after the task menu closed came back `defaultPrevented`, the menu still in the page. With no menu in the page it did not. The create modal already works round one case of it (a comment's "+" menu took the Escape meant for the modal). Radix offers no prop to let a leaving layer pass an Escape through untouched.
+
+*To close:* let a closing layer ignore Escape (in the shared dropdown, or by scoping the exit so it unmounts sooner), and check that an Escape during a menu's exit reaches what is under it.
+
+### `found-30-sep/agent-worktrees-build-main-packages` — open (test tooling, small; found closing `found-30-sep/menus-drop-a-press-while-closing`)
+
+**An agent worktree linked as the brief says builds `packages/*` from the main checkout**
+
+*Evidence, 30 September:* `apps/web/node_modules` linked wholesale to the main checkout's resolves `@rundesk/ui -> ../../../../packages/ui` against the main checkout. A `packages/ui` change built there was not in the bundle: `menu-reopen` would have measured nothing. `wt-break.sh`'s `link_own_packages` already builds its worktrees a `node_modules` whose `@rundesk/*` point at the worktree.
+
+*To close:* have the agent brief (or a helper) link `@rundesk/*` to the worktree the way `link_own_packages` does, and check that a worktree's bundle carries its own `packages/ui`.
 
 ### `found-30-sep/save-as-template-asks-no-description` — open (feature, small; found closing `ledger-rows/row-1060`)
 

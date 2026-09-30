@@ -47,12 +47,70 @@ export const DropdownMenuSubContent = React.forwardRef<
 ))
 DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayName
 
+/*
+ * A MENU THAT IS CLOSING DISMISSES NOTHING
+ * (`found-30-sep/menus-drop-a-press-while-closing`).
+ *
+ * Radix keeps a closed menu in the page through its exit animation (Presence
+ * waits for `animationend`), and with it the DismissableLayer's `pointerdown`
+ * listener on the document. A press on the menu's button in that window
+ * re-opens it from React's root listener; the same press then reaches the
+ * document, where the leaving layer counts it as a press outside and closes
+ * the menu it has just become. Measured on four menus, three runs: open again
+ * 4–16 ms after the press, and shut 3–8 ms later by the leaving layer's
+ * pointerDownOutside.
+ *
+ * A layer that was already closing when the press began has nothing to
+ * dismiss — on any other press, dismissing a closed menu changes nothing — so
+ * its outside press is refused and the button's own toggle decides. "Was
+ * closing" is read in the capture phase, before the button's handler re-opens
+ * the menu: by the time the layer asks, it says `open` again. The caller's
+ * `onPointerDownOutside` runs first, an open menu is dismissed as before, and
+ * the exit animation is unchanged. Every menu drawn with `DropdownMenuContent`
+ * below gets it.
+ */
+const ReopenableContent = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
+>(({ onPointerDownOutside, ...props }, ref) => {
+  const [node, setNode] = React.useState<HTMLDivElement | null>(null)
+  const closingWhenPressed = React.useRef(false)
+  React.useEffect(() => {
+    if (!node) return
+    const doc = node.ownerDocument
+    const read = () => {
+      closingWhenPressed.current = node.getAttribute('data-state') === 'closed'
+    }
+    doc.addEventListener('pointerdown', read, true)
+    return () => doc.removeEventListener('pointerdown', read, true)
+  }, [node])
+  const setRefs = React.useCallback(
+    (el: HTMLDivElement | null) => {
+      setNode(el)
+      if (typeof ref === 'function') ref(el)
+      else if (ref) ref.current = el
+    },
+    [ref],
+  )
+  return (
+    <DropdownMenuPrimitive.Content
+      ref={setRefs}
+      onPointerDownOutside={(event) => {
+        onPointerDownOutside?.(event)
+        if (closingWhenPressed.current) event.preventDefault()
+      }}
+      {...props}
+    />
+  )
+})
+ReopenableContent.displayName = 'ReopenableContent'
+
 export const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
 >(({ className, sideOffset = 6, ...props }, ref) => (
   <DropdownMenuPrimitive.Portal>
-    <DropdownMenuPrimitive.Content
+    <ReopenableContent
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
