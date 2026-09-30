@@ -360,14 +360,25 @@ export class EmailService {
     })
   }
 
-  /** Send a clip share notification */
+  /**
+   * Send a clip share notification.
+   *
+   * The link is the clip's own (`/clips/<token>`), which does not expire, so
+   * the mail says who can open it instead of when it dies
+   * (`resume-defects/resume-7`): it carried a signed URL and "This secure link
+   * expires on …", an hour after it was sent from the clips page.
+   */
   async sendClipSharedEmail(opts: {
     to: string
     actorEmail: string
     clipName: string
     clipUrl: string
-    expiresAt: Date
+    audience: 'anyone' | 'members'
   }) {
+    const who =
+      opts.audience === 'members'
+        ? 'Sign in to Rundesk to watch it: it is shared with the members of its workspace only.'
+        : 'Anyone with this link can watch it.'
     return this.send({
       to: opts.to,
       subject: `[Rundesk] ${opts.actorEmail} shared a clip with you`,
@@ -376,7 +387,7 @@ export class EmailService {
         body: `
           <p><strong>${this.esc(opts.actorEmail)}</strong> shared a clip with you:</p>
           <p><strong>${this.esc(opts.clipName)}</strong></p>
-          <p style="font-size: 13px; color: #6b7280;">This secure link expires on ${opts.expiresAt.toLocaleString()}.</p>
+          <p style="font-size: 13px; color: #6b7280;">${who} The link does not expire; it stops working if the clip is deleted.</p>
         `,
         ctaUrl: opts.clipUrl,
         ctaLabel: 'Open clip',

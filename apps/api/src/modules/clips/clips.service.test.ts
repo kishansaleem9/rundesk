@@ -1,25 +1,117 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common'
+import { BadRequestException, ForbiddenException, NotFoundException, UnauthorizedException } from '@nestjs/common'
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 import { ClipsService } from './clips.service'
 
-function createDbMock(options?: { memberEmail?: string | null }) {
-  return {
-    select: mock.fn(() => ({
-      from: mock.fn(() => ({
-        innerJoin: mock.fn(() => ({
-          where: mock.fn(() => ({
-            limit: mock.fn(async () =>
-              options?.memberEmail ? [{ email: options.memberEmail }] : [],
-            ),
-          })),
-        })),
-      })),
-    })),
-  } as any
+/*
+ * THE VALUES A QUERY WAS ASKED FOR, read off drizzle's condition: `eq(col, v)`
+ * binds `v` as a `Param`, and `and(…)` nests them. So the fake below answers
+ * the question the service asked — this token, this key, this member — rather
+ * than whatever was queued, and a rule that asks about the wrong row is caught.
+ */
+function paramValues(cond: unknown): unknown[] {
+  const out: unknown[] = []
+  const walk = (node: any) => {
+    if (!node || typeof node !== 'object') return
+    if (node.constructor?.name === 'Param') {
+      out.push(node.value)
+      return
+    }
+    if (Array.isArray(node.queryChunks)) node.queryChunks.forEach(walk)
+    else if (Array.isArray(node)) node.forEach(walk)
+  }
+  walk(cond)
+  return out
 }
 
-function createR2Mock() {
+type Link = { workspaceId: string; storageKey: string; token: string; createdById: string }
+
+/**
+ * A database holding the clip links, which workspaces block public sharing,
+ * and who is a member of what. Each select is told apart by the fields it
+ * names, which is how the service writes each of its questions.
+ */
+function createDbMock(options?: {
+  memberEmail?: string | null
+  links?: Link[]
+  blocked?: string[]
+  archived?: string[]
+  members?: string[]
+  /** Every insert meets a unique conflict, as a token clash or a racing insert would. */
+  insertConflicts?: boolean
+}) {
+  const state = {
+    links: [...(options?.links ?? [])],
+    blocked: new Set(options?.blocked ?? []),
+    archived: new Set(options?.archived ?? []),
+    members: new Set(options?.members ?? []),
+  }
+  const answer = (fields: string, params: unknown[]) => {
+    switch (fields) {
+      case 'token':
+        return state.links.filter((l) => l.storageKey === params[0]).map((l) => ({ token: l.token }))
+      case 'blockPublicSharing,storageKey,workspaceArchived,workspaceId':
+        return state.links
+          .filter((l) => l.token === params[0])
+          .map((l) => ({
+            workspaceId: l.workspaceId,
+            storageKey: l.storageKey,
+            blockPublicSharing: state.blocked.has(l.workspaceId),
+            workspaceArchived: state.archived.has(l.workspaceId),
+          }))
+      case 'blockPublicSharing':
+        return [{ blockPublicSharing: state.blocked.has(params[0] as string) }]
+      case 'userId':
+        return state.members.has(`${params[0]}:${params[1]}`) ? [{ userId: params[1] }] : []
+      case 'email':
+        return options?.memberEmail ? [{ email: options.memberEmail }] : []
+      default:
+        throw new Error(`the fake database was asked for ${fields}`)
+    }
+  }
+  const db = {
+    state,
+    select: mock.fn((fields?: Record<string, unknown>) => {
+      const names = Object.keys(fields ?? {}).sort().join(',')
+      let params: unknown[] = []
+      const q: any = {
+        from: () => q,
+        innerJoin: () => q,
+        where: (cond: unknown) => {
+          params = paramValues(cond)
+          return q
+        },
+        limit: async () => answer(names, params),
+      }
+      return q
+    }),
+    insert: mock.fn(() => ({
+      values: (values: Link) => ({
+        onConflictDoNothing: () => ({
+          returning: async () => {
+            if (options?.insertConflicts) return []
+            state.links.push(values)
+            return [{ token: values.token }]
+          },
+        }),
+      }),
+    })),
+    delete: mock.fn(() => ({
+      // Lazy, as drizzle's query is: nothing is deleted until it is awaited.
+      where: (cond: unknown) => ({
+        then: (resolve: () => void) => {
+          const [workspaceId, storageKey] = paramValues(cond)
+          state.links = state.links.filter((l) => !(l.workspaceId === workspaceId && l.storageKey === storageKey))
+          resolve()
+        },
+      }),
+    })),
+  }
+  return db as any
+}
+
+function createR2Mock(stored: string[] = ['workspaces/ws-1/clips/a.webm']) {
+  const objects = new Set(stored)
   return {
     configured: true,
     presignPutObject: mock.fn(async (key: string) => `https://upload.example/${encodeURIComponent(key)}`),
@@ -35,15 +127,29 @@ function createR2Mock() {
         LastModified: new Date('2026-05-08T09:00:00Z'),
       },
     ]),
-    headObject: mock.fn(async (key: string) => ({
-      Metadata: {
-        title: key.includes('second') ? 'Second clip' : 'First clip',
-        durationseconds: key.includes('second') ? '40' : '10',
-        recordedby: 'owner@rundesk.dev',
-      },
-    })),
-    getObjectUrl: mock.fn(async (key: string) => `https://cdn.example/${encodeURIComponent(key)}`),
-    deleteObject: mock.fn(async () => undefined),
+    headObject: mock.fn(async (key: string) => {
+      if (key.startsWith('workspaces/ws-1/clips/1') || key.startsWith('workspaces/ws-1/clips/2')) {
+        return {
+          Metadata: {
+            title: key.includes('second') ? 'Second clip' : 'First clip',
+            durationseconds: key.includes('second') ? '40' : '10',
+            recordedby: 'owner@rundesk.dev',
+          },
+        }
+      }
+      if (!objects.has(key)) throw Object.assign(new Error('NotFound'), { name: 'NotFound' })
+      return {
+        Metadata: { title: 'Demo clip', durationseconds: '15', recordedby: 'owner@rundesk.dev' },
+        ContentType: 'video/webm',
+        LastModified: new Date('2026-09-29T10:00:00Z'),
+      }
+    }),
+    getObjectUrl: mock.fn(
+      async (key: string, seconds = 900) => `https://cdn.example/${encodeURIComponent(key)}?X-Amz-Expires=${seconds}`,
+    ),
+    deleteObject: mock.fn(async (key: string) => {
+      objects.delete(key)
+    }),
   } as any
 }
 
@@ -53,12 +159,19 @@ function createEmailMock() {
   } as any
 }
 
+/** The environment: nothing set but what a test names. */
+const config = (env: Record<string, string> = {}) => ({ get: (k: string) => env[k] }) as any
+
+const KEY = 'workspaces/ws-1/clips/a.webm'
+/** A token in the shape `link` mints. */
+const TOKEN = 'T'.repeat(32)
+
 describe('ClipsService', () => {
   it('creates upload URL for clip recording', async () => {
     const r2 = createR2Mock()
     const email = createEmailMock()
     const db = createDbMock()
-    const svc = new ClipsService(r2, email, db)
+    const svc = new ClipsService(r2, email, db, config())
 
     const result = await svc.createUploadUrl('ws-1', 'owner@rundesk.dev', {
       fileName: 'demo clip.webm',
@@ -73,7 +186,7 @@ describe('ClipsService', () => {
   })
 
   it('lists clips sorted by newest first', async () => {
-    const svc = new ClipsService(createR2Mock(), createEmailMock(), createDbMock())
+    const svc = new ClipsService(createR2Mock(), createEmailMock(), createDbMock(), config())
     const clips = await svc.list('ws-1')
     assert.equal(clips.length, 2)
     assert.equal(clips[0].title, 'Second clip')
@@ -89,7 +202,7 @@ describe('ClipsService', () => {
       LastModified: new Date(Date.UTC(2026, 4, 8, 9, 0, i)),
     }))
     r2.listAllObjects = mock.fn(async () => all)
-    const clips = await new ClipsService(r2, createEmailMock(), createDbMock()).list('ws-1')
+    const clips = await new ClipsService(r2, createEmailMock(), createDbMock(), config()).list('ws-1')
     assert.equal(clips.length, 200)
     assert.equal(clips[0].storageKey, 'workspaces/ws-1/clips/1249-clip.webm')
     assert.equal(clips[199].storageKey, 'workspaces/ws-1/clips/1050-clip.webm')
@@ -98,7 +211,7 @@ describe('ClipsService', () => {
 
   it('deletes clip with workspace-bound key', async () => {
     const r2 = createR2Mock()
-    const svc = new ClipsService(r2, createEmailMock(), createDbMock())
+    const svc = new ClipsService(r2, createEmailMock(), createDbMock(), config())
     const out = await svc.remove('ws-1', 'workspaces/ws-1/clips/a.webm')
     assert.equal(out.ok, true)
     assert.equal(r2.deleteObject.mock.calls.length, 1)
@@ -106,7 +219,7 @@ describe('ClipsService', () => {
   })
 
   it('rejects delete for foreign workspace key', async () => {
-    const svc = new ClipsService(createR2Mock(), createEmailMock(), createDbMock())
+    const svc = new ClipsService(createR2Mock(), createEmailMock(), createDbMock(), config())
     await assert.rejects(
       () => svc.remove('ws-1', 'workspaces/ws-2/clips/a.webm'),
       (error: unknown) => error instanceof BadRequestException,
@@ -122,7 +235,7 @@ describe('ClipsService', () => {
 
   it('refuses to delete a key that walks out of the workspace’s clips, and deletes nothing', async () => {
     const r2 = createR2Mock()
-    const svc = new ClipsService(r2, createEmailMock(), createDbMock())
+    const svc = new ClipsService(r2, createEmailMock(), createDbMock(), config())
     await assert.rejects(
       () => svc.remove('ws-1', WALK),
       (error: unknown) => error instanceof BadRequestException,
@@ -132,28 +245,33 @@ describe('ClipsService', () => {
 
   it('refuses to share a key that walks out of the workspace’s clips, and signs nothing', async () => {
     const r2 = createR2Mock()
-    const svc = new ClipsService(r2, createEmailMock(), createDbMock())
+    const db = createDbMock()
+    const svc = new ClipsService(r2, createEmailMock(), db, config())
     await assert.rejects(
       () => svc.share('ws-1', 'actor-1', 'owner@rundesk.dev', { storageKey: WALK, mode: 'public' }),
       (error: unknown) => error instanceof BadRequestException,
     )
     assert.equal(r2.getObjectUrl.mock.calls.length, 0)
+    assert.equal(db.state.links.length, 0)
   })
 
   it('shares public clip without triggering email', async () => {
     const email = createEmailMock()
-    const svc = new ClipsService(createR2Mock(), email, createDbMock())
+    const r2 = createR2Mock()
+    const svc = new ClipsService(r2, email, createDbMock(), config({ APP_URL: 'https://rundesk.example/' }))
     const out = await svc.share('ws-1', 'actor-1', 'owner@rundesk.dev', {
       storageKey: 'workspaces/ws-1/clips/a.webm',
       mode: 'public',
     })
-    assert.ok(out.shareUrl.includes('https://cdn.example/'))
+    // `resume-defects/resume-7`: the clip's link, not a signed storage URL.
+    assert.equal(out.shareUrl, `https://rundesk.example/clips/${out.token}`)
+    assert.equal(r2.getObjectUrl.mock.calls.length, 0)
     assert.equal(email.sendClipSharedEmail.mock.calls.length, 0)
   })
 
   it('shares clip to workspace member and sends email', async () => {
     const email = createEmailMock()
-    const svc = new ClipsService(createR2Mock(), email, createDbMock({ memberEmail: 'member@rundesk.dev' }))
+    const svc = new ClipsService(createR2Mock(), email, createDbMock({ memberEmail: 'member@rundesk.dev' }), config())
     const out = await svc.share('ws-1', 'actor-1', 'owner@rundesk.dev', {
       storageKey: 'workspaces/ws-1/clips/a.webm',
       mode: 'member',
@@ -164,7 +282,7 @@ describe('ClipsService', () => {
   })
 
   it('throws when sharing to member without userId', async () => {
-    const svc = new ClipsService(createR2Mock(), createEmailMock(), createDbMock())
+    const svc = new ClipsService(createR2Mock(), createEmailMock(), createDbMock(), config())
     await assert.rejects(
       () => svc.share('ws-1', 'actor-1', 'owner@rundesk.dev', {
         storageKey: 'workspaces/ws-1/clips/a.webm',
@@ -175,7 +293,7 @@ describe('ClipsService', () => {
   })
 
   it('throws when member is missing in workspace', async () => {
-    const svc = new ClipsService(createR2Mock(), createEmailMock(), createDbMock({ memberEmail: null }))
+    const svc = new ClipsService(createR2Mock(), createEmailMock(), createDbMock({ memberEmail: null }), config())
     await assert.rejects(
       () => svc.share('ws-1', 'actor-1', 'owner@rundesk.dev', {
         storageKey: 'workspaces/ws-1/clips/a.webm',
@@ -184,5 +302,154 @@ describe('ClipsService', () => {
       }),
       (error: unknown) => error instanceof NotFoundException,
     )
+  })
+})
+
+/*
+ * `resume-defects/resume-7` — A CLIP'S LINK. Copy link and New tab handed out
+ * the signed storage URL, asked for a day, and nothing said so. ClickUp's clip
+ * URL is an unguessable string anyone holding it can open, and a clip is kept
+ * until it is deleted; so the link is `/clips/<token>`, the same one every
+ * time, and opening it signs the clip again. `test/e2e/clip-links.mjs` asks
+ * the same of a real database, a real store and a browser.
+ */
+describe('ClipsService — a clip’s link', () => {
+  it('is /clips/<an unguessable token>, made once: asked again, the same link comes back', async () => {
+    const db = createDbMock()
+    const svc = new ClipsService(createR2Mock(), createEmailMock(), db, config())
+    const first = await svc.link('ws-1', 'actor-1', KEY)
+    assert.match(first.token, /^[A-Za-z0-9_-]{32}$/)
+    assert.equal(first.path, `/clips/${first.token}`)
+    assert.equal(first.audience, 'anyone')
+    const again = await svc.link('ws-1', 'actor-2', KEY)
+    assert.equal(again.token, first.token)
+    assert.equal(db.state.links.length, 1)
+    assert.deepEqual(
+      { ...db.state.links[0], token: '' },
+      { workspaceId: 'ws-1', storageKey: KEY, token: '', createdById: 'actor-1' },
+    )
+  })
+
+  it('answers with the row already there when its insert meets another', async () => {
+    const db = createDbMock({ insertConflicts: true })
+    const svc = new ClipsService(createR2Mock(), createEmailMock(), db, config())
+    // Somebody else's insert for this clip lands between the look and the write.
+    const originalInsert = db.insert
+    db.insert = mock.fn((...args: unknown[]) => {
+      db.state.links.push({ workspaceId: 'ws-1', storageKey: KEY, token: TOKEN, createdById: 'actor-2' })
+      return originalInsert(...args)
+    })
+    const out = await svc.link('ws-1', 'actor-1', KEY)
+    assert.equal(out.token, TOKEN)
+  })
+
+  it('is refused for a key that is not one of this workspace’s clips, and for a clip that is not stored', async () => {
+    const db = createDbMock()
+    const svc = new ClipsService(createR2Mock(), createEmailMock(), db, config())
+    for (const key of ['workspaces/ws-2/clips/a.webm', 'workspaces/ws-1/clips/../../../workspaces/ws-2/clips/a.webm', 42]) {
+      await assert.rejects(() => svc.link('ws-1', 'actor-1', key), (e: unknown) => e instanceof BadRequestException)
+    }
+    await assert.rejects(
+      () => svc.link('ws-1', 'actor-1', 'workspaces/ws-1/clips/never-uploaded.webm'),
+      (e: unknown) => e instanceof NotFoundException,
+    )
+    assert.equal(db.state.links.length, 0)
+  })
+
+  it('says it opens for members only where the workspace blocks public sharing', async () => {
+    const svc = new ClipsService(createR2Mock(), createEmailMock(), createDbMock({ blocked: ['ws-1'] }), config())
+    assert.equal((await svc.link('ws-1', 'actor-1', KEY)).audience, 'members')
+  })
+
+  it('opening it signs the clip again, for the configured time, and says what it is', async () => {
+    const r2 = createR2Mock()
+    const links = [{ workspaceId: 'ws-1', storageKey: KEY, token: TOKEN, createdById: 'actor-1' }]
+    const svc = new ClipsService(r2, createEmailMock(), createDbMock({ links }), config({ CLIP_PLAYBACK_URL_SECONDS: '5' }))
+    const first = await svc.watch(TOKEN, null)
+    const second = await svc.watch(TOKEN, null)
+    assert.equal(first.title, 'Demo clip')
+    assert.equal(first.durationSeconds, 15)
+    assert.equal(first.expiresInSeconds, 5)
+    assert.equal(first.audience, 'anyone')
+    assert.equal(r2.getObjectUrl.mock.calls.length, 2)
+    assert.deepEqual(r2.getObjectUrl.mock.calls.map((c: any) => c.arguments), [[KEY, 5], [KEY, 5]])
+    assert.ok(second.url.startsWith('https://cdn.example/'))
+  })
+
+  it('signs for an hour when nothing is configured', async () => {
+    const r2 = createR2Mock()
+    const links = [{ workspaceId: 'ws-1', storageKey: KEY, token: TOKEN, createdById: 'actor-1' }]
+    const svc = new ClipsService(r2, createEmailMock(), createDbMock({ links }), config({ CLIP_PLAYBACK_URL_SECONDS: 'soon' }))
+    assert.equal((await svc.watch(TOKEN, null)).expiresInSeconds, 3600)
+  })
+
+  it('a token that is not one, a token nobody holds and a clip that is gone are not found, and nothing is signed', async () => {
+    const r2 = createR2Mock([])
+    const db = createDbMock({ links: [{ workspaceId: 'ws-1', storageKey: KEY, token: TOKEN, createdById: 'actor-1' }] })
+    const svc = new ClipsService(r2, createEmailMock(), db, config())
+    for (const token of ['short', `${TOKEN}/..`, 'U'.repeat(32), TOKEN, undefined]) {
+      await assert.rejects(() => svc.watch(token, null), (e: unknown) => e instanceof NotFoundException)
+    }
+    assert.equal(r2.getObjectUrl.mock.calls.length, 0)
+    // The malformed ones were refused before anything was read.
+    assert.equal(db.select.mock.calls.length, 2)
+  })
+
+  it('where the workspace blocks public sharing, asks nobody to sign in, refuses a non-member, and plays for a member', async () => {
+    const r2 = createR2Mock()
+    const links = [{ workspaceId: 'ws-1', storageKey: KEY, token: TOKEN, createdById: 'actor-1' }]
+    const svc = new ClipsService(
+      r2,
+      createEmailMock(),
+      createDbMock({ links, blocked: ['ws-1'], members: ['ws-1:member-1'] }),
+      config(),
+    )
+    await assert.rejects(() => svc.watch(TOKEN, null), (e: unknown) => e instanceof UnauthorizedException)
+    await assert.rejects(() => svc.watch(TOKEN, { id: 'outsider-1', role: 'member' }), (e: unknown) => e instanceof NotFoundException)
+    assert.equal(r2.getObjectUrl.mock.calls.length, 0)
+    const watched = await svc.watch(TOKEN, { id: 'member-1', role: 'member' })
+    assert.equal(watched.audience, 'members')
+    assert.equal(r2.getObjectUrl.mock.calls.length, 1)
+  })
+
+  it('where public sharing is open, plays for somebody from another workspace as for anyone', async () => {
+    const links = [{ workspaceId: 'ws-1', storageKey: KEY, token: TOKEN, createdById: 'actor-1' }]
+    const svc = new ClipsService(createR2Mock(), createEmailMock(), createDbMock({ links }), config())
+    assert.equal((await svc.watch(TOKEN, { id: 'outsider-1', role: 'member' })).title, 'Demo clip')
+  })
+
+  it('closes while its workspace is archived, and nothing is signed', async () => {
+    const r2 = createR2Mock()
+    const links = [{ workspaceId: 'ws-1', storageKey: KEY, token: TOKEN, createdById: 'actor-1' }]
+    const svc = new ClipsService(r2, createEmailMock(), createDbMock({ links, archived: ['ws-1'] }), config())
+    await assert.rejects(() => svc.watch(TOKEN, null), (e: unknown) => e instanceof NotFoundException)
+    assert.equal(r2.getObjectUrl.mock.calls.length, 0)
+  })
+
+  it('is gone once the clip is deleted', async () => {
+    const r2 = createR2Mock()
+    const db = createDbMock({ links: [{ workspaceId: 'ws-1', storageKey: KEY, token: TOKEN, createdById: 'actor-1' }] })
+    const svc = new ClipsService(r2, createEmailMock(), db, config())
+    await svc.remove('ws-1', KEY)
+    assert.equal(db.state.links.length, 0)
+    await assert.rejects(() => svc.watch(TOKEN, null), (e: unknown) => e instanceof NotFoundException)
+  })
+
+  it('an email share carries the link and says who can open it, and an external one is refused where public sharing is blocked', async () => {
+    const email = createEmailMock()
+    const svc = new ClipsService(createR2Mock(), email, createDbMock(), config({ APP_URL: 'https://rundesk.example' }))
+    const out = await svc.share('ws-1', 'actor-1', 'owner@rundesk.dev', { storageKey: KEY, mode: 'external', email: 'friend@elsewhere.test' })
+    const sent = email.sendClipSharedEmail.mock.calls[0].arguments[0]
+    assert.equal(sent.clipUrl, `https://rundesk.example/clips/${out.token}`)
+    assert.equal(sent.audience, 'anyone')
+    assert.equal('expiresAt' in sent, false)
+
+    const blockedEmail = createEmailMock()
+    const blocked = new ClipsService(createR2Mock(), blockedEmail, createDbMock({ blocked: ['ws-1'] }), config())
+    await assert.rejects(
+      () => blocked.share('ws-1', 'actor-1', 'owner@rundesk.dev', { storageKey: KEY, mode: 'external', email: 'friend@elsewhere.test' }),
+      (e: unknown) => e instanceof ForbiddenException,
+    )
+    assert.equal(blockedEmail.sendClipSharedEmail.mock.calls.length, 0)
   })
 })

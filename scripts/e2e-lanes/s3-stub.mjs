@@ -35,6 +35,13 @@
  * `X-Amz-Signature` at all is refused with 403, so a product that stopped
  * signing would be caught rather than quietly served.
  *
+ * AND A PRESIGNED URL'S WINDOW IS KEPT, as S3 keeps it: past `X-Amz-Date` plus
+ * `X-Amz-Expires` a request is refused with 403 "Request has expired". Unlike
+ * the signature, the window is the PRODUCT's choice — how long a URL it hands
+ * out lives — and a stub that served every URL forever could not show one
+ * dying: a clip's Copy link was a signed URL good for a day, and the check that
+ * its link outlives every signature waits one out (`resume-defects/resume-7`).
+ *
  * NOT FOR PRODUCTION, and it cannot become production by accident: it binds
  * loopback only, holds every object in memory, and refuses to start unless
  * `RUNDESK_S3_STUB=1` is set in the environment.
@@ -94,6 +101,19 @@ const REQUEST_LOG_CAP = 2000
 
 const xmlEscape = (s) =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+/*
+ * Whether a presigned request's window has passed: `X-Amz-Date` (UTC,
+ * `YYYYMMDDTHHMMSSZ`) plus `X-Amz-Expires` seconds. A request signed in its
+ * header carries neither and has no window here, as the SDK's own calls do not.
+ */
+const pastItsWindow = (params) => {
+  const signed = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(params.get('X-Amz-Date') ?? '')
+  const seconds = Number(params.get('X-Amz-Expires'))
+  if (!signed || !params.has('X-Amz-Expires') || !Number.isFinite(seconds)) return false
+  const [, y, mo, d, h, mi, s] = signed.map(Number)
+  return Date.now() > Date.UTC(y, mo - 1, d, h, mi, s) + seconds * 1000
+}
 
 /*
  * S3 errors are XML with a `Code` the AWS SDK parses into a named exception —
@@ -220,6 +240,10 @@ const server = createServer(async (req, res) => {
   if (requests.length > REQUEST_LOG_CAP) requests.shift()
 
   if (bucket !== BUCKET) return s3Error(res, 404, 'NoSuchBucket', `no bucket named ${bucket}`)
+
+  // Logged above, like any request the bucket was sent; refused here, as S3
+  // refuses a presigned URL past its window (see the header).
+  if (pastItsWindow(url.searchParams)) return s3Error(res, 403, 'AccessDenied', 'Request has expired')
 
   /*
    * ListObjectsV2 — bucket-scoped, no key.

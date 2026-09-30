@@ -26,7 +26,8 @@
  * clip only reaches the clips library if somebody asks for a link to it, or
  * for a task made from it (ClickUp saves every clip to its Clips Hub; this
  * saves the ones somebody did something with). The task then gets its own
- * copy from the library, made by the API: see `attachClipToTask`.
+ * copy from the library, made by the API: see `attachClipToTask`. The link is
+ * the clip's own and does not expire: see `clipLink`.
  */
 import { api } from './api'
 
@@ -119,18 +120,36 @@ export async function attachClipToTask(taskId: string, storageKey: string, fileN
   })
 }
 
+/** Who a clip's link opens for: anyone holding it, or its workspace's members, signed in. */
+export type ClipLinkAudience = 'anyone' | 'members'
+
+export type ClipLink = {
+  token: string
+  /** `/clips/<token>` — the app route, which signs the clip again on every view. */
+  path: string
+  audience: ClipLinkAudience
+  /** The path on this site: what Copy link copies and New tab opens. */
+  url: string
+}
+
 /**
- * A link to an uploaded clip.
+ * THE CLIP'S LINK (`resume-defects/resume-7`).
  *
- * `mode: 'public'` is the frame's "Copy link": a signed URL anybody holding it
- * can open. The server caps the expiry at seven days and defaults to an hour;
- * a day is asked for here because "copy a link and paste it to a colleague" is
- * not an operation that should stop working over lunch.
+ * This was a signed storage URL, asked for a day, and the toast said only
+ * "Link copied": a link pasted into a chat or a doc that died the next day.
+ * ClickUp's clip URL is an unguessable string that anyone with it can open,
+ * kept until the clip is deleted. So the link is the app's `/clips/<token>`,
+ * the same one every time it is asked for, and opening it signs the clip
+ * again; nothing here has an expiry to ask for or to state. `audience` is who
+ * it opens for, which the toast and the share dialog say out loud.
+ *
+ * On THIS site's origin: the server builds an email's link from its own
+ * `APP_URL`, which need not be the address the person is using.
  */
-export async function clipShareUrl(workspaceId: string, storageKey: string): Promise<string> {
-  const { shareUrl } = await api<{ shareUrl: string }>(
-    `/workspaces/${workspaceId}/clips/share`,
-    { method: 'POST', body: { storageKey, mode: 'public', expiresInMinutes: 60 * 24 } },
-  )
-  return shareUrl
+export async function clipLink(workspaceId: string, storageKey: string): Promise<ClipLink> {
+  const made = await api<Omit<ClipLink, 'url'>>(`/workspaces/${workspaceId}/clips/link`, {
+    method: 'POST',
+    body: { storageKey },
+  })
+  return { ...made, url: `${window.location.origin}${made.path}` }
 }

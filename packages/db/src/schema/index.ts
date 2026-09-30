@@ -81,6 +81,8 @@ export * from './client-invoices'
 export * from './tenant-databases'
 export * from './rate-limits'
 export * from './object-shares'
+// `resume-defects/resume-7` — a clip's stable link.
+export * from './clip-links'
 export * from './content-access-requests'
 export * from './notepads'
 export * from './time-off'

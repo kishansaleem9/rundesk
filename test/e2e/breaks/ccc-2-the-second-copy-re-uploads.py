@@ -13,11 +13,16 @@
 # The early return reads as a cache, and a cache is the first thing anybody
 # removes while debugging "why is my link stale".
 #
-# ONE CHECK, and it is the one written for it: "and a second Copy link re-signs
-# rather than uploading again". The first copy is correct — one presign, one
-# PUT, a shared URL on the clipboard — so every check before it stays green.
+# TWO CHECKS, the one written for it first. The first copy is correct — one
+# presign, one PUT, a shared URL on the clipboard — so every check before it
+# stays green. The second is the failed-attach check further down: with no key
+# remembered, Create a task uploads the clip afresh, so deleting the first
+# upload no longer makes its attach fail (measured on lane 4, 29 September:
+# 24/26). RE-AIMED for `resume-defects/resume-7`: the check read "re-signs
+# rather than uploading again"; a second Copy link now asks for the clip's own
+# link, which nothing signs until it is opened, and the sentence says so.
 #
-# Reddens: clip-created-card: "and a second Copy link re-signs rather than uploading again"
+# Reddens: clip-created-card: "and a second Copy link asks for the same link rather than uploading again"
 import io
 p = '/home/user/rundesk/apps/web/src/components/comment-recorder.tsx'
 a = """    if (clipKey) return clipKey

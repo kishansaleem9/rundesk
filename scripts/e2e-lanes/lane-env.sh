@@ -13,7 +13,8 @@
 # So both halves live here and every launcher sources them.
 #
 #   lane_store_up  <k>   start lane k's object store, wait for it to say ready
-#   lane_store_env <k>   export the four variables that point the API at it
+#   lane_store_env <k>   export the four variables that point the API at it,
+#                        and how long a clip's playback URL is signed for
 #
 # WHY A STORE AT ALL. The ledger had the cover picker's Upload tab down as
 # unmeasurable for want of credentials this repository does not hold. It was
@@ -40,6 +41,12 @@ lane_store_env () {
   export R2_ACCESS_KEY_ID=stub-key
   export R2_SECRET_ACCESS_KEY=stub-secret
   export R2_BUCKET_NAME="$(lane_store_bucket "$k")"
+  # A clip's link is signed again on every view, for an hour unless this says
+  # otherwise. `clip-links` checks that the link still plays after the window
+  # by waiting one out, so the lanes sign for ten seconds, and the store stub
+  # refuses a URL past its window (`resume-defects/resume-7`). CI's API step
+  # sets the same.
+  export CLIP_PLAYBACK_URL_SECONDS=10
 }
 
 # A LANE'S INTEGRATION KEYS, WHICH ARE NOT REAL, AND WHICH PROVIDERS HAVE THEM.

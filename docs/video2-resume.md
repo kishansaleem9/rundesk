@@ -291,9 +291,11 @@ These are the ones still standing:
    carries `@apply overflow-hidden` in `packages/ui`, which is why the obvious
    fix does not work. The same shape on the list's Table view and the Workload
    heat map is fixed the same way (`sticky-headers`).
-7. **A clip's "Copy link" yields a link that expires in 24 hours and says
-   nothing about it.** One of three share paths states the expiry, and it is
-   not the one people use.
+7. ~~**A clip's "Copy link" yields a link that expires in 24 hours and says
+   nothing about it.**~~ **Fixed, 30 September** (`resume-defects/resume-7`): a
+   clip has one link, `/clips/<token>`, which re-signs the recording each time it
+   is opened. Copy link, New tab and every share hand it out, and the toast and
+   the dialog say who can open it and that it does not expire.
 8. ~~**`email.service.send()` has no `replyTo`**~~, so an outbound mail cannot
    carry the address that brings a reply back into the task. **Partly fixed,
    24 September:** `send()` takes a Message-ID and a Reply-To and hands both to

@@ -19,8 +19,14 @@
  * `s3-stub.mjs`: both routes answer 201 there, which is why the guard below
  * accepts a 2xx and why the pending-clip check found a real defect rather than
  * an empty library. So the browser half stubs
- * presign, the PUT and share, which means these checks are about THIS CODE
+ * presign, the PUT and the link, which means these checks are about THIS CODE
  * calling the right things with the right arguments, and NOT about R2 working.
+ *
+ * THE LINK IS THE CLIP'S OWN NOW (`resume-defects/resume-7`). Copy link and
+ * New tab asked `POST /clips/share` to sign the object for a day and handed out
+ * the signed URL; they ask `POST /clips/link` for `/clips/<token>`, which
+ * signs again on every view. What that link does when it is opened — who may,
+ * and after the signing window — is `clip-links.mjs`, against the real API.
  *
  * THE GUARD THAT MAKES THAT STUB HONEST comes first, against the real API with
  * no browser involved: neither endpoint may answer 404, and the reason each
@@ -39,7 +45,7 @@
  * asserted exactly that: it looked for the stub's URL in the description, so
  * the defect was the check. ClickUp's Create a task makes "a new task and
  * attach[es] the Clip". What that needs proved is a file on the task, in the
- * store, served when the task is read. So in that section presign and share
+ * store, served when the task is read. So in that section presign and the link
  * pass through to the API, the clip goes to the lane's real store, and the
  * suite reads back the row, the store's own request log and the bytes.
  *
@@ -74,7 +80,7 @@ const ME = {
 }
 
 /** What the stub hands back, so the checks can look for exactly this. */
-const SHARE_URL = 'https://storage.test/signed/clip.webm?sig=e2e'
+const LINK_TOKEN = 'e2eClipCreatedCardLinkToken00000'
 const UPLOAD_URL = 'https://storage.test/put/clip.webm'
 
 let passed = 0
@@ -220,15 +226,28 @@ try {
     `presign answered ${presignReal.status}: ${JSON.stringify(presignReal.error).slice(0, 120)} — ` +
       'a 404 means the stub below would implement a route the product does not have',
   )
-  const shareReal = await A(`/workspaces/${workspaceId}/clips/share`, {
-    method: 'POST',
-    body: { storageKey: `workspaces/${workspaceId}/clips/probe.webm`, mode: 'public' },
-  })
+  /*
+   * THE CARD ASKS FOR THE CLIP'S LINK (`resume-defects/resume-7`), and a link
+   * needs a clip behind it: `POST /clips/link` answers 404 "Clip not found" for
+   * a key with nothing stored, which is the product being right and this
+   * guard's enemy at once. So where the store is up, the probe presigned above
+   * is PUT first and its link asked for, and the probe goes again at once.
+   */
+  const probeKey = presignReal.data?.storageKey ?? `workspaces/${workspaceId}/clips/probe.webm`
+  const probePut = presignReal.data?.uploadUrl
+    ? await fetch(presignReal.data.uploadUrl, { method: 'PUT', body: Buffer.from('probe'), headers: { 'content-type': 'video/webm' } })
+      .then((r) => r.status, () => 0)
+    : 0
+  const linkReal = await A(`/workspaces/${workspaceId}/clips/link`, { method: 'POST', body: { storageKey: probeKey } })
   chk(
-    servedByStorage(shareReal),
-    `and so is POST /clips/share — ${shareReal.status} "${shareReal.error?.message}"`,
-    `share answered ${shareReal.status}: ${JSON.stringify(shareReal.error).slice(0, 120)}`,
+    servedByStorage(linkReal),
+    `and so is POST /clips/link — ${linkReal.status} "${linkReal.error?.message}"`,
+    `link answered ${linkReal.status}: ${JSON.stringify(linkReal.error).slice(0, 120)}${probePut ? `, the probe's PUT ${probePut}` : ''}`,
   )
+  if (probePut) {
+    const probeGone = await A(`/workspaces/${workspaceId}/clips`, { method: 'DELETE', body: { storageKey: probeKey } })
+    if (![200, 204, 404].includes(probeGone.status)) leftBehind.push(`DELETE probe clip ${probeKey} answered ${probeGone.status}`)
+  }
 
   const [space] = await sql`
     insert into spaces (workspace_id, name) values (${workspaceId}, ${`Space ${TAG}`}) returning id`
@@ -244,10 +263,10 @@ try {
 
   /*
    * The storage backend, and only that, stood in for — except while
-   * `realStore` is set, when presign and share go to the API as they are (the
-   * Create a task section). Counted either way.
+   * `realStore` is set, when presign and the link go to the API as they are
+   * (the Create a task section). Counted either way.
    */
-  const calls = { presign: 0, share: 0, put: 0, presignBodies: [] }
+  const calls = { presign: 0, link: 0, put: 0, presignBodies: [] }
   let realStore = false
   await ctx.route('**/clips/presign', async (route) => {
     calls.presign += 1
@@ -259,13 +278,13 @@ try {
       body: JSON.stringify({ data: { uploadUrl: UPLOAD_URL, storageKey: `workspaces/${workspaceId}/clips/${TAG}.webm` }, error: null }),
     }).catch(() => {})
   })
-  await ctx.route('**/clips/share', async (route) => {
-    calls.share += 1
+  await ctx.route('**/clips/link', async (route) => {
+    calls.link += 1
     if (realStore) return route.fallback().catch(() => {})
     await route.fulfill({
       status: 201,
       contentType: 'application/json',
-      body: JSON.stringify({ data: { shareUrl: SHARE_URL }, error: null }),
+      body: JSON.stringify({ data: { token: LINK_TOKEN, path: `/clips/${LINK_TOKEN}`, audience: 'anyone' }, error: null }),
     }).catch(() => {})
   })
   /*
@@ -370,15 +389,21 @@ try {
     'as a video, not as whatever',
     `it asked to store ${JSON.stringify(calls.presignBodies[0]?.contentType)}`,
   )
+  /*
+   * The shared url is the clip's own link on this site — the path the link
+   * route answered, on the page's origin — and not a signed storage URL that
+   * dies (`resume-defects/resume-7`).
+   */
+  const SHARED_LINK = `${stack.base}/clips/${LINK_TOKEN}`
   const copied = await waitUntil(async () => {
     const state = await page.evaluate(() => window.__clip)
-    return state.copied.includes(SHARE_URL)
+    return state.copied.includes(SHARED_LINK)
   }, { timeoutMs: 20_000 })
   chk(
     copied,
     'and puts the SHARED url on the clipboard, not the blob: one',
     `the clipboard got ${JSON.stringify((await page.evaluate(() => window.__clip)).copied)} — a ` +
-      'blob: url works in this tab and nowhere else',
+      `blob: url works in this tab and nowhere else, and the link is ${SHARED_LINK}`,
   )
   chk(
     await waitUntil(
@@ -391,17 +416,19 @@ try {
 
   /*
    * TWICE MUST NOT UPLOAD TWICE. The key is remembered, so a second link action
-   * re-signs rather than re-uploading — otherwise pressing Copy link three
-   * times sends the clip three times.
+   * asks for the clip's link again rather than re-uploading — otherwise
+   * pressing Copy link three times sends the clip three times. It used to
+   * re-sign; the link is the clip's own now, and nothing is signed until it is
+   * opened (`resume-defects/resume-7`).
    */
   await page.getByTestId('clip-created-copy').click()
   await waitUntil(async () => (await page.evaluate(() => window.__clip)).copied.length >= 2, {
     timeoutMs: 20_000,
   })
   chk(
-    calls.presign === 1 && calls.put === 1,
-    'and a second Copy link re-signs rather than uploading again',
-    `presign ${calls.presign}×, PUT ${calls.put}× after two copies — the clip is being re-sent`,
+    calls.presign === 1 && calls.put === 1 && calls.link === 2,
+    'and a second Copy link asks for the same link rather than uploading again',
+    `presign ${calls.presign}×, PUT ${calls.put}×, link ${calls.link}× after two copies — the clip is being re-sent`,
   )
 
   // -------------------------------------------------------------------------
@@ -411,10 +438,10 @@ try {
   chk(
     await waitUntil(async () => {
       const state = await page.evaluate(() => window.__clip)
-      return state.opened.includes(SHARE_URL)
+      return state.opened.includes(SHARED_LINK)
     }, { timeoutMs: 20_000 }),
     'New tab opens the shared url',
-    `it opened ${JSON.stringify((await page.evaluate(() => window.__clip)).opened)}`,
+    `it opened ${JSON.stringify((await page.evaluate(() => window.__clip)).opened)}, not ${SHARED_LINK}`,
   )
   // Create a task is the section below, against the real store.
 

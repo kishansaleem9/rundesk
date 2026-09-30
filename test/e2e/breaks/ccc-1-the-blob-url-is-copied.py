@@ -25,6 +25,10 @@
 # that measure the same counters. Third time in this session I have counted one
 # code path and not its readers; the other two were `lus-1` and `td-1`.
 #
+# NINE, re-run on lane 4 on 29 September (`resume-defects/resume-7`): the
+# failed-attach check, added since, deletes the clip the Copy link uploaded,
+# and with nothing uploaded there is nothing to delete.
+#
 # Reddens: clip-created-card: "and puts the SHARED url on the clipboard, not the blob: one"
 import io
 p = '/home/user/rundesk/apps/web/src/components/comment-recorder.tsx'

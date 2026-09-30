@@ -377,10 +377,20 @@ try {
   }
   const CLIP_WALK = `workspaces/${WA}/clips/../../../${B_OBJECT}`
 
+  /*
+   * A SHARE ANSWERS WITH THE CLIP'S LINK, `/clips/<token>`, and no longer with
+   * a signed URL (`resume-defects/resume-7`). What a link serves is what
+   * opening it answers, `GET /public/clips/<token>`, signed at that moment.
+   */
+  const servedBy = async (res) => {
+    if (!res.data?.token) return null
+    const opened = await apiAs(null)(`/public/clips/${res.data.token}`)
+    return bytesAt(opened.data?.url)
+  }
   const walkShare = await A(`/workspaces/${WA}/clips/share`, { method: 'POST', body: { storageKey: CLIP_WALK, mode: 'public' } })
-  const walkServed = await bytesAt(walkShare.data?.shareUrl)
+  const walkServed = await servedBy(walkShare)
   chk(
-    walkShare.status === 400 && !walkShare.data?.shareUrl,
+    walkShare.status === 400 && !walkShare.data?.shareUrl && !walkShare.data?.token,
     'a clip key that starts with the workspace’s clips and walks out of them is not shared — no link comes back for it',
     `it answered ${said(walkShare)}${walkServed ? `, and the link served ${walkServed.equals(SECRET) ? 'workspace B’s file' : `${walkServed.length} byte(s)`}` : ''}`,
   )
@@ -395,7 +405,7 @@ try {
   const ownShare = OWN_CLIP
     ? await A(`/workspaces/${WA}/clips/share`, { method: 'POST', body: { storageKey: OWN_CLIP, mode: 'public' } })
     : { status: 0 }
-  const ownShared = await bytesAt(ownShare.data?.shareUrl)
+  const ownShared = await servedBy(ownShare)
   chk(
     ownShare.status < 300 && ownShared !== null && ownShared.equals(CLIP),
     'while the workspace’s own clip is shared, and its link serves the clip',

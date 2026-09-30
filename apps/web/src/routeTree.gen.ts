@@ -28,6 +28,7 @@ import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as SubmitSlugRouteImport } from './routes/submit.$slug'
 import { Route as PortalTokenRouteImport } from './routes/portal.$token'
 import { Route as DSlugRouteImport } from './routes/d.$slug'
+import { Route as ClipsTokenRouteImport } from './routes/clips.$token'
 import { Route as AppProfileRouteImport } from './routes/app.profile'
 import { Route as AppHelpRouteImport } from './routes/app.help'
 import { Route as AppAdminRouteImport } from './routes/app.admin'
@@ -178,6 +179,11 @@ const DSlugRoute = DSlugRouteImport.update({
   path: '/d/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ClipsTokenRoute = ClipsTokenRouteImport.update({
+  id: '/clips/$token',
+  path: '/clips/$token',
+  getParentRoute: () => rootRouteImport,
+} as any).lazy(() => import('./routes/clips.$token.lazy').then((d) => d.Route))
 const AppProfileRoute = AppProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
@@ -579,6 +585,7 @@ export interface FileRoutesByFullPath {
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/help': typeof AppHelpRoute
   '/app/profile': typeof AppProfileRoute
+  '/clips/$token': typeof ClipsTokenRoute
   '/d/$slug': typeof DSlugRoute
   '/portal/$token': typeof PortalTokenRoute
   '/submit/$slug': typeof SubmitSlugRoute
@@ -650,6 +657,7 @@ export interface FileRoutesByTo {
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/help': typeof AppHelpRoute
   '/app/profile': typeof AppProfileRoute
+  '/clips/$token': typeof ClipsTokenRoute
   '/d/$slug': typeof DSlugRoute
   '/portal/$token': typeof PortalTokenRoute
   '/submit/$slug': typeof SubmitSlugRoute
@@ -718,6 +726,7 @@ export interface FileRoutesById {
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/help': typeof AppHelpRoute
   '/app/profile': typeof AppProfileRoute
+  '/clips/$token': typeof ClipsTokenRoute
   '/d/$slug': typeof DSlugRoute
   '/portal/$token': typeof PortalTokenRoute
   '/submit/$slug': typeof SubmitSlugRoute
@@ -792,6 +801,7 @@ export interface FileRouteTypes {
     | '/app/admin'
     | '/app/help'
     | '/app/profile'
+    | '/clips/$token'
     | '/d/$slug'
     | '/portal/$token'
     | '/submit/$slug'
@@ -863,6 +873,7 @@ export interface FileRouteTypes {
     | '/app/admin'
     | '/app/help'
     | '/app/profile'
+    | '/clips/$token'
     | '/d/$slug'
     | '/portal/$token'
     | '/submit/$slug'
@@ -930,6 +941,7 @@ export interface FileRouteTypes {
     | '/app/admin'
     | '/app/help'
     | '/app/profile'
+    | '/clips/$token'
     | '/d/$slug'
     | '/portal/$token'
     | '/submit/$slug'
@@ -999,6 +1011,7 @@ export interface RootRouteChildren {
   TermsRoute: typeof TermsRoute
   TrustRoute: typeof TrustRoute
   VerifyEmailRoute: typeof VerifyEmailRoute
+  ClipsTokenRoute: typeof ClipsTokenRoute
   DSlugRoute: typeof DSlugRoute
   PortalTokenRoute: typeof PortalTokenRoute
   SubmitSlugRoute: typeof SubmitSlugRoute
@@ -1123,6 +1136,13 @@ declare module '@tanstack/react-router' {
       path: '/d/$slug'
       fullPath: '/d/$slug'
       preLoaderRoute: typeof DSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/clips/$token': {
+      id: '/clips/$token'
+      path: '/clips/$token'
+      fullPath: '/clips/$token'
+      preLoaderRoute: typeof ClipsTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app/profile': {
@@ -1721,6 +1741,7 @@ const rootRouteChildren: RootRouteChildren = {
   TermsRoute: TermsRoute,
   TrustRoute: TrustRoute,
   VerifyEmailRoute: VerifyEmailRoute,
+  ClipsTokenRoute: ClipsTokenRoute,
   DSlugRoute: DSlugRoute,
   PortalTokenRoute: PortalTokenRoute,
   SubmitSlugRoute: SubmitSlugRoute,

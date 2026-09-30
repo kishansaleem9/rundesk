@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common'
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { ClipsService } from './clips.service'
@@ -34,6 +35,21 @@ export class ClipsController {
     return this.clips.remove(workspaceId, body.storageKey)
   }
 
+  /**
+   * The clip's link, `{ token, path, audience }`: the same one every time
+   * (`resume-defects/resume-7`). Any member who can list the clips may ask,
+   * as any member could sign one before.
+   */
+  @Post('link')
+  @ApiOperation({ summary: 'The clip’s stable link (/clips/<token>)' })
+  link(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string },
+    @Body() body: { storageKey: string },
+  ) {
+    return this.clips.link(workspaceId, user.id, body?.storageKey)
+  }
+
   @Post('share')
   share(
     @Param('workspaceId') workspaceId: string,
@@ -44,10 +60,28 @@ export class ClipsController {
       mode: 'member' | 'external' | 'public'
       userId?: string
       email?: string
-      expiresInMinutes?: number
     },
   ) {
     return this.clips.share(workspaceId, user.id, user.email, body)
   }
 }
 
+/**
+ * WHAT A CLIP'S LINK PLAYS, for whoever opens `/clips/<token>`
+ * (`resume-defects/resume-7`). No sign-in needed where the workspace allows
+ * public links, as ClickUp's clips need none; the session is read when there
+ * is one, because a workspace that blocks public sharing lets only its members
+ * in. Signed again on every call — see `ClipsService.watch`.
+ */
+@ApiTags('clips')
+@Controller('public/clips')
+@UseGuards(OptionalJwtAuthGuard)
+export class ClipsPublicController {
+  constructor(private readonly clips: ClipsService) {}
+
+  @Get(':token')
+  @ApiOperation({ summary: 'Open a clip’s link: its title and a freshly signed playback URL' })
+  watch(@Param('token') token: string, @CurrentUser() user: { id: string; role?: string } | null) {
+    return this.clips.watch(token, user)
+  }
+}

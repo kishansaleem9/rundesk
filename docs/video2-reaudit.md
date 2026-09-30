@@ -1412,7 +1412,10 @@ Frames extracted and looked at for this pass: `00:05`, `00:50`, `00:52`,
   expiry stated. UI: `apps/web/src/pages/workspace-clips-page.tsx:80` and
   `:471-488` (the three mode chips), `:115-117` (the payload).
   The composer's Copy link uses `mode: 'public'` with a 24-hour expiry —
-  `apps/web/src/lib/clip-publish.ts:115-120`.
+  `apps/web/src/lib/clip-publish.ts:115-120`. *(30 September: every mode now
+  hands out the clip's one link, `/clips/<token>`, which re-signs the recording
+  when it is opened, and nothing is signed at the share
+  (`resume-defects/resume-7`).)*
 - status: B
 - defect class: none
 - why not already a row: the ledger's `B | **"Clip created!" card** — Create a

@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 354 items, 36 open, 8 partly fixed, 310 closed, counted from this file's headings on 30 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 361 items, 42 open, 8 partly fixed, 311 closed, counted from this file's headings on 30 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -10,7 +10,7 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 ## Product defects — 46
 
-### `resume-defects/resume-7` — open, large
+### `resume-defects/resume-7` — **closed**, large
 
 **The clip's 'Copy link' still yields an expiring signed URL, and nothing tells the person**
 
@@ -20,6 +20,39 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Progress:* one of its three uses is gone. Create a task no longer writes a URL into the task: it attaches the clip (`clip-create-task-persists-24h-url`), and `clip-created-card` no longer asserts the description link. Copy link and New tab still hand out the 24-hour signed URL with nothing saying so, which is the rest of this item.
 
+
+*Closed, 30 September.* ClickUp settles it (help centre, read through search results; the site is blocked here):
+- "anyone with the link to a Clip can access it";
+- Clips "are shared publicly and do not require authentication", and their URLs are "an unguessable, randomized string of characters";
+- "Clips are retained forever, unless manually deleted".
+
+No source ties an expiry to a Clip; link expiry is an Enterprise choice for public links to locations and items.
+
+So a clip has one link, `/clips/<token>`: 24 random bytes in `clip_links` (migration 0168), made the first time somebody asks for it and the same ever after. Opening it signs the storage object again (`GET /public/clips/:token`, for `CLIP_PLAYBACK_URL_SECONDS`, an hour by default).
+- Copy link copies it and New tab opens it, on the page's own origin. The share dialog shows it.
+- Every share mode, the emails too, hands out the link and never a signed URL. `expiresInMinutes` is gone.
+- The toast and the dialog say who can open it and that it does not expire.
+- It opens for anyone holding it, signed in or not.
+- A page left open past its signature signs again and resumes.
+
+Where the sources are silent, the safe rule:
+- in a workspace that blocks public sharing (§A4.2) it opens for its members, signed in, and nobody else: 401 asks for a sign-in, and anybody from elsewhere gets 404;
+- an email share to somebody outside that workspace is refused;
+- an archived workspace's links close;
+- deleting the clip deletes its link.
+
+The store stub now refuses a presigned URL past its window, as S3 does, so a URL dying can be seen. The lanes and CI sign clip playback for ten seconds.
+
+Checks:
+- `clip-links` is new, with 19 checks and nothing stubbed, registered in CI (244 in `postgres-harnesses`). Before, 0/19 on lane 4: Copy link and New tab gave a signed URL good for a day, "Link copied" was the whole toast, and there was no `/clips/` page. After, 19/19.
+- `clip-created-card` now asks `POST /clips/link`. Two sentences follow the behaviour ("and so is POST /clips/link", "and a second Copy link asks for the same link rather than uploading again"). It was 21/26 before, measured with the new suite, and 26/26 after.
+- `object-key-boundaries` follows the link to the bytes: 22/23 before, 23/23 after.
+- `clips.service.test.ts` has 23 tests, 12 of them new.
+- `csl-1..25` are new, 20 aimed at `clip-links` and 5 unit claims, each reddening what it names. `ccc-2`, `ccc-5`, `okb-19` and `okb-20` were re-aimed and `ccc-1` re-run, each reddening its claim. An agent measured all of them on lane 4.
+- `csl-13` found that the share dialog could not hold a long link: the signed URL it used to show pushed its next Generate off the screen. Fixed with `min-w-0` on the dialog's column.
+- Regression on the integrated tree, lanes 5 and 7: the 18 suites that record, share or store (`clip-links` 19/19, `clip-created-card` 26/26, `object-key-boundaries` 23/23, `comment-recording` 33/33, `task-cover` 42/42, `task-ai-bar` 19/19 on the lane without a model), all green, 554 checks.
+
+Found while building it: `found-30-sep/store-stub-drops-object-metadata`, `found-30-sep/public-doc-page-reads-the-envelope`, `found-30-sep/comment-clips-have-no-copy-link`, `found-30-sep/guests-may-ask-for-clip-links`, `found-30-sep/public-cdn-url-makes-every-object-public`, `found-30-sep/public-routes-unthrottled` and `found-30-sep/task-attachments-flaky`.
 ### `product-siblings/avatar-logo-persist-expiring-signed-url` — **closed**, break run pending
 
 **Avatar and workspace-logo uploads persist a 15-minute presigned URL as avatarUrl/logoUrl**
@@ -1583,6 +1616,62 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - The next preflight caught the cause. The run printed "(it said: at ChildProcess._handle.onexit …)": the mutant's stub had exited on EADDRINUSE. The gates drew their ports from their pid, `9300 + pid % 400` and `9500 + pid % 300`. Those ranges overlap each other, and stubs left by ended mutant runs were still listening in them (`found-29-sep/killed-mutants-outlive-their-run`). Both gates now take a port the OS chose (`scripts/lib/free-port.mjs`).
 - `STUB_GATE_MUTANT_TIMEOUT_MS` sets the limit for a slower machine.
 - After: the two gates together, 22 of 22 and 11 of 11, at load ~10.
+
+### `found-30-sep/public-doc-page-reads-the-envelope` — open (visible bug, small; found closing `resume-defects/resume-7`)
+
+**The public doc page takes the API's `{ data, meta, error }` envelope for the doc**
+
+*Evidence, 30 September, read and not yet measured:* `apps/web/src/routes/d.$slug.tsx` does `(await res.json()) as PublicDoc`, but `GET /public/docs/:slug` is wrapped like every answer (`ResponseInterceptor`). So `/d/<slug>` would draw no title, "last updated Invalid Date" and no content. No suite opens the page in a browser: `doc-boundaries` reads the API only.
+
+*To close:* measure it in a browser, read the doc from `data`, and check that a public doc's title and content are drawn and a revoked or unknown slug says so.
+
+### `found-30-sep/public-cdn-url-makes-every-object-public` — open (security, small; found closing `resume-defects/resume-7`)
+
+**Where `R2_PUBLIC_URL` is a CDN domain, every stored object is readable by its address, so a members-only clip is only as private as its link**
+
+*Evidence, 30 September:* `R2Service.getObjectUrl` returns `${R2_PUBLIC_URL}/<key>` whenever that is not the raw R2 API host. A clip's members-only link then answers with the object's permanent public address. The same is true of every attachment, avatar and logo. The default deployment signs, and so do the lanes and CI.
+
+*To close:* decide whether private content may ever be served from a public domain. If not, sign it wherever the content is private (members-only clips, task attachments), whatever `R2_PUBLIC_URL` says, and check it with a lane that sets a public URL.
+
+### `found-30-sep/guests-may-ask-for-clip-links` — open (decision, small; found closing `resume-defects/resume-7`)
+
+**A guest may ask for a clip's link, as a guest could sign one before**
+
+*Evidence, 30 September:* the library's routes admit any workspace member, guests included. ClickUp's sources say nothing about guests and Clip links. Rundesk's public doc links are not a guest's to make ("guests never share publicly").
+
+*To close:* the owner decides. If guests may not make public links of any kind, refuse them the link route, as doc links refuse them, and check it.
+
+### `found-30-sep/comment-clips-have-no-copy-link` — open (feature, small; found closing `resume-defects/resume-7`)
+
+**A clip in a comment has no Copy link**
+
+*Evidence, 30 September:* ClickUp's share icon on an expanded comment clip copies its URL. A comment clip is the task's own attachment, not a library clip, so a link to it needs the task's read rule on the route rather than the library's.
+
+*To close:* give comment clips a link under the task's read rule, and check that it opens for those who may read the task and nobody else.
+
+### `found-30-sep/public-routes-unthrottled` — open (security, small; found closing `resume-defects/resume-7`)
+
+**The public routes are not rate-limited**
+
+*Evidence, 30 September:* `GET /public/clips/:token` has no throttle, and neither do the public doc, portal and image routes. The only global guard is CSRF. A clip token is 192 random bits, so guessing is not the risk; a flood is.
+
+*To close:* throttle the public routes per address, and check that a burst is refused with 429 while an ordinary viewer is not.
+
+### `found-30-sep/store-stub-drops-object-metadata` — open (test tooling, small; found closing `resume-defects/resume-7`)
+
+**The lanes' store stub keeps no object metadata, so a clip's title and length read back wrong on every lane and in CI**
+
+*Evidence, 30 September:* a presigned PUT carries `x-amz-meta-title` and `x-amz-meta-durationseconds`, and `scripts/e2e-lanes/s3-stub.mjs` stores only the bytes and the type. So a clip's title reads back as its file name and its length as 0, in the library, in search and on the clip page. Real R2 keeps them.
+
+*To close:* keep and return the `x-amz-meta-*` headers in the stub, with a case in `check-s3-stub.mjs` and a mutation that reddens it. Then a suite may read a clip's title as it was recorded.
+
+### `found-30-sep/task-attachments-flaky` — open (test tooling, small; found closing `resume-defects/resume-7`)
+
+**`task-attachments` fails a different check on some runs, on the main tree's build as on others**
+
+*Evidence, 30 September, lane 4:* six runs gave 16, 14 and 17 of 17 on the clip build, and 17, 16 and 17 on the main tree's. The failing checks differed each time: a card's actions at rest and on hover, a card's position, and once three anchor checks of a linked file.
+
+*To close:* find what each failing check reads too early, and make it wait for what it reads, as the other suites' fixed waits were converted.
 
 ### `found-29-sep/priority-readd-answers-a-ticked-off-row` — **closed** (visible bug, small; found closing `ledger-rows/row-850`)
 
@@ -5316,6 +5405,8 @@ FAILs. video-regression 94/94.
 
 *To close:* The order is forced. First, a `clips` table (id, workspace_id, storage_key unique, title, duration_seconds, created_by, share_token, created_at), backfilled from the existing storage prefix, with list() reading the table. Second, a stable app route that resolves a token to a freshly signed playback URL, shared with resume-7. Third, paste handling in the comment composer (and chat) that recognises the route, stores a clip reference on the comment rather than a bare URL, and renders the existing comment-video card (task-detail-sheet.tsx:5732-5770) with its processing state. Checks: paste a copied clip link and assert the card shows the clip's title and plays; paste a foreign URL and assert it stays a link. Break patches: the route ignores the token; the paste handler falls back to plain text.
 
+
+*Update, 30 September:* the per-clip route this row says is missing now exists, from `resume-defects/resume-7`. `/clips/<token>` and `GET /public/clips/:token` give a clip's title, length, a playable URL and who it opens for, and that is what a pasted link would read to render the clip. What is still missing is the paste itself, turning a clip link into the clip in a description, a comment or a doc, and the clips table that `clip_links` would join or be absorbed into.
 ### `resume-defects/s4-composer-email` — open, large
 
 **Section 4: 'The composer posts as Email' is still unbuilt. The mode menu now exists with Email disabled, a suite locks that state in, and the ledger's 'today' text is stale**

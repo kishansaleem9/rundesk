@@ -6383,8 +6383,12 @@ function CommentAttachments({
            *    seconds. A "Copy link" here would hand somebody a link that dies
            *    in fifteen minutes — it pastes, it looks right, and it stops
            *    working over lunch. That is a worse failure than not offering it.
-           *    The "Clip created!" card CAN offer one because it goes through
-           *    `POST /clips/share`, which takes an explicit expiry.
+           *    The "Clip created!" card CAN offer one because its clip is in the
+           *    library, and a library clip has a link of its own, `/clips/<token>`,
+           *    signed again on every view (`POST /clips/link`,
+           *    `resume-defects/resume-7`). A clip in a comment is the task's own
+           *    attachment, and a link to it would need the task's read rule on
+           *    the route, not the library's; that is not built.
            *
            *  · "More" would be a menu with nothing in it.
            */

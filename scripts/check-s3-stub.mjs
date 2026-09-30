@@ -23,7 +23,9 @@
  * exchange the product never performs, and checking it here would test this
  * repository's understanding of SigV4 rather than the product's. What IS
  * asserted is that a signature is PRESENT and that an unsigned PUT is refused,
- * which is the part a product regression could actually reach.
+ * which is the part a product regression could actually reach — and that a
+ * presigned URL past its window is refused, because how long a URL lives is
+ * the product's choice (`resume-defects/resume-7`).
  *
  *   node scripts/check-s3-stub.mjs            # the cases
  *   node scripts/check-s3-stub.mjs --mutate   # and that each one bites
@@ -131,6 +133,12 @@ async function main() {
     // A PUT the API signs in its HEADER, not its query — how it uploads by itself.
     out.directPut = await r2.putObject('tasks/probe/direct.png', BYTES, 'image/png').then(() => 'stored').catch((e: Error) => e.name)
     out.directRoundTrip = await r2.getObject('tasks/probe/direct.png').then((b) => b.equals(BYTES)).catch(() => false)
+    // A URL signed for one second, asked for after two: its window has passed.
+    // X-Amz-Date is to the second, so two whole seconds are waited and a bit.
+    const brief = await r2.getObjectUrl(KEY, 1)
+    await new Promise((resolve) => setTimeout(resolve, 2200))
+    out.expiredGet = (await fetch(brief)).status
+    out.freshGet = (await fetch(await r2.getObjectUrl(KEY, 60))).status
     await r2.deleteObject(KEY)
     out.afterDelete = await r2.getObject(KEY).then(() => 'still-there').catch((e: Error) => e.name)
     // The request log: what a suite reads to prove the product did, or did
@@ -239,6 +247,11 @@ if (out.none !== undefined) {
     `the API's own PUT answered ${out.directPut}; round trip ${out.directRoundTrip}`,
   )
   chk(
+    out.expiredGet === 403 && out.freshGet === 200,
+    'a presigned GET past its window is refused, as S3 refuses one, while one signed now is served — so a URL that dies can be seen to',
+    `past its window it answered ${out.expiredGet}; signed now, ${out.freshGet}`,
+  )
+  chk(
     out.copied === 'copied' && out.copyRoundTrip === true,
     'a copy made inside the bucket holds the source’s bytes — how a clip becomes a task’s own attachment',
     `the copy answered ${out.copied}; its bytes ${out.copyRoundTrip ? 'match' : 'do not match'}`,
@@ -340,6 +353,7 @@ if (process.argv.includes('--mutate')) {
     ['the log reports no position to read from', 'JSON.stringify({ seq: requestSeq, requests })', 'JSON.stringify({ seq: 0, requests })'],
     ['a stale stub reports the source on disk', 'return res.end(JSON.stringify({ source: SOURCE }))', "return res.end(JSON.stringify({ source: 'stale' }))"],
     ['control routes are logged as bucket traffic', "  if (url.pathname === '/__control/fail-next-put' && req.method === 'POST') {", "  requests.push({ n: ++requestSeq, method: req.method, bucket, key })\n  if (url.pathname === '/__control/fail-next-put' && req.method === 'POST') {"],
+    ['a presigned URL is served past its window, forever', 'if (pastItsWindow(url.searchParams)) return', 'if (false) return'],
   ]
   console.log('\n▶ and each mutation of the stub reddens a case')
   for (const [label, from, to] of MUTATIONS) {

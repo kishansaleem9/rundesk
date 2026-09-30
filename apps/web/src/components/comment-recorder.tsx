@@ -35,7 +35,7 @@ import { Mic, Square, Video, Trash2, Loader2 } from 'lucide-react'
 import { useTranslation } from '../lib/i18n'
 import { ClipSetupPanel } from './clip-setup-panel'
 import { openClipStream, readClipSetup, type ClipSetup } from '../lib/clip-capture'
-import { publishClip, clipShareUrl, attachClipToTask } from '../lib/clip-publish'
+import { publishClip, clipLink, attachClipToTask, type ClipLinkAudience } from '../lib/clip-publish'
 import { api, ApiError } from '../lib/api'
 import { useSpeechRecognition } from '../lib/use-speech-recognition'
 import {
@@ -99,6 +99,12 @@ export function CommentRecorder({
    */
   const [clipKey, setClipKey] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
+  /*
+   * Who the clip's link opens for, as the server said when it handed the link
+   * over. The toast says it: the link was a signed URL that died in a day and
+   * the toast said only "Link copied" (`resume-defects/resume-7`).
+   */
+  const linkAudienceRef = useRef<ClipLinkAudience>('anyone')
 
   const recorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -214,10 +220,10 @@ export function CommentRecorder({
     /*
      * §V2-S05b — THE REMEMBERED CLIP KEY MUST GO WITH IT, and this was a real
      * bug rather than tidiness. `ensureLink` reuses `clipKey` so a second Copy
-     * link re-signs instead of re-uploading; without clearing it here, record
-     * clip A, copy its link, discard, record clip B, copy — and the clipboard
-     * gets a link to clip A. The right clip, silently, for the wrong recording.
-     * Found by writing the check for it, not by using it.
+     * link asks for the link again instead of re-uploading; without clearing
+     * it here, record clip A, copy its link, discard, record clip B, copy —
+     * and the clipboard gets a link to clip A. The right clip, silently, for
+     * the wrong recording. Found by writing the check for it, not by using it.
      */
     setClipKey(null)
     chunksRef.current = []
@@ -352,13 +358,21 @@ export function CommentRecorder({
     }
   }
 
+  /*
+   * THE CLIP'S OWN LINK, `/clips/<token>` on this site (`resume-defects/resume-7`).
+   * It was the signed storage URL, asked for a day: pasted anywhere, it died
+   * the next day. The link is the same every time it is asked for, and opening
+   * it signs the clip again, so a second press asks, and uploads nothing.
+   */
   const ensureLink = async (): Promise<string | null> => {
     const key = await ensureClip()
     if (!key || !workspaceId) return null
     try {
-      return await clipShareUrl(workspaceId, key)
+      const link = await clipLink(workspaceId, key)
+      linkAudienceRef.current = link.audience
+      return link.url
     } catch {
-      toast.error(t('clipCreated.uploadFailed'))
+      toast.error(t('clipLink.failed'))
       return null
     }
   }
@@ -368,8 +382,11 @@ export function CommentRecorder({
     if (!url) return
     try {
       await navigator.clipboard?.writeText(url)
-      // The frame's own confirmation, at `05:30`.
-      toast.success(t('clipCreated.linkCopied'))
+      // The frame's own confirmation, at `05:30`, and what it leaves out: who
+      // can open the link, and that it does not expire.
+      toast.success(t('clipCreated.linkCopied'), {
+        description: t(linkAudienceRef.current === 'members' ? 'clipLink.members' : 'clipLink.anyone'),
+      })
     } catch {
       toast.error(t('clipCreated.copyFailed'))
     }

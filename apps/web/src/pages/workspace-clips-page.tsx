@@ -36,7 +36,7 @@ import { useAuthStore } from '../store/auth'
 import { useTranslation } from '../lib/i18n'
 import { ClipSetupPanel } from '../components/clip-setup-panel'
 import { openClipStream, readClipSetup, type ClipSetup } from '../lib/clip-capture'
-import { uploadBlobWithProgress } from '../lib/clip-publish'
+import { uploadBlobWithProgress, type ClipLinkAudience } from '../lib/clip-publish'
 import { InlineSkeleton } from '../components/loading-skeletons'
 
 type Clip = {
@@ -81,6 +81,8 @@ export function ClipsPage() {
   const [selectedMemberId, setSelectedMemberId] = useState('')
   const [externalEmail, setExternalEmail] = useState('')
   const [shareUrl, setShareUrl] = useState('')
+  // Who the link opens for, as the server said (`resume-defects/resume-7`).
+  const [shareAudience, setShareAudience] = useState<ClipLinkAudience>('anyone')
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleteClip, setDeleteClip] = useState<Clip | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -105,22 +107,30 @@ export function ClipsPage() {
       await qc.invalidateQueries({ queryKey: ['clips', workspaceId] })
     },
   })
+  /*
+   * `resume-defects/resume-7` — EVERY MODE HANDS OUT THE CLIP'S LINK. This
+   * asked the server to sign the object for 60 minutes and showed the signed
+   * URL with no word of when it would die. The link is `/clips/<token>` now,
+   * which does not expire, so there is nothing to ask for; it is shown on this
+   * site's origin (the server's `shareUrl` is built for email, from its own
+   * `APP_URL`), with who can open it.
+   */
   const shareMutation = useMutation({
     mutationFn: () => {
       if (!shareClip) throw new Error('Pick a clip first')
-      return api<{ shareUrl: string; sentTo?: string }>(`/workspaces/${workspaceId}/clips/share`, {
+      return api<{ path: string; audience: ClipLinkAudience; sentTo?: string }>(`/workspaces/${workspaceId}/clips/share`, {
         method: 'POST',
         body: {
           storageKey: shareClip.storageKey,
           mode: shareMode,
           userId: shareMode === 'member' ? selectedMemberId : undefined,
           email: shareMode === 'external' ? externalEmail.trim() : undefined,
-          expiresInMinutes: 60,
         },
       })
     },
     onSuccess: (data) => {
-      setShareUrl(data.shareUrl)
+      setShareUrl(`${window.location.origin}${data.path}`)
+      setShareAudience(data.audience)
     },
   })
   const clips = clipsQuery.data ?? []
@@ -452,6 +462,7 @@ export function ClipsPage() {
                 setSelectedMemberId('')
                 setExternalEmail('')
                 setShareUrl('')
+                shareMutation.reset()
                 setShareOpen(true)
               }}
             />
@@ -466,11 +477,20 @@ export function ClipsPage() {
               {t('clips.shareDescription')}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
+          {/*
+            `min-w-0`: the dialog is a grid, and a grid item is never narrower
+            than its content, so a long address in the link row widened the
+            dialog's one column past the dialog itself and pushed the footer's
+            button off the screen — the first share worked, the next could not
+            be pressed. Measured with a signed storage URL in the row, which is
+            what this dialog used to show (`resume-defects/resume-7`).
+          */}
+          <div className="space-y-3 min-w-0">
             <div className="flex gap-2">
               {(['member', 'external', 'public'] as const).map((mode) => (
                 <button
                   key={mode}
+                  data-testid={`clip-share-mode-${mode}`}
                   onClick={() => setShareMode(mode)}
                   className={cn(
                     'px-3 py-1.5 text-xs rounded border',
@@ -501,26 +521,48 @@ export function ClipsPage() {
             ) : null}
             {shareMode === 'external' ? (
               <Input
+                data-testid="clip-share-email"
                 placeholder={t('clips.externalEmailPlaceholder')}
                 value={externalEmail}
                 onChange={(e) => setExternalEmail(e.target.value)}
               />
             ) : null}
             {shareUrl ? (
-              <div className="rounded border border-border p-2 text-xs flex items-center gap-2">
-                <span className="truncate flex-1">{shareUrl}</span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => navigator.clipboard?.writeText(shareUrl)}
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </Button>
+              <div className="space-y-1.5">
+                <div className="rounded border border-border p-2 text-xs flex items-center gap-2">
+                  {/* And here: a flex item will not shrink below its text either (see the wrapper above). */}
+                  <span className="truncate flex-1 min-w-0" data-testid="clip-share-link">{shareUrl}</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="clip-share-copy"
+                    aria-label={t('clipCreated.copyLink')}
+                    onClick={() =>
+                      void navigator.clipboard
+                        ?.writeText(shareUrl)
+                        .then(() => toast.success(t('clipCreated.linkCopied')))
+                        .catch(() => toast.error(t('clipCreated.copyFailed')))
+                    }
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                {/* Who can open it, and that it does not expire — what the dialog never said. */}
+                <p className="text-xs text-muted-foreground" data-testid="clip-share-audience">
+                  {t(shareAudience === 'members' ? 'clipLink.members' : 'clipLink.anyone')}
+                </p>
               </div>
+            ) : null}
+            {/* A refused share said nothing at all. */}
+            {shareMutation.isError ? (
+              <p className="text-xs text-rose-500" data-testid="clip-share-error">
+                {(shareMutation.error as Error)?.message ?? t('clipLink.failed')}
+              </p>
             ) : null}
           </div>
           <DialogFooter>
             <Button
+              data-testid="clip-share-generate"
               onClick={() => shareMutation.mutate()}
               disabled={
                 shareMutation.isPending ||
@@ -583,7 +625,7 @@ function ClipCard({
   const [resolvedDuration, setResolvedDuration] = useState<number>(clip.durationSeconds ?? 0)
   const duration = `${Math.floor((resolvedDuration ?? 0) / 60)}:${String((resolvedDuration ?? 0) % 60).padStart(2, '0')}`
   return (
-    <Card variant="glass" className="cursor-pointer p-0 overflow-hidden transition-all hover:shadow-glow hover:border-accent/40 group">
+    <Card variant="glass" data-testid="clip-card" className="cursor-pointer p-0 overflow-hidden transition-all hover:shadow-glow hover:border-accent/40 group">
       <div
         className="relative aspect-video overflow-hidden"
         style={{ background: 'linear-gradient(135deg, hsl(230 50% 45%), hsl(270 70% 55%))' }}
@@ -625,7 +667,12 @@ function ClipCard({
             <button className="text-muted-foreground hover:text-destructive" onClick={onDelete}>
               <Trash2 className="h-3.5 w-3.5" />
             </button>
-            <button className="text-muted-foreground hover:text-foreground" onClick={onShare}>
+            <button
+              className="text-muted-foreground hover:text-foreground"
+              data-testid="clip-card-share"
+              aria-label={t('clips.shareTitle')}
+              onClick={onShare}
+            >
               <Share2 className="h-3.5 w-3.5" />
             </button>
           </div>

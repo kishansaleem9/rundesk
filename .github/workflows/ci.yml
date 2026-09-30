@@ -594,11 +594,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs TWO HUNDRED AND FORTY-THREE — every suite in the repo but the
+    # The job now runs TWO HUNDRED AND FORTY-FOUR — every suite in the repo but the
     # six in `browser-suites`, which `check-suites-registered.mjs` now enforces
     # rather than this comment asserting it. At the measured 1.1 minutes each
-    # that is about 267 minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155 → 156 → 158 → 159 → 160 → 161 → 162 → 163 → 164 → 165 → 166 → 167 → 168 → 169 → 170 → 171 → 172 → 173 → 174 → 175 → 176 → 177 → 178 → 179 → 180 → 181 → 182 → 183 → 184 → 185 → 186 → 187 → 188 → 189 → 190 → 191 → 192 → 193 → 194 → 195 → 196 → 197 → 198 → 199 → 200 → 201 → 202 → 203 → 204 → 205 → 206 → 207 → 208 → 216 → 217 → 218 → 219 → 220 → 221 → 222 → 223 → 224 → 225 → 227 → 229 → 231 → 232 → 233 → 234 → 236 → 237 → 241 → 242 → 243.
+    # that is about 268 minutes plus setup. The count has gone
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155 → 156 → 158 → 159 → 160 → 161 → 162 → 163 → 164 → 165 → 166 → 167 → 168 → 169 → 170 → 171 → 172 → 173 → 174 → 175 → 176 → 177 → 178 → 179 → 180 → 181 → 182 → 183 → 184 → 185 → 186 → 187 → 188 → 189 → 190 → 191 → 192 → 193 → 194 → 195 → 196 → 197 → 198 → 199 → 200 → 201 → 202 → 203 → 204 → 205 → 206 → 207 → 208 → 216 → 217 → 218 → 219 → 220 → 221 → 222 → 223 → 224 → 225 → 227 → 229 → 231 → 232 → 233 → 234 → 236 → 237 → 241 → 242 → 243 → 244.
     #
     # The limit is 300, raised from 270 when the job reached 227 suites: about
     # 250 minutes plus setup against 270 left a margin smaller than one slow
@@ -783,6 +783,10 @@ jobs:
           R2_ACCESS_KEY_ID: stub-key
           R2_SECRET_ACCESS_KEY: stub-secret
           R2_BUCKET_NAME: rundesk-ci
+          # How long a clip's playback URL is signed for, as `lane_store_env`
+          # sets it: `clip-links` waits one window out to show the clip's link
+          # still plays after it (`resume-defects/resume-7`).
+          CLIP_PLAYBACK_URL_SECONDS: 10
           # Integration keys that are not real — the six `lane_oauth_env`
           # exports. A grant's start refuses a provider with no keys, and the
           # suites that read a grant's state start Google, Microsoft and
@@ -1434,7 +1438,7 @@ jobs:
       # §V2-S05b, frames `05:25`–`05:30` — the "Clip created!" card.
       #
       # PART OF THIS IS STUBBED and the suite says so: clip storage is R2, which
-      # is not configured in CI, so presign / PUT / share are intercepted in the
+      # is not configured in CI, so presign / PUT / the link are intercepted in the
       # browser. What makes that honest is the guard that runs FIRST against the
       # real API — neither endpoint may answer 404, and each must fail for a
       # storage reason. A 404 would mean the stub implements an address the
@@ -1443,6 +1447,20 @@ jobs:
       - name: Clip created card
         if: '!cancelled()'
         run: node test/e2e/clip-created-card.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # `resume-defects/resume-7` — a clip's link is the clip's, not a signature
+      # that dies. Copy link, New tab and the share dialog hand out
+      # `/clips/<token>`, which signs the clip again on every view; it opens for
+      # anyone holding it (ClickUp's rule) unless the workspace blocks public
+      # sharing, and then for its members. Nothing stubbed: the store above,
+      # which refuses a URL past its window, and the API step's
+      # CLIP_PLAYBACK_URL_SECONDS, so the suite can wait one window out.
+      - name: A clip's link outlives every signature, and opens for whoever may watch
+        if: '!cancelled()'
+        run: node test/e2e/clip-links.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
