@@ -72,7 +72,7 @@ import {
   MapPin,
   CornerDownRight,
 } from 'lucide-react'
-import { api, ApiError, downloadFile } from '../lib/api'
+import { api, ApiError, downloadFile, refusalMessage } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import {
   useSpaceFeatures,
@@ -120,6 +120,7 @@ import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type Dra
 import { addDays, addMonths, differenceInCalendarDays, endOfMonth, endOfWeek, format, isSameMonth, isToday, startOfDay, startOfMonth, startOfWeek } from 'date-fns'
 import { ListSkeleton } from '../components/loading-skeletons'
 import { relativeTime } from '../lib/relative-time'
+import { fieldsOfList } from '../lib/field-scope'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 // Status is now a free-text key validated against the list's list_statuses.
@@ -291,6 +292,8 @@ type CustomFieldDef = {
    */
   type: CustomFieldType | (string & {})
   options?: Array<{ label: string; value: string }> | null
+  /** The one list this field is scoped to, or none for the whole project (`fieldsOfList`). */
+  listId?: string | null
 }
 type CustomFieldValue = {
   definition: { id: string }
@@ -1793,11 +1796,19 @@ function ListDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [listCaps.add, listCaps.edit, listCaps.comment, listCaps.statuses, listCaps.fields, currentUserId],
   )
-  const { data: projectFields = [] } = useQuery({
+  const { data: allProjectFields = [] } = useQuery({
     queryKey: ['project-fields', workspaceId, projectId],
     queryFn: () =>
       api<CustomFieldDef[]>(`/workspaces/${workspaceId}/projects/${projectId}/custom-fields`),
   })
+  /*
+   * THIS LIST'S FIELDS: the project's, less those scoped to another list of it
+   * (`found-30-sep/field-route-takes-another-projects-field`). The project's
+   * list holds every field, and a field scoped to another list was drawn here as
+   * a column, filter and sort whose cells took a value (200) that the row, read
+   * back through the task's own fields, never showed. The server now refuses it.
+   */
+  const projectFields = useMemo(() => fieldsOfList(allProjectFields, listId), [allProjectFields, listId])
   const createField = useMutation({
     mutationFn: () =>
       api(`/workspaces/${workspaceId}/projects/${projectId}/custom-fields`, {
@@ -2563,13 +2574,25 @@ function ListDetail() {
       : format(startOfMonth(new Date()), 'yyyy-MM')
   const calendarOnToday = calendarPeriodKey === calendarTodayKey
 
+  /*
+   * A ROW'S CHANGE, AND THE SERVER'S WORDS WHEN IT IS REFUSED. The row edits,
+   * the calendar drop and the Gantt drag sent their PATCH and threw on a
+   * refusal into nothing (their callers do not wait), so a refused change said
+   * nothing and left the row as drawn. A due date moved before the start the
+   * task holds is now refused (400, `found-30-sep/a-task-starts-after-it-is-due`),
+   * and that, like any refusal, is said; the rows are read again either way.
+   */
+  const patchTaskSaying = async (taskId: string, patch: Record<string, unknown>) => {
+    try {
+      await api(`/tasks/${taskId}`, { method: 'PATCH', body: JSON.stringify(patch) })
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotUpdateTask'))
+    }
+    await refetch()
+  }
   // Reschedule a task's due date onto a calendar day (drag-drop / click-create).
   const rescheduleTask = async (taskId: string, day: Date) => {
-    await api(`/tasks/${taskId}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ dueDate: format(day, 'yyyy-MM-dd') }),
-    })
-    await refetch()
+    await patchTaskSaying(taskId, { dueDate: format(day, 'yyyy-MM-dd') })
   }
   // Shift a task's whole span by `deltaDays` (Gantt bar drag, Plan §5.4). Reuses
   // the same PATCH /tasks/:id path as the calendar reschedule above, moving
@@ -2580,8 +2603,7 @@ function ListDetail() {
     if (task.startDate) patch.startDate = format(addDays(new Date(task.startDate), deltaDays), 'yyyy-MM-dd')
     if (task.dueDate) patch.dueDate = format(addDays(new Date(task.dueDate), deltaDays), 'yyyy-MM-dd')
     if (Object.keys(patch).length === 0) return
-    await api(`/tasks/${task.id}`, { method: 'PATCH', body: JSON.stringify(patch) })
-    await refetch()
+    await patchTaskSaying(task.id, patch)
   }
   const createTaskOnDay = async (day: Date, title: string) => {
     await api('/tasks', {
@@ -3451,10 +3473,7 @@ function ListDetail() {
             subtaskStamp={subtaskStamp}
             hiddenCols={hiddenFields}
             selectedTaskIds={selectedTaskIds}
-            onPatchTask={async (taskId, patch) => {
-              await api(`/tasks/${taskId}`, { method: 'PATCH', body: JSON.stringify(patch) })
-              await refetch()
-            }}
+            onPatchTask={(taskId, patch) => patchTaskSaying(taskId, patch)}
             onToggleSelect={(taskId, additive) => {
               setSelectedTaskIds((prev) => {
                 const next = new Set(prev)
@@ -3617,13 +3636,7 @@ function ListDetail() {
             columnFilters={columnFilters}
             onColumnFilters={setColumnFilters}
             onOpenTask={(id) => setSelectedTaskId(id)}
-            onPatchTask={async (id, patch) => {
-              await api(`/tasks/${id}`, {
-                method: 'PATCH',
-                body: JSON.stringify(patch),
-              })
-              await refetch()
-            }}
+            onPatchTask={(id, patch) => patchTaskSaying(id, patch)}
             onAddTask={async (title) => {
               // Omit status so the backend seeds the list's first/default status
               // (resolveStatusForList) — a hardcoded 'todo' would mis-seed lists
@@ -6777,14 +6790,28 @@ function BulkActionBar({
 
   if (count === 0 || !caps.edit) return null
 
+  /*
+   * THE TASKS THE SERVER DID NOT CHANGE, AND WHY. The route changes what it may
+   * and answers the rest under `failed`, each with its reason — a task left
+   * starting after its due date among them
+   * (`found-30-sep/a-task-starts-after-it-is-due`) — and a refusal of the
+   * whole request is a 400. Both were read by nothing: the bar cleared as if
+   * every task had changed.
+   */
   const apply = async (patch: Record<string, unknown>) => {
     setBusy(true)
     try {
-      await api('/tasks/bulk/update', {
+      const res = await api<{ failedCount?: number; failed?: Array<{ reason?: string }> }>('/tasks/bulk/update', {
         method: 'PATCH',
         body: JSON.stringify({ taskIds: Array.from(selectedIds), patch }),
       })
+      if (res?.failedCount) {
+        const reasons = [...new Set((res.failed ?? []).map((f) => f.reason).filter(Boolean))]
+        toast.error([tCount('list.bulk.notChanged', res.failedCount), ...reasons].join(' '))
+      }
       await onApplied()
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotUpdateTask'))
     } finally {
       setBusy(false)
     }
@@ -7507,13 +7534,13 @@ function CustomizeViewPanel({
       // `downloadFile` already carries the Authorization header, refreshes an
       // expired token and revokes the object URL — an <a href> can do none of
       // those, and a second copy of it here would be a second thing to fix.
-      await downloadFile(
-        `/tasks/list/${listId}/export?${query.toString()}`,
-        `list.${format === 'xlsx' ? 'xlsx' : 'csv'}`,
-      )
+      // Saved under the name the server gives, the list's own: this saved
+      // every list's as "list.csv" (`found-30-sep/list-export-saved-as-list-csv`).
+      await downloadFile(`/tasks/list/${listId}/export?${query.toString()}`)
       if (ref.current) ref.current.open = false
-    } catch {
-      toast.error(t('list.export.failed'))
+    } catch (err) {
+      // The server's words when it refused (`found-30-sep/download-refusals-say-no-reason`).
+      toast.error(refusalMessage(err, t('list.export.failed')))
     } finally {
       setBusy(false)
     }

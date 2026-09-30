@@ -3,7 +3,7 @@
 # Reddens: unit: task-templates.service.test.ts "writes the copy the values its fields can hold, and none of the original’s votes or files"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/task-templates/task-templates.service.ts'
-a = "    await this.materialiseTemplateValues(task.id, ctx.projectId, workspaceId, payload.customFieldValues)\n"
+a = "    await this.materialiseTemplateValues(task.id, { projectId: ctx.projectId, listId: ctx.listId }, workspaceId, payload.customFieldValues)\n"
 b = ("    {\n"
      "      // BROKEN: every value the task held, written onto the copy unchecked\n"
      "      const defs = await this.db\n"

@@ -30,7 +30,45 @@ type ResolvedItem = {
 }
 /** What a guest must be able to read for the route to be theirs (`guestMayRead`): a task in reach, a container on the way. */
 type GuestTarget = { kind: 'space' | 'project' | 'list' | 'task'; id: string }
-type ResolvedResource = { workspaceId: string; container?: ContainerAccessContext; item?: ResolvedItem; guestTarget?: GuestTarget }
+type ResolvedResource = {
+  workspaceId: string
+  /** The route named the workspace itself, which is not looked up: see `NOT_THERE`. */
+  namedWorkspace?: boolean
+  container?: ContainerAccessContext
+  item?: ResolvedItem
+  guestTarget?: GuestTarget
+}
+
+/*
+ * ONE ANSWER FOR WHAT THE CALLER MAY NOT OPEN (`found-30-sep/private-task-reads-say-403`).
+ *
+ * A space, project, list or task the caller may not open is answered exactly
+ * as an id that names nothing: 404, in the same words. This guard answered 403
+ * with the reason ("This task is private", "This list is private", "This space
+ * or project is private", "This is not shared with you", "You are not a member
+ * of this workspace") and 404 for a miss, so any id a member was handed said
+ * whether it named something, what kind of wall stood in front of it, and — to
+ * a user of another organisation — that it lived in a workspace they are not
+ * in. The service reads of a task (`readableTask`: Duplicate, reminders, custom
+ * fields, calendar push, Download all) already answered 404, so one task said
+ * two things depending on the route asked.
+ *
+ * Why 404 and not 403 for both: RFC 9110 §15.5.4 lets a server that "wishes to
+ * 'hide' the current existence of a forbidden target resource" answer 404, and
+ * OWASP's IDOR cheat sheet says that where existence is sensitive, "map both
+ * cases to the same public response, such as a 404". ClickUp's API answers one
+ * refusal, "Team not authorized", whether the id names a task the token may not
+ * reach or none at all. The one door ClickUp keeps — Request access on a link
+ * to a private item — stays: the task sheet offers the ask on this 404 in
+ * words that do not say whether anything is there (`RequestAccessCard`).
+ *
+ * What stays 403: a refusal the caller may know about. A route that names the
+ * WORKSPACE itself is answered 403 for a non-member whether or not the
+ * workspace exists (it is not looked up), so it says nothing either way; and a
+ * write to something the caller may open but not change is the write rule's
+ * 403, asked after this guard.
+ */
+const NOT_THERE = 'Resource not found'
 
 
 /**
@@ -54,7 +92,7 @@ export class ResourceMemberGuard implements CanActivate {
     if (!user?.id) throw new ForbiddenException('Not authenticated')
 
     const resolved = await this.resolveResource(req.params ?? {}, req.body ?? {}, user.id)
-    if (!resolved) throw new NotFoundException('Resource not found')
+    if (!resolved) throw new NotFoundException(NOT_THERE)
     const { workspaceId, container, item } = resolved
 
     if (user.role === 'super_admin') {
@@ -70,7 +108,12 @@ export class ResourceMemberGuard implements CanActivate {
       .from(workspaceMembers)
       .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, user.id)))
       .limit(1)
-    if (!member) throw new ForbiddenException('You are not a member of this workspace')
+    if (!member) {
+      // The workspace named by the route: 403 for any id, there or not. A
+      // space, list or task found in a workspace the caller is not in: not there.
+      if (resolved.namedWorkspace) throw new ForbiddenException('You are not a member of this workspace')
+      throw new NotFoundException(NOT_THERE)
+    }
 
     // Private-container enforcement: a workspace member still needs container
     // membership to reach a private space/project. Public containers pass.
@@ -79,14 +122,14 @@ export class ResourceMemberGuard implements CanActivate {
         userId: user.id,
         workspaceRole: member.role as string,
       })
-      if (!ok) throw new ForbiddenException('This space or project is private')
+      if (!ok) throw new NotFoundException(NOT_THERE)
     }
 
     // A guest reads what is shared with them, and sees the containers on the
     // way to it (`guest-reach.ts`): nothing else in the workspace is theirs.
     if (member.role === 'guest' && resolved.guestTarget) {
       const { kind, id } = resolved.guestTarget
-      if (!(await guestMayRead(this.db, user.id, kind, id))) throw new ForbiddenException('This is not shared with you')
+      if (!(await guestMayRead(this.db, user.id, kind, id))) throw new NotFoundException(NOT_THERE)
     }
 
     // Per-item privacy (§2): a private list, or a private/foreign task, is only
@@ -100,7 +143,7 @@ export class ResourceMemberGuard implements CanActivate {
           { userId: user.id, isManager },
         )
       ) {
-        throw new ForbiddenException('This list is private')
+        throw new NotFoundException(NOT_THERE)
       }
       if (
         item.taskVisibility !== undefined &&
@@ -109,7 +152,7 @@ export class ResourceMemberGuard implements CanActivate {
           { userId: user.id, isManager, isAssignee: item.taskIsAssignee },
         )
       ) {
-        throw new ForbiddenException('This task is private')
+        throw new NotFoundException(NOT_THERE)
       }
     }
 
@@ -168,7 +211,7 @@ export class ResourceMemberGuard implements CanActivate {
     id: string,
     actorId: string,
   ): Promise<ResolvedResource | null> {
-    if (kind === 'ws') return { workspaceId: id }
+    if (kind === 'ws') return { workspaceId: id, namedWorkspace: true }
     if (kind === 'label') {
       const [r] = await this.db.select({ w: labels.workspaceId }).from(labels).where(eq(labels.id, id)).limit(1)
       return r ? { workspaceId: r.w } : null

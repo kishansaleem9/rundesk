@@ -2073,7 +2073,7 @@ Checks:
 
 Found while building it: `found-30-sep/create-modal-cuts-off-create` (closed with it), `found-30-sep/a-task-starts-after-it-is-due`, `found-30-sep/task-estimate-below-zero`, `found-30-sep/refused-create-leaves-tags` and `found-30-sep/load-template-takes-every-attribute`.
 
-### `found-30-sep/a-task-starts-after-it-is-due` — open (visible bug, small; found closing `found-30-sep/template-submit-ignores-the-form`)
+### `found-30-sep/a-task-starts-after-it-is-due` — **closed** (visible bug, small; found closing `found-30-sep/template-submit-ignores-the-form`)
 
 **A task can start after it is due, and nothing says so**
 
@@ -2084,7 +2084,66 @@ Found while building it: `found-30-sep/create-modal-cuts-off-create` (closed wit
 
 *To close:* research what ClickUp does with a start after the due date (refuse it, move one of the two, or warn). Then do the same on every write that sets both, the template's merge among them, and check it with a suite.
 
-### `found-30-sep/task-estimate-below-zero` — open (small; found closing `found-30-sep/template-submit-ignores-the-form`)
+
+*Closed, 30 September* (built by an agent on lane 5). ClickUp keeps the rule, read through search excerpts (its help
+centre, feedback board and developer site are blocked here): its feedback board's "Improve the Start/Due date and
+time setting experience in Task view" says that when you set a start date after the due date, ClickUp "deletes the
+due date", and asks instead for "a warning" that does "not let you save", because the deleted date is lost. OWASP's
+Input Validation Cheat Sheet names the case as semantic validation: "start date is before end date". So a task
+never starts after it is due, and a write that would make it so is refused with the reason, not answered by deleting
+a date the caller named.
+
+Measured first on lane 5 at `6f8e02c`, a probe three times: `POST /tasks` starting in ten days and due in three
+answered 201; `PATCH` the same, 200, and so did a start moved past the due date held and a due date moved before the
+start held; the bulk editor changed the task (`failed []`); a template starting in nine days beside a due date typed
+three days out, 201, starting six days after it was due; two dates typed the wrong way round beside a template, 201;
+a duplicate of such a task, 201.
+
+- One rule (`task-values.ts`), asked by `createTask` and `updateTask`, so by `POST /tasks`, `PATCH`, the bulk
+  editor, a template's task, a duplicate and the next occurrence of a recurring task: 400, "A task cannot start
+  after it is due: the start date is after the due date.", before anything is written. `PATCH` asks it of the dates
+  the task would hold, and only when a date is written, so a task made before the rule can still be renamed or
+  closed.
+- A day with no time (stored as UTC midnight, shown as that day) beside a moment is compared as days, the moment
+  read as the day it falls on where its writer is: the web names the browser's zone on every write (`X-Time-Zone`).
+  A task due "the 4th" may start at 15:00 on the 4th; one starting at 09:00 on the 5th in Karachi is refused from
+  Karachi and taken from Los Angeles, where that instant is the evening of the 4th. A caller naming no zone is
+  refused only what every reader would see out of order. (A review found the first build asked the exact question
+  only in the create modal, so from the sheet, a list row, the calendar drop and the bulk bar a start up to a day
+  and a half past a due day was taken without a word; measured in a browser in Karachi: 200, no toast.)
+- The bulk editor refuses two dates the wrong way round, whole; one date moved past a task's other fails that task
+  under `failed`, with the reason, and the rest change. The list page's bulk bar now says how many were not changed
+  and why; it read nothing of the answer.
+- A template's date gives way to one the person typed that it contradicts, as ClickUp's picker keeps the date just
+  set; two typed the wrong way round are refused. A template whose own start is after its due date is refused (400).
+  Save as template turns a task's dates into days from now in the order the task holds them: rounded each alone, a
+  task due "the 4th" and starting at noon that day came out starting a day after it was due, and the save was
+  refused (400) at any hour (found by the review; before this work it was saved, the wrong way round).
+  The next occurrence of a recurring task keeps its start at the old distance before the due date where its rule
+  would put it after (a monthly rule puts both on one day).
+- The create modal says, beside the dates and before Create, "The start date is after the due date. A task cannot
+  start after it is due." and Create waits (four locales). The task sheet's start box stops its picker at the due
+  date and its due box at the start; a refused change is said in the server's words. The list page's row edits,
+  calendar drop and Gantt shift said nothing when refused and now say it. The timeline's right handle stops at the
+  start itself, not the midnight of its day.
+
+Checks:
+- `task-values` is new (21 checks, registered in ci.yml). Before: 3/16 three times at `6f8e02c` (the 13 new checks
+  red). After: 16/16 three times in a row there, and again at `bac7eae`. The review added five (C17–C21): 16/21 three
+  times on the build before its fixes, 21/21 three times in a row after.
+- `task-values-1..12`, `-17..19` and `-21` are new, each reddening the check it claims on lane 5; 1 also reddens the
+  template's and the duplicate's refusals and the Karachi create (all reach `createTask`), 3 the bulk editor's, the
+  sheet's and the Karachi PATCH and sheet (all reach `updateTask`), 19 the Karachi sheet.
+- `twr-1..3`, `twr-9..11`, `twr-14..16`, `twr-18..21`, `twr-23`, `twr-25`, `twr-26` are unit claims, each reddening
+  its test in `task-values.test.ts`, `task-writes.test.ts`, `task-templates.service.test.ts` or
+  `lib/task-dates.test.ts`.
+- `create-modal-templates-22` was anchored on the merge's due date, which moved; re-anchored, it reddens its claim.
+
+Found while closing it: `found-30-sep/spreadsheet-import-skips-task-rules`,
+`found-30-sep/timeline-drags-refused-silently` and `found-30-sep/sheet-dates-write-as-typed`.
+- Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `create-modal-templates` 45, `task-values` 21, `task-creation-access` 6, `time-estimate` 13, `task-depth` 92.
+
+### `found-30-sep/task-estimate-below-zero` — **closed** (small; found closing `found-30-sep/template-submit-ignores-the-form`)
 
 **`POST /tasks` and `PATCH /tasks/:id` take an estimate below zero**
 
@@ -2096,7 +2155,33 @@ Found while building it: `found-30-sep/create-modal-cuts-off-create` (closed wit
 
 *To close:* refuse an estimate below zero on both routes, as the template route does, and check each with a suite.
 
-### `found-30-sep/refused-create-leaves-tags` — open (small; found closing `found-30-sep/template-submit-ignores-the-form`)
+
+*Closed, 30 September* (built by an agent on lane 5). ClickUp's API says of a time estimate that it "must be a
+non-negative integer" (search excerpt of "Replace task time estimates"). Measured first on lane 5 at `6f8e02c`, a
+probe three times: `POST /tasks` with `timeEstimate: -3600` answered 201 and stored it, `PATCH` -60 200, and the
+bulk editor -120 200; the template's route refused -60 (400). Past what the column holds, and in parts of a second,
+Postgres refused the write in its own words.
+
+- An estimate is none, or a whole number of seconds from 0 to 2147483647 (`assertEstimate`), asked by `createTask`,
+  `updateTask` and the bulk editor (the whole request); `CreateTaskDto` has `@Min(0)` and `@Max`, as the template's
+  body now has the same `@Max`. Every refusal names the rule.
+- A duplicate and each of its subtasks, a template's subtasks, and the next occurrence of a recurring task carry no
+  estimate the rule refuses (one below nought from before the rule, or past the column) rather than failing. A
+  review found the subtasks missed: a duplicate whose subtask held -60 made the copy, its checklists and values,
+  then was refused (400) at the subtask, leaving a half-made copy each try (measured: 400 twice, two copies left,
+  neither with its subtask nor recorded; before this work it was copied, -60 and all). Now it is copied whole, the
+  subtask with no estimate. The web's estimate box already refused a sign.
+
+Checks:
+- `task-values` (new): POST, PATCH and the bulk editor each refuse one below nought and write nothing; an estimate of
+  nought is taken by all three; and (the review's) a task whose subtask holds -60 is duplicated whole. Before: the
+  three red, three times, and the duplicate red three times on the build before the review's fixes; after: green,
+  three times.
+- `task-values-13..16` and `-20` are new, each reddening the check it claims (14 also C15, which reads the estimate 14
+  lets through). `twr-4`, `twr-7`, `twr-17`, `twr-22` and `twr-24` are unit claims, each reddening its test.
+- Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `create-modal-templates` 45, `task-values` 21, `task-creation-access` 6, `time-estimate` 13, `task-depth` 92.
+
+### `found-30-sep/refused-create-leaves-tags` — **closed** (small; found closing `found-30-sep/template-submit-ignores-the-form`)
 
 **A refused create leaves the tags it made behind**
 
@@ -2105,6 +2190,75 @@ Found while building it: `found-30-sep/create-modal-cuts-off-create` (closed wit
 Read, not measured: the create modal makes each typed tag (`POST /workspaces/:ws/labels`) before the task. So a refused create, plain or from a template, leaves those tags too. Before this fix, every tag typed beside a template was left so, attached to nothing.
 
 *To close:* make the labels only once the task is made, or in the same transaction, and check that a refused create adds no label.
+
+
+*Closed, 30 September* (built by an agent on lane 5). ClickUp makes a tag from the task creation window ("Search or
+create new", type the name, Enter), as part of the task being made; OWASP's Business Logic Security Cheat Sheet: a
+half-finished step leaves "exploitable inconsistencies", and the fix is "a database transaction". Measured first on
+lane 5 at `6f8e02c`, a probe three times: a task from a template holding a tag the workspace lacked, refused for its
+task type (400), made no task and left the tag. Read: the create modal made each typed tag before the task.
+
+- `createTask` takes tags by name (`labelsByName`): each is found in the task's workspace whatever its case, after
+  every question has been answered, and the rest are made in the same transaction as the task, its people and its
+  tag rows. The template's route hands its tags over by name and makes none itself; its match was exact-case, so a
+  template's "urgent" beside the workspace's "Urgent" made a second tag. A duplicate carries the original's tags by
+  id. A guest's name for a tag that does not exist is left off, as the tags route refuses a guest a new tag.
+- The create modal sends the typed tags by name, on `POST /tasks` and on the template's route, and no longer makes
+  them first; a typed tag the task came back without is said with the other extras.
+
+Checks:
+- `create-modal-templates` had 33 checks and has 37. Before: 32/37 three times at `6f8e02c` (the four new checks
+  red, and "Create sends the template’s route what was set …", which now expects `labelsByName`). After: 37/37
+  three times in a row there, and again at `bac7eae`.
+- `create-modal-templates-28..31` are new, each reddening only the check it claims on lane 5.
+- `twr-5`, `twr-6`, `twr-8`, `twr-12` and `twr-13` are unit claims, each reddening its test.
+- `create-modal-templates-12`, `-23` and `tsf-3` were anchored on lines this moved; re-anchored, each reddens its
+  claim.
+- Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `create-modal-templates` 45, `task-values` 21, `task-creation-access` 6, `time-estimate` 13, `task-depth` 92.
+
+### `found-30-sep/spreadsheet-import-skips-task-rules` — open (visible bug, small; found closing `found-30-sep/a-task-starts-after-it-is-due`)
+
+**The spreadsheet import writes a task that starts after it is due, and a second tag that differs only in case**
+
+*Evidence, 30 September, measured on lane 5 at `bac7eae` with this work's build (`probe-import.mjs`):* a sheet row
+"Start Date 2026-10-10, Due Date 2026-10-03, Tags urgent-X", imported into a workspace that holds the tag "Urgent-X",
+answered 201. The task was stored starting on the 10th and due on the 3rd, and the workspace then held two tags,
+"Urgent-X" and "urgent-X". The import writes its rows straight into `tasks` (`spreadsheet-import.service.ts`, the
+insert and the "merge" update), not through `TasksService.createTask`, so it asks none of `task-values.ts`; and its
+`ensureLabel` finds a tag by its exact name, where `POST /workspaces/:ws/labels` and a create's `labelsByName` find
+one whatever its case.
+
+*To close:* research what ClickUp's CSV import does with a start after the due date (a rejected row, or the start
+left out), then ask each imported row `assertDatesInOrder` and say the outcome in the job's per-row results; find a
+tag by name whatever its case, as the tags route does. Check it with the `imports` suite, by SQL.
+
+### `found-30-sep/timeline-drags-refused-silently` — open (visible bug, small; found closing `found-30-sep/a-task-starts-after-it-is-due`)
+
+**A timeline drag the server refuses snaps back and says nothing**
+
+*Evidence, 30 September (read, not run):* `workspace-timeline-page.tsx`'s `persistDates` mutation has an
+`onSettled` that refetches and no `onError`, so a refused PATCH — a reader without edit, or any other refusal — puts
+the bar back without a word. This work made its drags keep the dates in order (the right handle stopped at the
+midnight of a timed start's day, hours before the start, which the server now refuses; it now stops at the start),
+so the new rule is not reached from here; the silence is older than it. The list page's row edits, calendar drop,
+Gantt shift and bulk bar had the same silence and now toast the server's words (this work).
+
+*To close:* toast the server's words on a refused drag, as the list page now does, and check it with
+`gantt-controls` or a timeline suite (a member at view level dragging a bar).
+
+### `found-30-sep/sheet-dates-write-as-typed` — open (visible bug, small; found closing `found-30-sep/a-task-starts-after-it-is-due`)
+
+**The task sheet writes a date on every change of its box, and is closed while each write is out**
+
+*Evidence, 30 September (read, not run):* the sheet's start and due boxes are `datetime-local` inputs whose
+`onChange` sends `PATCH /tasks/:id` at once (`task-detail-sheet.tsx`), and both are `disabled` while
+`patchTask.isPending`. A date typed field by field (the day "2" then "5") is sent at each whole value, "the 2nd"
+first, and what is typed while a write is out is dropped by a disabled box. Now that a start after the due date is
+refused (400, with a toast), a half-typed value can bring the refusal's toast for a date the person never meant.
+
+*To close:* measure it (Playwright `pressSequentially` into the box, counting the PATCHes), then write the date on
+blur or Enter, and keep the box enabled; check it with `task-values` or
+`task-depth`.
 
 ### `found-30-sep/load-template-takes-every-attribute` — open (parity, medium; found closing `found-30-sep/template-submit-ignores-the-form`)
 
@@ -2947,7 +3101,7 @@ Found while building it: `found-30-sep/private-task-reads-say-403`, `found-30-se
 `found-30-sep/two-zip-writers`.
 - Merged here and run again on lanes 5 and 7, with a CRC of its own where Node has none (`found-30-sep/node-engines-below-zlib-crc32`, below): `task-attachments` 32/32, `attach-on-create` 14, `object-key-boundaries` 23, `clip-created-card` 26, `task-cover` 42, `comment-recording` 33 and `list-export` 30, all green, 200 checks.
 
-### `found-30-sep/private-task-reads-say-403` — open (security, small; found closing `found-30-sep/attachments-have-no-download-all`)
+### `found-30-sep/private-task-reads-say-403` — **closed** (security, small; found closing `found-30-sep/attachments-have-no-download-all`)
 
 **A task's own reads tell a member refused it that it exists; the service reads answer as if it did not**
 
@@ -2961,7 +3115,219 @@ So the task's own route says whether an id is a task.
 *To close:* decide one answer for a task the caller may not open, and give it to the guard and the services
 alike; check it on a private task, list and space.
 
-### `found-30-sep/list-export-saved-as-list-csv` — open (visible bug, small; found closing `found-30-sep/attachments-have-no-download-all`)
+
+*Closed, 30 September* (by an agent on lane 2). For a task, list, project or space the caller may not open, the
+answer is now exactly what an id naming nothing gets on that route: 404, in the same words.
+
+The grounds:
+- RFC 9110 §15.5.4: a server that "wishes to "hide" the current existence of a forbidden target resource MAY instead
+  respond with a status code of 404".
+- OWASP's IDOR cheat sheet: where existence is sensitive, "map both cases to the same public response, such as a
+  404".
+- ClickUp's API gives one refusal, "Team not authorized", both for a task its token may not reach and for an id that
+  is not a task ("most of the time this is due to whatever is coming in not actually being a ClickUp task ID", read
+  through search excerpts).
+- ClickUp's app keeps a door, Request access on a link to a private item, and so does this change: the task sheet's
+  card is offered on the 404, for a refused task and a missing one alike, in words that say neither.
+
+Measured first on lane 2, three runs alike: 23 of 30 refusal/miss pairs answered differently.
+- `GET /tasks/:id` answered 403 "This task is private", "This list is private", "This space or project is private",
+  a guest "This is not shared with you", and another organisation's user "You are not a member of this workspace",
+  each against 404 "Resource not found".
+- The same for a list, project and space by id.
+- The same for a dependency on a private task, Draft a reply, a client portal, and Duplicate's words.
+- A member moved their own task into another's private list (201) and lost it there.
+
+The fix:
+- `ResourceMemberGuard`: every refusal of a space, project, list, task, view, goal, sprint or label it found is
+  `NotFoundException('Resource not found')`, the miss's own. A route naming the WORKSPACE keeps 403 "You are not a
+  member of this workspace": the workspace is not looked up, so the answer is the same for any id.
+- The task read rule (`assertTaskReadAccess`) answers every refusal "Task not found". Before, it said "Workspace not
+  found" to a stranger and 403 with the wall's name to a member. A task another task points at is refused in the
+  reference's own words ("Related task not found", "Parent task not found", and a merge's target "The task to merge
+  into was not found").
+- The task WRITE rule (`assertTaskWritable`, the first check of every task write route without a guard: a change, a
+  move, a merge, the bin, assignees, labels, files, recurrence, each id of the bulk editor) tells a stranger "Task
+  not found" (was "Workspace not found"), and says a task is in the bin (409) only to somebody who may open it; to
+  anybody else a binned task is "Task not found" too.
+- A merge asks the read rule of its source, and the reference rule of its target, before the merge rule: a private
+  target, or a private subtask, was "Task not found" or "Subtasks only nest one level deep" (400) where nothing was
+  "The task to merge into was not found", and a binned source was "A task in the bin cannot be merged" (400) to
+  people who may not open it. A target in another workspace is now "not found" as well, as a parent's and a
+  dependency's are; the merge picker only ever offered the workspace's own tasks.
+- Assign with AI (`GET /ai/assignee-suggestion`, which names no workspace and so has no guard in front of it) answers
+  a task its asker may not open `unknown_task`, word for word as an id naming nothing (was `no_permission`, to a
+  member refused it and to a user of any other organisation).
+- The move's target is read by `readableList` (the container AND the private-list rule) before the create gate. A
+  list the mover may not open is "Target list not found", like a missing one. The private-list rule was never
+  checked before.
+- Draft a reply, Summarize, a deadline: 404 "Task not found" (was 403 "You do not have access to this task").
+- Duplicate and Save as template say "Task not found in this workspace" for all three misses.
+- Client portals: a project the caller may not open is "Project not found", a portal of it "Portal not found".
+  Guests who may open the project are still refused, with the reason.
+- Request access: the card is drawn on the 404 (`offersRequestAccess`) and reads "You can't open this — It may have
+  been deleted, or it hasn't been shared with you. If it's there, we can ask whoever can grant access." (four
+  locales). The ask answers `{status}` only, records an ask about any id, and delivers one that names nothing in the
+  workspace to nobody. An id that cannot be one is 400.
+- What stays 403: a write the caller's level does not allow on something they may open (a view-only PATCH still says
+  "View only"), and every permission-key refusal.
+
+Checks:
+- A new suite, `refused-as-missing` (17 checks, API only, in CI). It covers a private task, a private list (and its
+  task and listing), a private space (its project, list, task), a guest, and another organisation's user; each
+  refused ask is paired with an id naming nothing and must read equal. It also covers the task's own routes and
+  service reads (files, following, Download all, Duplicate, a reminder, fields, calendar push), a dependency, Draft a
+  reply, the move into a private list and a private space's list (the task stays), and a portal; and, from the
+  review, a stranger's writes (change, move, bin, restore, archive, take on, repeat, the bulk editor's reasons), a
+  binned task refused to those who may not open it (the member's own still 409), and a merge's target and source.
+  Three checks must not change: the view-only write stays 403 with its reason, what may be opened still opens, and
+  the workspace-named route stays 403.
+- `ai-task-reads` check 4 (Assign with AI) pairs the private list's task, and this workspace's task asked by a user
+  of another organisation, each with an id naming nothing, word for word; it had pinned `no_permission`.
+- `request-access`, 9 → 10 checks: the refusal is the miss's 404 in the same words; the card on a task that does not
+  exist reads as on the private one and never says "exists"; an ask about nothing is answered word for word as one
+  about a private task and reaches nobody.
+- BEFORE, three runs each at `f532edc` and again at `6f8e02c` with the final suites: `refused-as-missing` 3/13 (its
+  three controls), `request-access` 7/10; the probe 23/30 pairs apart. AFTER, three runs each, three times over:
+  13/13, 10/10, 0/30 apart. The review's four checks and Assign with AI, three runs each: on the build as the review
+  found it `refused-as-missing` 13/17 and `ai-task-reads` 3/4, its probe 21/21 pairs apart; after, 17/17, 4/4, 0/21.
+- Unit tests: `resource-member.guard.test.ts` (one test re-aimed, four new), `tasks-security.test.ts` (two re-aimed,
+  one tightened), `tasks-refused-reads.test.ts` (7, new), `ai/task-readable.test.ts` (4, new),
+  `common/permissions/task-write.test.ts` (3, new), `task-templates.service.test.ts` (1 new),
+  `client-portal.service.test.ts` (2 new), `request-access.test.ts` (ids made uuids, 2 new),
+  `external-links.test.ts` (a stranger's "workspace not found" re-aimed to the miss), web
+  `request-access-offer.test.ts` (3, new).
+- Suites updated on purpose, each a refusal of something the caller may not open at all:
+  - `ai-task-reads` (3 checks, 403 → 404);
+  - `guest-space-level` (a guest's list, comment, and the task beside theirs, 403 → 404);
+  - `task-boundaries` (a move into a private project's list: 404, in the words a foreign list gets);
+  - `time-tracking-readers` (a guest's timer on a task not shared with them, 403 → 404);
+  - nine fixture gates that asserted the refusal before measuring anything (`ai-read-access`,
+    `custom-field-access`, `knowledge-read-access`, `lookup-read-access`, `meeting-access`, `private-list-reach`,
+    `report-read-access`, `task-creation-access`, `workspace-read-access`).
+
+Break patches:
+- New, each shown to redden what it names: `ram-1..17` (one per new check), `request-access-4-a-private-task-says-it-is-there`,
+  `request-access-5..7`, `atr-7`, and unit `rmg-1..5`, `tsr-1..2`, `trr-1..6`, `ait-1..3`, `tw-1..2`, `ttm-1`,
+  `cpa-1..2`, `rac-1..2`, `rao-1..2`.
+- Re-aimed: `dla-8` (now the service's own refusal, since the guard's answer is the miss) and `request-access-1` (to
+  the web unit test, since the e2e check it claimed was inverted).
+- Retired: `request-access-4-private-is-not-found-again`. It broke the old decision by doing what is now the
+  decision.
+- Re-anchored and shown to redden: `ddr-1`, `hpa-11`, `tb-9`, `tb-11`, `tb-15`.
+- Re-claimed to re-worded sentences: `atr-1..6` and `ttr-1`/`ttr-3` (all shown to redden except `atr-5`, which needs
+  a model lane); `atr-6` re-anchored too.
+- Every patch on a changed file still applies: 466 at both trees, 47 only on the changed one, 0 moved.
+
+Regression on lane 2, one suite at a time, 115 suites: 1515 checks passed and 3 failed.
+- Two failures were this change itself (`guest-space-level`, `time-tracking-readers`: a guest refused something not
+  shared now gets 404). Both suites were updated and re-run green.
+- One was `list-export`'s UI download capture under load. It re-ran 30/30 twice and touches no route of this change.
+- API unit 1892/1892, web unit 34 files, `tsc` in both apps.
+
+Regression after the review: 38 suites, 497 passed and 1 failed (`task-depth`'s read of the sheet's text after Escape, at
+load 8–9; re-ran 92/92 twice). API unit 1900/1900.
+
+Found closing it: `found-30-sep/access-asks-from-outside-the-workspace`, `found-30-sep/move-targets-say-what-they-refuse`,
+`found-30-sep/chat-refusals-say-the-channel-is-there`; and reviewing it, `found-30-sep/ai-actions-say-what-they-refuse`
+and `found-30-sep/linked-docs-say-where-a-doc-lives`.
+- Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `refused-as-missing` 17, `request-access` 10, `task-boundaries` 45, `guest-space-level` 5, `time-tracking-readers` 4, `workspace-read-access` 30, `private-list-reach` 13, `lookup-read-access` 8.
+
+### `found-30-sep/access-asks-from-outside-the-workspace` — open (security, small; found closing `found-30-sep/private-task-reads-say-403`)
+
+**Any account asks any workspace's admins for access, by the workspace's id**
+
+*Evidence, 30 September, lane 2, before and after this work:* a user of another organisation, a member of no part
+of the workspace, sends `POST /shares/task/<an open task's id>/request {workspaceId}`. The answer is 201, the ask is
+recorded in the workspace's `content_access_requests`, and every admin is notified "… asked for access to <the task's
+title>". The route asks nothing of the asker. Its comment says "It needs only a workspace membership, which the
+service establishes by looking the object up inside `workspaceId`", and the service does not do that. ClickUp does
+let people outside a workspace request access ("People outside your Workspace must request access to a public or
+private item", help centre excerpt), but approving such an ask there is an invitation with its own permission. Here
+nothing checks the asker at all, and a workspace's id reaches whoever holds any of its links.
+
+*To close:* decide whether an outsider may ask.
+- If so, name the approval path and limit asks per asker.
+- If not, answer a non-member 403, in the same words for every workspace id (as the guard's named-workspace answer).
+- Check it with an outsider beside a member.
+
+### `found-30-sep/move-targets-say-what-they-refuse` — open (security, small; found closing `found-30-sep/private-task-reads-say-403`)
+
+**Moving a list, project or folder says why the target is refused, where a missing one is "not found"**
+
+*Evidence, 30 September:*
+- Measured on lane 2: `space-default-permission`'s "nor into a private project they are not in" is 403 for
+  `POST /lists/:id/move {projectId: <a private project>}`, where a project id naming nothing is 404 "Target project
+  not found".
+- Read, not measured: `lists.service.ts` `moveList` answers a project in another workspace with 400 "A list can only
+  be moved within its own workspace", and an archived one with 400 "Cannot move into a deleted project".
+  `projects.service.ts` `moveProject` does the same for spaces ("A project can only be moved within its own
+  workspace", "Cannot move into a deleted space").
+
+So each target id reveals whether it names a container and where. Since this closure, the task move answers all of
+these as "Target list not found".
+
+*To close:*
+- Check the target's read rule first (`readableProject`, and the space's).
+- Answer a refused, foreign or archived target in the words of a missing one.
+- Then apply the create gate (403, since the mover may open the target).
+- Update `space-default-permission`'s two private-target checks to the 404 and pair each with an id naming nothing.
+
+### `found-30-sep/chat-refusals-say-the-channel-is-there` — open (security, small; found closing `found-30-sep/private-task-reads-say-403`)
+
+**A chat channel the reader may not open is 403 with the reason; one that is not there is 404**
+
+*Evidence, 30 September, lane 2 (a probe, `probe-chat.mjs`):* `GET /chat/channels/:id/messages` answers:
+- a member refused a private channel: 403 "Channel membership required";
+- a channel of a private space: 403 "Space membership required";
+- a user of another organisation: 403 "Workspace membership required";
+- an id naming nothing: 404 "Channel not found".
+
+So a channel's id reveals whether it is one, what kind, and, to a stranger, that it belongs to somebody. This is the
+same split this closure removed from tasks, lists, projects and spaces. `chat.service.ts` holds a fourth refusal,
+"This channel is not shared with you", for a guest.
+
+*To close:*
+- Give one answer for a channel the reader may not open: the 404 an id naming nothing gets, in its words. Apply it
+  across the channel's reads (messages, members, join, search hits).
+- Keep the 403s a reader may know about ("You have view-only access to this channel", the creator-only edits).
+- Pair each refusal in `chat-realtime-access` and `guest-chat-scope` with an id naming nothing.
+
+### `found-30-sep/ai-actions-say-what-they-refuse` — open (security, small; found reviewing `found-30-sep/private-task-reads-say-403`)
+
+**The AI command executor answers an id of another workspace in other words than an id naming nothing**
+
+*Evidence, 30 September, lane 2, the review's build (`review/probe-executor.mjs`, `review/probe-executor-1.log`):* a
+member of workspace W1, in no part of W2, sends `POST /ai/command/execute {workspaceId: W1, actions: [...]}` naming
+W2's ids. The route's guard reads only the body's workspace; each action reads its own ids.
+- `assign_task` on W2's task, assigning themselves: skipped "Assignee is not a workspace member"; on an id naming
+  nothing: "Task not found". The executor's own check (`resolveTaskWorkspaceId`, then the assignee's membership there)
+  runs before the write rule, so the answer says the id is a task, in a workspace the assignee is not in.
+- `create_task` in W2's list: "no_permission"; in an id naming nothing: "List not found".
+- `create_list` in W2's space: "no_permission"; in an id naming nothing: "unknown_space" (the same split
+  `ai-create-containers` pins as "creating there is refused as `no_permission`").
+- Alike already, since this closure: `set_task_status` and `assign_task` with an assignee in W2 ("Task not found"
+  both).
+
+*To close:*
+- Ask the task's write rule before the assignee check in `assign_task`, and the list's and space's read rules first
+  in `create_task` and `createContainer`, answering a refusal as the miss (`List not found`, `unknown_space`).
+- Keep `no_permission` for what the actor may open and not change (a guest, a view-only space).
+- Pair each refusal with an id naming nothing, in `ai-create-containers` (re-aiming its trespass check) and a check
+  for `assign_task`.
+
+### `found-30-sep/linked-docs-say-where-a-doc-lives` — open (security, small; found reviewing `found-30-sep/private-task-reads-say-403`)
+
+**Linking a doc of another workspace to a task says it is one**
+
+*Evidence, read, not measured:* `TasksService.linkDoc` (after the task's write rule, which the caller passes on their
+own task) answers a doc id of another workspace 400 "Doc belongs to a different workspace", and an id naming nothing
+404 "Doc not found". So a member of any workspace learns whether an id names a doc elsewhere.
+
+*To close:* answer a doc of another workspace, and one the caller may not open, as "Doc not found"; pair it in
+`linked-docs-access` with an id naming nothing.
+
+### `found-30-sep/list-export-saved-as-list-csv` — **closed** (visible bug, small; found closing `found-30-sep/attachments-have-no-download-all`)
 
 **A list's export is saved as "list.csv" whatever the list is called**
 
@@ -2972,6 +3338,93 @@ from the title, a second copy of the server's rule.
 
 *To close:* save under the name the server gives, as Download all now does (`downloadFile` with no name reads
 `Content-Disposition`), and check the saved name for a list with a name.
+
+
+*Closed, 30 September.* ClickUp's help says how to export a List or Table view (Customize › Export, CSV or XLSX) and a Doc, and nothing of the file's name (help centre, through search excerpts). RFC 6266 says to send the whole name in `filename*` (UTF-8), which "recipients SHOULD pick", with an ASCII `filename` first as the fallback.
+
+So the name is made once, on the server:
+- `downloadName` (`common/export/download-name.ts`) is the zip's one-segment rule (`safeEntryName`), with the whole name in `filename*` and an ASCII fallback.
+- The list export, the doc export (Markdown and PDF) and Download all use it. They were three rules: the list's dropped everything outside `[\w \-.]`, and the doc's made hyphens of everything outside `[a-zA-Z0-9._-]`.
+- The list route and the docs panel call `downloadFile` with no name, so the page saves under `Content-Disposition`. They had saved "list.csv" and worked the doc's name out again.
+
+Measured on lane 4 with the final suites:
+- before, 30/33 and 8/9 in three runs each: the browser saved "list.csv" for "Export list <stamp>" and for "Übersicht — قائمة <stamp>", the header was `filename="bersicht   <stamp>.csv"`, and the doc was saved as "Plan-berblick-<stamp>.md";
+- after, 33/33 and 9/9, three runs at each base.
+
+The lanes' shells set no `LANG`, and Chromium then saves any non-ASCII name as "download" (measured). So these two suites launch their browser with a UTF-8 locale, as GitHub's runners have (`utf8LocaleEnv`, `lib/playwright.mjs`).
+
+Checks:
+- `list-export` goes from 30 to 33 checks, and `file-exports` from 8 to 9.
+- `download-name.test.ts` (3) is new, and `download-file.test.ts` test 3.
+- `lxn-1..9` redden what they name.
+- `dla-6` and `dla-21` were re-anchored onto the shared rule and still redden their claims.
+
+Found while closing it:
+- `found-30-sep/export-names-worked-out-twice`
+- `found-30-sep/lanes-save-downloads-in-ascii`
+- `found-30-sep/task-cover-second-board-reads-early`
+- Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `private-object-urls` 13, `list-export` 33, `file-exports` 9, `task-attachments` 33, `attach-on-create` 14.
+
+### `found-30-sep/domain-left-on-the-private-bucket` — open (security, deploy; found in review of `found-30-sep/public-cdn-url-makes-every-object-public`)
+
+This replaces the builder's proposed `found-30-sep/public-domain-serves-the-whole-bucket`, whose "To close" the review did.
+
+**A deployment whose `R2_PUBLIC_URL` domain is connected to `R2_BUCKET_NAME` serves every private object by its key until the domain is disconnected. Code can refuse to use it and say so, and does.**
+
+*Evidence, 30 September:*
+- Cloudflare: "When you connect a Custom Domain, your R2 bucket becomes publicly accessible."
+- Measured after the fix, with the domain on the private bucket:
+  - the domain still served a task's file unsigned by its key (lane 4's API, 3 runs; `confirm-finding.mjs`, 3 runs);
+  - the API sent nobody there;
+  - it logged at boot "ERROR [R2Service] R2_PUBLIC_URL (…) serves the objects of R2_BUCKET_NAME (…) to anybody, unsigned … Disconnect that domain from …".
+- Not known: whether any deployment sets `R2_PUBLIC_URL`. `deploy/env.production.template` leaves it empty, and the ledger says the default deployment signs.
+- The API checks the domain it is given, and nothing else: an r2.dev URL or a second domain on `R2_BUCKET_NAME` is outside what it can see.
+
+*To close:*
+1. For each deployment, read `R2_PUBLIC_URL` and the API's boot log.
+2. Where the error is there:
+   1. create the pictures' bucket, with the private bucket's CORS rule;
+   2. set `R2_PUBLIC_BUCKET_NAME`;
+   3. connect the domain to that bucket, and disconnect it, and any r2.dev URL, from `R2_BUCKET_NAME`;
+   4. restart. The pictures move on boot.
+3. Read the log again for "Avatars and workspace logos are served from R2_PUBLIC_URL …; it serves no object of R2_BUCKET_NAME".
+4. Where no deployment sets `R2_PUBLIC_URL`, close this as not applicable.
+
+### `found-30-sep/export-names-worked-out-twice` — open (visible bug, small; found closing `found-30-sep/list-export-saved-as-list-csv`)
+
+**The workspace, members, tasks and report exports are still saved under names the page works out, which differ from the server's**
+
+*Evidence, 30 September, read, not measured:*
+- `workspace-settings-page.tsx` saves the JSON export as `rundesk-<ws>.json`, while the server names it `rundesk-export-<ws>.json`.
+- It saves the tasks CSV as `rundesk-<ws>-tasks.csv` (server: `rundesk-tasks-<ws>.csv`) and the members CSV as `rundesk-<ws>-members.csv` (server: `rundesk-members-<ws>.csv`).
+- The report builder saves `<report name>.pdf` with its own `[a-z0-9-_]` rule, while the server's CSV answers `rundesk-report.csv`.
+- The audit export's local-date name (`audit-log-<day>.csv`) is the page's by design (`local-dates`), while the server's header says `audit-log.csv`.
+- That is two rules for one name, as the list export's was.
+
+*To close:* name each file once, on the server, with `downloadName`, and save under the header, as the list and doc exports now do. Where the page must add something the server cannot know, such as the reader's local date, say so in the code. Then check the saved names.
+
+### `found-30-sep/lanes-save-downloads-in-ascii` — open (test tooling, small; found closing `found-30-sep/list-export-saved-as-list-csv`)
+
+**On the lanes, Chromium saves any download named outside ASCII as "download", so no suite can see a name in another script unless it asks for a UTF-8 locale**
+
+*Evidence, 30 September:*
+- The lanes' shells set no `LANG`. Under the POSIX locale Chromium converts a download's name to ASCII, and falls back to "download" when it cannot.
+- Measured with a bare page: "Übersicht 1.csv", "قائمة 1.csv" and "a — b.csv" were each saved as "download".
+- Under `LANG=C.UTF-8` each was saved as named. GitHub's runners are UTF-8, so CI and the lanes measure different things.
+- `list-export` and `file-exports` now launch with `utf8LocaleEnv()`. `task-attachments` names its zip in ASCII, and every other suite's browser still runs in the POSIX locale.
+
+*To close:* give every suite's browser a UTF-8 locale: `launchOptions()` passes `env`, or `lane_*_env` exports `LANG`. Then check Download all's zip saved under a title in Arabic.
+
+### `found-30-sep/task-cover-second-board-reads-early` — open (test tooling, small; found running `task-cover` in this work's regression)
+
+**`task-cover`'s second board can be read before it has drawn the cover it is asked to take off**
+
+*Evidence, 30 September, lane 4:*
+- One run in three failed: "and so does a second board open at the same time, where nobody touched the sheet — the second board never drew the cover, so there was nothing to take off".
+- The next two runs passed 42/42.
+- The precondition, that the second board draws the cover, is read as the check itself rather than waited for, so a slow second board fails a check about removal. Read, not proven: the run left no trace of how long the board took.
+
+*To close:* wait for the second board's card to draw the cover, bounded, and fail on that precondition in its own words. Then check it under a full sweep's load.
 
 ### `found-30-sep/node-engines-below-zlib-crc32` — **closed** (deploy, small; found closing `found-30-sep/attachments-have-no-download-all`)
 
@@ -2990,7 +3443,7 @@ of its own when `zlib.crc32` is missing.
 - `dla-23` (the last XOR skipped) and `dla-24` (each chunk starts again, the value handed in ignored) redden it, each 6/7, run against sandbox copies here.
 - Read, not run: that the writer picks the stand-in when `zlib.crc32` is missing. Every Node here is 22, and no Node before 20.15 was installed to start the API on.
 
-### `found-30-sep/download-refusals-say-no-reason` — open (visible bug, small; found closing `found-30-sep/attachments-have-no-download-all`)
+### `found-30-sep/download-refusals-say-no-reason` — **closed** (visible bug, small; found closing `found-30-sep/attachments-have-no-download-all`)
 
 **A refused download says "could not", never why**
 
@@ -3002,6 +3455,32 @@ holds objects in memory, and a task past 1 GiB was not staged.
 
 *To close:* carry the envelope's message on the `ApiError`, show it where it is meant for the reader (the 400s),
 and check it with a cap lowered for the run, or with a HEAD stubbed to answer past it.
+
+
+*Closed, 30 September.* ClickUp names no size limit or refusal wording for Download all (help centre, through search excerpts). NN/g's guidelines ask for messages that "precisely indicate the problem, and constructively suggest a solution", and the server already wrote one.
+
+So a refused download now carries its envelope:
+- `downloadFile` and `downloadFilePost` read the refusal into the `ApiError`: its message and details, with `said` marking the words as the API's.
+- `refusalMessage` shows them for a 4xx other than 401, and the page's own words for a 401, a 5xx, a page that is not the API's, or a message made up on the page.
+- It is applied at every download:
+  - Download all
+  - the list export
+  - the doc export
+  - the workspace, tasks and members exports, which had shown "Download failed (403)"
+  - the audit export
+  - the report PDF and the contribution PDF
+
+Measured in a browser on lane 4 with the store claiming 2 GiB for the zip's first HEAD (`s3-stub.mjs`: `next-head-length`, once, and cleared by `reset`, so the route's real 1 GiB cap refuses it):
+- before, the toast read "Could not download the attachments" (32/33, three runs);
+- after, it reads "This task's files come to 2048 MB, and a zip of them holds 1024 MB at most: download them one at a time", and nothing is saved (33/33, three runs at each base).
+
+Checks:
+- `task-attachments` goes from 32 to 33.
+- `download-file.test.ts` (tests 1 and 2).
+- The stub gate goes from 30 to 31 cases, and 31 of 31 mutations bite.
+- `drr-1..5` redden what they name.
+- `aap-4` and `fex-6` were re-anchored onto the new lines and still redden their claims.
+- Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `private-object-urls` 13, `list-export` 33, `file-exports` 9, `task-attachments` 33, `attach-on-create` 14.
 
 ### `found-30-sep/two-zip-writers` — **closed** (code, small; found closing `found-30-sep/attachments-have-no-download-all`)
 
@@ -3151,7 +3630,7 @@ Checks:
 
 *To close:* the owner decides whether the person is told. If so, the answer names the fields left out and the modal says so, in four locales; check it with a template applied where a field refuses its value.
 
-### `found-30-sep/template-values-find-fields-by-name-alone` — open (visible bug, small; found closing `found-30-sep/template-values-written-unchecked`)
+### `found-30-sep/template-values-find-fields-by-name-alone` — **closed** (visible bug, small; found closing `found-30-sep/template-values-written-unchecked`)
 
 **A template's or a duplicate's value goes to whichever field of that name the project's query returns last**
 
@@ -3159,13 +3638,120 @@ Checks:
 
 *To close:* map only the fields the new task has (project-wide or its own list's), decide between same-named fields deliberately, and copy a duplicate's values by field; check with a same-named field scoped to another list.
 
-### `found-30-sep/field-route-takes-another-projects-field` — open (visible bug, small; found closing `found-30-sep/template-values-written-unchecked`)
+
+*Closed, 30 September* (built by an agent on lane 7). ClickUp lets two fields share a name ("multiple custom fields called the same thing", read through search excerpts), and its templates carry their fields rather than their names. What a value written by name should do where two fields share it is not said, so the rule is this product's.
+
+Measured first on lane 7, three runs alike:
+- A template applied in one list wrote its value into a field of that name scoped to another list, which the task does not have. It also wrote into the list-scoped one of two fields sharing a name, leaving the project's own empty. Which of the two it took changed between runs: `create-modal-templates` passed its precedence check in two runs of three.
+- A task holding two fields of one name, saved as a template and applied, or duplicated, answered 409 after making the task, which held neither value: both went into one field, and a task holds one value per field.
+
+The fix:
+- A value goes only into a field the new task has (`fieldIsOnList`), planned by `fieldsForTemplateValues`:
+  - by the field it came from first, since a template or a duplicate taken from a task now names it (`fieldId`);
+  - else by name: the one field, or of two the one scoped to the task's own list, or neither of two at the same reach;
+  - each field once.
+- A duplicate copies by field. The snapshot reads a task's values in the order the task shows its fields.
+- The snapshot takes only the values of the fields the task has where it is now (`fieldIsOnTask`). A move leaves a task's value rows, so a task moved out of a field's list, or in from another project, still held values it no longer showed. Measured on lane 7 in three runs, each such value fell to a field of its name:
+  - a duplicate showed the project's Stage holding the hidden value while the original showed it empty;
+  - a template saved from the task held the value and wrote it the same way;
+  - a task moved in from another project gave that project's Stage to this one's.
+
+Checks:
+- `create-modal-templates`, 33 → 41. A side list, and two Stage fields, one the side list's and one the project's, all read by SQL:
+  - "a template’s value is not written into a field of its name scoped to another list…";
+  - "and applied in the side list… the side list’s own…";
+  - "a task holding two fields of one name, saved as a template and applied in its own list, gives each value back to the field it came from (read by SQL)";
+  - "and applied in the other list… writes that field once, with the value taken from it";
+  - "and a duplicate of that task copies each value into the field it came from, not both into one (read by SQL)";
+  - "a task moved out of the side list keeps its value in the side list’s Stage, which it no longer shows — and a duplicate of it writes that value into no field, the project’s Stage of that name among them, while its Note is copied (read by SQL)";
+  - "and saved as a template, it holds no value for that field — only the Note — and applied in the list writes none into the project’s Stage (read by SQL)";
+  - "and a task moved in from another project, still holding that project’s Stage, is duplicated without it: nothing goes into this project’s Stage of that name, while the Owner it has here is copied (read by SQL)".
+- Before: the first five, 34, 34 and 33 of 38. The last three, on this work before the review fix: 38/41 in three runs, exactly those three failing.
+- After: 38/38 in nine runs, three in a row each at `6f8e02c`, `bac7eae` and `f44b647`. Then 41/41 in three runs and once more at `f44b647`.
+- `task-templates.service.test.ts` has eight new tests, which the old service fails; the review's three also fail against this work's service before the review fix (38/41).
+- `tvn-1..5` redden 2, 1, 3, 1 and 2 of the first five checks, each exactly the ones it names. `tvn-11..13` redden 3, 1 and 1 of the last three (38/41, 40/41, 40/41), each exactly the ones it names. `tvn-6..10` and `tvn-14..16` redden the unit tests they name.
+- `dcv-1..4` were re-anchored on the moved code and redden as before: 58/60, 59/60 and 59/60, plus their unit test. `ddr-2` and `ddr-5` were re-anchored on the snapshot's new call: 40/41, its own check, and its unit test.
+- Regression on lane 7: 17 suites and 401 checks, all green; after the review fix, `custom-field-progress` ×3 and six more suites once, all green. The API's unit tests: 1907/1907.
+- Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `custom-field-access` 6, `custom-field-types` 33, `create-modal-templates` 45, `template-center` 81, `ai-read-access` 5, `ai-task-reads` 4.
+
+### `found-30-sep/field-definition-takes-a-foreign-list` — open (security, small; found closing `found-30-sep/field-route-takes-another-projects-field`)
+
+**A field is defined with a list of another project, and a share on that list decides who may define it**
+
+*Evidence, 30 September, measured on lane 7* (`found-probe.mjs`: three runs for the admin, the last two for the member):
+- `createDefinition` stores the `listId` it is sent without asking that the list is the project's. An admin defined a field in a project, scoped to a list of another project: 201, the other project's list stored. No task has that field.
+- `assertMayDefineFields` puts that list in the `within` steps it hands `assertSpaceLevel`, and the most specific grant decides. A member in a view-only space was refused a field on its project (403). The same member, holding an edit share on a list of another space, defined one there by naming that list (201).
+- They cannot rename or delete it (those ask without a list).
+
+*To close:* refuse a `listId` that is not a list of the project (as a list that is not there), in `createDefinition` and in the rule's `within`. Check the member's two answers (403 both) and the admin's refusal, and that a field scoped to the project's own list is still made.
+
+### `found-30-sep/merge-moves-values-onto-fields-the-target-lacks` — open (visible bug, small; found closing `found-30-sep/field-route-takes-another-projects-field`)
+
+**Merging a task into one of another list or project moves its values onto fields the survivor does not have**
+
+*Evidence, 30 September, measured on lane 7 in three runs:*
+- `mergeTask` moves every value row of the merged task to the target (`moveOrDrop` over `custom_field_values`).
+- A task in another list of the project, holding a value in a field scoped to its list, merged into a task in the first list: 201. So did a task of another project, holding its project's field.
+- The target then held both rows, and its fields, read back, showed neither.
+
+*To close:* find what ClickUp's merge does with fields the target's location lacks. Move only values of fields the target has (`fieldIsOnTask`), and say what was left behind, or offer to add the field as ClickUp does. Check it with a task of another list and one of another project.
+
+*Since the review fix,* such rows no longer reach a duplicate of the target or a template saved from it, since the snapshot takes only the fields the task has. They are still stored, and search still finds them (next item).
+
+### `found-30-sep/search-finds-tasks-by-values-they-no-longer-show` — open (visible bug, small; found closing the review of `found-30-sep/template-values-find-fields-by-name-alone`)
+
+**Search's custom-field filter finds a task by a value it holds for a field it no longer has**
+
+*Evidence, 30 September, read and not yet measured:*
+- A move changes a task's list and leaves its value rows (`moveTask`). A merge moves rows onto fields the target lacks (item above), and the value route took such rows before this work.
+- `SearchService.customFieldValueCondition` matches `tasks.id` against every row of the field (`custom_field_values.field_id = :fieldId` and the value). It does not ask whether the task has that field (`fieldIsOnTask`), and the filter's field list offers every field of every project the caller may open.
+- So, as read: filtering by a list-scoped Stage = "draft" finds a task moved out of that list, whose Stage shows empty wherever it is opened.
+
+*To close:* measure it first (a task moved out of a field's list, and one moved in from another project, each searched by the hidden value). Then join the filter's rows to the task's list and the field's project and list, by the rule `fieldIsOnTask` states, and check both cases and a task that does have the field. Whether a move should drop, keep or offer to carry such values, as ClickUp may, is a separate question for the move's own item.
+
+### `found-30-sep/fields-picker-counts-hidden-columns` — open (visible bug, small; found closing `found-30-sep/field-route-takes-another-projects-field`)
+
+**The list page's Fields button counts hidden built-in columns as hidden fields**
+
+*Evidence, 30 September, read and not yet measured:*
+- The Fields summary reads `projectFields.length - hiddenFields.size`.
+- `hiddenFields` also holds the built-in columns hidden in the Columns panel (`hiddenFields.has(c.key)`).
+- So hiding Due makes the Fields count one short, and it can go below zero. The Columns summary beside it filters, and so is right.
+
+*To close:* count the fields shown (`projectFields.filter((f) => !hiddenFields.has(f.id)).length`). Check it with a built-in column hidden.
+
+### `found-30-sep/ai-page-fields-checked-only-by-a-unit` — open (test tooling, small; found closing `found-30-sep/field-route-takes-another-projects-field`)
+
+**The AI page's field boxes are checked by no suite**
+
+*Evidence, 30 September:*
+- The AI page's "Generate task" now offers only the chosen list's fields (`fieldsOfList`).
+- Its field boxes appear only after a model has answered, and no suite drives that page to them. The filter is covered by `field-scope.test.ts` alone.
+
+*To close:* on a model lane, generate a task for a list whose project has a field scoped to another list, and check that no box is offered for it and that saving writes no refused value.
+
+### `found-30-sep/field-route-takes-another-projects-field` — **closed** (visible bug, small; found closing `found-30-sep/template-values-written-unchecked`)
 
 **The field-value route takes a field the task does not have**
 
 *Evidence, 30 September, read and not yet measured:* `setValue` checks that the task and the field are both in the workspace (`assertTaskOpenTo`, `getDefOwnedBy`), not that the field is one the task has — its project's, and for a list-scoped field its list's. A value written so is shown by no reader: `getValuesForTask` reads the task's own project's fields.
 
 *To close:* refuse a field the task does not have; check with a field of another project and one scoped to another list.
+
+
+*Closed, 30 September* (built by an agent on lane 7). ClickUp's API sets a value only for a field "applicable" to the task, and answers 400 for one that is not enabled for it (*Set Custom Field Value*, read through search excerpts). OWASP ASVS 4.2.1 asks that no record be created "for someone else".
+
+Measured first on lane 7, three runs alike: on a task in one list, a Text and a Voting field of another project, and a field scoped to another list of its own project, each took a value (200). The task's fields, read back, showed none of them. In `custom-field-access` a member wrote into a field of a project they may not open (200, and a row).
+- The fields a task has are now stated once: `fieldIsOnList` / `fieldIsOnTask` in `custom-fields.service.ts`, which the reader asks too.
+- `setValue` refuses any other field before a value or a vote is written. It answers 404 "Custom field not found on this task" whatever project the field is in, so the answer says nothing of a project the caller may not open.
+- The list page drew every field of the project, as columns, filters, sort and in the Fields picker; a cell of another list's field took a value the row never showed. It now draws the list's fields alone (`fieldsOfList`, `apps/web/src/lib/field-scope.ts`), and so does the AI page's Generate task.
+
+Checks:
+- `custom-field-access`, 4 → 6: "a value for a field of another project is refused on a task (404 each, nothing written, read by SQL) — a Text field and a Voting field alike, and one of a project the member may not open — while the task’s own project’s field is set" and "and a value for a field scoped to another list of the task’s project is refused (404, nothing written) — while a field scoped to the task’s own list is set, and the task’s fields read it back". Before, 4/6 in three runs. After, 6/6 in nine runs, three in a row each at `6f8e02c`, `bac7eae` and `f44b647`.
+- `custom-field-types`, 32 → 33: "the grid draws a column for a field scoped to this list, and none — no cell, no header, nothing in its Fields picker — for one scoped to another list of the project, which this list’s tasks do not have". Before, 32/33 in three runs; after, 33/33 in six.
+- `custom-fields.service.test.ts` is new, with five tests; four fail against the old service and the fifth is the positive control. `field-scope.test.ts` is new, with two.
+- `frt-1..4` redden their checks, one or both of `custom-field-access`'s and `custom-field-types`' grid check (5/6, 4/6, 5/6, 32/33). `frt-5..11` redden the unit tests they name.
+- Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `custom-field-access` 6, `custom-field-types` 33, `create-modal-templates` 45, `template-center` 81, `ai-read-access` 5, `ai-task-reads` 4.
 
 ### `found-30-sep/template-tags-keep-their-case` — open (decision, small; found closing `found-30-sep/template-tags-spelled-by-collation`)
 
@@ -3186,13 +3772,70 @@ Checks:
 
 *To close:* say which fields are not captured, in the four locales, and check the words on the sheet.
 
-### `found-30-sep/public-cdn-url-makes-every-object-public` — open (security, small; found closing `resume-defects/resume-7`)
+### `found-30-sep/public-cdn-url-makes-every-object-public` — **closed** (security, small; found closing `resume-defects/resume-7`)
 
 **Where `R2_PUBLIC_URL` is a CDN domain, every stored object is readable by its address, so a members-only clip is only as private as its link**
 
 *Evidence, 30 September:* `R2Service.getObjectUrl` returns `${R2_PUBLIC_URL}/<key>` whenever that is not the raw R2 API host. A clip's members-only link then answers with the object's permanent public address. The same is true of every attachment, avatar and logo. The default deployment signs, and so do the lanes and CI.
 
 *To close:* decide whether private content may ever be served from a public domain. If not, sign it wherever the content is private (members-only clips, task attachments), whatever `R2_PUBLIC_URL` says, and check it with a lane that sets a public URL.
+
+
+*Closed, 30 September, after review.*
+
+ClickUp's answer to the same complaint is Private Attachment Links. Its feedback board asks three times for attachments "behind Workspace authorization". The setting is "available on all plans" and "requires that the person accessing a Workspace attachment is logged into that Workspace"; its attachment URLs are "an unguessable, randomized string of characters" (help centre, read through search excerpts).
+
+Rundesk has no setting that makes an attachment public. Its keys are `<prefix>/<milliseconds>-<name>`, carried in every signed URL. Cloudflare: "When you connect a Custom Domain, your R2 bucket becomes publicly accessible." So signing what is handed out is not enough: nothing private may be in a bucket a public domain serves.
+
+So:
+- `R2Service.getObjectUrl` signs, whatever `R2_PUBLIC_URL` says. Every private caller went through it:
+  - task files and cover;
+  - clips (link and library);
+  - call recordings;
+  - chat files and emoji;
+  - form uploads.
+- The pictures on show (avatars, workspace logos) live in `R2_PUBLIC_BUCKET_NAME`. `bucketFor` chooses by key shape (`isPublicImageKey`), for every upload, read, signature, copy and delete.
+- `publicObjectUrl` gives `${R2_PUBLIC_URL}/<key>` only when the key is a picture's, the pictures have their bucket, and the domain was seen not to serve `R2_BUCKET_NAME`. Otherwise it signs.
+- `checkPublicDomain` runs at boot, before the first request, and hourly. It puts an object in `R2_BUCKET_NAME`, reads it at the domain unsigned, and deletes it.
+- A domain that serves the private bucket is used for nothing and logged as an ERROR naming the bucket to disconnect it from.
+- Pictures saved before are moved to their bucket on boot. A picture's listing and delete reach both buckets, so the purge misses nothing mid-move.
+- `.env.example` and the production template say:
+  - `R2_PUBLIC_BUCKET_NAME` and `R2_PUBLIC_URL` go together, both or neither;
+  - never connect a domain to `R2_BUCKET_NAME`;
+  - the pictures' bucket needs the same CORS rule.
+
+Measured first:
+- The reviewer's chain against the first fix, on its own store and API, 3 runs of 3:
+  - a member removed from the workspace, who had once listed a task's files, was told the domain by the unauthenticated images route;
+  - the domain served the file unsigned by its key.
+- After the fix:
+  - on the item's deployment, the images route signs, and the API logs the error;
+  - with the pictures in their own bucket and the domain on it alone, the file's key at the domain is 404.
+- Lane 4's own API with `R2_PUBLIC_URL` on its bucket, 3 runs:
+  - the task file, cover and chat file are signed for 900 s, and the clip link for 10 s;
+  - the logo is signed;
+  - the boot log names the exposure.
+
+Checks:
+- `private-object-urls` is new, with 13 checks, registered in CI. It stands up a store of two buckets and three APIs from the build, one after another: the domain on the private bucket; the pictures in their own, with the domain on it alone; and the domain left on the private one.
+  - HEAD's storage code: 1/13 in three runs.
+  - The first fix, before review: 7/13 in three runs.
+  - After: 13/13 in seven runs.
+- Unit tests:
+  - `r2-signed-urls.test.ts` (5) is new;
+  - `r2-public-bucket.test.ts` (7) is new;
+  - `r2-own-url.test.ts` gains the public-CDN reading and the pictures' bucket.
+- The store stub holds several buckets. Its gate has 32 cases, and 33 of 33 mutations bite.
+- Break patches: `pou-1..8` and `pou-16..23` redden their checks, and `pou-9..15` and `pou-24..34` their unit tests, each only what it names.
+- Regression on lane 4:
+  - 34 suites and 664 checks, green, for the whole work;
+  - after review, 20 storage suites and 469 checks, green.
+
+What remains is the operator's: a domain already connected to `R2_BUCKET_NAME` serves it until disconnected. The API refuses it and says so at every check.
+
+Found while closing it:
+- `found-30-sep/domain-left-on-the-private-bucket`.
+- Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `private-object-urls` 13, `list-export` 33, `file-exports` 9, `task-attachments` 33, `attach-on-create` 14.
 
 ### `found-30-sep/guests-may-ask-for-clip-links` — open (decision, small; found closing `resume-defects/resume-7`)
 

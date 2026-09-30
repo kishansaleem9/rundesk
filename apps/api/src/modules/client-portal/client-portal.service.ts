@@ -17,11 +17,12 @@ import {
   lists,
   tasks,
   listStatuses,
+  users,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import type { StatusCategory } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
-import { checkContainerAccess } from '../../common/permissions/container-access.guard-helper'
+import { readableProject } from '../../common/permissions/read-access'
 
 /**
  * A row of the SAFE task projection fetched for the public view. The SQL only
@@ -98,34 +99,36 @@ export class ClientPortalService {
     return row ?? null
   }
 
-  /**
-   * Assert the actor may manage portals for a project: workspace member with
-   * container (private space/project) access. Reuses the same helper the
-   * ResourceMemberGuard applies to project routes.
+  /*
+   * Assert the actor may manage portals for a project: one who may open it
+   * (workspace member, container access), and not a guest.
+   *
+   * A project the caller may not open is answered as the miss the route
+   * itself makes — "Project not found", or "Portal not found" for a portal's
+   * own routes — not 403 "You are not a member of this workspace" or "This
+   * space or project is private", which told a caller holding a portal's id
+   * that it was there and where (`found-30-sep/private-task-reads-say-403`).
+   * `readableProject` is the guard's rule for a project, a guest's reach
+   * included. A guest who may open the project is refused in words: they know
+   * it is there, and a portal is still not theirs.
    */
-  private async assertProjectManageAccess(projectId: string, userId: string) {
+  private async assertProjectManageAccess(projectId: string, userId: string, notThere = 'Project not found') {
     const proj = await this.resolveProject(projectId)
-    if (!proj) throw new NotFoundException('Project not found')
+    if (!proj) throw new NotFoundException(notThere)
+    const [account] = await this.db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1)
+    if (!(await readableProject(this.db, proj.workspaceId, proj.projectId, { id: userId, role: account?.role ?? null }))) {
+      throw new NotFoundException(notThere)
+    }
     const [member] = await this.db
       .select({ role: workspaceMembers.role })
       .from(workspaceMembers)
       .where(and(eq(workspaceMembers.workspaceId, proj.workspaceId), eq(workspaceMembers.userId, userId)))
       .limit(1)
-    if (!member) throw new ForbiddenException('You are not a member of this workspace')
+    // No row: a super admin, whom `readableProject` lets through as every guard does.
+    if (!member) return proj
     // A portal is an anonymous window onto the project — not a guest's to open,
     // list or revoke. Guests read portal tokens and could mint new ones.
     if (member.role === 'guest') throw new ForbiddenException('Guests cannot manage client portals')
-    const ok = await checkContainerAccess(
-      this.db,
-      {
-        spaceId: proj.spaceId,
-        spaceVisibility: proj.spaceVisibility,
-        projectId: proj.projectId,
-        projectVisibility: proj.projectVisibility,
-      },
-      { userId, workspaceRole: member.role as string },
-    )
-    if (!ok) throw new ForbiddenException('This space or project is private')
     return proj
   }
 
@@ -219,7 +222,7 @@ export class ClientPortalService {
     body: { name?: string | null; isEnabled?: boolean; showCompleted?: boolean },
   ) {
     const portal = await this.getPortalOr404(portalId)
-    await this.assertProjectManageAccess(portal.projectId, userId)
+    await this.assertProjectManageAccess(portal.projectId, userId, 'Portal not found')
 
     const patch: Partial<typeof clientPortals.$inferInsert> = {}
     if (body.name !== undefined) patch.name = typeof body.name === 'string' ? body.name.trim() || null : null
@@ -233,7 +236,7 @@ export class ClientPortalService {
 
   async remove(portalId: string, userId: string) {
     const portal = await this.getPortalOr404(portalId)
-    await this.assertProjectManageAccess(portal.projectId, userId)
+    await this.assertProjectManageAccess(portal.projectId, userId, 'Portal not found')
     await this.db.delete(clientPortals).where(eq(clientPortals.id, portalId))
     return { ok: true }
   }

@@ -28,7 +28,7 @@
  *
  * Pure, and unit-tested in tasks-attachments-zip.test.ts.
  */
-import { safeEntryName } from '../../common/export/zip-names'
+import { downloadName } from '../../common/export/download-name'
 import type { ZipMethod } from '../../common/export/zip-stream'
 import { isLinkAttachmentKey } from './task-object-keys'
 
@@ -100,29 +100,13 @@ export async function mapAtMost<T, R>(limit: number, items: readonly T[], fn: (i
   return out
 }
 
-/** RFC 5987: the name in UTF-8, percent-encoded, for `filename*`. */
-function encodeExtValue(value: string): string {
-  return encodeURIComponent(value).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
-}
-
 /**
  * The zip's name, `<title>-attachments.zip`, made safe as an entry's name is
  * (`safeEntryName`), and the `Content-Disposition` that carries it: an ASCII
  * `filename` for any client, and the whole name in `filename*` (RFC 6266), so a
- * title in Arabic or Urdu is not saved as `task-attachments.zip`.
+ * title in Arabic or Urdu is not saved as `task-attachments.zip`. The rule every
+ * download the API names shares (`downloadName`, `found-30-sep/list-export-saved-as-list-csv`).
  */
 export function attachmentsZipName(title: unknown): { fileName: string; disposition: string } {
-  const base = safeEntryName(title, 'task')
-  const fileName = `${base}-attachments.zip`
-  const asciiBase =
-    base
-      .normalize('NFKD')
-      .replace(/[̀-ͯ]/g, '')
-      .replace(/[^\x20-\x7e]/g, '')
-      .replace(/[%;]/g, '_')
-      .trim() || 'task'
-  return {
-    fileName,
-    disposition: `attachment; filename="${asciiBase}-attachments.zip"; filename*=UTF-8''${encodeExtValue(fileName)}`,
-  }
+  return downloadName(title, '-attachments.zip', 'task')
 }

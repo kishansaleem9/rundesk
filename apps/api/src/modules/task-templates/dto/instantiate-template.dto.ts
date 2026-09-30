@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   IsArray,
   IsDateString,
   IsIn,
@@ -7,8 +8,13 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   Min,
+  ValidateNested,
 } from 'class-validator'
+import { Type } from 'class-transformer'
+import { LabelByNameDto } from '../../tasks/dto/task.dto'
+import { ESTIMATE_MAX_SECONDS } from '../../tasks/task-values'
 
 const PRIORITIES = ['urgent', 'high', 'normal', 'low'] as const
 
@@ -60,6 +66,7 @@ export class InstantiateTemplateDto {
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(ESTIMATE_MAX_SECONDS)
   timeEstimate?: number
 
   @IsOptional()
@@ -71,4 +78,15 @@ export class InstantiateTemplateDto {
   @IsArray()
   @IsString({ each: true })
   labelIds?: string[]
+
+  /**
+   * The tags typed beside the template, by name — found or made only once the
+   * task is, with the template's own (`found-30-sep/refused-create-leaves-tags`).
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => LabelByNameDto)
+  labelsByName?: LabelByNameDto[]
 }

@@ -5,8 +5,9 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { plainToInstance } from 'class-transformer'
 import { validate } from 'class-validator'
-import { TaskTemplatesService, fitTemplateValue } from './task-templates.service'
+import { TaskTemplatesService, fitTemplateValue, offsetsFromTask, templateWithForm } from './task-templates.service'
 import { CreateTaskDto } from '../tasks/dto/task.dto'
+import { assertEstimate } from '../tasks/task-values'
 
 /**
  * The service has two clearly testable surfaces:
@@ -269,6 +270,12 @@ const EMPTY = {
   title: '', description: null, priority: 'normal', timeEstimate: null, startDateOffsetDays: null,
   dueDateOffsetDays: null, labels: [], checklists: [], subtasks: [], customFieldValues: [],
 }
+/**
+ * Where a value row's field is, as the snapshot reads it beside the value: here,
+ * a field of the task's project ('p') for the whole project. The snapshot takes
+ * only the values of the fields the task has (`fieldIsOnTask`).
+ */
+const ON_TASK = { projectId: 'p', listId: null }
 const U1 = '11111111-1111-4111-8111-111111111111'
 const U2 = '22222222-2222-4222-8222-222222222222'
 const T1 = '33333333-3333-4333-8333-333333333333'
@@ -321,11 +328,11 @@ describe('TaskTemplatesService — a list-valued custom field is kept (found-30-
   it('keeps a task\'s People and Labels lists when it is saved as a template, and leaves out its votes and files', async () => {
     const task = { title: 'Launch', description: null, priority: 'high', timeEstimate: null, startDate: null, dueDate: null }
     const values = [
-      { name: 'People', type: 'people', value: { v: [U1, U2] } },
-      { name: 'Tags', type: 'labels', value: { v: ['red', 'blue'] } },
-      { name: 'Votes', type: 'voting', value: { v: [U1] } },
-      { name: 'Files', type: 'files', value: { v: ['attachment-1'] } },
-      { name: 'Budget', type: 'number', value: { v: 5 } },
+      { name: 'People', type: 'people', value: { v: [U1, U2] }, ...ON_TASK },
+      { name: 'Tags', type: 'labels', value: { v: ['red', 'blue'] }, ...ON_TASK },
+      { name: 'Votes', type: 'voting', value: { v: [U1] }, ...ON_TASK },
+      { name: 'Files', type: 'files', value: { v: ['attachment-1'] }, ...ON_TASK },
+      { name: 'Budget', type: 'number', value: { v: 5 }, ...ON_TASK },
     ]
     // The task's place, the read rule's two reads (the task where it lives, the caller's role), then the task,
     // its labels, checklists, subtasks and values, in the order they are read.
@@ -486,6 +493,22 @@ describe('TaskTemplatesService — a task its caller may not open is not copied 
     assert.equal(inserted.length, 0)
   })
 
+  /*
+   * `found-30-sep/private-task-reads-say-403`: the three misses read alike — a
+   * task in no workspace said "Task not found", where one found and refused
+   * said "Task not found in this workspace", so the words told a caller that
+   * the id named a task.
+   */
+  it('answers a task that is not there in the words it answers one its caller may not open', async () => {
+    const refused = await new TaskTemplatesService(
+      recordingDb([[{ workspaceId: WORKSPACE_ID, spaceId: 's', projectId: 'p', listId: 'l' }], []]).db, { createTask: mock.fn() } as any, securityStub,
+    ).duplicateTask(WORKSPACE_ID, T1, ACTOR).then(() => null, (e: Error) => e)
+    const missing = await new TaskTemplatesService(recordingDb([[]]).db, { createTask: mock.fn() } as any, securityStub)
+      .duplicateTask(WORKSPACE_ID, T1, ACTOR).then(() => null, (e: Error) => e)
+    assert.ok(refused instanceof NotFoundException && missing instanceof NotFoundException, `refused ${refused?.message}, missing ${missing?.message}`)
+    assert.equal(missing.message, refused.message)
+  })
+
   it('refuses to save such a task as a template, and saves nothing', async () => {
     const { db, inserted } = recordingDb([[{ workspaceId: WORKSPACE_ID, spaceId: 's', projectId: 'p', listId: 'l' }], []])
     await assert.rejects(
@@ -500,11 +523,11 @@ describe('TaskTemplatesService.duplicateTask — the copy carries no votes and n
   it('writes the copy the values its fields can hold, and none of the original’s votes or files', async () => {
     const task = { title: 'Launch', description: null, priority: 'high', timeEstimate: null, startDate: null, dueDate: null }
     const values = [
-      { name: 'People', type: 'people', value: { v: [U1] } },
-      { name: 'Tags', type: 'labels', value: { v: ['red'] } },
-      { name: 'Votes', type: 'voting', value: { v: [U1] } },
-      { name: 'Files', type: 'files', value: { v: ['attachment-1'] } },
-      { name: 'Budget', type: 'number', value: { v: 5 } },
+      { name: 'People', type: 'people', value: { v: [U1] }, ...ON_TASK },
+      { name: 'Tags', type: 'labels', value: { v: ['red'] }, ...ON_TASK },
+      { name: 'Votes', type: 'voting', value: { v: [U1] }, ...ON_TASK },
+      { name: 'Files', type: 'files', value: { v: ['attachment-1'] }, ...ON_TASK },
+      { name: 'Budget', type: 'number', value: { v: 5 }, ...ON_TASK },
     ]
     const defs = [
       { id: 'f-people', name: 'People', type: 'people', options: null },
@@ -513,12 +536,12 @@ describe('TaskTemplatesService.duplicateTask — the copy carries no votes and n
       { id: 'f-files', name: 'Files', type: 'files', options: null },
       { id: 'f-budget', name: 'Budget', type: 'number', options: null },
     ]
-    // The task's place, its dates and assignees; the task, its labels, checklists, subtasks and values; then its
+    // The task's place, its dates, assignees and tags; the task, its labels, checklists, subtasks and values; then its
     // project's fields, who of those named is a member, and the field route's own check of the People list.
     const { db, inserted } = recordingDb([
       [{ workspaceId: WORKSPACE_ID, spaceId: 's', projectId: 'p', listId: 'l' }],
       ...READABLE,
-      [{ startDate: null, dueDate: null }], [],
+      [{ startDate: null, dueDate: null }], [], [],
       [task], [], [], [], values,
       defs, [{ id: U1 }], [{ userId: U1 }],
     ])
@@ -529,6 +552,167 @@ describe('TaskTemplatesService.duplicateTask — the copy carries no votes and n
       { taskId: 'copy-1', fieldId: 'f-tags', value: { v: ['red'] } },
       { taskId: 'copy-1', fieldId: 'f-budget', value: { v: 5 } },
     ])
+  })
+})
+
+/*
+ * `found-30-sep/template-values-find-fields-by-name-alone` — a template's values
+ * were mapped by name over every field of the project: one went into a field
+ * scoped to another list, which the new task does not have, or into whichever
+ * of two fields of one name came back last; and a duplicate of a task whose two
+ * fields of one name were both set wrote both into one field, which the table
+ * refuses (409, and a copy with none of its values). Each value now goes into a
+ * field the task has — by the field it came from, else by name, its own list's
+ * over the project's, neither of two at the same reach — and each field once.
+ */
+describe('TaskTemplatesService — each value into a field the new task has (found-30-sep/template-values-find-fields-by-name-alone)', () => {
+  const F_STAGE = '55555555-5555-4555-8555-555555555555'
+  const F_STAGE_L2 = '66666666-6666-4666-8666-666666666666'
+  const templateOf = (customFieldValues: unknown[]) => ({
+    id: 'tpl-1', workspaceId: WORKSPACE_ID, name: 'T', description: null, icon: null, usageCount: 0,
+    createdById: ACTOR.id, createdAt: new Date(), updatedAt: new Date(),
+    payload: { ...EMPTY, customFieldValues },
+  })
+  const text = (id: string, name: string, listId: string | null) => ({ id, name, type: 'text', options: null, listId })
+  /** What instantiating in `listId` writes, with these fields in the list's project. */
+  const applied = async (values: unknown[], defs: unknown[], listId: string) => {
+    // The template, the list's place, then the project's fields.
+    const { db, inserted } = recordingDb([[templateOf(values)], [{ workspaceId: WORKSPACE_ID, projectId: 'p' }], defs])
+    await new TaskTemplatesService(db, { createTask: mock.fn(async () => ({ id: 'task-9' })) } as any, securityStub)
+      .instantiate(WORKSPACE_ID, 'tpl-1', ACTOR, { listId })
+    return inserted[0] ?? []
+  }
+
+  it('writes a value only into a field the new task has: none into a field scoped to another list, and a name shared with such a field into the project’s own', async () => {
+    const written = await applied(
+      [{ fieldName: 'Scope', value: 'scoped' }, { fieldName: 'Stage', value: 'staged' }],
+      [text('f-scope', 'Scope', 'l2'), text('f-stage-l2', 'Stage', 'l2'), text('f-stage', 'Stage', null)],
+      'l1',
+    )
+    assert.deepEqual(written, [{ taskId: 'task-9', fieldId: 'f-stage', value: { v: 'staged' } }])
+  })
+
+  it('between two fields of one name the task has, writes into the one scoped to its own list, and into neither when both are the project’s', async () => {
+    const own = await applied(
+      [{ fieldName: 'Stage', value: 'staged' }],
+      [text('f-stage-l2', 'Stage', 'l2'), text('f-stage', 'Stage', null)],
+      'l2',
+    )
+    assert.deepEqual(own, [{ taskId: 'task-9', fieldId: 'f-stage-l2', value: { v: 'staged' } }])
+    const neither = await applied(
+      [{ fieldName: 'Stage', value: 'staged' }],
+      [text('f-stage-a', 'Stage', null), text('f-stage-b', 'Stage', null)],
+      'l2',
+    )
+    assert.deepEqual(neither, [])
+  })
+
+  it('writes a value taken from a field back into that field where the new task has it, and each field once', async () => {
+    const values = [
+      { fieldId: F_STAGE, fieldName: 'Stage', value: 'project value' },
+      { fieldId: F_STAGE_L2, fieldName: 'Stage', value: 'list value' },
+    ]
+    const defs = [text(F_STAGE_L2, 'Stage', 'l2'), text(F_STAGE, 'Stage', null)]
+    assert.deepEqual(await applied(values, defs, 'l2'), [
+      { taskId: 'task-9', fieldId: F_STAGE, value: { v: 'project value' } },
+      { taskId: 'task-9', fieldId: F_STAGE_L2, value: { v: 'list value' } },
+    ])
+    // Where the list's field is not the task's, its value falls to the name, whose field the other already holds.
+    assert.deepEqual(await applied(values, defs, 'l1'), [
+      { taskId: 'task-9', fieldId: F_STAGE, value: { v: 'project value' } },
+    ])
+  })
+
+  it('a duplicate copies each value into the field it came from, where two of its fields share a name', async () => {
+    const task = { title: 'Launch', description: null, priority: 'high', timeEstimate: null, startDate: null, dueDate: null }
+    const values = [
+      { fieldId: F_STAGE, name: 'Stage', type: 'text', value: { v: 'project value' }, ...ON_TASK },
+      { fieldId: F_STAGE_L2, name: 'Stage', type: 'text', value: { v: 'list value' }, projectId: 'p', listId: 'l' },
+    ]
+    // The task's place, the read rule's two reads, its dates, assignees and tags; the task, its labels, checklists,
+    // subtasks and values; then its project's fields.
+    const { db, inserted } = recordingDb([
+      [{ workspaceId: WORKSPACE_ID, spaceId: 's', projectId: 'p', listId: 'l' }],
+      ...READABLE,
+      [{ startDate: null, dueDate: null }], [], [],
+      [task], [], [], [], values,
+      [text(F_STAGE, 'Stage', null), text(F_STAGE_L2, 'Stage', 'l')],
+    ])
+    await new TaskTemplatesService(db, { createTask: mock.fn(async () => ({ id: 'copy-1' })) } as any, securityStub).duplicateTask(WORKSPACE_ID, T1, ACTOR)
+    assert.deepEqual(inserted[0], [
+      { taskId: 'copy-1', fieldId: F_STAGE, value: { v: 'project value' } },
+      { taskId: 'copy-1', fieldId: F_STAGE_L2, value: { v: 'list value' } },
+    ])
+  })
+
+  it('a template saved from a task names the field each value came from, beside its name', async () => {
+    const task = { title: 'Launch', description: null, priority: 'high', timeEstimate: null, startDate: null, dueDate: null }
+    const values = [
+      { fieldId: F_STAGE, name: 'Stage', type: 'text', value: { v: 'project value' }, ...ON_TASK },
+      { fieldId: F_STAGE_L2, name: 'Stage', type: 'text', value: { v: 'list value' }, projectId: 'p', listId: 'l' },
+    ]
+    const { db, inserted } = recordingDb([
+      [{ workspaceId: WORKSPACE_ID, spaceId: 's', projectId: 'p', listId: 'l' }],
+      ...READABLE,
+      [task], [], [], [], values,
+    ])
+    await new TaskTemplatesService(db, tasksServiceStub, securityStub).saveFromTask(WORKSPACE_ID, T1, ACTOR, { name: 'From a task' })
+    assert.deepEqual(inserted[0].payload.customFieldValues, [
+      { fieldId: F_STAGE, fieldName: 'Stage', value: 'project value' },
+      { fieldId: F_STAGE_L2, fieldName: 'Stage', value: 'list value' },
+    ])
+  })
+
+  /*
+   * A task keeps its value rows when it is moved (`moveTask` changes its list
+   * alone), so a task in list 'l' of project 'p' may still hold a value for the
+   * Stage of list 'l2' it was moved out of, or for the Budget of project 'p2' it
+   * was moved in from — fields it no longer has, which nobody sees on it. The
+   * snapshot took every row, and each such value fell to the field of its name
+   * the copy has: the copy showed the project's Stage or Budget holding what the
+   * original showed empty, and a template saved from the task carried both.
+   */
+  const F_NOTE = '77777777-7777-4777-8777-777777777777'
+  const F_BUDGET = '88888888-8888-4888-8888-888888888888'
+  const F_BUDGET_P2 = '99999999-9999-4999-8999-999999999999'
+  const moved = { title: 'Moved', description: null, priority: 'normal', timeEstimate: null, startDate: null, dueDate: null }
+  const note = { fieldId: F_NOTE, name: 'Note', type: 'text', value: { v: 'kept' }, ...ON_TASK }
+  const stageOfL2 = { fieldId: F_STAGE_L2, name: 'Stage', type: 'text', value: { v: 'hidden draft' }, projectId: 'p', listId: 'l2' }
+  const budgetOfP2 = { fieldId: F_BUDGET_P2, name: 'Budget', type: 'number', value: { v: 5 }, projectId: 'p2', listId: null }
+  /** The fields of project 'p': a Note, a Stage and a Budget for the whole project, and the Stage of list 'l2'. */
+  const fieldsOfP = [
+    text(F_NOTE, 'Note', null), text(F_STAGE, 'Stage', null), text(F_STAGE_L2, 'Stage', 'l2'),
+    { id: F_BUDGET, name: 'Budget', type: 'number', options: null, listId: null },
+  ]
+  /** What a duplicate of the task in list 'l', holding these rows, writes onto its copy. */
+  const duplicated = async (values: unknown[]) => {
+    const { db, inserted } = recordingDb([
+      [{ workspaceId: WORKSPACE_ID, spaceId: 's', projectId: 'p', listId: 'l' }],
+      ...READABLE,
+      [{ startDate: null, dueDate: null }], [], [],
+      [moved], [], [], [], values,
+      fieldsOfP,
+    ])
+    await new TaskTemplatesService(db, { createTask: mock.fn(async () => ({ id: 'copy-1' })) } as any, securityStub).duplicateTask(WORKSPACE_ID, T1, ACTOR)
+    return inserted[0] ?? []
+  }
+
+  it('a duplicate of a task moved out of a field’s list copies none of that field’s value — not into the project’s field of its name — and copies the fields it has', async () => {
+    assert.deepEqual(await duplicated([note, stageOfL2]), [{ taskId: 'copy-1', fieldId: F_NOTE, value: { v: 'kept' } }])
+  })
+
+  it('nor a value of the project the task was moved in from, into this project’s field of its name', async () => {
+    assert.deepEqual(await duplicated([note, budgetOfP2]), [{ taskId: 'copy-1', fieldId: F_NOTE, value: { v: 'kept' } }])
+  })
+
+  it('a template saved from such a task holds only the values of the fields it has, not those of its old list or its old project', async () => {
+    const { db, inserted } = recordingDb([
+      [{ workspaceId: WORKSPACE_ID, spaceId: 's', projectId: 'p', listId: 'l' }],
+      ...READABLE,
+      [moved], [], [], [], [note, stageOfL2, budgetOfP2],
+    ])
+    await new TaskTemplatesService(db, tasksServiceStub, securityStub).saveFromTask(WORKSPACE_ID, T1, ACTOR, { name: 'From a moved task' })
+    assert.deepEqual(inserted[0].payload.customFieldValues, [{ fieldId: F_NOTE, fieldName: 'Note', value: 'kept' }])
   })
 })
 
@@ -556,11 +740,10 @@ describe('TaskTemplatesService.instantiate — what the person set beside the te
   })
   /** The task `createTask` was asked for, the subtasks after it, and what was inserted. */
   const made = async (form: Record<string, unknown>, payload: Record<string, unknown> = {}) => {
-    // The template, the list's place, then the template's tag as the workspace holds it.
+    // The template and the list's place: its tags are handed to `createTask` by name, not looked up here.
     const { db, inserted } = recordingDb([
       [templateOf(payload)],
       [{ workspaceId: WORKSPACE_ID, projectId: 'p' }],
-      [{ id: 'label-tpl', name: 'tpl-tag' }],
     ])
     const createTask = mock.fn(async (_arg: any) => ({ id: 'task-9' }))
     await new TaskTemplatesService(db, { createTask } as any, securityStub).instantiate(WORKSPACE_ID, 'tpl-1', ACTOR, {
@@ -602,10 +785,185 @@ describe('TaskTemplatesService.instantiate — what the person set beside the te
     assert.equal((await made({ description: '   ' })).task.description, 'The template body')
   })
 
+  /*
+   * The template's tags go to `createTask` BY NAME, beside the names typed with
+   * it (`found-30-sep/refused-create-leaves-tags`): `createTask` finds each once,
+   * whatever its case, and makes the rest only once the task is made.
+   */
   it('makes the tags the template’s and the form’s together, each once, and assigns each person set once', async () => {
-    const { task } = await made({ labelIds: ['label-typed', 'label-tpl'], assigneeIds: [U1, U2, U1] })
-    assert.deepEqual(task.labelIds, ['label-tpl', 'label-typed'])
+    const { task, inserted } = await made({
+      labelIds: ['label-typed', 'label-typed'],
+      labelsByName: [{ name: 'typed-tag', color: '#ff0000' }],
+      assigneeIds: [U1, U2, U1],
+    })
+    assert.deepEqual(task.labelIds, ['label-typed'])
+    assert.deepEqual(task.labelsByName, [{ name: 'tpl-tag', color: '#94a3b8' }, { name: 'typed-tag', color: '#ff0000' }])
     assert.deepEqual(task.assigneeIds, [U1, U2])
+    // No tag is made here: what was inserted is the template's checklist and its items alone.
+    assert.equal(inserted.some((row) => (Array.isArray(row) ? row : [row]).some((r: any) => 'color' in r)), false)
+  })
+})
+
+/*
+ * `found-30-sep/refused-create-leaves-tags` — a template's missing tags were made
+ * BEFORE `createTask` asked about the list, the type, the people and the tags, so
+ * a create it refused left them in the workspace. Now nothing is written before
+ * `createTask` answers.
+ */
+describe('TaskTemplatesService.instantiate — a refused create makes no tag (found-30-sep/refused-create-leaves-tags)', () => {
+  it('writes nothing at all when createTask refuses the task: no tag, no checklist, no count', async () => {
+    const template = {
+      id: 'tpl-1', workspaceId: WORKSPACE_ID, name: 'T', description: null, icon: null, usageCount: 0,
+      createdById: ACTOR.id, createdAt: new Date(), updatedAt: new Date(),
+      payload: { ...EMPTY, title: 'Tagged', labels: ['not-yet-a-tag'], checklists: [{ title: 'Steps', items: [{ content: 'One' }] }] },
+    }
+    const { db, inserted, set } = recordingDb([[template], [{ workspaceId: WORKSPACE_ID, projectId: 'p' }]])
+    const createTask = mock.fn(async () => { throw new BadRequestException('That task type does not belong to this workspace') })
+    await assert.rejects(
+      new TaskTemplatesService(db, { createTask } as any, securityStub).instantiate(WORKSPACE_ID, 'tpl-1', ACTOR, {
+        listId: 'l', taskTypeId: '44444444-4444-4444-8444-444444444444',
+      }),
+      /does not belong/,
+    )
+    assert.equal(createTask.mock.callCount(), 1)
+    assert.equal(inserted.length, 0, `inserted ${JSON.stringify(inserted)}`)
+    assert.equal(set.length, 0)
+    assert.equal(db.insert.mock.callCount(), 0)
+  })
+
+  it('duplicates a task with its own tags by id, and hands createTask no tag to make', async () => {
+    const task = { title: 'Tagged', description: null, priority: 'normal', timeEstimate: -60, startDate: null, dueDate: null }
+    // The task's place, the read rule, its dates, assignees and tags (by id); the task, its label names, checklists, subtasks and values.
+    const { db, inserted } = recordingDb([
+      [{ workspaceId: WORKSPACE_ID, spaceId: 's', projectId: 'p', listId: 'l' }],
+      ...READABLE,
+      [{ startDate: null, dueDate: null }], [], [{ labelId: 'label-a' }, { labelId: 'label-b' }],
+      [task], [{ name: 'A' }, { name: 'B' }], [], [], [],
+    ])
+    const createTask = mock.fn(async (_arg: any) => ({ id: 'copy-1' }))
+    await new TaskTemplatesService(db, { createTask } as any, securityStub).duplicateTask(WORKSPACE_ID, T1, ACTOR)
+    const asked = createTask.mock.calls[0]?.arguments[0]
+    assert.deepEqual(asked?.labelIds, ['label-a', 'label-b'])
+    assert.equal(asked?.labelsByName, undefined)
+    // An estimate below nought on the original (made before estimates were checked) is none on the copy.
+    assert.equal(asked?.timeEstimate, undefined)
+    assert.equal(inserted.length, 0)
+  })
+})
+
+/*
+ * `found-30-sep/a-task-starts-after-it-is-due` — the template's start date landed
+ * beside a typed due date, and the task started six days after it was due. The
+ * date typed stands; the template's that it contradicts is left out.
+ */
+describe('templateWithForm — a date set wins over a template date it contradicts (found-30-sep/a-task-starts-after-it-is-due)', () => {
+  const NOW = new Date('2026-09-30T12:00:00.000Z')
+  const base = { description: null, priority: 'normal' as const, timeEstimate: null, labels: [] as string[] }
+  it('leaves out the template’s start after a typed due date, and its due date before a typed start', () => {
+    const late = templateWithForm({ ...base, startDateOffsetDays: 9, dueDateOffsetDays: null }, { dueDate: '2026-10-03T12:00:00.000Z' }, NOW)
+    assert.equal(late.startDate, undefined)
+    assert.equal(late.dueDate?.toISOString(), '2026-10-03T12:00:00.000Z')
+    const early = templateWithForm({ ...base, startDateOffsetDays: null, dueDateOffsetDays: 2 }, { startDate: '2026-10-09T12:00:00.000Z' }, NOW)
+    assert.equal(early.startDate?.toISOString(), '2026-10-09T12:00:00.000Z')
+    assert.equal(early.dueDate, undefined)
+  })
+
+  /*
+   * Asked where the person is, as `createTask` asks it: kept here and refused
+   * there would refuse a create for a date the person did not type.
+   */
+  it('asks where the person is whether a template’s start fits beside a typed due day with no time', () => {
+    const dueThe4th = { dueDate: '2026-10-04' }
+    // Four days from noon UTC: 12:00Z on the 4th — 02:00 on the 5th at UTC+14, 05:00 on the 4th in Los Angeles.
+    const tpl = { ...base, startDateOffsetDays: 4, dueDateOffsetDays: null }
+    assert.equal(templateWithForm(tpl, dueThe4th, NOW, 'Pacific/Kiritimati').startDate, undefined)
+    assert.equal(templateWithForm(tpl, dueThe4th, NOW, 'America/Los_Angeles').startDate?.toISOString(), '2026-10-04T12:00:00.000Z')
+    assert.equal(templateWithForm(tpl, dueThe4th, NOW).startDate?.toISOString(), '2026-10-04T12:00:00.000Z')
+  })
+
+  it('keeps the template’s date where it fits beside the typed one, and passes two typed dates on as typed', () => {
+    const fits = templateWithForm({ ...base, startDateOffsetDays: 1, dueDateOffsetDays: null }, { dueDate: '2026-10-03T12:00:00.000Z' }, NOW)
+    assert.equal(fits.startDate?.toISOString(), '2026-10-01T12:00:00.000Z')
+    const typed = templateWithForm({ ...base, startDateOffsetDays: null, dueDateOffsetDays: null }, { startDate: '2026-10-10T12:00:00.000Z', dueDate: '2026-10-03T12:00:00.000Z' }, NOW)
+    // Both typed the wrong way round are the caller's to be told of: `createTask` refuses them.
+    assert.equal(typed.startDate?.toISOString(), '2026-10-10T12:00:00.000Z')
+    assert.equal(typed.dueDate?.toISOString(), '2026-10-03T12:00:00.000Z')
+  })
+})
+
+/*
+ * Found by a review of this work. `createTask` refuses an estimate below
+ * nought, and a duplicate's subtasks were handed theirs as stored: a subtask
+ * holding -60 (written before the rule) was refused after the copy, its
+ * checklists and its values were made — a half-made copy, one more each try.
+ */
+describe('TaskTemplatesService.duplicateTask — a subtask’s estimate below nought (found-30-sep/task-estimate-below-zero)', () => {
+  it('makes the whole copy — its subtask with no estimate — where the subtask holds one below nought, and records the duplicate', async () => {
+    const task = { title: 'Launch', description: null, priority: 'normal', timeEstimate: 600, startDate: null, dueDate: null }
+    const sub = { title: 'Sub', description: null, priority: 'normal', timeEstimate: -60, dueDate: null }
+    // The task's place, the read rule, its dates, assignees and tags; the task, its label names, checklists, subtasks and values.
+    const { db } = recordingDb([
+      [{ workspaceId: WORKSPACE_ID, spaceId: 's', projectId: 'p', listId: 'l' }],
+      ...READABLE,
+      [{ startDate: null, dueDate: null }], [], [],
+      [task], [], [], [sub], [],
+    ])
+    // `createTask` as it is: an estimate the rule refuses is a 400.
+    const createTask = mock.fn(async (arg: any) => {
+      assertEstimate(arg.timeEstimate)
+      return { id: arg.parentTaskId ? 'copy-sub' : 'copy-1' }
+    })
+    const audit = mock.fn(async () => undefined)
+    const answer = await new TaskTemplatesService(db, { createTask } as any, { logAuditEvent: audit } as any).duplicateTask(WORKSPACE_ID, T1, ACTOR)
+    assert.equal(answer.taskId, 'copy-1')
+    const asked = createTask.mock.calls.map((c) => c.arguments[0])
+    assert.deepEqual(asked.map((a) => [a.title, a.parentTaskId, a.timeEstimate]), [['Launch (copy)', undefined, 600], ['Sub', 'copy-1', undefined]])
+    assert.equal(audit.mock.callCount(), 1)
+  })
+})
+
+/*
+ * Found by a review of this work. Save as template turns each date into whole
+ * days from now on its own, so two in order could round apart and the new
+ * template check refused the save (400) — due "the 4th" with no time and a
+ * start at 15:00 that day, saved at 14:00 UTC, came out 3 and 4.
+ */
+describe('offsetsFromTask — a task’s dates as a template’s days, in the order it holds them (found-30-sep/a-task-starts-after-it-is-due)', () => {
+  it('keeps a start no later than the due where the task’s own dates are in order, and leaves a task that starts after it is due as it is', () => {
+    const at = (iso: string) => new Date(iso)
+    const savedAt2pm = at('2026-09-30T14:00:00Z')
+    // Due the 4th, no time (3.4 days away); a start at 15:00 that day (4.0 days away).
+    assert.deepEqual(offsetsFromTask(savedAt2pm, at('2026-10-04T15:00:00Z'), at('2026-10-04T00:00:00Z')), { startDateOffsetDays: 3, dueDateOffsetDays: 3 })
+    // A start at noon that day splits them whatever the hour it is saved.
+    for (const hour of [0, 6, 11, 13, 18, 23]) {
+      const saved = at(`2026-09-30T${String(hour).padStart(2, '0')}:30:00Z`)
+      const got = offsetsFromTask(saved, at('2026-10-04T12:00:00Z'), at('2026-10-04T00:00:00Z'))
+      assert.ok(got.startDateOffsetDays! <= got.dueDateOffsetDays!, `saved at ${hour}:30 gave ${JSON.stringify(got)}`)
+    }
+    // In order and apart, as they were; one date alone, as it was.
+    assert.deepEqual(offsetsFromTask(savedAt2pm, at('2026-10-01T14:00:00Z'), at('2026-10-06T14:00:00Z')), { startDateOffsetDays: 1, dueDateOffsetDays: 6 })
+    assert.deepEqual(offsetsFromTask(savedAt2pm, at('2026-10-09T14:00:00Z'), null), { startDateOffsetDays: 9, dueDateOffsetDays: null })
+    // A task starting ten days out and due in three (made before the rule) keeps its order, to be refused with the reason.
+    assert.deepEqual(offsetsFromTask(savedAt2pm, at('2026-10-10T14:00:00Z'), at('2026-10-03T14:00:00Z')), { startDateOffsetDays: 10, dueDateOffsetDays: 3 })
+  })
+})
+
+describe('TaskTemplatesService — a template that starts after it is due is refused (found-30-sep/a-task-starts-after-it-is-due)', () => {
+  it('refuses to make or change a template whose start date is after its due date, and saves nothing', async () => {
+    const { db, inserted } = recordingDb([[{ id: 'tpl-1', workspaceId: WORKSPACE_ID, name: 'T', payload: { ...EMPTY } }]])
+    const svc = new TaskTemplatesService(db, tasksServiceStub, securityStub)
+    await assert.rejects(
+      svc.create(WORKSPACE_ID, ACTOR, { name: 'Late', payload: { startDateOffsetDays: 9, dueDateOffsetDays: 3 } }),
+      (e) => e instanceof BadRequestException && /cannot start after it is due/.test(e.message),
+    )
+    await assert.rejects(
+      svc.update(WORKSPACE_ID, 'tpl-1', ACTOR, { payload: { startDateOffsetDays: 4, dueDateOffsetDays: 1 } }),
+      (e) => e instanceof BadRequestException,
+    )
+    assert.equal(inserted.length, 0)
+    // The same day, or a start with no due date, is kept.
+    const ok = await svc.create(WORKSPACE_ID, ACTOR, { name: 'Same day', payload: { startDateOffsetDays: 3, dueDateOffsetDays: 3 } })
+    assert.equal(ok.payload.startDateOffsetDays, 3)
   })
 })
 
@@ -649,8 +1007,33 @@ describe('POST …/task-templates/:id/instantiate — the body is checked as POS
       assert.deepEqual(await refused(body, sent), [field], `instantiate (body ${bodyType}) refuses ${field} ${JSON.stringify(value)}`)
       assert.deepEqual(await refused(CreateTaskDto, sent), [field], `POST /tasks refuses ${field} ${JSON.stringify(value)} too`)
     }
-    // Below nothing, an estimate is no estimate here (POST /tasks takes one).
+    // Below nothing, an estimate is no estimate here.
     assert.deepEqual(await refused(body, { ...GOOD, timeEstimate: -60 }), ['timeEstimate'])
+  })
+
+  /*
+   * `found-30-sep/task-estimate-below-zero` — `POST /tasks` took an estimate below
+   * nought (`@IsInt()` alone) where the template's route refused it; and past
+   * what the column holds, Postgres refused it in its own words. And
+   * `found-30-sep/refused-create-leaves-tags` — tags by name, on both routes.
+   */
+  it('refuses an estimate below nought, or past what the column holds, on both routes, and takes tags by name on both', async () => {
+    const dtos: Record<string, new () => object> = await import('./dto/instantiate-template.dto').catch(() => ({}))
+    const body = bodyType ? dtos[bodyType] : undefined
+    for (const timeEstimate of [-60, -1, 2_147_483_648]) {
+      assert.deepEqual(await refused(CreateTaskDto, { ...GOOD, timeEstimate }), ['timeEstimate'], `POST /tasks refuses ${timeEstimate}`)
+      assert.deepEqual(await refused(body, { ...GOOD, timeEstimate }), ['timeEstimate'], `instantiate refuses ${timeEstimate}`)
+    }
+    for (const timeEstimate of [0, 2_147_483_647]) {
+      assert.deepEqual(await refused(CreateTaskDto, { ...GOOD, timeEstimate }), [], `POST /tasks takes ${timeEstimate}`)
+    }
+    const named = { ...GOOD, labelsByName: [{ name: 'Design', color: '#ff0000' }, { name: 'Later' }] }
+    assert.deepEqual(await refused(CreateTaskDto, named), [])
+    assert.deepEqual(await refused(body, named), [])
+    for (const labelsByName of [[{ name: '' }], ['Design'], { name: 'Design' }]) {
+      assert.deepEqual(await refused(CreateTaskDto, { ...GOOD, labelsByName }), ['labelsByName'], `POST /tasks refuses ${JSON.stringify(labelsByName)}`)
+      assert.deepEqual(await refused(body, { ...GOOD, labelsByName }), ['labelsByName'], `instantiate refuses ${JSON.stringify(labelsByName)}`)
+    }
   })
 })
 

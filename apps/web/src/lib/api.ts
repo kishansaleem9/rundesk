@@ -9,10 +9,47 @@ export class ApiError extends Error {
     public status: number,
     message: string,
     public details?: unknown,
+    /** Whether `message` is the API's own, from its envelope, rather than one made up here. */
+    public readonly said: boolean = false,
   ) {
     super(message)
     this.name = 'ApiError'
   }
+}
+
+/**
+ * WHAT A REFUSAL SAYS TO ITS READER (`found-30-sep/download-refusals-say-no-reason`).
+ * The API's own sentence when it refused the request itself — a 4xx whose
+ * envelope said why: a zip past its cap ("This task's files come to … download
+ * them one at a time"), a plan that does not include it, a task that is gone —
+ * and `fallback` for anything else: a 401 (the session, not the request), a
+ * server error, a proxy's page, no answer. A download used to say only that it
+ * failed, whatever the server had said.
+ */
+export function refusalMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof ApiError) || !error.said) return fallback
+  if (error.status < 400 || error.status >= 500 || error.status === 401) return fallback
+  return error.message.trim() || fallback
+}
+
+/**
+ * A download the API refused, as an `ApiError` carrying the refusal's envelope —
+ * its `message` and `details` — or "Download failed (<status>)" when what came
+ * back was not the API's envelope.
+ */
+async function downloadRefused(res: Response): Promise<ApiError> {
+  const text = await res.text().catch(() => '')
+  let error: { message?: unknown; details?: unknown } | null = null
+  try {
+    const body = JSON.parse(text) as { error?: { message?: unknown; details?: unknown } | null } | null
+    error = body && typeof body === 'object' ? body.error ?? null : null
+  } catch {
+    /* not the API's envelope: a proxy's page, or no body */
+  }
+  const said = typeof error?.message === 'string' && error.message.trim() !== ''
+  return said
+    ? new ApiError(res.status, error!.message as string, error!.details, true)
+    : new ApiError(res.status, `Download failed (${res.status})`)
 }
 
 /**
@@ -44,6 +81,18 @@ function readCookie(name: string): string | null {
   const escaped = name.replace(/([.*+?^${}()|[\]\\])/g, '\\$1')
   const match = document.cookie.match(new RegExp('(?:^|; )' + escaped + '=([^;]*)'))
   return match ? decodeURIComponent(match[1]) : null
+}
+
+/** The header the API reads a writer's zone from (`writerZone`, `task-values.ts`). */
+const TIME_ZONE_HEADER = 'X-Time-Zone'
+
+/** This browser's IANA zone, or null where the runtime will not say. */
+function browserTimeZone(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null
+  } catch {
+    return null
+  }
 }
 
 // Single in-flight refresh promise so a burst of 401s doesn't trigger N refreshes.
@@ -110,6 +159,14 @@ async function fetchWithAuth(path: string, init: RequestInit, token: string | nu
     const csrf = readCookie(CSRF_COOKIE)
     if (csrf) headers.set('X-CSRF-Token', csrf)
   }
+  // Every write says the zone its dates were read in, which is this browser's:
+  // the app shows every date in it (`task-dates.ts`), and the server orders a
+  // day with no time beside a moment as the writer sees them
+  // (`found-30-sep/a-task-starts-after-it-is-due`, `startsAfterDue`).
+  if (UNSAFE_METHODS.has(method) && !headers.has(TIME_ZONE_HEADER)) {
+    const zone = browserTimeZone()
+    if (zone) headers.set(TIME_ZONE_HEADER, zone)
+  }
 
   return fetch(`${API_BASE}${path}`, {
     ...init,
@@ -130,7 +187,11 @@ type ApiOptions = Omit<RequestInit, 'body'> & {
  *
  * Without a `filename`, it is saved under the name the response gives
  * (`Content-Disposition`), so a name the server works out — a task's "Download
- * all" is named after the task — is not worked out a second time here.
+ * all" is named after the task, a list's export after the list, a doc's after
+ * the doc — is not worked out a second time here
+ * (`found-30-sep/list-export-saved-as-list-csv`).
+ *
+ * Refused, it throws the refusal's own words (`refusalMessage` shows them).
  */
 export async function downloadFile(path: string, filename?: string): Promise<void> {
   const token = useAuthStore.getState().accessToken
@@ -140,7 +201,7 @@ export async function downloadFile(path: string, filename?: string): Promise<voi
     if (newToken) res = await fetchWithAuth(path, { method: 'GET' }, newToken)
     else useAuthStore.getState().clear()
   }
-  if (!res.ok) throw new ApiError(res.status, `Download failed (${res.status})`)
+  if (!res.ok) throw await downloadRefused(res)
   const blob = await res.blob()
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -162,7 +223,7 @@ export async function downloadFilePost(path: string, body: unknown, filename: st
     if (newToken) res = await fetchWithAuth(path, init, newToken)
     else useAuthStore.getState().clear()
   }
-  if (!res.ok) throw new ApiError(res.status, `Download failed (${res.status})`)
+  if (!res.ok) throw await downloadRefused(res)
   const blob = await res.blob()
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -230,7 +291,7 @@ export async function api<T = unknown>(
 
   if (!res.ok || parsed.error) {
     const err = parsed.error ?? { status: res.status, message: res.statusText }
-    throw new ApiError(err.status, err.message, err.details)
+    throw new ApiError(err.status, err.message, err.details, !!parsed.error)
   }
   return parsed.data as T
 }

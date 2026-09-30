@@ -24,7 +24,7 @@ import {
   X,
   Loader2,
 } from 'lucide-react'
-import { api, downloadFilePost } from '../lib/api'
+import { api, downloadFilePost, refusalMessage } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { usePermissions } from '../hooks/use-permissions'
@@ -241,8 +241,8 @@ export function InsightsPage() {
         { period: contribPeriod, ...(chosenSprintId ? { sprintId: chosenSprintId } : {}) },
         'rundesk-contribution.pdf',
       )
-    } catch {
-      toast.error(t('insights.contributionPdfError'))
+    } catch (e) {
+      toast.error(refusalMessage(e, t('insights.contributionPdfError')))
     }
   }
 

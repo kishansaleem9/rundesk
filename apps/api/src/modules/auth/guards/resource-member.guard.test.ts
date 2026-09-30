@@ -47,9 +47,75 @@ test('DENIES a non-member for a workspace param', async () => {
   await assert.rejects(() => g.canActivate(ctxFor({ id: 'u', role: 'member' }, { workspaceId: WS })), ForbiddenException)
 })
 
-test('DENIES a non-member resolving via spaceId', async () => {
-  const g = new ResourceMemberGuard(makeDb([{ w: WS }], [])) // space resolves to WS, but no membership
-  await assert.rejects(() => g.canActivate(ctxFor({ id: 'outsider', role: 'member' }, { spaceId: SPACE })), ForbiddenException)
+/*
+ * ONE ANSWER FOR WHAT THE CALLER MAY NOT OPEN (`found-30-sep/private-task-reads-say-403`).
+ * A space, list or task the caller may not open is refused exactly as an id
+ * that names nothing is: NotFoundException, "Resource not found". This denied a
+ * user of another organisation with 403 "You are not a member of this
+ * workspace", and a member with 403 and the reason, so an id said whether it
+ * named something and where. `sameAsNothing` is the whole claim: same class,
+ * same status, same words as the miss below.
+ */
+const nothing = async (): Promise<unknown> => {
+  const g = new ResourceMemberGuard(makeDb([], []))
+  return g.canActivate(ctxFor({ id: 'u', role: 'member' }, { taskId: ABSENT })).then(() => null, (err: unknown) => err)
+}
+const sameAsNothing = async (refused: unknown) => {
+  const miss = await nothing()
+  assert.ok(miss instanceof NotFoundException, 'the miss itself is not a 404')
+  assert.ok(refused instanceof NotFoundException, `refused with ${(refused as Error)?.constructor?.name}: ${(refused as Error)?.message}`)
+  assert.equal((refused as NotFoundException).getStatus(), miss.getStatus())
+  assert.equal((refused as Error).message, miss.message)
+}
+const refusalOf = (g: ResourceMemberGuard, user: unknown, params: unknown) =>
+  g.canActivate(ctxFor(user, params)).then(() => null, (err: unknown) => err)
+
+test('a non-member resolving via spaceId is told it is not there, as for an id naming nothing', async () => {
+  const g = new ResourceMemberGuard(makeDb([{ w: WS, spaceId: SPACE, sv: 'public' }], [])) // space resolves to WS, but no membership
+  await sameAsNothing(await refusalOf(g, { id: 'outsider', role: 'member' }, { spaceId: SPACE }))
+})
+
+/*
+ * A db for a member refused by the rules below the membership: the resolve
+ * row, the membership row, then whatever the container rule reads (space
+ * members for a private space: none).
+ */
+function makeSeqDb(queue: unknown[][]): Db {
+  let call = 0
+  const chain = (rows: unknown[]): Record<string, unknown> => {
+    const c: Record<string, unknown> = {}
+    for (const k of ['from', 'innerJoin', 'leftJoin', 'where', 'orderBy']) c[k] = () => c
+    c.limit = () => Promise.resolve(rows)
+    c.then = (res: (v: unknown) => unknown, rej: (e: unknown) => unknown) => Promise.resolve(rows).then(res, rej)
+    return c
+  }
+  return { select: () => chain(queue[call++] ?? []), execute: async () => [] } as unknown as Db
+}
+const MEMBER = { id: 'plain-member', role: 'member' }
+const taskRow = (over: Record<string, unknown> = {}) => ({
+  w: WS, spaceId: SPACE, sv: 'public', projectId: null, pv: null,
+  lv: 'public', lc: 'someone-else', tv: 'public', tc: 'someone-else', isAssignee: false, ...over,
+})
+
+test('a member refused a private task is told it is not there, as for an id naming nothing', async () => {
+  const g = new ResourceMemberGuard(makeSeqDb([[taskRow({ tv: 'private' })], [{ role: 'member' }]]))
+  await sameAsNothing(await refusalOf(g, MEMBER, { taskId: TASK }))
+})
+
+test('a member refused a private list is told it is not there, as for an id naming nothing', async () => {
+  const g = new ResourceMemberGuard(makeSeqDb([[{ w: WS, spaceId: SPACE, sv: 'public', projectId: null, pv: null, lv: 'private', lc: 'someone-else' }], [{ role: 'member' }]]))
+  await sameAsNothing(await refusalOf(g, MEMBER, { listId: LIST }))
+})
+
+test('a member refused a private space is told it is not there, as for an id naming nothing', async () => {
+  // The resolve row, the membership, then the space's members: not this one.
+  const g = new ResourceMemberGuard(makeSeqDb([[{ w: WS, spaceId: SPACE, sv: 'private' }], [{ role: 'member' }], []]))
+  await sameAsNothing(await refusalOf(g, MEMBER, { spaceId: SPACE }))
+})
+
+test('the same member opens the task once it is theirs to open, so the refusals above are about the task', async () => {
+  const g = new ResourceMemberGuard(makeSeqDb([[taskRow({ tv: 'private', tc: MEMBER.id })], [{ role: 'member' }]]))
+  assert.equal(await g.canActivate(ctxFor(MEMBER, { taskId: TASK })), true)
 })
 
 /*

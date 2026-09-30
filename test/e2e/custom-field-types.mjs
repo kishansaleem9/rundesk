@@ -33,6 +33,12 @@
  * holds, and every refusal is matched against the endpoint's own message
  * rather than against a status alone.
  *
+ * AND THE GRID'S COLUMNS ARE THE LIST'S FIELDS
+ * (`found-30-sep/field-route-takes-another-projects-field`): a field scoped to
+ * another list of the project was drawn as a column here, whose cells took a
+ * value the row never showed. It is drawn nowhere on this list now, and the
+ * route refuses the value.
+ *
  *   node test/e2e/custom-field-types.mjs --api 3029 --dist /tmp/claude-0/dist-9
  */
 import path from 'node:path'
@@ -50,7 +56,7 @@ const argOf = (name, fallback) => {
 }
 
 /** Exact, never `<`: a branch that silently skipped is a shorter run. */
-const EXPECTED_CHECKS = 32
+const EXPECTED_CHECKS = 33
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3029))
@@ -564,6 +570,19 @@ try {
 
   const reRelate = await setOn(subject.id, blockers.data.id, [other.id])
   if (reRelate.status !== 200) throw new Error(`could not re-relate for the grid: ${reRelate.status}`)
+  /*
+   * `found-30-sep/field-route-takes-another-projects-field` — a second list in
+   * the project, a field scoped to it, and one scoped to this list. The grid
+   * drew a column for every field of the project, and a cell of the other
+   * list's field took a value (200) that the row, read back through the task's
+   * own fields, never showed; the route now refuses it.
+   */
+  const secondList = await A('/lists', { method: 'POST', body: { projectId: project.id, name: `Second list ${TAG}` } })
+  const scopedHere = await define({ name: 'This list only', type: 'text', listId: list.id })
+  const scopedAway = await define({ name: 'Second list only', type: 'text', listId: secondList.data?.id })
+  if (!secondList.ok || !secondList.data?.id || !scopedHere.ok || !scopedAway.ok) {
+    throw new Error(`could not scope the grid's fields: list ${secondList.status}, here ${scopedHere.status} ${said(scopedHere)}, away ${scopedAway.status} ${said(scopedAway)}`)
+  }
   await page.goto(
     `${stack.base}/app/${W}/${space.id}/${project.id}/${list.id}`,
     { waitUntil: 'domcontentloaded' },
@@ -607,6 +626,16 @@ try {
       'grid rather than disabling it',
     `the money cell offers ${await moneyOpener.count()} editors — 0 would mean every custom ` +
       'column had just been made read-only, which is not the fix',
+  )
+  const hereCell = page.getByTestId(`custom-cell-open-${subject.id}-${scopedHere.data.id}`)
+  const hereDrawn = await waitUntil(async () => (await hereCell.count()) === 1, { timeoutMs: 20_000 })
+  const awayCells = await page.locator(`[data-testid^="custom-cell-"][data-testid$="-${scopedAway.data.id}"]`).count()
+  const awayNamed = await page.getByText('Second list only', { exact: true }).count()
+  chk(
+    hereDrawn && awayCells === 0 && awayNamed === 0,
+    'the grid draws a column for a field scoped to this list, and none — no cell, no header, nothing in its Fields picker — for one scoped to another list of the project, which this list’s tasks do not have',
+    `the field of this list has ${await hereCell.count()} cell(s) in the subject's row; the other list's field has ${awayCells} cell(s) ` +
+      `and its name is on the page ${awayNamed} time(s)`,
   )
 } catch (err) {
   failed += 1

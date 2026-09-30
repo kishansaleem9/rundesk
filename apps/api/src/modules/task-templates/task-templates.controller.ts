@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -16,6 +17,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { TaskTemplatesService } from './task-templates.service'
 import { InstantiateTemplateDto } from './dto/instantiate-template.dto'
+import { WRITER_ZONE_HEADER, writerZone } from '../tasks/task-values'
 import type { TaskTemplatePayload } from '@rundesk/db'
 
 /**
@@ -135,12 +137,14 @@ export class TaskTemplatesController {
     @Param('id', new ParseUUIDPipe()) templateId: string,
     @Body() body: InstantiateTemplateDto,
     @CurrentUser() user: any,
+    @Headers(WRITER_ZONE_HEADER) zone?: string,
   ) {
     return this.templates.instantiate(
       workspaceId,
       templateId,
       { id: user.id, email: user.email },
       body,
+      { writerZone: writerZone(zone) },
     )
   }
 }

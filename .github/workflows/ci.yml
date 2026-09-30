@@ -2353,6 +2353,19 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # A task, list, project or space the reader may not open was 403 with the
+      # reason ("This task is private", "You are not a member of this
+      # workspace"), where an id naming nothing was 404, so any id said whether
+      # it named something; the service reads answered 404. One answer now: the
+      # miss the route itself makes. And a move into another's private list,
+      # which was taken, is refused.
+      - name: What a reader may not open is answered as what is not there
+        if: '!cancelled()'
+        run: node test/e2e/refused-as-missing.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # A private folder left the folder listing and nothing else: its project,
       # lists and tasks were read by members it refused, by id and in every list.
       - name: What is in a private folder reaches nobody it refuses
@@ -3283,6 +3296,18 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # What a task's dates and estimate may be, on every write that sets them:
+      # no task starts after it is due (create, patch, bulk edit, a template's
+      # merge, a duplicate), no estimate is below nought, and the task sheet
+      # and the create modal say so (found-30-sep/a-task-starts-after-it-is-due,
+      # found-30-sep/task-estimate-below-zero). Each row read back by SQL.
+      - name: A task never starts after it is due, nor is estimated below nought
+        if: '!cancelled()'
+        run: node test/e2e/task-values.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # Home's "Assigned to me" and "Today & overdue" hold open work only,
       # soonest due first, counted honestly (500+ when cut), and a failed read
       # says so rather than "no tasks". Rows staged in Postgres.
@@ -3315,6 +3340,21 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
+
+      # Where R2_PUBLIC_URL is a public domain — a CDN on a bucket, which
+      # serves every key in it — a task's files and cover, a chat file, a clip
+      # and a recording are still handed out signed; the avatars and logos the
+      # domain is for live in a bucket of their own (R2_PUBLIC_BUCKET_NAME), so
+      # the domain need serve nothing else; and a domain on the private bucket
+      # is found when the API starts, used for nothing, and reported as an
+      # error (`found-30-sep/public-cdn-url-makes-every-object-public`). No step
+      # here sets R2_PUBLIC_URL, so the suite starts a store of two buckets and
+      # three APIs of its own, one after another, from this job's build and on
+      # its database: the domain on the private bucket, on the pictures' alone,
+      # and left on the private one after the pictures moved.
+      - name: Private objects are signed, and a public domain serves the pictures alone
+        if: '!cancelled()'
+        run: node test/e2e/private-object-urls.mjs --api 3011
 
       # Every task picker finds a task by its words, wherever it is. They all
       # read the newest 200 tasks and filtered in the browser, so task 201

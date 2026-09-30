@@ -68,6 +68,11 @@
  * under names that are distinct and hold no path, the links in `links.txt`, the
  * zip named after the task; and a member refused the task gets 404 for it.
  *
+ * AND A REFUSED DOWNLOAD SAID ONLY THAT IT FAILED (`found-30-sep/download-refusals-say-no-reason`).
+ * Past the zip's cap the server says why, and the page showed "Could not
+ * download the attachments". The store claims a size past the cap for one HEAD,
+ * and the page has to show the server's sentence and save nothing.
+ *
  *   node test/e2e/task-attachments.mjs --api 3011 --dist apps/web/dist
  */
 import fs from 'node:fs'
@@ -87,7 +92,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 32
+const EXPECTED_CHECKS = 33
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -1013,6 +1018,43 @@ try {
     savedName === WANT_ZIP_NAME,
     'and the zip is saved under the task\'s name — <title>-attachments.zip, with the characters no file name may hold made safe',
     `the browser saved ${JSON.stringify(savedName)}; the task is ${JSON.stringify(ZIP_TITLE)}, so ${JSON.stringify(WANT_ZIP_NAME)}`,
+  )
+
+  /*
+   * PAST ITS CAP, THE PAGE SAYS WHY (`found-30-sep/download-refusals-say-no-reason`).
+   * A task whose files come to more than a zip holds (1 GiB) is refused before a
+   * byte, with a sentence written for its reader: how much the files come to,
+   * what a zip holds, and to download them one at a time. The page said only
+   * "Could not download the attachments": its download read the status and
+   * never the refusal. A lane cannot hold a GiB, so the store is asked to claim
+   * one for the next HEAD, which is the zip's sizing of the task's first file
+   * (`s3-stub.mjs`, `next-head-length`); the route's own cap refuses it. And a
+   * refusal saves nothing.
+   */
+  const armed = await fetch(`${STORE}/__control/next-head-length?bytes=${2 * 1024 ** 3}`, { method: 'POST' })
+    .then((r) => r.status, () => 0)
+  const REFUSAL = /This task's files come to \d+ MB, and a zip of them holds 1024 MB at most: download them one at a time/
+  // A download, if one comes, is waited for beside the toast, not before it.
+  const saving = page.waitForEvent('download', { timeout: 10_000 }).catch(() => null)
+  await downloadAll.click({ timeout: 8000 }).catch(() => {})
+  // Every toast drawn while it waits, since a toast leaves after a few seconds.
+  const toastsSeen = new Set()
+  const refusalSaid = await waitUntil(async () => {
+    for (const text of await page.locator('[data-sonner-toast]').filter({ visible: true }).allInnerTexts().catch(() => [])) {
+      toastsSeen.add(text.trim())
+    }
+    return [...toastsSeen].some((text) => REFUSAL.test(text))
+  }, { timeoutMs: 10_000 })
+  const toastsNow = [...toastsSeen]
+  const refusedSave = await saving
+  // Disarmed whether or not it fired, so no HEAD after this run's is answered with it.
+  const disarmed = await fetch(`${STORE}/__control/reset`, { method: 'POST' }).then((r) => r.status, () => 0)
+  chk(
+    armed === 200 && refusalSaid && refusedSave === null && disarmed === 200,
+    'a task whose files come to more than a zip holds is refused in the server\'s own words — how much, what a zip holds, one at a time — and nothing is saved',
+    `the store ${armed === 200 ? 'claimed 2 GiB for the next HEAD' : `refused to claim a size (${armed})`}; ` +
+      `the page's toasts read ${JSON.stringify(toastsNow)}; ${refusedSave ? `the browser saved ${refusedSave.suggestedFilename()}` : 'nothing was saved'}` +
+      `${disarmed === 200 ? '' : `; and the claim could not be disarmed (${disarmed})`}`,
   )
 
   /*

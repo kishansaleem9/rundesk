@@ -5,8 +5,8 @@
 # Reddens: create-modal-templates: "and the member assigned and the tag added in the form are on it, beside the template’s own tag (read by SQL)"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/task-templates/task-templates.service.ts'
-a = "  const labelIds = [...new Set([...templateLabelIds, ...(form.labelIds ?? [])])]\n"
-b = "  const labelIds = form.labelIds?.length ? [...new Set(form.labelIds)] : templateLabelIds\n"
+a = "    ...(payload.labels ?? []).map((name) => ({ name, color: DEFAULT_LABEL_COLOR })),\n"
+b = "    ...(form.labelIds?.length || form.labelsByName?.length ? [] : payload.labels ?? []).map((name) => ({ name, color: DEFAULT_LABEL_COLOR })),\n"
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

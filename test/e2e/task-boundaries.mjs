@@ -426,8 +426,11 @@ try {
 
   const movePrivate = await M(`/tasks/${T}/move`, { method: 'POST', body: { listId: LP } })
   chk(
-    refused(movePrivate, 403) && (await row(T))?.list_id === LE1,
-    'and so is a list in a private project the caller cannot see, in a space they may otherwise edit',
+    // 404, as the list in another workspace is: a list the caller may not open
+    // is not there for them (`found-30-sep/private-task-reads-say-403`). It was
+    // 403 "You do not have access to that list", which said it was.
+    refused(movePrivate, 404) && movePrivate.message === moveOut.message && (await row(T))?.list_id === LE1,
+    'and so is a list in a private project the caller cannot see, in a space they may otherwise edit: NOT FOUND, in the words a list in another workspace gets',
     `it answered ${said(movePrivate)}; the task is in ${(await row(T))?.list_id}`,
   )
   await putBack(T, { list_id: LE1 })

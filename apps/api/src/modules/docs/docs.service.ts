@@ -17,6 +17,7 @@ import { SearchService } from '../search/search.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import { tiptapToMarkdown, tiptapToPlainLines, splitTitleFromMarkdown } from './tiptap-markdown'
 import { renderReportPdf } from '../reports/pdf'
+import { downloadName } from '../../common/export/download-name'
 
 type TiptapNode = { type: string; content?: TiptapNode[]; text?: string; attrs?: Record<string, unknown> }
 
@@ -413,8 +414,11 @@ export class DocsService {
     if (!doc) throw new NotFoundException('Doc not found')
     const body = tiptapToMarkdown(doc.content)
     const markdown = body.startsWith('# ') ? body : `# ${doc.title}\n\n${body}`
-    const base = (doc.title || 'document').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'document'
-    return { fileName: `${base}.md`, markdown }
+    // Named as every download is (`downloadName`): the whole title in `filename*`.
+    // This kept `[a-zA-Z0-9._-]` alone, so "Überblick" was "berblick.md", and
+    // the page worked the name out again (`found-30-sep/list-export-saved-as-list-csv`).
+    const { fileName, disposition } = downloadName(doc.title, '.md', 'document')
+    return { fileName, disposition, markdown }
   }
 
   /**
@@ -482,8 +486,8 @@ export class DocsService {
     const [doc] = await this.db.select().from(docs).where(eq(docs.id, docId)).limit(1)
     if (!doc) throw new NotFoundException('Doc not found')
     const pdf = renderReportPdf(doc.title || 'Untitled', tiptapToPlainLines(doc.content))
-    const base = (doc.title || 'document').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'document'
-    return { fileName: `${base}.pdf`, pdf }
+    const { fileName, disposition } = downloadName(doc.title, '.pdf', 'document')
+    return { fileName, disposition, pdf }
   }
 
   // ─── Doc templates ─────────────────────────────────────────────────────────

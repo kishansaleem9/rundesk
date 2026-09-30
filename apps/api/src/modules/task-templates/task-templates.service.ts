@@ -21,8 +21,9 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { isUuid } from '../../common/validation/uuid'
 import { TasksService } from '../tasks/tasks.service'
 import { SecurityService } from '../security/security.service'
-import { CustomFieldsService } from '../custom-fields/custom-fields.service'
+import { CustomFieldsService, fieldIsOnList, fieldIsOnTask } from '../custom-fields/custom-fields.service'
 import { readableTask } from '../../common/permissions/read-access'
+import { DEFAULT_LABEL_COLOR, carriedEstimate, startsAfterDue, type LabelByName } from '../tasks/task-values'
 
 const NAME_MAX = 120
 const DESCRIPTION_MAX = 1000
@@ -112,6 +113,56 @@ export function fitTemplateValue(
 }
 
 /**
+ * `found-30-sep/template-values-find-fields-by-name-alone` — WHICH FIELD EACH
+ * VALUE GOES INTO, among the fields the new task has (`fieldIsOnList`: its
+ * project's, less those scoped to another list). Values were mapped by name
+ * over every field of the project, so one went into a field scoped to another
+ * list, which the task does not have and no reader shows, or into whichever of
+ * two fields of one name the query returned last; and two values meant for two
+ * fields of one name went into one, which the table refuses (a task holds one
+ * value per field), so the task was made with none of them (409, measured).
+ *
+ *   · BY FIELD FIRST. A value taken from a task names the field it came from
+ *     (`fieldId`), and goes back into that field wherever the new task has it:
+ *     a duplicate's always, in its own list, and a template's where it is
+ *     applied in the list it was saved from.
+ *   · BY NAME OTHERWISE — another project, another list, a template written
+ *     by hand — and only into a field no value has taken: the one field of
+ *     that name the task has; of two, the one scoped to the task's own list
+ *     over the project's, being made for this list; of two at the same reach,
+ *     neither, since nothing says which was meant (`checkedFormulaConfig`
+ *     refuses a formula over such a name for the same reason).
+ *   · EACH FIELD ONCE, the value taken by field before any taken by name.
+ *
+ * ClickUp's templates carry their fields themselves, and its own API takes a
+ * value only for a field "applicable" to the task; it lets two fields share a
+ * name. What a value written by name should do when two do is not said
+ * anywhere, so the rule above is this product's.
+ */
+export function fieldsForTemplateValues<F extends { id: string; name: string; listId?: string | null }>(
+  fields: readonly F[],
+  values: TaskTemplatePayload['customFieldValues'],
+  listId: string,
+): Array<{ field: F; value: TemplateFieldValue }> {
+  const onTask = fields.filter((f) => fieldIsOnList(f, listId))
+  const byId = new Map(onTask.map((f) => [f.id, f]))
+  const planned = new Map<string, { field: F; value: TemplateFieldValue }>()
+  const byName: TaskTemplatePayload['customFieldValues'] = []
+  for (const v of values) {
+    const same = v.fieldId ? byId.get(v.fieldId) : undefined
+    if (!same) byName.push(v)
+    else if (!planned.has(same.id)) planned.set(same.id, { field: same, value: v.value })
+  }
+  for (const v of byName) {
+    const named = onTask.filter((f) => f.name === v.fieldName)
+    const own = named.filter((f) => f.listId === listId)
+    const field = named.length === 1 ? named[0] : own.length === 1 ? own[0] : undefined
+    if (field && !planned.has(field.id)) planned.set(field.id, { field, value: v.value })
+  }
+  return [...planned.values()]
+}
+
+/**
  * What the person set in the create modal beside the template they chose
  * (`InstantiateTemplateDto`, checked as `POST /tasks` checks the same fields).
  * A field they left alone is absent.
@@ -127,6 +178,8 @@ export interface TemplateFormValues {
   timeEstimate?: number
   assigneeIds?: string[]
   labelIds?: string[]
+  /** Tags typed beside the template, by name (`found-30-sep/refused-create-leaves-tags`). */
+  labelsByName?: LabelByName[]
 }
 
 /**
@@ -150,30 +203,57 @@ export interface TemplateFormValues {
  *   · A DESCRIPTION typed comes first, and the template's follows it after a
  *     blank line; either alone is the description.
  *   · TAGS AND ASSIGNEES are the template's and the form's together, each once.
- *     A template holds no assignees, so those are the form's.
+ *     A template holds no assignees, so those are the form's. The template's
+ *     tags go BY NAME, with the tags typed beside it, and `createTask` finds
+ *     them or makes them only once the task is made
+ *     (`found-30-sep/refused-create-leaves-tags`): they were made here first,
+ *     so a create refused for its type or its people left them behind.
+ *   · A DATE SET WINS OVER A TEMPLATE DATE IT CONTRADICTS
+ *     (`found-30-sep/a-task-starts-after-it-is-due`): the template's start date
+ *     landed beside a typed due date, and a task starting in nine days was made
+ *     due in three. The date typed stands and the template's is left out, as
+ *     ClickUp's picker keeps the date just set and deletes the other; two
+ *     typed the wrong way round are refused by `createTask`, as `POST /tasks`
+ *     refuses them. A template holding its own two the wrong way round (saved
+ *     before templates were checked) gives its due date and no start. Asked
+ *     where the person is (`zone`, as `createTask` asks it), so what is kept
+ *     here is never what `createTask` then refuses.
  *
  * Checklists, subtasks and custom-field values have no place in the form and
  * come from the template, as they did (`instantiate`).
  */
 export function templateWithForm(
-  payload: Pick<TaskTemplatePayload, 'description' | 'priority' | 'timeEstimate' | 'startDateOffsetDays' | 'dueDateOffsetDays'>,
+  payload: Pick<TaskTemplatePayload, 'description' | 'priority' | 'timeEstimate' | 'startDateOffsetDays' | 'dueDateOffsetDays' | 'labels'>,
   form: TemplateFormValues,
-  templateLabelIds: string[],
   now: Date,
+  zone?: string,
 ) {
   const typed = (form.description ?? '').trim()
   const own = (payload.description ?? '').trim()
   const description = !typed ? payload.description ?? undefined : own ? `${typed}\n\n${own}` : typed
-  const labelIds = [...new Set([...templateLabelIds, ...(form.labelIds ?? [])])]
+  const labelIds = [...new Set(form.labelIds ?? [])]
+  const labelsByName: LabelByName[] = [
+    ...(payload.labels ?? []).map((name) => ({ name, color: DEFAULT_LABEL_COLOR })),
+    ...(form.labelsByName ?? []),
+  ]
   const assigneeIds = [...new Set(form.assigneeIds ?? [])]
+  const typedStart = form.startDate ? new Date(form.startDate) : undefined
+  const typedDue = form.dueDate ? new Date(form.dueDate) : undefined
+  let startDate = typedStart ?? offsetToDate(now, payload.startDateOffsetDays) ?? undefined
+  let dueDate = typedDue ?? offsetToDate(now, payload.dueDateOffsetDays) ?? undefined
+  if (startsAfterDue(startDate, dueDate, zone)) {
+    if (!typedStart) startDate = undefined
+    else if (!typedDue) dueDate = undefined
+  }
   return {
     description,
     priority: form.priority ?? payload.priority,
     taskTypeId: form.taskTypeId || undefined,
     timeEstimate: form.timeEstimate ?? payload.timeEstimate ?? undefined,
-    startDate: form.startDate ? new Date(form.startDate) : offsetToDate(now, payload.startDateOffsetDays) ?? undefined,
-    dueDate: form.dueDate ? new Date(form.dueDate) : offsetToDate(now, payload.dueDateOffsetDays) ?? undefined,
+    startDate,
+    dueDate,
     labelIds: labelIds.length ? labelIds : undefined,
+    labelsByName: labelsByName.length ? labelsByName : undefined,
     assigneeIds: assigneeIds.length ? assigneeIds : undefined,
   }
 }
@@ -347,8 +427,9 @@ export class TaskTemplatesService {
    * workspace. Captures: title, description, priority, time estimate,
    * date offsets (computed relative to "today" at save time), labels,
    * checklists with items, one level of subtasks, and custom-field
-   * values keyed by definition name — a People, Labels or Tasks field's
-   * list among them, and no votes or files (`NOT_FROM_TEMPLATES`).
+   * values keyed by definition name and by the field itself — a People,
+   * Labels or Tasks field's list among them, and no votes or files
+   * (`NOT_FROM_TEMPLATES`).
    *
    * Status is intentionally NOT captured because each list has its
    * own custom-status pipeline — see TaskTemplatePayload docstring.
@@ -360,11 +441,13 @@ export class TaskTemplatesService {
     dto: { name: string; description?: string | null; icon?: string | null },
   ): Promise<TaskTemplateView> {
     const ctx = await this.resolveTaskContext(taskId)
-    if (!ctx) throw new NotFoundException('Task not found')
+    // One sentence for the three misses — no task, another workspace's, one the
+    // caller may not open (`found-30-sep/private-task-reads-say-403`).
+    if (!ctx) throw new NotFoundException('Task not found in this workspace')
     if (ctx.workspaceId !== workspaceId) throw new NotFoundException('Task not found in this workspace')
     await this.assertTaskOpenTo(workspaceId, taskId, actor)
 
-    const payload = await this.snapshotTask(taskId, { forTemplate: true })
+    const payload = await this.snapshotTask(taskId, ctx, { forTemplate: true })
     return this.create(workspaceId, actor, {
       name: dto.name,
       description: dto.description ?? null,
@@ -379,10 +462,10 @@ export class TaskTemplatesService {
    * Materialize a template into a real task under the target list.
    * Subtasks, checklists, labels (resolved by name within the
    * workspace — missing ones are auto-created with a neutral color),
-   * and custom-field values (resolved by definition name within the
-   * target project, each as far as that field can hold it —
-   * `fitTemplateValue`, then the field route's own rules) are all
-   * reconstructed.
+   * and custom-field values (each into a field the new task has, by the
+   * field it was taken from or else by name — `fieldsForTemplateValues` —
+   * and as far as that field can hold it — `fitTemplateValue`, then the
+   * field route's own rules) are all reconstructed.
    *
    * Date offsets are interpreted as days from `now` so a template
    * with `dueDateOffsetDays: 7` always produces a task due in a week.
@@ -396,6 +479,8 @@ export class TaskTemplatesService {
     templateId: string,
     actor: { id: string; email?: string },
     dto: { listId: string; titleOverride?: string } & TemplateFormValues,
+    /** The zone the person reads a day in (`writerZone`), for the dates typed beside the template. */
+    { writerZone }: { writerZone?: string } = {},
   ) {
     const template = await this.requireTemplate(workspaceId, templateId)
     const listCtx = await this.resolveListContext(dto.listId)
@@ -406,21 +491,23 @@ export class TaskTemplatesService {
 
     const payload = template.payload
     const now = new Date()
-    const templateLabelIds = await this.resolveLabelIds(workspaceId, payload.labels, actor.id)
 
     // The form's task type, people and labels are asked by `createTask` as
     // `POST /tasks` asks them — a type of the list's, people who can see it,
-    // labels of this workspace — before anything is written.
+    // labels of this workspace — before anything is written; and the tags it
+    // is given by name (the template's, and those typed beside it) are made
+    // there, only once the task is (`found-30-sep/refused-create-leaves-tags`).
     const task = await this.tasksService.createTask({
       listId: dto.listId,
       title: dto.titleOverride?.trim() || payload.title || template.name,
-      ...templateWithForm(payload, dto, templateLabelIds, now),
+      ...templateWithForm(payload, dto, now, writerZone),
       createdById: actor.id,
+      writerZone,
     })
     if (!task) throw new Error('Task creation returned no row')
 
     await this.materialiseChecklists(task.id, payload.checklists)
-    await this.materialiseTemplateValues(task.id, listCtx.projectId, workspaceId, payload.customFieldValues)
+    await this.materialiseTemplateValues(task.id, { projectId: listCtx.projectId, listId: dto.listId }, workspaceId, payload.customFieldValues)
     await this.materialiseSubtasks(dto.listId, task.id, payload.subtasks, actor.id, now)
 
     // Bump usage count for ordering/discovery.
@@ -458,10 +545,22 @@ export class TaskTemplatesService {
    * and says nothing of a Voting or a Files field; the rules those fields' own
    * route keeps decide it. The copy carries no votes and no files, and each
    * other value as far as the field's route would take it now.
+   *
+   * AND EACH INTO THE FIELD IT CAME FROM, the copy being in the same list with
+   * the same fields (`found-30-sep/template-values-find-fields-by-name-alone`).
+   * It copied by name, so two fields of one name, a project's and a list's,
+   * both set, put both values into one field, which the table refuses: 409,
+   * after the copy was made, with none of its values (measured). Every value
+   * copied is one of a field the task has (`snapshotTask`), so each finds its
+   * field and none falls to a name: a value the task still held for a field it
+   * no longer had went into another field of that name on the copy.
    */
   async duplicateTask(workspaceId: string, taskId: string, actor: { id: string; email?: string; role?: string | null }) {
     const ctx = await this.resolveTaskContext(taskId)
-    if (!ctx) throw new NotFoundException('Task not found')
+    // One sentence for the three misses — no task, another workspace's, one the
+    // caller may not open. "Task not found" for the first said the other two
+    // named a task (`found-30-sep/private-task-reads-say-403`).
+    if (!ctx) throw new NotFoundException('Task not found in this workspace')
     if (ctx.workspaceId !== workspaceId) throw new NotFoundException('Task not found in this workspace')
     await this.assertTaskOpenTo(workspaceId, taskId, actor)
 
@@ -475,17 +574,32 @@ export class TaskTemplatesService {
       .from(taskAssignees)
       .where(eq(taskAssignees.taskId, taskId))
     const assigneeIds = assignees.map((a) => a.userId)
+    /*
+     * The original's own tags, by id: they are this workspace's, and a copy
+     * needs none made (`found-30-sep/refused-create-leaves-tags` — they were
+     * looked up by name here, and any not found made, before the copy was
+     * asked about).
+     */
+    const tagged = await this.db
+      .select({ labelId: taskLabelAssignments.labelId })
+      .from(taskLabelAssignments)
+      .where(eq(taskLabelAssignments.taskId, taskId))
+    const labelIds = tagged.map((t) => t.labelId)
 
-    const payload = await this.snapshotTask(taskId)
+    const payload = await this.snapshotTask(taskId, ctx)
     const now = new Date()
-    const labelIds = await this.resolveLabelIds(workspaceId, payload.labels, actor.id)
 
     const task = await this.tasksService.createTask({
       listId: ctx.listId,
       title: `${payload.title || 'Task'} (copy)`,
       description: payload.description ?? undefined,
       priority: payload.priority,
-      timeEstimate: payload.timeEstimate ?? undefined,
+      // A task made before estimates were checked may hold one below nought
+      // (`found-30-sep/task-estimate-below-zero`); its copy holds none, and so
+      // does each subtask's copy (`materialiseSubtasks`). Its dates are copied
+      // as they are, and a pair the wrong way round is refused with the
+      // reason, to be put right on the original — before anything is made.
+      timeEstimate: carriedEstimate(payload.timeEstimate),
       startDate: src?.startDate ?? undefined,
       dueDate: src?.dueDate ?? undefined,
       labelIds: labelIds.length ? labelIds : undefined,
@@ -495,7 +609,7 @@ export class TaskTemplatesService {
     if (!task) throw new Error('Task creation returned no row')
 
     await this.materialiseChecklists(task.id, payload.checklists)
-    await this.materialiseTemplateValues(task.id, ctx.projectId, workspaceId, payload.customFieldValues)
+    await this.materialiseTemplateValues(task.id, { projectId: ctx.projectId, listId: ctx.listId }, workspaceId, payload.customFieldValues)
     await this.materialiseSubtasks(ctx.listId, task.id, payload.subtasks, actor.id, now)
 
     await this.security.logAuditEvent({
@@ -544,9 +658,22 @@ export class TaskTemplatesService {
    * writes (`NOT_FROM_TEMPLATES`); a duplicate takes the task as it is, and what
    * of it is written onto the copy is decided as a template's values are
    * (`materialiseTemplateValues`).
+   *
+   * ITS VALUES ARE THOSE OF THE FIELDS IT HAS, where it is now (`place`, its
+   * project and list: `fieldIsOnTask`), as its reader shows them
+   * (`CustomFieldsService.getValuesForTask`). A task keeps its value rows when
+   * it is moved (`moveTask` changes its list alone), so a task moved out of a
+   * field's list, or in from another project, still holds values for fields it
+   * no longer has, which nobody sees on it. The snapshot took every row, and a
+   * value whose field the new task lacks is written by name
+   * (`fieldsForTemplateValues`): a duplicate showed the project's field of that
+   * name holding the hidden value while the original showed it empty, and a
+   * template saved from the task carried it too (measured on lane 7; review of
+   * `found-30-sep/template-values-find-fields-by-name-alone`).
    */
   private async snapshotTask(
     taskId: string,
+    place: { projectId: string; listId: string },
     { forTemplate = false }: { forTemplate?: boolean } = {},
   ): Promise<TaskTemplatePayload> {
     const [task] = await this.db
@@ -593,9 +720,15 @@ export class TaskTemplatesService {
 
     const valueRows = await this.db
       .select({
+        // The field each value came from, so it goes back into that field
+        // (`fieldsForTemplateValues`), not into whichever shares its name.
+        fieldId: customFieldValues.fieldId,
         name: customFieldDefinitions.name,
         type: customFieldDefinitions.type,
         value: customFieldValues.value,
+        // The field's own place, to ask whether the task has it (`fieldIsOnTask`).
+        projectId: customFieldDefinitions.projectId,
+        listId: customFieldDefinitions.listId,
       })
       .from(customFieldValues)
       .innerJoin(
@@ -603,14 +736,18 @@ export class TaskTemplatesService {
         eq(customFieldDefinitions.id, customFieldValues.fieldId),
       )
       .where(eq(customFieldValues.taskId, taskId))
+      // IN THE ORDER THE TASK SHOWS ITS FIELDS, not the order the rows happen to
+      // come back in: where two values fall to one field by name, the first is
+      // written (`fieldsForTemplateValues`), and which one that was changed
+      // from run to run (measured, `found-30-sep/template-values-find-fields-by-name-alone`).
+      .orderBy(asc(customFieldDefinitions.position), asc(customFieldDefinitions.createdAt))
 
     return {
       title: task.title,
       description: task.description,
       priority: task.priority as TaskPriority,
       timeEstimate: task.timeEstimate ?? null,
-      startDateOffsetDays: dateToOffsetDays(now, task.startDate),
-      dueDateOffsetDays: dateToOffsetDays(now, task.dueDate),
+      ...offsetsFromTask(now, task.startDate, task.dueDate),
       labels: labelRows.map((l) => l.name),
       checklists: checklistRows.map((c) => ({
         title: c.title,
@@ -624,39 +761,11 @@ export class TaskTemplatesService {
         dueDateOffsetDays: dateToOffsetDays(now, s.dueDate),
       })),
       customFieldValues: valueRows
+        .filter((r) => fieldIsOnTask(r, place))
         .filter((r) => r.value && r.value.v !== null && r.value.v !== undefined)
         .filter((r) => !forTemplate || !NOT_FROM_TEMPLATES.has(r.type))
-        .map((r) => ({ fieldName: r.name, value: r.value.v ?? null })),
+        .map((r) => ({ ...(r.fieldId ? { fieldId: r.fieldId } : {}), fieldName: r.name, value: r.value.v ?? null })),
     }
-  }
-
-  private async resolveLabelIds(
-    workspaceId: string,
-    names: string[],
-    _creatorId: string,
-  ): Promise<string[]> {
-    if (!names?.length) return []
-    const unique = Array.from(new Set(names.map((n) => n.trim()).filter(Boolean)))
-    if (unique.length === 0) return []
-
-    const existing = await this.db
-      .select({ id: labels.id, name: labels.name })
-      .from(labels)
-      .where(and(eq(labels.workspaceId, workspaceId), inArray(labels.name, unique)))
-
-    const existingByName = new Map(existing.map((l) => [l.name, l.id]))
-    const missing = unique.filter((n) => !existingByName.has(n))
-    if (missing.length) {
-      const created = await this.db
-        .insert(labels)
-        .values(missing.map((name) => ({ workspaceId, name, color: '#94a3b8' })))
-        .returning({ id: labels.id, name: labels.name })
-      for (const l of created) existingByName.set(l.name, l.id)
-    }
-
-    return unique
-      .map((n) => existingByName.get(n))
-      .filter((id): id is string => !!id)
   }
 
   private async materialiseChecklists(
@@ -683,8 +792,9 @@ export class TaskTemplatesService {
 
   /**
    * A TEMPLATE's custom-field values, onto the task made from it — or a
-   * DUPLICATED task's, onto its copy: each to the field of that name in the
-   * task's project, as far as `fitTemplateValue` says that field can hold it.
+   * DUPLICATED task's, onto its copy: each to a field the task has, by the
+   * field it came from or else by name (`fieldsForTemplateValues`), as far as
+   * `fitTemplateValue` says that field can hold it.
    * The people and tasks a list names are asked of the database once each, and
    * only ids shaped like ids are asked: an id that is not one would have
    * Postgres refuse the whole query (`isUuid`).
@@ -702,7 +812,7 @@ export class TaskTemplatesService {
    */
   private async materialiseTemplateValues(
     taskId: string,
-    projectId: string,
+    target: { projectId: string; listId: string },
     workspaceId: string,
     values: TaskTemplatePayload['customFieldValues'],
   ) {
@@ -713,16 +823,19 @@ export class TaskTemplatesService {
         name: customFieldDefinitions.name,
         type: customFieldDefinitions.type,
         options: customFieldDefinitions.options,
+        listId: customFieldDefinitions.listId,
       })
       .from(customFieldDefinitions)
-      .where(eq(customFieldDefinitions.projectId, projectId))
-    const byName = new Map(defs.map((d) => [d.name, d]))
+      .where(eq(customFieldDefinitions.projectId, target.projectId))
+    // Only the fields the new task has, each value into one of them at most
+    // (`found-30-sep/template-values-find-fields-by-name-alone`).
+    const planned = fieldsForTemplateValues(defs, values, target.listId)
 
     const named = (type: string) =>
       Array.from(
         new Set(
-          values.flatMap((v) =>
-            byName.get(v.fieldName)?.type === type && Array.isArray(v.value) ? v.value.filter(isUuid) : [],
+          planned.flatMap(({ field, value }) =>
+            field.type === type && Array.isArray(value) ? value.filter(isUuid) : [],
           ),
         ),
       )
@@ -746,10 +859,8 @@ export class TaskTemplatesService {
     const known = { members: new Set(members.map((m) => m.id)), tasks: new Set(tasksHere.map((t) => t.id)) }
 
     const rows: Array<typeof customFieldValues.$inferInsert> = []
-    for (const v of values) {
-      const def = byName.get(v.fieldName)
-      if (!def) continue
-      const value = fitTemplateValue(def, v.value, known)
+    for (const { field: def, value: held } of planned) {
+      const value = fitTemplateValue(def, held, known)
       if (value === undefined) continue
       const taken = await this.customFields.checkValue(workspaceId, taskId, def, value).then(
         (checked) => ({ checked }),
@@ -780,7 +891,11 @@ export class TaskTemplatesService {
         title: st.title,
         description: st.description ?? undefined,
         priority: st.priority,
-        timeEstimate: st.timeEstimate ?? undefined,
+        // One the rule refuses — a duplicated subtask's below nought, written
+        // before estimates were checked; a template's past what the column
+        // holds — is none on the copy, rather than refusing this subtask
+        // after the parent, its checklists and its values are made.
+        timeEstimate: carriedEstimate(st.timeEstimate),
         dueDate: offsetToDate(now, st.dueDateOffsetDays) ?? undefined,
         createdById: actorId,
       })
@@ -849,6 +964,17 @@ export class TaskTemplatesService {
    */
   private normalisePayload(raw: Partial<TaskTemplatePayload>): TaskTemplatePayload {
     const priority = clampPriority(raw.priority)
+    const startDateOffsetDays = clampNumber(raw.startDateOffsetDays, -3650, 3650)
+    const dueDateOffsetDays = clampNumber(raw.dueDateOffsetDays, -3650, 3650)
+    /*
+     * A TEMPLATE THAT STARTS AFTER IT IS DUE IS REFUSED
+     * (`found-30-sep/a-task-starts-after-it-is-due`), as a task that does is:
+     * every task made from it would start after it was due. Whole days from the
+     * day it is used, so compared as days.
+     */
+    if (startDateOffsetDays !== null && dueDateOffsetDays !== null && startDateOffsetDays > dueDateOffsetDays) {
+      throw new BadRequestException('A template cannot start after it is due: its start date is after its due date.')
+    }
     return {
       title: String(raw.title ?? '').slice(0, 500),
       description:
@@ -857,8 +983,8 @@ export class TaskTemplatesService {
           : String(raw.description).slice(0, 10_000),
       priority,
       timeEstimate: clampNumber(raw.timeEstimate, 0),
-      startDateOffsetDays: clampNumber(raw.startDateOffsetDays, -3650, 3650),
-      dueDateOffsetDays: clampNumber(raw.dueDateOffsetDays, -3650, 3650),
+      startDateOffsetDays,
+      dueDateOffsetDays,
       labels: (raw.labels ?? [])
         .filter((s): s is string => typeof s === 'string')
         .map((s) => s.trim())
@@ -886,6 +1012,9 @@ export class TaskTemplatesService {
         .filter((v: any) => v && typeof v.fieldName === 'string')
         .slice(0, MAX_CUSTOM_FIELDS)
         .map((v: any) => ({
+          // The field it was taken from, kept only when it is shaped like an id:
+          // it is compared with the new task's fields, never trusted beyond them.
+          ...(typeof v.fieldId === 'string' && isUuid(v.fieldId) ? { fieldId: v.fieldId } : {}),
           fieldName: String(v.fieldName).slice(0, 200),
           value: templateFieldValue(v.value),
         })),
@@ -935,4 +1064,31 @@ function dateToOffsetDays(now: Date, value: Date | null): number | null {
   const ms = value.getTime() - now.getTime()
   if (!Number.isFinite(ms)) return null
   return Math.round(ms / (24 * 60 * 60 * 1000))
+}
+
+/**
+ * A TASK'S TWO DATES AS A TEMPLATE'S DAYS FROM NOW, IN THE ORDER THE TASK HOLDS
+ * THEM (`found-30-sep/a-task-starts-after-it-is-due`, found by a review of
+ * this work). Each date is rounded to whole days on its own, so two in order
+ * can round apart: due "the 4th" with no time (UTC midnight) and a start at
+ * 15:00 that day, saved at 14:00 UTC on the 30th, are 3.4 and 4.0 days away,
+ * and came out due in 3 and starting in 4 — which a template may not hold, so
+ * Save as template was refused (400) for a task every write takes, depending
+ * on the time of day it was saved. Where the task's own dates are in order
+ * (`startsAfterDue`, asked as of any reader) the start is kept no later than
+ * the due: the same day. A task that itself starts after it is due, made
+ * before the rule, is left as it is and refused with the reason, as its
+ * duplicate is.
+ */
+export function offsetsFromTask(
+  now: Date,
+  start: Date | null,
+  due: Date | null,
+): { startDateOffsetDays: number | null; dueDateOffsetDays: number | null } {
+  const startDateOffsetDays = dateToOffsetDays(now, start)
+  const dueDateOffsetDays = dateToOffsetDays(now, due)
+  if (startDateOffsetDays !== null && dueDateOffsetDays !== null && startDateOffsetDays > dueDateOffsetDays && !startsAfterDue(start, due)) {
+    return { startDateOffsetDays: dueDateOffsetDays, dueDateOffsetDays }
+  }
+  return { startDateOffsetDays, dueDateOffsetDays }
 }

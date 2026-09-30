@@ -4,7 +4,7 @@
 # Reddens: custom-field-progress: "a duplicate of the task carries none of its votes — a vote is cast by its voter on the task they voted on (read by SQL)"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/task-templates/task-templates.service.ts'
-a = "    await this.materialiseTemplateValues(task.id, ctx.projectId, workspaceId, payload.customFieldValues)\n"
+a = "    await this.materialiseTemplateValues(task.id, { projectId: ctx.projectId, listId: ctx.listId }, workspaceId, payload.customFieldValues)\n"
 b = ("    {\n"
      "      // BROKEN: every value the task held, written onto the copy unchecked\n"
      "      const defs = await this.db\n"

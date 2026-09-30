@@ -48,6 +48,12 @@
  *
  *   RUNDESK_S3_STUB=1 node scripts/e2e-lanes/s3-stub.mjs --port 9100 --bucket rundesk-test
  *
+ * `--bucket` may be given more than once, and each bucket is a store of its
+ * own: an object put in one is not in another, as in R2. The first is the one
+ * the ready line names as `bucket`; `buckets` names them all. A deployment
+ * whose pictures have a bucket of their own (`R2_PUBLIC_BUCKET_NAME`) is two
+ * (`found-30-sep/public-cdn-url-makes-every-object-public`).
+ *
  * It prints one line of JSON on stdout when it is listening, so a caller can
  * wait for readiness rather than sleeping:
  *
@@ -78,13 +84,18 @@ const PORT = Number(arg('port', 9100))
  * built from older source.
  */
 const SOURCE = createHash('sha1').update(readFileSync(new URL(import.meta.url))).digest('hex').slice(0, 12)
-const BUCKET = arg('bucket', 'rundesk-test')
+const BUCKETS = process.argv.flatMap((a, i, all) => (a === '--bucket' && all[i + 1] ? [all[i + 1]] : []))
+if (BUCKETS.length === 0) BUCKETS.push('rundesk-test')
+const BUCKET = BUCKETS[0]
 const STRICT = process.argv.includes('--strict')
 
-/** key → { body: Buffer, contentType: string, meta: Record<string, string>, at: Date } */
-const objects = new Map()
+/** bucket → (key → { body: Buffer, contentType: string, meta: Record<string, string>, at: Date }) */
+const stores = new Map(BUCKETS.map((b) => [b, new Map()]))
+const objectCount = () => [...stores.values()].reduce((n, m) => n + m.size, 0)
 // Armed by `POST /__control/fail-next-put`, and consumed by the PUT it fires on.
 let failNextPut = false
+// Armed by `POST /__control/next-head-length?bytes=N`, and consumed by the HEAD it answers.
+let nextHeadLength = null
 /*
  * EVERY BUCKET REQUEST, IN ORDER, so "the product did NOT touch the bucket" is
  * something a suite can read rather than assume. Removing a LINK attachment
@@ -222,6 +233,30 @@ const server = createServer(async (req, res) => {
    * is to say it at the START of a section rather than trusting the end of the
    * last one.
    */
+  /*
+   * A SIZE THE NEXT HEAD CLAIMS (`found-30-sep/download-refusals-say-no-reason`).
+   *
+   * Download all sizes each of a task's files with HEAD, and refuses, before a
+   * byte, a task whose files come to more than a zip holds: 1 GiB. That refusal
+   * says why in words the page has to show, and it could not be staged: this
+   * store holds its objects in memory, and a lane's is shared by every suite.
+   * So the NEXT HEAD of an object that is there answers `content-length: N`,
+   * once; its GET still serves the bytes that were put, and every HEAD after it
+   * the true size. Not keyed off the object, for the reason above: which object
+   * is asked is the product's business. `reset` forgets it, as it forgets an
+   * arranged failure.
+   */
+  if (url.pathname === '/__control/next-head-length' && req.method === 'POST') {
+    const bytes = Number(url.searchParams.get('bytes'))
+    if (!url.searchParams.has('bytes') || !Number.isSafeInteger(bytes) || bytes < 0) {
+      res.writeHead(400, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ error: 'bytes must be a whole number, 0 or more' }))
+    }
+    nextHeadLength = bytes
+    res.writeHead(200, { 'content-type': 'application/json' })
+    return res.end(JSON.stringify({ nextHeadLength }))
+  }
+
   if (url.pathname === '/__control/version' && req.method === 'GET') {
     res.writeHead(200, { 'content-type': 'application/json' })
     return res.end(JSON.stringify({ source: SOURCE }))
@@ -234,8 +269,9 @@ const server = createServer(async (req, res) => {
 
   if (url.pathname === '/__control/reset' && req.method === 'POST') {
     failNextPut = false
+    nextHeadLength = null
     res.writeHead(200, { 'content-type': 'application/json' })
-    return res.end(JSON.stringify({ failNextPut, objects: objects.size }))
+    return res.end(JSON.stringify({ failNextPut, objects: objectCount() }))
   }
 
   /*
@@ -276,7 +312,9 @@ const server = createServer(async (req, res) => {
   requests.push(logged)
   if (requests.length > REQUEST_LOG_CAP) requests.shift()
 
-  if (bucket !== BUCKET) return s3Error(res, 404, 'NoSuchBucket', `no bucket named ${bucket}`)
+  if (!stores.has(bucket)) return s3Error(res, 404, 'NoSuchBucket', `no bucket named ${bucket}`)
+  // This bucket's objects, and no other's.
+  const objects = stores.get(bucket)
 
   // Logged above, like any request the bucket was sent; refused here, as S3
   // refuses a presigned URL past its window (see the header).
@@ -305,7 +343,7 @@ const server = createServer(async (req, res) => {
     const truncated = matching.length > hits.length
     const next = truncated ? Buffer.from(hits[hits.length - 1][0]).toString('base64url') : null
     const body =
-      `<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><Name>${xmlEscape(BUCKET)}</Name>` +
+      `<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><Name>${xmlEscape(bucket)}</Name>` +
       `<Prefix>${xmlEscape(prefix)}</Prefix><KeyCount>${hits.length}</KeyCount>` +
       `<MaxKeys>${max}</MaxKeys><IsTruncated>${truncated}</IsTruncated>` +
       (token ? `<ContinuationToken>${xmlEscape(token)}</ContinuationToken>` : '') +
@@ -363,8 +401,8 @@ const server = createServer(async (req, res) => {
       const [srcBucket, ...rest] = decodeURIComponent(String(copySource)).replace(/^\//, '').split('/')
       const srcKey = rest.join('/')
       logged.copyOf = srcKey
-      if (srcBucket !== BUCKET) return s3Error(res, 404, 'NoSuchBucket', `no bucket named ${srcBucket}`)
-      const src = objects.get(srcKey)
+      if (!stores.has(srcBucket)) return s3Error(res, 404, 'NoSuchBucket', `no bucket named ${srcBucket}`)
+      const src = stores.get(srcBucket).get(srcKey)
       if (!src) return s3Error(res, 404, 'NoSuchKey', `no object at ${srcKey}`)
       const replace = String(req.headers['x-amz-metadata-directive'] ?? '').toUpperCase() === 'REPLACE'
       const copied = {
@@ -402,6 +440,13 @@ const server = createServer(async (req, res) => {
       res.writeHead(404)
       return res.end()
     }
+    // The size armed by `next-head-length`, once (see there).
+    if (nextHeadLength !== null) {
+      const claimed = nextHeadLength
+      nextHeadLength = null
+      res.writeHead(200, { 'content-type': found.contentType, 'content-length': claimed, ...metaHeaders(found.meta) })
+      return res.end()
+    }
     res.writeHead(200, { 'content-type': found.contentType, 'content-length': found.body.length, ...metaHeaders(found.meta) })
     return res.end()
   }
@@ -431,7 +476,7 @@ server.listen(PORT, '127.0.0.1', () => {
    * asynchronous, so this must not be followed by anything that exits.
    */
   console.log(
-    JSON.stringify({ ready: true, port: PORT, bucket: BUCKET, endpoint: `http://127.0.0.1:${PORT}`, strict: STRICT, source: SOURCE }),
+    JSON.stringify({ ready: true, port: PORT, bucket: BUCKET, buckets: BUCKETS, endpoint: `http://127.0.0.1:${PORT}`, strict: STRICT, source: SOURCE }),
   )
 })
 

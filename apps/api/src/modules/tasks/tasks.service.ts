@@ -91,7 +91,7 @@ import {
 } from '../../common/permissions/item-visibility'
 import { PUBLIC_USER_COLUMNS, PUBLIC_USER_WITH } from '../../common/permissions/public-user'
 import { canReadDoc, hiddenDocIds } from '../../common/permissions/doc-access'
-import { readableTask, readableTaskIds } from '../../common/permissions/read-access'
+import { readableList, readableTask, readableTaskIds } from '../../common/permissions/read-access'
 import { listVisibilityFilter } from '../../common/permissions/item-visibility'
 import { safeFetch } from '../../common/http/safe-fetch'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
@@ -111,10 +111,19 @@ import { assertManagerTaskScope, taskRestorable } from '../../common/permissions
 import { assertCanCreateTaskIn, canCreateTaskIn } from '../../common/permissions/task-create'
 import { assertMayShapeStatuses } from '../../common/permissions/status-access'
 import { assertMayDefineFields } from '../../common/permissions/field-access'
-import { checkContainerAccess, containerRefusal, containerVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
+import { containerRefusal, containerVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
 import { attachmentKind, isLinkAttachmentKey, isTaskOwnObjectKey, isTaskUploadKey } from './task-object-keys'
 import { isWorkspaceClipKey } from '../clips/clip-keys'
 import { pickUpdatable } from './task-update-fields'
+import {
+  assertDatesInOrder,
+  assertEstimate,
+  carriedEstimate,
+  planLabelsByName,
+  startsAfterDue,
+  uniqueLabelNames,
+  type LabelByName,
+} from './task-values'
 import { CustomFieldsService } from '../custom-fields/custom-fields.service'
 import { guestMayRead } from '../../common/permissions/guest-reach'
 import { likeContaining } from '../../common/sql/like'
@@ -724,6 +733,13 @@ export class TasksService {
    * cross-workspace / non-member callers and outsiders to a private space or
    * project. Used by read paths that hand back sensitive data (e.g. signed R2
    * attachment URLs) as a service-layer defense-in-depth behind the route guard.
+   *
+   * EVERY REFUSAL IS THE MISS: "Task not found", 404, as for an id that names
+   * no task (`found-30-sep/private-task-reads-say-403`, the guard's rule). It
+   * said "Workspace not found" to a stranger, and 403 "This space is private",
+   * "This list is private", "This task is private" or "not shared with you" to
+   * a member — so a task another task points at (a dependency, a parent) said
+   * what kind of wall stood in front of it.
    */
   private async assertTaskReadAccess(taskId: string, actorId: string, opts: { asAssignee?: boolean } = {}) {
     const [ctx] = await this.db
@@ -746,11 +762,13 @@ export class TasksService {
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
       .where(eq(tasks.id, taskId))
       .limit(1)
-    if (!ctx) throw new NotFoundException('Task not found')
-    const access = await this.assertContainerReadAccess(ctx, actorId)
+    const notThere = () => new NotFoundException('Task not found')
+    if (!ctx) throw notThere()
+    const access = await this.containerReadAccess(ctx, actorId)
+    if (!access) throw notThere()
     // A guest reads only the tasks in their reach (`guest-reach.ts`), assigned or not.
     if (access.workspaceRole === 'guest' && !(await guestMayRead(this.db, actorId, 'task', taskId))) {
-      throw new ForbiddenException('This task is not shared with you')
+      throw notThere()
     }
     /*
      * PER-ITEM PRIVACY, as `ResourceMemberGuard` enforces it on the routes that
@@ -763,7 +781,7 @@ export class TasksService {
     if (ctx.listVisibility === 'private' || ctx.taskVisibility === 'private') {
       const isManager = isManagerRole(access.workspaceRole)
       if (!canSeePrivateItem({ visibility: ctx.listVisibility, createdById: ctx.listCreatedById }, { userId: actorId, isManager })) {
-        throw new ForbiddenException('This list is private')
+        throw notThere()
       }
       if (ctx.taskVisibility === 'private') {
         // `asAssignee`: the question is whether they could see it ONCE
@@ -781,7 +799,7 @@ export class TasksService {
             { userId: actorId, isManager, isAssignee: Boolean(assigned) },
           )
         ) {
-          throw new ForbiddenException('This task is private')
+          throw notThere()
         }
       }
     }
@@ -790,11 +808,14 @@ export class TasksService {
 
   /**
    * Whether `actorId` may read what sits in this container — the workspace, a
-   * private space, a private project. Split out of `assertTaskReadAccess` so
-   * the same rule answers for a task that does not exist YET: `createTask`
-   * checks its assignees against the list before it writes anything.
+   * private space, folder or project — with their role there, or null. Split
+   * out of `assertTaskReadAccess` so the same rule answers for a task that does
+   * not exist YET: `createTask` checks its assignees against the list before
+   * it writes anything. A refusal is null, not a sentence naming the container
+   * that refused: each caller answers it as its own miss
+   * (`found-30-sep/private-task-reads-say-403`).
    */
-  private async assertContainerReadAccess<
+  private async containerReadAccess<
     C extends {
       workspaceId: string
       spaceId: string
@@ -802,24 +823,17 @@ export class TasksService {
       projectId: string | null
       projectVisibility: string | null
     },
-  >(ctx: C, actorId: string): Promise<C & { workspaceRole: string }> {
+  >(ctx: C, actorId: string): Promise<(C & { workspaceRole: string }) | null> {
     const [membership] = await this.db
       .select({ role: workspaceMembers.role })
       .from(workspaceMembers)
       .where(and(eq(workspaceMembers.workspaceId, ctx.workspaceId), eq(workspaceMembers.userId, actorId)))
       .limit(1)
-    if (!membership) throw new NotFoundException('Workspace not found')
-
-    // The shared rule (`containerRefusal`), answered in the words of whichever
-    // container refused; managers pass it. This restated the rule to keep its
-    // messages, and missed a private folder the day the rule learnt one.
-    const withRole = { ...ctx, workspaceRole: membership.role as string }
+    if (!membership) return null
+    // The shared rule (`containerRefusal`); managers pass it.
     const refusal = await containerRefusal(this.db, ctx, { userId: actorId, workspaceRole: membership.role as string })
-    if (refusal === 'space') throw new ForbiddenException('This space is private')
-    if (refusal === 'folder') throw new ForbiddenException('This folder is private')
-    if (refusal === 'project') throw new ForbiddenException('This project is private')
-
-    return withRole
+    if (refusal) return null
+    return { ...ctx, workspaceRole: membership.role as string }
   }
 
   /**
@@ -870,7 +884,12 @@ export class TasksService {
       .where(eq(tasks.id, otherTaskId))
       .limit(1)
     if (!other || other.workspaceId !== workspaceId) throw new NotFoundException(notFound)
-    await this.assertTaskReadAccess(otherTaskId, actorId)
+    // A task the caller may not open is the same miss, in the same words: a
+    // dependency on a private task said "This task is private" where one on an
+    // id naming nothing said "Related task not found" (`found-30-sep/private-task-reads-say-403`).
+    await this.assertTaskReadAccess(otherTaskId, actorId).catch((err) => {
+      throw err instanceof NotFoundException ? new NotFoundException(notFound) : err
+    })
   }
 
   /**
@@ -929,14 +948,13 @@ export class TasksService {
       // A private list is its creator's and the managers' — the list half of
       // the item rule in `assertTaskReadAccess`. The task's own privacy does
       // not apply: somebody it is born assigned to is one of its assignees.
-      const visible = await this.assertContainerReadAccess(ctx, userId).then(
-        (access) =>
-          canSeePrivateItem(
-            { visibility: ctx.listVisibility, createdById: ctx.listCreatedById },
-            { userId, isManager: isManagerRole(access.workspaceRole) },
-          ),
-        () => false,
-      )
+      const access = await this.containerReadAccess(ctx, userId)
+      const visible =
+        !!access &&
+        canSeePrivateItem(
+          { visibility: ctx.listVisibility, createdById: ctx.listCreatedById },
+          { userId, isManager: isManagerRole(access.workspaceRole) },
+        )
       if (!visible) throw new BadRequestException(PERSON_CANNOT_SEE[as])
     }
   }
@@ -1959,11 +1977,28 @@ export class TasksService {
     parentTaskId?: string
     assigneeIds?: string[]
     labelIds?: string[]
+    /**
+     * Tags by NAME (`found-30-sep/refused-create-leaves-tags`): found in the
+     * task's workspace whatever their case, or made there once the task is —
+     * never before, so a create refused below leaves no tag behind.
+     */
+    labelsByName?: LabelByName[]
     isMilestone?: boolean
     taskTypeId?: string | null
     createdById: string
+    /**
+     * The zone its writer reads a day in (`writerZone`, from the `X-Time-Zone`
+     * the web sends): a day beside a moment is ordered as they see it. None
+     * for a duplicate or a recurrence, whose dates nobody typed just now.
+     */
+    writerZone?: string
   }) {
     await this.assertCanCreateTaskIn(data.listId, data.createdById)
+    // What its estimate and dates may be (`task-values.ts`), asked of every
+    // way a task is made — the route, a template, a duplicate, a recurrence —
+    // before anything is written.
+    assertEstimate(data.timeEstimate)
+    assertDatesInOrder(data.startDate, data.dueDate, data.writerZone)
     // Cap nesting at two levels (parent → subtask). A subtask cannot itself have
     // subtasks, so reject a parent that is already a subtask (Plan §4).
     if (data.parentTaskId) {
@@ -1988,14 +2023,47 @@ export class TasksService {
     const bornAssignees = [...new Set(data.assigneeIds ?? [])].filter(Boolean)
     await this.assertPeopleCanSeeList(data.listId, bornAssignees, 'assignee')
     const bornLabels = [...new Set(data.labelIds ?? [])].filter(Boolean)
-    if (bornLabels.length > 0) {
+    const byName = uniqueLabelNames(data.labelsByName)
+    /*
+     * TAGS BY NAME ARE FOUND NOW AND MADE ONLY ONCE THE TASK IS
+     * (`found-30-sep/refused-create-leaves-tags`). A template's missing tags
+     * were made before this method asked anything, and the create modal made
+     * each typed tag before it sent the task: a create refused for its type,
+     * its people or its list left them in the workspace, attached to nothing.
+     * Here the ones that exist are found (whatever their case, as the tags
+     * route finds one), and the rest are made in the same transaction as the
+     * task, after every question above and below has been answered.
+     */
+    let labelsToMake: LabelByName[] = []
+    let labelWorkspaceId: string | null = null
+    if (bornLabels.length > 0 || byName.length > 0) {
       const home = await this.resolveWorkspaceForList(data.listId)
       if (!home) throw new NotFoundException('List not found')
-      const own = await this.db
-        .select({ id: labels.id })
-        .from(labels)
-        .where(and(inArray(labels.id, bornLabels), eq(labels.workspaceId, home.workspaceId)))
-      if (own.length !== bornLabels.length) throw new NotFoundException('Label not found')
+      labelWorkspaceId = home.workspaceId
+      if (bornLabels.length > 0) {
+        const own = await this.db
+          .select({ id: labels.id })
+          .from(labels)
+          .where(and(inArray(labels.id, bornLabels), eq(labels.workspaceId, home.workspaceId)))
+        if (own.length !== bornLabels.length) throw new NotFoundException('Label not found')
+      }
+      if (byName.length > 0) {
+        const existing = await this.db
+          .select({ id: labels.id, name: labels.name })
+          .from(labels)
+          .where(and(
+            eq(labels.workspaceId, home.workspaceId),
+            inArray(sql<string>`lower(${labels.name})`, byName.map((l) => l.name.toLowerCase())),
+          ))
+        const [member] = await this.db
+          .select({ role: workspaceMembers.role })
+          .from(workspaceMembers)
+          .where(and(eq(workspaceMembers.workspaceId, home.workspaceId), eq(workspaceMembers.userId, data.createdById)))
+          .limit(1)
+        const plan = planLabelsByName(byName, existing, { mayMake: member?.role !== 'guest' })
+        for (const id of plan.foundIds) if (!bornLabels.includes(id)) bornLabels.push(id)
+        labelsToMake = plan.toMake
+      }
     }
     const resolved = await this.resolveStatusForList(data.listId, data.status)
     // A workspace that has nominated a default type gets it applied here, so
@@ -2017,41 +2085,63 @@ export class TasksService {
       resolvedTypeId = (await this.milestoneTypeForList(data.listId)) ?? resolvedTypeId
     }
 
-    const [task] = await this.db
-      .insert(tasks)
-      .values({
-        listId: data.listId,
-        parentTaskId: data.parentTaskId,
-        taskTypeId: resolvedTypeId,
-        createdById: data.createdById,
-        title: data.title,
-        description: data.description,
-        priority: data.priority ?? 'normal',
-        status: resolved.key,
-        statusCategory: resolved.category,
-        position: data.position ?? 0,
-        startDate: data.startDate,
-        dueDate: data.dueDate,
-        timeEstimate: data.timeEstimate,
-        isMilestone,
-      })
-      .returning()
+    /*
+     * THE TASK, ITS PEOPLE AND ITS TAGS IN ONE TRANSACTION: a tag named for it
+     * is made here, with it, and never without it
+     * (`found-30-sep/refused-create-leaves-tags`).
+     */
+    const task = await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(tasks)
+        .values({
+          listId: data.listId,
+          parentTaskId: data.parentTaskId,
+          taskTypeId: resolvedTypeId,
+          createdById: data.createdById,
+          title: data.title,
+          description: data.description,
+          priority: data.priority ?? 'normal',
+          status: resolved.key,
+          statusCategory: resolved.category,
+          position: data.position ?? 0,
+          startDate: data.startDate,
+          dueDate: data.dueDate,
+          timeEstimate: data.timeEstimate,
+          isMilestone,
+        })
+        .returning()
 
-    // The assignees a task is BORN with are announced exactly as the ones added
-    // later are — see `announceAssignment`. Writing the rows and stopping there
-    // is what this used to do, and it meant the create modal could put your
-    // name on a task without telling you.
-    if (bornAssignees.length) {
-      await this.db.insert(taskAssignees).values(
-        bornAssignees.map((userId) => ({ taskId: task.id, userId })),
-      )
-    }
-    if (bornLabels.length) {
-      await this.db
-        .insert(taskLabelAssignments)
-        .values(bornLabels.map((labelId) => ({ taskId: task.id, labelId })))
-        .onConflictDoNothing()
-    }
+      // The assignees a task is BORN with are announced exactly as the ones added
+      // later are — see `announceAssignment`. Writing the rows and stopping there
+      // is what this used to do, and it meant the create modal could put your
+      // name on a task without telling you.
+      if (bornAssignees.length) {
+        await tx.insert(taskAssignees).values(
+          bornAssignees.map((userId) => ({ taskId: row.id, userId })),
+        )
+      }
+      const labelIds = [...bornLabels]
+      if (labelsToMake.length > 0 && labelWorkspaceId) {
+        // `onConflictDoNothing`: a tag of the same name made meanwhile is the
+        // one wanted, and is found below rather than failing the transaction.
+        await tx
+          .insert(labels)
+          .values(labelsToMake.map((l) => ({ workspaceId: labelWorkspaceId!, name: l.name, color: l.color! })))
+          .onConflictDoNothing()
+        const made = await tx
+          .select({ id: labels.id })
+          .from(labels)
+          .where(and(eq(labels.workspaceId, labelWorkspaceId), inArray(labels.name, labelsToMake.map((l) => l.name))))
+        for (const l of made) if (!labelIds.includes(l.id)) labelIds.push(l.id)
+      }
+      if (labelIds.length) {
+        await tx
+          .insert(taskLabelAssignments)
+          .values(labelIds.map((labelId) => ({ taskId: row.id, labelId })))
+          .onConflictDoNothing()
+      }
+      return row
+    })
     // Creator is auto-subscribed as a watcher so they hear about replies/activity
     // — unless they turned auto-follow off (§A4.7).
     if (await this.notifications.autoFollowEnabled(data.createdById)) {
@@ -3426,7 +3516,7 @@ export class TasksService {
     // real http(s) URL, so it can't smuggle a raw storage key past this check.
     //
     // THE SHAPE, NOT THE PREFIX. This was `startsWith(prefix)`, and a prefix
-    // check does not hold on a public-CDN deployment: `getObjectUrl` returns
+    // check did not hold on a public-CDN deployment: `getObjectUrl` returned
     // `${publicUrl}/${key}` unencoded, a browser collapses `..` in a URL path,
     // and `<prefix>../../../../workspaces/<other>/…` passes `startsWith` and
     // fetches another workspace's object. See task-object-keys.ts.
@@ -3625,6 +3715,8 @@ export class TasksService {
       visibility: 'public' | 'private'
       parentTaskId: string | null
     }>,
+    /** The zone its writer reads a day in (`createTask`'s `writerZone`). */
+    { writerZone }: { writerZone?: string } = {},
   ) {
     // FIRST, before anything reads it: only fields this update may write. The
     // parameter's type is a promise the runtime never kept — both the route and
@@ -3669,8 +3761,25 @@ export class TasksService {
     if (patch.coverStorageKey != null && !isTaskOwnObjectKey(patch.coverStorageKey, taskId, access.workspaceId)) {
       throw new BadRequestException('A cover image must be one of this task’s own attachments')
     }
+    // `found-30-sep/task-estimate-below-zero` — none, or whole seconds from nought.
+    if ('timeEstimate' in patch) assertEstimate(patch.timeEstimate)
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
+    /*
+     * `found-30-sep/a-task-starts-after-it-is-due` — the dates the task WOULD
+     * hold: what this write names, and what it keeps of the row for the other.
+     * Moving one date past the other is refused as sending both so is; clearing
+     * either, or moving both in order, is taken. Asked only when a date is
+     * written, so a task that already holds them the wrong way round (made
+     * before this rule) can still be renamed, closed or given a start that fits.
+     */
+    if ('startDate' in patch || 'dueDate' in patch) {
+      assertDatesInOrder(
+        'startDate' in patch ? patch.startDate : before.startDate,
+        'dueDate' in patch ? patch.dueDate : before.dueDate,
+        writerZone,
+      )
+    }
 
     // Re-parenting: null promotes a subtask to a task of its own. Anything else
     // has to keep the one-level rule that createTask enforces, and must not
@@ -3919,6 +4028,8 @@ export class TasksService {
         type: DependencyType
       }>
     }>,
+    /** The zone its writer reads a day in (`createTask`'s `writerZone`), asked of every task. */
+    { writerZone }: { writerZone?: string } = {},
   ) {
     const uniqueTaskIds = [...new Set(taskIds)].filter(Boolean)
     if (uniqueTaskIds.length === 0) {
@@ -3930,6 +4041,17 @@ export class TasksService {
     if (Object.keys(patch).length === 0) {
       throw new BadRequestException('patch is required')
     }
+    /*
+     * WHAT IS WRONG WHATEVER THE TASK, REFUSED FOR THE WHOLE REQUEST, before any
+     * task is changed: an estimate below nought
+     * (`found-30-sep/task-estimate-below-zero`) and two dates in the wrong order
+     * (`found-30-sep/a-task-starts-after-it-is-due`). One date moved past the
+     * other a task holds depends on that task, and `updateTask` refuses it task
+     * by task: that task is reported under `failed` with the reason, and the
+     * rest are changed.
+     */
+    if ('timeEstimate' in patch) assertEstimate(patch.timeEstimate)
+    if ('startDate' in patch && 'dueDate' in patch) assertDatesInOrder(patch.startDate, patch.dueDate, writerZone)
 
     const fieldPatch: Partial<{
       priority: TaskPriority
@@ -3987,7 +4109,7 @@ export class TasksService {
       try {
         let next = null
         if (Object.keys(fieldPatch).length > 0) {
-          next = await this.updateTask(taskId, actorId, fieldPatch)
+          next = await this.updateTask(taskId, actorId, fieldPatch, { writerZone })
         } else {
           await this.assertTaskWriteAccess(taskId, actorId)
         }
@@ -4131,6 +4253,26 @@ export class TasksService {
       assigneeIds = (source.assignees ?? []).map((assignee) => assignee.userId)
     }
 
+    /*
+     * THE NEXT ONE STARTS NO LATER THAN IT IS DUE
+     * (`found-30-sep/a-task-starts-after-it-is-due`). A rule moves each date on
+     * its own, and a monthly one puts both on the same day, each keeping its
+     * time: a task starting at 14:00 and due at 09:00 a fortnight later would
+     * come round starting five hours after it was due, and `createTask` now
+     * refuses that — which, on completion, would stop the task recurring
+     * without a word. Where that happens the start keeps its old distance
+     * before the due date; a task that already started after it was due (made
+     * before the rule) comes round with no start.
+     */
+    let nextStart = shift(source.startDate)
+    const nextDue = shift(source.dueDate)
+    if (nextStart && nextDue && startsAfterDue(nextStart, nextDue)) {
+      const span = source.startDate && source.dueDate
+        ? new Date(source.dueDate).getTime() - new Date(source.startDate).getTime()
+        : -1
+      nextStart = span >= 0 ? new Date(nextDue.getTime() - span) : undefined
+    }
+
     const created = await this.createTask({
       listId: source.listId,
       title: source.title,
@@ -4143,9 +4285,11 @@ export class TasksService {
         (source.statusCategory as StatusCategory) === 'closed'
           ? undefined
           : source.status,
-      startDate: shift(source.startDate),
-      dueDate: shift(source.dueDate),
-      timeEstimate: source.timeEstimate ?? undefined,
+      startDate: nextStart,
+      dueDate: nextDue,
+      // A task made before the estimate rule may hold one below nought; the
+      // next occurrence carries none rather than failing to come round.
+      timeEstimate: carriedEstimate(source.timeEstimate),
       createdById: actorId,
       assigneeIds,
       parentTaskId: source.parentTaskId ?? undefined,
@@ -4363,38 +4507,27 @@ export class TasksService {
    *   · the SAME workspace — a list elsewhere answers NOT FOUND rather than
    *     "different workspace", which would confirm a guessed id exists;
    *   · the space's create gate — `edit` or above, like any new task there;
-   *   · private-container visibility — a list in a private space or project
-   *     the caller cannot see is not a destination they can name.
+   *   · the list's read rule (`readableList`): the container rule and the
+   *     private-list rule. A list the caller may not open is not a
+   *     destination they can name, and is answered as one that is not there
+   *     (`found-30-sep/private-task-reads-say-403`). This asked the container
+   *     rule alone, so a member moved their own task into another's private
+   *     list in an open space (201, measured on lane 2) and lost it there; and
+   *     a list in a private space was 403 "You do not have access to that
+   *     list" where a missing one was 404. Asked BEFORE the create gate, whose
+   *     403 would otherwise say that a list the caller may not open is there.
    */
   async moveTask(taskId: string, actorId: string, targetListId: string, position: number) {
     if (typeof targetListId !== 'string' || !targetListId) {
       throw new BadRequestException('listId is required')
     }
     const access = await this.assertTaskWriteAccess(taskId, actorId)
-    const [target] = await this.db
-      .select({
-        workspaceId: spaces.workspaceId,
-        spaceId: spaces.id,
-        spaceVisibility: spaces.visibility,
-        projectId: projects.id,
-        projectVisibility: projects.visibility,
-      })
-      .from(lists)
-      .innerJoin(projects, eq(projects.id, lists.projectId))
-      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(eq(lists.id, targetListId))
-      .limit(1)
-    if (!target || target.workspaceId !== access.workspaceId) {
-      throw new NotFoundException('Target list not found')
-    }
+    const [account] = await this.db.select({ role: users.role }).from(users).where(eq(users.id, actorId)).limit(1)
+    const target = isUuid(targetListId)
+      ? await readableList(this.db, access.workspaceId, targetListId, { id: actorId, role: account?.role ?? null })
+      : null
+    if (!target) throw new NotFoundException('Target list not found')
     await assertCanCreateInSpace(this.db, { spaceId: target.spaceId, actorId, kind: 'task' })
-    const [membership] = await this.db
-      .select({ role: workspaceMembers.role })
-      .from(workspaceMembers)
-      .where(and(eq(workspaceMembers.workspaceId, target.workspaceId), eq(workspaceMembers.userId, actorId)))
-      .limit(1)
-    const canSee = await checkContainerAccess(this.db, target, { userId: actorId, workspaceRole: membership?.role })
-    if (!canSee) throw new ForbiddenException('You do not have access to that list')
 
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
@@ -4823,6 +4956,26 @@ export class TasksService {
     const sourceChildren = source
       ? await this.db.select({ id: tasks.id }).from(tasks).where(eq(tasks.parentTaskId, taskId))
       : []
+
+    /*
+     * WHAT THE MERGER MAY NOT OPEN IS NOT THERE, in the words of what is not
+     * (`found-30-sep/private-task-reads-say-403`, review) — asked before the
+     * merge rule, whose refusals describe the two tasks. The target is a task
+     * this one points at, so it obeys the reference rule dependencies and
+     * parents obey (`assertTaskReference`): in the source's workspace, one the
+     * merger may open, and otherwise "The task to merge into was not found",
+     * as for an id naming nothing. It was asked only through the write rule,
+     * after the merge rule: a private target said "Task not found" where
+     * nothing said "The task to merge into was not found"; a private subtask
+     * said "Subtasks only nest one level deep" (400); a binned source said
+     * "A task in the bin cannot be merged" (400) to somebody who may not open
+     * it; and a user of another organisation merging any real task into
+     * nothing was told the TARGET was missing.
+     */
+    if (!source) throw new NotFoundException(MERGE_REFUSAL_MESSAGE['source-missing'])
+    const { workspaceId } = await this.assertTaskReadAccess(taskId, actorId)
+    await this.assertTaskReference(targetTaskId, workspaceId, actorId, MERGE_REFUSAL_MESSAGE['target-missing'])
+
     const refusal = mergeRefusal(
       source ?? null,
       target ?? null,
@@ -4835,7 +4988,8 @@ export class TasksService {
 
     // Both tasks must be somewhere this person may write. Checked for the
     // target too: merging is a write to it, and a task you cannot edit is not a
-    // task you may pour another one into.
+    // task you may pour another one into. Both are readable by now, so what
+    // these refuse is the merger's to know about.
     await this.assertTaskWriteAccess(taskId, actorId)
     await this.assertTaskWriteAccess(targetTaskId, actorId)
 

@@ -91,7 +91,8 @@ try {
   const hidden = await plant('hidden', 'private', 3)
   const open = await plant('open', null, 1)
   const gate = await M(`/tasks/list/${hidden.list}`)
-  if (gate.status !== 403) throw new Error(`the member was not refused the hidden list (${said(gate)}), so nothing here would mean anything`)
+  // Refused as a list that is not there (404, `found-30-sep/private-task-reads-say-403`).
+  if (gate.status !== 404) throw new Error(`the member was not refused the hidden list (${said(gate)}), so nothing here would mean anything`)
   const reportOf = (C, path, init) => C(`/workspaces/${WS}/reports/${path}`, init)
   const carries = (res) => res.text.includes(WORD)
 

@@ -23,11 +23,17 @@
  * prefixes an apostrophe, and the XLSX writes the cell as an inline string,
  * which is a different XML element from the one a formula lives in.
  *
+ * AND THE FILE WAS CALLED "list.csv" (`found-30-sep/list-export-saved-as-list-csv`).
+ * The server names the export after the list, and the page saved it under a
+ * name of its own. The name the browser saves is read for a list with a name,
+ * and for one named in two scripts, which the server now sends whole in
+ * `filename*` rather than stripped to ASCII.
+ *
  *   node test/e2e/list-export.mjs --api 3011
  */
 import path from 'node:path'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
-import { resolveChromium, launchOptions } from './lib/playwright.mjs'
+import { resolveChromium, launchOptions, utf8LocaleEnv } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { waitUntil } from './lib/wait.mjs'
 import { xlsxRows, unzip } from './lib/unzip.mjs'
@@ -40,7 +46,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure too. */
-const EXPECTED_CHECKS = 30
+const EXPECTED_CHECKS = 33
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -125,6 +131,32 @@ try {
   )
   chk(visible.text.split('\r\n').length === 5, 'and one row per task, no more',
     `got ${visible.text.split('\r\n').length - 1} row(s) for 4 tasks`)
+
+  /*
+   * NAMED AFTER THE LIST, IN WHATEVER SCRIPT IT IS NAMED
+   * (`found-30-sep/list-export-saved-as-list-csv`). The name went out as ASCII
+   * alone, everything else dropped, so a list called "Übersicht — قائمة" was
+   * "bersicht  .csv", and one named in Arabic alone "list.csv". RFC 6266: the
+   * whole name in `filename*` (UTF-8), which a browser prefers, beside a plain
+   * `filename` for any client that reads only that.
+   */
+  const WORLD_NAME = `Übersicht — قائمة ${stamp}`
+  const worldList = (await A('/lists', { method: 'POST', body: { spaceId, name: WORLD_NAME } })).data
+  if (!worldList?.id) throw new Error('could not make the list named in two scripts')
+  const worldExport = await R(`/tasks/list/${worldList.id}/export`)
+  const star = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(worldExport.disposition ?? '')
+  const plain = /filename="([^"]*)"/.exec(worldExport.disposition ?? '')
+  let starName = null
+  try {
+    starName = star ? decodeURIComponent(star[1]) : null
+  } catch {
+    starName = null
+  }
+  chk(
+    worldExport.status === 200 && starName === `${WORLD_NAME}.csv` && !!plain && /^[\x20-\x7e]+\.csv$/.test(plain[1]),
+    'a list named in any script is exported under its whole name — in filename*, beside a plain ASCII filename',
+    `the export answered ${worldExport.status} with content-disposition ${JSON.stringify(worldExport.disposition)}`,
+  )
 
   console.log('\n▶ what to export')
   const names = await R(`/tasks/list/${list.id}/export?columns=names`)
@@ -358,7 +390,8 @@ try {
   // ON SCREEN: what the panel actually asks for, read off the request.
   const chromium = await resolveChromium()
   stack = await startLocalStack({ dist: path.resolve(import.meta.dirname, '../..', argOf('--dist', 'apps/web/dist')), apiPort: API_PORT })
-  browser = await chromium.launch(launchOptions())
+  // A UTF-8 locale, or Chromium saves a name in another script as "download" (see `utf8LocaleEnv`).
+  browser = await chromium.launch({ ...launchOptions(), env: utf8LocaleEnv() })
   const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'block' })).newPage()
   await page.goto(`${stack.base}/login`, { waitUntil: 'domcontentloaded' })
   await page.fill('input[type=email]', ME.email)
@@ -428,6 +461,54 @@ try {
     'and in the table it asks for the custom fields the table shows',
     `it asked for fields=${tableFields}`,
   )
+
+  /*
+   * SAVED UNDER THE NAME THE SERVER GIVES (`found-30-sep/list-export-saved-as-list-csv`).
+   * The page saved every list's export as "list.csv" (or "list.xlsx"), whatever
+   * the list was called and whatever the server named it. It saves under the
+   * response's `Content-Disposition` now, as Download all does, so the name's
+   * rule is written once, on the server. Read off the file the browser saved.
+   */
+  /** Open Customize › Export view, press Download, and the name the browser saved under — or null. */
+  const savedName = async () => {
+    /*
+     * THE DOWNLOAD BEFORE THIS ONE ENDS FIRST. It disables the button while it
+     * runs and closes the panel when it ends, so a panel opened before then was
+     * shut under the press, and nothing was saved (seen once, 30 September).
+     */
+    await waitUntil(() => page.getByTestId('list-export-download').isEnabled({ timeout: 2000 }), { timeoutMs: 30_000 })
+    await waitUntil(async () => {
+      for (const id of ['list-customize', 'list-export-section']) {
+        const details = page.getByTestId(id)
+        if (!(await details.evaluate((el) => el.open, undefined, { timeout: 5000 }))) {
+          await details.locator(':scope > summary').click({ timeout: 5000 })
+        }
+      }
+      return page.getByTestId('list-export-download').isEnabled()
+    }, { timeoutMs: 30_000 })
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 20_000 }).catch(() => null),
+      page.getByTestId('list-export-download').click({ timeout: 10_000 }).catch(() => {}),
+    ])
+    await page.keyboard.press('Escape').catch(() => {})
+    return download ? download.suggestedFilename() : null
+  }
+  const listSaved = await savedName()
+  chk(
+    listSaved === `Export list ${stamp}.csv`,
+    'and Download saves the export under the list’s name, as the server names it — not list.csv',
+    `the browser saved ${JSON.stringify(listSaved)} for the list ${JSON.stringify(`Export list ${stamp}`)}`,
+  )
+  const worldRow = (await A(`/lists/${worldList.id}`)).data
+  await page.goto(`${stack.base}/app/${workspaceId}/${spaceId}/${worldRow?.projectId}/${worldList.id}`, { waitUntil: 'domcontentloaded' })
+  const worldSaved = await savedName()
+  chk(
+    worldSaved === `${WORLD_NAME}.csv`,
+    'and a list named in another script is saved under its whole name too',
+    `the browser saved ${JSON.stringify(worldSaved)} for the list ${JSON.stringify(WORLD_NAME)}`,
+  )
+  const worldGone = await A(`/lists/${worldList.id}`, { method: 'DELETE' })
+  if (![200, 204, 404].includes(worldGone.status)) leftBehind.push(`DELETE /lists/${worldList.id} answered ${worldGone.status}`)
 
   const gone = await A(`/lists/${list.id}`, { method: 'DELETE' })
   if (![200, 204, 404].includes(gone.status)) leftBehind.push(`DELETE /lists/${list.id} answered ${gone.status}`)

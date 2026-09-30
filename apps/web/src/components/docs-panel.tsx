@@ -67,7 +67,7 @@ import { TextStyle } from '@tiptap/extension-text-style'
 import { Color } from '@tiptap/extension-color'
 import TextAlign from '@tiptap/extension-text-align'
 import { TableKit } from '@tiptap/extension-table'
-import { api, ApiError, downloadFile } from '../lib/api'
+import { api, ApiError, downloadFile, refusalMessage } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { getRealtimeSocket } from '../lib/realtime'
 import { createMentionExtension, type MentionMember } from '../lib/tiptap-mention'
@@ -936,9 +936,10 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 variant="ghost"
                 title={t('docs.exportMarkdown')}
                 onClick={() => {
-                  const base = (activeDoc.title || 'document').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'document'
-                  void downloadFile(`/docs/${activeDoc.id}/export`, `${base}.md`).catch(() =>
-                    toast.error(t('docs.couldNotExport')),
+                  // Saved under the name the server gives, the doc's whole title
+                  // (`found-30-sep/list-export-saved-as-list-csv`); a refusal in its words.
+                  void downloadFile(`/docs/${activeDoc.id}/export`).catch((err) =>
+                    toast.error(refusalMessage(err, t('docs.couldNotExport'))),
                   )
                 }}
               >
@@ -949,9 +950,8 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 variant="ghost"
                 title={t('docs.exportPdf')}
                 onClick={() => {
-                  const base = (activeDoc.title || 'document').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'document'
-                  void downloadFile(`/docs/${activeDoc.id}/export?format=pdf`, `${base}.pdf`).catch(() =>
-                    toast.error(t('docs.couldNotExport')),
+                  void downloadFile(`/docs/${activeDoc.id}/export?format=pdf`).catch((err) =>
+                    toast.error(refusalMessage(err, t('docs.couldNotExport'))),
                   )
                 }}
               >

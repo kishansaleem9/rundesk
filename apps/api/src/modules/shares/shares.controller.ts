@@ -74,12 +74,20 @@ export class SharesController {
     @Body() body: { workspaceId: string },
     @CurrentUser() user: any,
   ) {
-    return this.shares.requestAccess(
+    const out = await this.shares.requestAccess(
       body.workspaceId,
       this.shares.assertType(objectType),
       objectId,
       { id: user.id, name: user.displayName, email: user.email },
     )
+    /*
+     * The asker is told only whether they asked already. How many were told,
+     * or that nobody could be, depends on whether the id names something and
+     * who holds it — the answer the task sheet's "not found" keeps from them
+     * (`found-30-sep/private-task-reads-say-403`); the sheet showed the same
+     * confirmation for every answer already.
+     */
+    return { status: out.status === 'already_asked' ? 'already_asked' : 'sent' }
   }
 
   @Delete(':shareId')

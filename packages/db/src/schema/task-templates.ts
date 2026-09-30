@@ -70,6 +70,13 @@ export type TaskTemplatePayload = {
     dueDateOffsetDays: number | null
   }>
   customFieldValues: Array<{
+    /*
+     * The field the value was taken from, when it was taken from a task: a
+     * value goes back into that field wherever the new task has it, and by
+     * `fieldName` only where it does not — another project, another list, or a
+     * template written by hand (`found-30-sep/template-values-find-fields-by-name-alone`).
+     */
+    fieldId?: string
     fieldName: string
     // `string[]` for §V2-01c's `labels` and `people`. Widened here rather than
     // filtered out in the template writer: a template that silently dropped a

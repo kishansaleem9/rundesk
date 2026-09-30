@@ -95,7 +95,8 @@ try {
   // And a private channel of the open space, which the member is not in.
   const closedChannel = await make(`/workspaces/${WS}/chat/channels`, { name: `${TAG}-closed-channel`, isPrivate: true }, 'the closed channel')
   const refused = await M(`/tasks/list/${hidden.list}`)
-  if (refused.status !== 403) throw new Error(`the member was not refused the hidden list (${said(refused)}), so nothing here would mean anything`)
+  // Refused as a list that is not there (404, `found-30-sep/private-task-reads-say-403`).
+  if (refused.status !== 404) throw new Error(`the member was not refused the hidden list (${said(refused)}), so nothing here would mean anything`)
 
   const HIDDEN = [
     ['space', hidden.space], ['list', hidden.list], ['task', hidden.task], ['doc', hidden.doc],

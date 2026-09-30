@@ -225,3 +225,39 @@ describe('ClientPortalService.getPublicView', () => {
     assert.equal(view.project.name, 'Website Redesign')
   })
 })
+
+/*
+ * `found-30-sep/private-task-reads-say-403` — a project its caller may not open
+ * is not there for them. Managing its portals said 403 "This space or project
+ * is private" (and "You are not a member of this workspace" to a stranger),
+ * where a project or portal id naming nothing said 404, so a portal's id told
+ * whoever held it that it was there and where.
+ */
+describe('ClientPortalService — a project its caller may not open (found-30-sep/private-task-reads-say-403)', () => {
+  /** A project in a private space, a plain member not among its members. */
+  const refusedDb = (portal: Record<string, unknown> | null) => makeDb((s) => {
+    if (s.op === 'select' && s.table === clientPortals) return portal ? [portal] : []
+    if (s.op === 'select' && s.table === projects) return [{ ...PROJECT_ROW, id: 'proj-1', spaceVisibility: 'private' }]
+    if (s.op === 'select' && s.table === workspaceMembers) return [{ role: 'member' }]
+    return [] // the account's role, the space's members: none
+  })
+  const noneDb = () => makeDb(() => [])
+  const refusal = (p: Promise<unknown>) => p.then(() => null, (e: Error) => e)
+
+  it('lists no portal of it, answering as for a project that is not there', async () => {
+    const refused = await refusal(new ClientPortalService(refusedDb(null)).listForProject('proj-1', 'a-member'))
+    const missing = await refusal(new ClientPortalService(noneDb()).listForProject('proj-1', 'a-member'))
+    assert.ok(refused && missing && refused.constructor === missing.constructor, `refused ${refused?.constructor?.name}, missing ${missing?.constructor?.name}`)
+    assert.equal(refused.message, missing.message)
+    assert.equal(missing.message, 'Project not found')
+  })
+
+  it('and revokes none of its portals, answering as for a portal that is not there', async () => {
+    const portal = { id: 'portal-1', projectId: 'proj-1', workspaceId: 'ws-1', token: 't', isEnabled: true }
+    const refused = await refusal(new ClientPortalService(refusedDb(portal)).remove('portal-1', 'a-member'))
+    const missing = await refusal(new ClientPortalService(noneDb()).remove('portal-1', 'a-member'))
+    assert.ok(refused && missing && refused.constructor === missing.constructor, `refused ${refused?.constructor?.name}, missing ${missing?.constructor?.name}`)
+    assert.equal(refused.message, missing.message)
+    assert.equal(missing.message, 'Portal not found')
+  })
+})

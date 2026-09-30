@@ -1,5 +1,5 @@
 # THE SUMMARY ASKS THE MODEL FIRST: where none is configured, a refused reader is told "not configured" rather than refused.
-# Reddens: ai-task-reads: "a task is summarised for nobody who may not open it — a guest it is not shared with, a member refused its private list (403 each, nothing of it sent to a model) — and for a member who reads it, it is"
+# Reddens: ai-task-reads: "a task is summarised for nobody who may not open it — a guest it is not shared with, a member refused its private list (404 each, as for a task that is not there; nothing of it sent to a model) — and for a member who reads it, it is"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/ai/ai.controller.ts'
 a = "    if (body.taskId) await this.ai.assertTaskReadable(body.taskId, { id: user.id, role: user.role })\n    await this.ai.assertAvailable('summarize', { userId: user.id, workspaceId: body.workspaceId })\n"

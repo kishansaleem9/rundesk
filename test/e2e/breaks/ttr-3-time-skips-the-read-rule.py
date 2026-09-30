@@ -1,5 +1,5 @@
 # A TASK'S TIME ASKS NO READ RULE: anybody in the workspace puts time on any task whose id they have.
-# Reddens: time-tracking-readers: "a guest starts, stops and logs time on a task shared with them at View — not on one that is not (403, none made) — and a member of a view-only space does as the guest does"
+# Reddens: time-tracking-readers: "a guest starts, stops and logs time on a task shared with them at View — not on one that is not (404, as for a task that is not there; none made) — and a member of a view-only space does as the guest does"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/time-entries.controller.ts'
 a = "@UseGuards(JwtAuthGuard, ResourceMemberGuard)\nexport class TaskTimeEntriesController {\n"

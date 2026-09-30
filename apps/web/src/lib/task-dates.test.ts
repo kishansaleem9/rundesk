@@ -1,6 +1,29 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { toDateInput, toDateTimeInput, fromDateTimeInput, withDatePart, presetToIso } from './task-dates'
+import { toDateInput, toDateTimeInput, fromDateTimeInput, withDatePart, presetToIso, datesOutOfOrder, startMaxFor } from './task-dates'
+
+/*
+ * `found-30-sep/a-task-starts-after-it-is-due` — the create modal asks this of
+ * its two boxes before Create, and says so beside them.
+ */
+describe('datesOutOfOrder — a start typed after the due date', () => {
+  it('is out of order only when both are set and the start is after the due, to the minute', () => {
+    assert.equal(datesOutOfOrder('2026-10-10T09:00', '2026-10-03T17:00'), true)
+    assert.equal(datesOutOfOrder('2026-10-03T17:01', '2026-10-03T17:00'), true)
+    assert.equal(datesOutOfOrder('2026-10-03T17:00', '2026-10-03T17:00'), false)
+    assert.equal(datesOutOfOrder('2026-10-01T09:00', '2026-10-03T17:00'), false)
+    assert.equal(datesOutOfOrder('', '2026-10-03T17:00'), false)
+    assert.equal(datesOutOfOrder('2026-10-10T09:00', ''), false)
+  })
+
+  it('bounds the start box by the due moment, or by the end of a due day with no time on it', () => {
+    const due = new Date(2026, 9, 3, 17, 30).toISOString()
+    assert.equal(startMaxFor(due), '2026-10-03T17:30')
+    assert.equal(startMaxFor('2026-10-05T00:00:00.000Z'), '2026-10-05T23:59')
+    assert.equal(startMaxFor(null), undefined)
+    assert.equal(startMaxFor('not a date'), undefined)
+  })
+})
 
 /**
  * §G [21:36–23:38] — "START date aur DUE date … TIME ke saath."

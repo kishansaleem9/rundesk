@@ -1,5 +1,5 @@
 # TIME ASKS THE EDIT RULE: a timer and a manual entry are refused to whoever may only read the task.
-# Reddens: time-tracking-readers: "a guest starts, stops and logs time on a task shared with them at View — not on one that is not (403, none made) — and a member of a view-only space does as the guest does"
+# Reddens: time-tracking-readers: "a guest starts, stops and logs time on a task shared with them at View — not on one that is not (404, as for a task that is not there; none made) — and a member of a view-only space does as the guest does"
 #   or "the sheet offers the guest Start timer on a task shared with them at View, and the timer runs"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'

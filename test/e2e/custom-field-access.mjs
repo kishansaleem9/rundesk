@@ -13,6 +13,19 @@
  * Each route is made by that member against the refused space and against an
  * open one, and the admin, who may open everything, reads the refused one.
  *
+ * AND A VALUE ONLY FOR A FIELD THE TASK HAS,
+ * `found-30-sep/field-route-takes-another-projects-field`. The value route asked
+ * that the task and the field were both in the workspace, not that the field was
+ * the task's: measured on lane 7, a field of another project and one scoped to
+ * another list of the task's own each took a value onto it (200, and a vote as
+ * well), which no reader shows, since the task's fields are its project's, less
+ * those scoped to another list. ClickUp's own API sets a value only for a field
+ * "applicable" to the task and answers 400 otherwise (Set Custom Field Value,
+ * read through search excerpts). Here it is refused as a field that is not there
+ * (404), whatever project it is in, so the answer says nothing of a project the
+ * caller may not open (OWASP ASVS 4.2.1: no "creating or updating someone else's
+ * record"). The member asks, on the open task they may change.
+ *
  *   node test/e2e/custom-field-access.mjs --api 3021
  */
 import { signInApi, signUpApi } from './lib/signin.mjs'
@@ -25,7 +38,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 4
+const EXPECTED_CHECKS = 6
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -86,12 +99,13 @@ try {
     const field = await make(A, `/workspaces/${WS}/projects/${project}/custom-fields`, { name: `${TAG} ${side} field`, type: 'text' }, `the ${side} field`)
     const set = await A(`/workspaces/${WS}/tasks/${task}/custom-fields/${field}`, { method: 'PUT', body: { value: `${TAG} ${side} value` } })
     if (!set.ok) throw new Error(`could not set the ${side} value: ${said(set)}`)
-    return { project, list, task, field }
+    return { space, project, list, task, field }
   }
   const hidden = await plant('hidden', 'private')
   const open = await plant('open')
   const gate = await M(`/tasks/list/${hidden.list}`)
-  if (gate.status !== 403) throw new Error(`the member was not refused the hidden list (${said(gate)}), so nothing here would mean anything`)
+  // Refused as a list that is not there (404, `found-30-sep/private-task-reads-say-403`).
+  if (gate.status !== 404) throw new Error(`the member was not refused the hidden list (${said(gate)}), so nothing here would mean anything`)
   const valueOf = async (task, field) =>
     (await sql`select value from custom_field_values where task_id = ${task} and field_id = ${field}`)[0]?.value ?? null
   const fieldNamed = async (id) => (await sql`select name from custom_field_definitions where id = ${id}`)[0]?.name ?? null
@@ -152,6 +166,52 @@ try {
       renameOpen.ok && (await fieldNamed(open.field)) === `${TAG} open field, renamed`,
     'a member cannot rename or delete a field of a project they are refused (404 each, the field untouched) — while they rename an open one',
     `rename ${said(renameHidden)}, delete ${said(deleteHidden)}; the field is now ${JSON.stringify(hiddenName)}; renaming the open one ${said(renameOpen)}`,
+  )
+
+  // ══ 5–6. A FIELD THE TASK DOES NOT HAVE ══════════════════════════════════
+  console.log('\n▶ a value for a field the task does not have')
+  /*
+   * `found-30-sep/field-route-takes-another-projects-field`. The member may
+   * change the open task (section 2). Beside it: another project in the open
+   * space, with a Text and a Voting field; and in the open task's own project a
+   * second list, a field scoped to it, and a field scoped to the task's own list.
+   * The hidden project's field is a field of a project the member may not open.
+   */
+  const elsewhere = await make(A, '/projects', { spaceId: open.space, name: `${TAG} elsewhere project` }, 'the other project')
+  const foreignText = await make(A, `/workspaces/${WS}/projects/${elsewhere}/custom-fields`, { name: `${TAG} elsewhere text`, type: 'text' }, 'the other project’s Text field')
+  const foreignVote = await make(A, `/workspaces/${WS}/projects/${elsewhere}/custom-fields`, { name: `${TAG} elsewhere vote`, type: 'voting' }, 'the other project’s Voting field')
+  const secondList = await make(A, '/lists', { projectId: open.project, name: `${TAG} open second list` }, 'the second list')
+  const scopedElsewhere = await make(A, `/workspaces/${WS}/projects/${open.project}/custom-fields`, { name: `${TAG} second list’s field`, type: 'text', listId: secondList }, 'the field of the second list')
+  const scopedHere = await make(A, `/workspaces/${WS}/projects/${open.project}/custom-fields`, { name: `${TAG} open list’s field`, type: 'text', listId: open.list }, 'the field of the task’s own list')
+  const putOnOpen = (field, value) => M(`/workspaces/${WS}/tasks/${open.task}/custom-fields/${field}`, { method: 'PUT', body: { value } })
+  /** How many values the open task holds for a field, read by SQL. */
+  const heldFor = async (field) => (await sql`select count(*)::int as n from custom_field_values where task_id = ${open.task} and field_id = ${field}`)[0].n
+
+  const foreignTextPut = await putOnOpen(foreignText, `${TAG} written elsewhere`)
+  const foreignVotePut = await putOnOpen(foreignVote, null)
+  const hiddenFieldPut = await putOnOpen(hidden.field, `${TAG} written into the hidden project`)
+  const ownProjectPut = await putOnOpen(open.field, `${TAG} open value, again`)
+  const foreignHeld = { text: await heldFor(foreignText), vote: await heldFor(foreignVote), hidden: await heldFor(hidden.field) }
+  chk(
+    refused(foreignTextPut) && refused(foreignVotePut) && refused(hiddenFieldPut) &&
+      foreignHeld.text === 0 && foreignHeld.vote === 0 && foreignHeld.hidden === 0 &&
+      ownProjectPut.ok && JSON.stringify(await valueOf(open.task, open.field)).includes('again'),
+    'a value for a field of another project is refused on a task (404 each, nothing written, read by SQL) — a Text field and a Voting field alike, and one of a project the member may not open — while the task’s own project’s field is set',
+    `the other project’s Text ${said(foreignTextPut)}, its Voting ${said(foreignVotePut)}, the hidden project’s ${said(hiddenFieldPut)}; ` +
+      `the task holds ${JSON.stringify(foreignHeld)} values for them; its own project’s field answered ${said(ownProjectPut)}`,
+  )
+
+  const elsewherePut = await putOnOpen(scopedElsewhere, `${TAG} written into the second list’s field`)
+  const herePut = await putOnOpen(scopedHere, `${TAG} the open list’s value`)
+  const elsewhereHeld = await heldFor(scopedElsewhere)
+  const shown = await M(`/workspaces/${WS}/tasks/${open.task}/custom-fields`)
+  const shownHere = (shown.data ?? []).find((r) => r.definition?.id === scopedHere)?.value ?? null
+  chk(
+    refused(elsewherePut) && elsewhereHeld === 0 &&
+      herePut.ok && shown.ok && shownHere === `${TAG} the open list’s value`,
+    'and a value for a field scoped to another list of the task’s project is refused (404, nothing written) — while a field scoped to the task’s own list is set, and the task’s fields read it back',
+    `the second list’s field answered ${said(elsewherePut)} and the task holds ${elsewhereHeld} value(s) for it; ` +
+      `the task’s own list’s field answered ${said(herePut)}, and the task’s fields (${said(shown)}) read ${JSON.stringify(shownHere)}`,
   )
 } catch (e) {
   failed += 1

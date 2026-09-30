@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Dialog, DialogContent, DialogHeader, DialogTitle, Input, Label, Switch, cn, toast } from '@rundesk/ui'
 import { Building2, Users, Plug, Shield, Tag, Trash2, Archive, RotateCcw, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Upload, CreditCard, ToggleRight, Layers, Sparkles, UserCog, Lock, Globe, Shapes, CalendarDays, Star, X, Megaphone, ScrollText } from 'lucide-react'
-import { api, ApiError, downloadFile } from '../lib/api'
+import { api, ApiError, downloadFile, refusalMessage } from '../lib/api'
 import { applyBrandColor } from '../lib/branding'
 import { applyAccentColor } from '../components/app-topbar'
 import { AnnouncementsPanel } from '../components/announcements-panel'
@@ -1178,7 +1178,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
               downloadFile(
                 `/workspaces/${workspaceId}/export/csv/members`,
                 `rundesk-${workspaceId}-members.csv`,
-              ).catch((e) => toast.error(e instanceof Error ? e.message : t('settings.exportFailed')))
+              ).catch((e) => toast.error(refusalMessage(e, t('settings.exportFailed'))))
             }
           >
             <Upload className="h-3.5 w-3.5 mr-1" />
@@ -1876,7 +1876,7 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
               variant="outline"
               onClick={() =>
                 downloadFile(`/workspaces/${workspaceId}/export/json`, `rundesk-${workspaceId}.json`).catch((e) =>
-                  toast.error(e instanceof Error ? e.message : t('settings.exportFailed')),
+                  toast.error(refusalMessage(e, t('settings.exportFailed'))),
                 )
               }
             >
@@ -1887,7 +1887,7 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
               variant="outline"
               onClick={() =>
                 downloadFile(`/workspaces/${workspaceId}/export/csv/tasks`, `rundesk-${workspaceId}-tasks.csv`).catch((e) =>
-                  toast.error(e instanceof Error ? e.message : t('settings.exportFailed')),
+                  toast.error(refusalMessage(e, t('settings.exportFailed'))),
                 )
               }
             >

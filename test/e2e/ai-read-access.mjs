@@ -106,7 +106,8 @@ try {
   await make('/tasks', { listId: OL, title: `${TAG} open step`, assigneeIds: [memberId], dueDate: tomorrow }, 'the member’s task')
   const TARGET = await make('/tasks', { listId: OL, title: `${TAG} who should take this` }, 'the task to assign')
   const gates = await Promise.all([M(`/tasks/list/${PSL}`), M(`/tasks/list/${PL}`)])
-  if (!gates.every((g) => g.status === 403)) {
+  // Refused as ids that name nothing are (404, `found-30-sep/private-task-reads-say-403`).
+  if (!gates.every((g) => g.status === 404)) {
     throw new Error(`the member was not refused the private space's list and the private list (${gates.map((g) => g.status).join(', ')}), so nothing here would mean anything`)
   }
   const privateIds = [

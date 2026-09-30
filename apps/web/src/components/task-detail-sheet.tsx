@@ -93,7 +93,7 @@ import {
   // `ledger-rows/row-751`).
   Brain as BrainIcon,
 } from 'lucide-react'
-import { api, ApiError, downloadFile } from '../lib/api'
+import { api, ApiError, downloadFile, refusalMessage } from '../lib/api'
 import { useAiDock } from '../lib/ai-dock'
 import { offerUndo } from '../lib/undoable-delete'
 import { useActivityRail, setActivityRail } from '../lib/activity-rail'
@@ -148,6 +148,7 @@ import {
   fromDateTimeInput,
   withDatePart,
   presetToIso,
+  startMaxFor,
   DATE_PRESETS,
 } from '../lib/task-dates'
 import { TaskSheetSkeleton } from './loading-skeletons'
@@ -2324,14 +2325,13 @@ export function TaskDetailSheet({
           </>
         ) : (
           /*
-           * §G10 — a private task is not a missing one.
+           * §G10 — the dead end offers a way to ask.
            *
-           * The resource guard answers 403 for something that exists and 404
-           * for something that does not, and this screen used to flatten both
-           * into "Task not found." The card renders only on the 403 and offers
-           * the ask; on a 404 nothing changes, because confirming that an
-           * object exists to somebody who was never told about it is the
-           * opposite of what private means.
+           * A task this person may not open is answered as one that is not
+           * there (404, `found-30-sep/private-task-reads-say-403`), so the
+           * screen cannot tell the two apart and does not try: the card offers
+           * the ask on the 404 in words that do not say which it was, and the
+           * server carries the ask only where there is a task to grant.
            */
           <div className="space-y-3">
             <p className="text-sm text-destructive">{t('taskDetail.notFound')}</p>
@@ -3567,10 +3567,14 @@ function OverviewPanel({
           {/* §G [21:36] — the deadline is a moment, not a day. See
               lib/task-dates.ts for why this is local-time and what a bare
               `type="date"` here used to do to a time already on the row. */}
+          {/* `found-30-sep/a-task-starts-after-it-is-due` — the picker offers no
+              day before the start (`min`), and a due date typed before it is
+              refused by the server with the reason, which the toast gives. */}
           <input
             type="datetime-local"
             data-testid="task-due-date"
             value={toDateTimeInput(detail.dueDate)}
+            min={toDateTimeInput(detail.startDate) || undefined}
             onChange={(e) => patchTask.mutate({ dueDate: fromDateTimeInput(e.target.value) })}
             disabled={patchTask.isPending || !caps.edit}
             className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
@@ -3613,6 +3617,7 @@ function OverviewPanel({
             type="datetime-local"
             data-testid="task-start-date"
             value={toDateTimeInput(detail.startDate)}
+            max={startMaxFor(detail.dueDate)}
             onChange={(e) => patchTask.mutate({ startDate: fromDateTimeInput(e.target.value) })}
             disabled={patchTask.isPending || !caps.edit}
             className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
@@ -5961,8 +5966,11 @@ function AttachmentsPanel({
     setZipping(true)
     try {
       await downloadFile(`/tasks/${taskId}/attachments/zip`)
-    } catch {
-      toast.error(t('taskDetail.attachmentsDownloadAllFailed'))
+    } catch (err) {
+      // The server's own words when it refused — past the zip's cap it says how
+      // much the files come to and to download them one at a time
+      // (`found-30-sep/download-refusals-say-no-reason`).
+      toast.error(refusalMessage(err, t('taskDetail.attachmentsDownloadAllFailed')))
     } finally {
       setZipping(false)
     }

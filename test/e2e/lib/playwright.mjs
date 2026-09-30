@@ -130,3 +130,19 @@ export function launchOptions(extraArgs = []) {
     args: ['--no-sandbox', '--disable-dev-shm-usage', ...extraArgs],
   }
 }
+
+/**
+ * THE BROWSER'S ENVIRONMENT, WITH A UTF-8 LOCALE — for a suite that reads the
+ * name a download is saved under.
+ *
+ * Chromium saves a download under a name it converts to the system's charset,
+ * which it reads from the locale. The lanes' shells set no LANG, so that charset
+ * is ASCII there, and a name in any other script — "Übersicht.csv", an Arabic
+ * list's export, even "a — b.csv" — is saved as "download", whatever the page
+ * or the server named it (measured 30 September, closing
+ * `found-30-sep/list-export-saved-as-list-csv`). A desktop has a UTF-8 locale,
+ * and so do GitHub's runners. Pass as `env` to `chromium.launch`.
+ */
+export function utf8LocaleEnv() {
+  return { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }
+}

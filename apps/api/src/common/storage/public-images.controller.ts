@@ -2,15 +2,17 @@ import { Controller, Get, NotFoundException, Param, Res, UseGuards } from '@nest
 import { ApiTags } from '@nestjs/swagger'
 import type { FastifyReply } from 'fastify'
 import { R2Service } from './r2.service'
-import { isKeyDirectlyUnder } from './object-key-shape'
+import { isKeyDirectlyUnder, PUBLIC_IMAGE_PREFIXES } from './object-key-shape'
 import { PUBLIC_ROUTE_LIMITS, RateLimit, RateLimitGuard } from '../guards/rate-limit.guard'
 
 /**
  * The pictures people put on show — avatars and workspace logos — and nothing
  * else. A key under any other prefix is an attachment, a clip, a document: a
  * private object this route must not hand out however its key is written.
+ * Defined beside the key rules (`object-key-shape.ts`), since `R2Service`
+ * serves these alone from a public domain.
  */
-export const PUBLIC_IMAGE_PREFIXES = ['avatars/', 'workspace-logos/'] as const
+export { PUBLIC_IMAGE_PREFIXES }
 
 /** The stable address an uploaded avatar or logo is saved as. */
 export function publicImagePath(key: string): string {
@@ -61,7 +63,8 @@ export class PublicImagesController {
     if (!this.r2.configured || !PUBLIC_IMAGE_PREFIXES.some((prefix) => isKeyDirectlyUnder(key, prefix))) {
       throw new NotFoundException('Image not found')
     }
-    const url = await this.r2.getObjectUrl(key)
+    // The public domain's address where there is one, which a CDN serves; else signed.
+    const url = await this.r2.publicObjectUrl(key)
     // Ten minutes, inside the fifteen the signed URL lives.
     return reply.header('Cache-Control', 'public, max-age=600').redirect(url, 302)
   }

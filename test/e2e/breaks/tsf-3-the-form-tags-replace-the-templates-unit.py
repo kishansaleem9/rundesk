@@ -3,8 +3,8 @@
 # Reddens: unit: task-templates.service.test.ts "makes the tags the template’s and the form’s together, each once, and assigns each person set once"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/task-templates/task-templates.service.ts'
-a = "  const labelIds = [...new Set([...templateLabelIds, ...(form.labelIds ?? [])])]\n"
-b = "  const labelIds = form.labelIds?.length ? [...new Set(form.labelIds)] : templateLabelIds\n"
+a = "    ...(payload.labels ?? []).map((name) => ({ name, color: DEFAULT_LABEL_COLOR })),\n"
+b = "    ...(form.labelIds?.length || form.labelsByName?.length ? [] : payload.labels ?? []).map((name) => ({ name, color: DEFAULT_LABEL_COLOR })),\n"
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

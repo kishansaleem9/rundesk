@@ -4,11 +4,11 @@
 # Reddens: custom-field-progress: "a duplicate of the task carries none of its votes — a vote is cast by its voter on the task they voted on (read by SQL)"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/task-templates/task-templates.service.ts'
-a = ("      if (!def) continue\n"
-     "      const value = fitTemplateValue(def, v.value, known)\n")
-b = ("      if (!def) continue\n"
-     "      if (def.type === 'voting' && Array.isArray(v.value)) { rows.push({ taskId, fieldId: def.id, value: { v: v.value } }); continue } // BROKEN: the votes go with it\n"
-     "      const value = fitTemplateValue(def, v.value, known)\n")
+a = ("    for (const { field: def, value: held } of planned) {\n"
+     "      const value = fitTemplateValue(def, held, known)\n")
+b = ("    for (const { field: def, value: held } of planned) {\n"
+     "      if (def.type === 'voting' && Array.isArray(held)) { rows.push({ taskId, fieldId: def.id, value: { v: held } }); continue } // BROKEN: the votes go with it\n"
+     "      const value = fitTemplateValue(def, held, known)\n")
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

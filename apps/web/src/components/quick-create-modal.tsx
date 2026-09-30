@@ -27,6 +27,7 @@ import { useCreatable } from '../hooks/use-creatable'
 import { usePermissions } from '../hooks/use-permissions'
 import { daysFromToday, localDateTimeValue } from '../lib/local-date'
 import { parseEstimate } from '../lib/estimate'
+import { datesOutOfOrder } from '../lib/task-dates'
 import { CREATE_TYPES, createTypeOf, type CreateKind } from '../lib/create-types'
 
 type Space = { id: string; name: string }
@@ -529,7 +530,7 @@ type TaskTemplate = { id: string; name: string }
  * What `POST …/task-templates/:id/instantiate` answers: the new task's id as
  * `taskId`, beside the task. Not a task, so it has no `id` of its own.
  */
-type InstantiatedTask = { taskId: string; task?: { title?: string } }
+type InstantiatedTask = { taskId: string; task?: { title?: string; labels?: Array<{ name: string }> } }
 /** Which of the Templates menu's two writes has its panel open, and on what. */
 type TemplatePanel = { kind: 'save' } | { kind: 'update'; template: TaskTemplate }
 type WorkspaceMember = { userId: string; displayName?: string | null; email?: string | null }
@@ -772,7 +773,8 @@ const CREATE_THEN: Array<{ value: Exclude<CreateThen, 'main'>; labelKey: Transla
   { value: 'another', labelKey: 'quickCreate.then.another' },
   { value: 'duplicate', labelKey: 'quickCreate.then.duplicate' },
 ]
-type CreatedTask = { id: string; title?: string }
+/** A task as the create answers it; `labels` are its tags, as made. */
+type CreatedTask = { id: string; title?: string; labels?: Array<{ name: string }> }
 
 function TaskForm({
   workspaceId,
@@ -1180,9 +1182,15 @@ function TaskForm({
    * started is not here. The plain create sends it with the list, the title and
    * the priority; the template's route takes it as what wins over the template
    * (or adds to its description, tags and assignees), and a field that is not
-   * here is the template's. `labelIds` are the typed tags, made by then.
+   * here is the template's.
+   *
+   * THE TYPED TAGS GO BY NAME (`labelsByName`), and the server finds each or
+   * makes it only once the task is made (`found-30-sep/refused-create-leaves-tags`).
+   * This form made each one first (`POST /workspaces/:ws/labels`), so a create
+   * the server then refused left every typed tag in the workspace, attached to
+   * nothing. The colour is the one the task sheet gives the same name.
    */
-  const setInForm = (labelIds: string[]) => {
+  const setInForm = () => {
     const estimate = parseEstimate(estimateHours)
     return {
       ...(priorityTouched ? { priority } : {}),
@@ -1201,7 +1209,7 @@ function TaskForm({
        * is seconds; what somebody may type is `12`, `90m` or `1h 30m`.
        */
       ...(estimate ? { timeEstimate: estimate.seconds } : {}),
-      ...(labelIds.length ? { labelIds } : {}),
+      ...(tagNames.length ? { labelsByName: tagNames.map((name) => ({ name, color: colorForTagName(name) })) } : {}),
     }
   }
 
@@ -1224,7 +1232,7 @@ function TaskForm({
       method: 'POST',
       body: { listId, ...(titleOverride.trim() ? { titleOverride: titleOverride.trim() } : {}), ...fields },
     })
-    return { id: made.taskId, title: made.task?.title }
+    return { id: made.taskId, title: made.task?.title, labels: made.task?.labels }
   }
 
   const create = useMutation({
@@ -1232,31 +1240,15 @@ function TaskForm({
     // made here, only what `onSuccess` does once it exists.
     mutationFn: async (_then: CreateThen): Promise<CreatedTask> => {
       /*
-       * Tags first, because the task wants ids and she types names —
-       * [23:23] "agar aap likh ke enter kar doongi to yeh tag ban jayega".
-       * Creating a name that already exists returns the existing label
-       * (case-insensitively), so typing "Design" twice does not make two.
-       *
-       * A tag that will not create must not cost her the task: it is dropped
-       * from the payload rather than thrown, the same rule the watcher and
-       * attachment loops below already follow.
+       * [23:23] "agar aap likh ke enter kar doongi to yeh tag ban jayega" — the
+       * typed tags go with the task, BY NAME (`setInForm`), and the server finds
+       * each (whatever its case, so "Design" typed twice is one tag) or makes it
+       * once the task is made. They were made here first, one request each, so
+       * a create the server refused left them all behind
+       * (`found-30-sep/refused-create-leaves-tags`). A tag that cannot be made
+       * (a guest may not make one) does not cost her the task: it is left off,
+       * and said below.
        */
-      const labelIds: string[] = []
-      for (const name of tagNames) {
-        try {
-          // `color` is required by CreateLabelDto — omitting it 400s, and the
-          // catch below would then drop the tag silently. Same derivation the
-          // task sheet uses, so a tag made here and one made there are the
-          // same colour rather than two shades of the same word.
-          const label = await api<{ id: string }>(`/workspaces/${workspaceId}/labels`, {
-            method: 'POST',
-            body: { name, color: colorForTagName(name) },
-          })
-          if (label?.id) labelIds.push(label.id)
-        } catch {
-          /* reported below with the other best-effort extras */
-        }
-      }
       /*
        * A template is not a set of defaults to copy into this form — it
        * carries checklists, subtasks and custom-field values this modal has
@@ -1268,10 +1260,10 @@ function TaskForm({
        * a word. What will happen is said beside the template before Create
        * (`TemplateMergeNote`).
        */
-      const fields = setInForm(labelIds)
+      const fields = setInForm()
       const task = templateId
         ? await instantiate(templateId, title, fields)
-        : await api<{ id: string }>(`/tasks`, {
+        : await api<CreatedTask>(`/tasks`, {
             method: 'POST',
             // Omit status → backend seeds the list's first/default status.
             // Omit taskTypeId → same, for the list's default type.
@@ -1282,6 +1274,13 @@ function TaskForm({
       // Neither is allowed to lose you the task: a watcher that cannot be added
       // or a file that will not upload is reported, not thrown.
       const problems: string[] = []
+      // A typed tag the task came back without is one the server would not make.
+      if (Array.isArray(task.labels)) {
+        const on = new Set(task.labels.map((l) => l.name.toLowerCase()))
+        for (const name of tagNames) {
+          if (!on.has(name.toLowerCase())) problems.push(t('quickCreate.tagNotAdded', { name }))
+        }
+      }
       for (const userId of watcherIds) {
         try {
           await api(`/tasks/${task.id}/watchers`, { method: 'POST', body: { userId } })
@@ -1490,7 +1489,16 @@ function TaskForm({
 
   // Both halves of Create Task ▾ ask this: a title, a list, nothing in flight
   // (a Create instantly from template is a create too).
-  const canCreate = Boolean(title.trim() && listId) && !create.isPending && !instant.isPending
+  /*
+   * A START TYPED AFTER THE DUE DATE (`found-30-sep/a-task-starts-after-it-is-due`)
+   * is said beside the dates, and Create waits until it is not: the server
+   * refuses such a task (400). ClickUp's own picker deletes the due date when
+   * a start after it is set, and its users asked on its feedback board for "a
+   * warning" that does "not let you save" instead; this is that warning, and
+   * neither date the person typed is thrown away.
+   */
+  const datesBackwards = datesOutOfOrder(startDate, dueDate)
+  const canCreate = Boolean(title.trim() && listId) && !create.isPending && !instant.isPending && !datesBackwards
 
   /*
    * The template chosen under Use Template, and the one-value fields set here
@@ -1915,9 +1923,14 @@ function TaskForm({
           <input
             type="datetime-local"
             value={startDate}
+            max={dueDate || undefined}
             onChange={(e) => setStartDate(e.target.value)}
             data-testid="quick-create-start"
-            className="h-8 rounded-md border border-border bg-card px-1.5 text-[12px] text-foreground"
+            aria-invalid={datesBackwards || undefined}
+            className={cn(
+              'h-8 rounded-md border bg-card px-1.5 text-[12px] text-foreground',
+              datesBackwards ? 'border-destructive' : 'border-border',
+            )}
           />
         </label>
         <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
@@ -1925,9 +1938,14 @@ function TaskForm({
           <input
             type="datetime-local"
             value={dueDate}
+            min={startDate || undefined}
             onChange={(e) => setDueDate(e.target.value)}
             data-testid="quick-create-due"
-            className="h-8 rounded-md border border-border bg-card px-1.5 text-[12px] text-foreground"
+            aria-invalid={datesBackwards || undefined}
+            className={cn(
+              'h-8 rounded-md border bg-card px-1.5 text-[12px] text-foreground',
+              datesBackwards ? 'border-destructive' : 'border-border',
+            )}
           />
         </label>
         <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
@@ -1959,6 +1977,11 @@ function TaskForm({
           />
         </label>
       </div>
+      {datesBackwards && (
+        <p role="alert" data-testid="quick-create-dates-order" className="-mt-1 text-[11px] text-destructive">
+          {t('quickCreate.startAfterDue')}
+        </p>
+      )}
 
       {/* [22:55] "ASSIGN pe main khud ko assign kar sakti hoon ya kisi aur ko" —
           assignment is a create-time decision, not an afterthought. */}

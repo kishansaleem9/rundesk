@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
-import { and, eq, or, asc, isNull, isNotNull, inArray } from 'drizzle-orm'
+import { and, eq, asc, isNotNull, inArray } from 'drizzle-orm'
 import {
   customFieldDefinitions,
   customFieldValues,
@@ -55,6 +55,30 @@ export const TSHIRT_SIZES = ['xs', 's', 'm', 'l', 'xl'] as const
 
 /** The types that hold a list rather than one value. */
 const MULTI_TYPES: ReadonlySet<string> = new Set(['labels', 'people', 'files', 'voting', 'tasks'])
+
+/**
+ * THE FIELDS A TASK HAS: its project's, less those scoped to another list of it
+ * (`listId`, §V2-S01c). A field with no list is the whole project's.
+ *
+ * One statement of the rule, for the reader and every writer. The reader
+ * (`getValuesForTask`) has always shown a task these and no others, while the
+ * value route (`setValue`) asked only that the field was in the workspace, and
+ * took a field of another project, or one scoped to another list, onto the
+ * task: 200, and a value no reader showed
+ * (`found-30-sep/field-route-takes-another-projects-field`). A template and a
+ * duplicate write onto the fields the new task has by the same rule
+ * (`found-30-sep/template-values-find-fields-by-name-alone`).
+ */
+export function fieldIsOnList(field: { listId?: string | null }, listId: string): boolean {
+  return field.listId == null || field.listId === listId
+}
+
+export function fieldIsOnTask(
+  field: { projectId: string; listId?: string | null },
+  task: { projectId: string; listId: string },
+): boolean {
+  return field.projectId === task.projectId && fieldIsOnList(field, task.listId)
+}
 
 /**
  * 0158 — a SIGNATURE is the strokes that were drawn, and nothing else.
@@ -440,6 +464,8 @@ export class CustomFieldsService {
       .select({
         id: customFieldDefinitions.id,
         projectId: customFieldDefinitions.projectId,
+        // The value route asks whether the field is one the task has (`fieldIsOnTask`).
+        listId: customFieldDefinitions.listId,
         // 0158 — the rename guard needs the name it is replacing.
         name: customFieldDefinitions.name,
         type: customFieldDefinitions.type,
@@ -468,21 +494,16 @@ export class CustomFieldsService {
      * changes nothing, seen from the other side; this codebase has now found it
      * in both directions.
      *
-     * NULL means project-wide, which is what every existing row is.
+     * NULL means project-wide, which is what every existing row is. The rule
+     * is `fieldIsOnList`, which the value route asks too.
      */
-    const defs = await this.db
-      .select()
-      .from(customFieldDefinitions)
-      .where(
-        and(
-          eq(customFieldDefinitions.projectId, task.projectId),
-          or(
-            isNull(customFieldDefinitions.listId),
-            eq(customFieldDefinitions.listId, task.listId),
-          ),
-        ),
-      )
-      .orderBy(asc(customFieldDefinitions.position))
+    const defs = (
+      await this.db
+        .select()
+        .from(customFieldDefinitions)
+        .where(eq(customFieldDefinitions.projectId, task.projectId))
+        .orderBy(asc(customFieldDefinitions.position))
+    ).filter((d) => fieldIsOnList(d, task.listId))
 
     const values = await this.db
       .select()
@@ -617,8 +638,19 @@ export class CustomFieldsService {
     actorId?: string,
     reader?: ReadActor,
   ) {
-    await this.assertTaskOpenTo(workspaceId, taskId, reader)
+    const task = await this.assertTaskOpenTo(workspaceId, taskId, reader)
     const def = await this.getDefOwnedBy(workspaceId, fieldId)
+    /*
+     * A FIELD THE TASK HAS, or none: its project's, and for a field scoped to a
+     * list, its list's (`fieldIsOnTask`). The route asked only that the task and
+     * the field were both in the workspace, so a field of another project, or
+     * one scoped to another list, took a value onto this task (200, and a vote
+     * as well) that no reader shows, since `getValuesForTask` reads the task's
+     * own fields (`found-30-sep/field-route-takes-another-projects-field`).
+     * Refused as a field that is not there, whatever project it is in, so the
+     * answer says nothing of fields in a project the caller may not open.
+     */
+    if (!fieldIsOnTask(def, task)) throw new NotFoundException('Custom field not found on this task')
     /*
      * A VALUE IS PART OF THE TASK, and set as the task is changed: the write
      * rule, where the read rule was all it asked — a member in a view-only

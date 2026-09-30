@@ -16,9 +16,11 @@
  *
  * THE PREFIX CHECK THIS REPLACES WAS BYPASSABLE. `addAttachment` accepted any
  * key that `startsWith` the task's prefix, and so would a cover check written
- * the same way. But `R2Service.getObjectUrl` in public-CDN mode returns
- * `${publicUrl}/${key}` with the key UNENCODED, and a browser collapses `..`
- * in a URL path before it asks for it:
+ * the same way. But `R2Service.getObjectUrl` in public-CDN mode returned
+ * `${publicUrl}/${key}` with the key UNENCODED (it signs every object now,
+ * `found-30-sep/public-cdn-url-makes-every-object-public`, and only a picture
+ * on show is served so), and a browser collapses `..` in a URL path before it
+ * asks for it:
  *
  *   workspaces/A/tasks/T/attachments/../../../../workspaces/B/tasks/X/attachments/secret.pdf
  *

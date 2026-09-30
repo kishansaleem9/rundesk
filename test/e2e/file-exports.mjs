@@ -23,7 +23,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { resolveChromium, launchOptions } from './lib/playwright.mjs'
+import { resolveChromium, launchOptions, utf8LocaleEnv } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
@@ -34,7 +34,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 8
+const EXPECTED_CHECKS = 9
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -129,7 +129,8 @@ try {
 
   // ══ 3. THE BUTTONS ═══════════════════════════════════════════════════════
   console.log('\n▶ each export button in the app saves the file it names')
-  browser = await chromium.launch(launchOptions())
+  // A UTF-8 locale, or Chromium saves a name in another script as "download" (see `utf8LocaleEnv`).
+  browser = await chromium.launch({ ...launchOptions(), env: utf8LocaleEnv() })
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true })
   const page = await ctx.newPage()
   await page.goto(`${B}/login`, { waitUntil: 'domcontentloaded' })
@@ -176,6 +177,24 @@ try {
     auditFile.name?.endsWith('.csv') && headerOf(auditFile.bytes).startsWith('Timestamp,Actor,Action'),
     'Audit log → Export CSV saves a .csv whose first row is the header',
     told(auditFile),
+  )
+
+  /*
+   * A DOC'S EXPORT IS SAVED UNDER THE NAME THE SERVER GIVES IT
+   * (`found-30-sep/list-export-saved-as-list-csv`). The page worked the name out
+   * from the title, a second copy of the server's rule, and ASCII only: a doc
+   * called "Plan — Überblick" was saved as "Plan-berblick.md". The server names
+   * it once, the whole title in `filename*`, and the page saves under that.
+   */
+  const DOC_TITLE = `Plan — Überblick ${Date.now()}`
+  const madeDoc = await api(`/workspaces/${WS}/docs`, { method: 'POST', body: { title: DOC_TITLE } })
+  if (!madeDoc.data?.id) throw new Error(`could not make the doc: ${madeDoc.status}`)
+  await page.goto(`${B}/app/${WS}/docs?doc=${madeDoc.data.id}`, { waitUntil: 'domcontentloaded' })
+  const docFile = await saved(page.getByTitle('Export as Markdown'))
+  chk(
+    docFile.name === `${DOC_TITLE}.md` && docFile.bytes.toString('utf8').startsWith(`# ${DOC_TITLE}`),
+    'Docs → Export as Markdown saves the doc under its whole title, as the server names it',
+    `${told(docFile)}; the doc is ${JSON.stringify(DOC_TITLE)}`,
   )
 } catch (e) {
   failed += 1

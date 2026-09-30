@@ -128,7 +128,8 @@ try {
   // a guest at Full edit adds one, `guest-task-making`).
   await sql`insert into object_shares (workspace_id, object_type, object_id, user_id, level) values (${WS}, 'list', ${open.list}, ${guest.id}, 'edit')`
   const gate = await member.as(`/tasks/list/${hidden.list}`)
-  if (gate.status !== 403) throw new Error(`the member was not refused the private list (${said(gate)}), so nothing here would mean anything`)
+  // Refused as a list that is not there (404, `found-30-sep/private-task-reads-say-403`).
+  if (gate.status !== 404) throw new Error(`the member was not refused the private list (${said(gate)}), so nothing here would mean anything`)
 
   // The meetings are planted by SQL: the create route is itself under test (§4).
   const meeting = async (workspaceId, by) =>

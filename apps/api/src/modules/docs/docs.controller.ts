@@ -142,16 +142,17 @@ export class DocsController {
     @Res() res: any,
     @Query('format') format?: string,
   ) {
+    // Named by `downloadName`, the whole title in `filename*`; the page saves under it.
     if (format === 'pdf') {
-      const { fileName, pdf } = await this.docs.exportDocPdf(docId, user.id)
+      const { disposition, pdf } = await this.docs.exportDocPdf(docId, user.id)
       res.header('Content-Type', 'application/pdf')
-      res.header('Content-Disposition', `attachment; filename="${fileName}"`)
+      res.header('Content-Disposition', disposition)
       res.send(pdf)
       return
     }
-    const { fileName, markdown } = await this.docs.exportDocMarkdown(docId, user.id)
+    const { disposition, markdown } = await this.docs.exportDocMarkdown(docId, user.id)
     res.header('Content-Type', 'text/markdown; charset=utf-8')
-    res.header('Content-Disposition', `attachment; filename="${fileName}"`)
+    res.header('Content-Disposition', disposition)
     res.send(markdown)
   }
 

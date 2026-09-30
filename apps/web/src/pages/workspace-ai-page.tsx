@@ -31,6 +31,7 @@ import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { localDateTimeValue } from '../lib/local-date'
 import { useSpeechRecognition, MicButton } from '../lib/use-speech-recognition'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
+import { fieldsOfList } from '../lib/field-scope'
 
 type GeneratedTask = {
   title: string
@@ -56,6 +57,8 @@ type GenCustomFieldDef = {
   type: 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url' | 'email' | 'phone' | 'money' | 'rating'
   isRequired: boolean
   options: Array<{ label: string; value: string }> | null
+  /** The one list this field is scoped to, or none for the whole project (`fieldsOfList`). */
+  listId?: string | null
 }
 
 type GenListOption = { value: string; label: string; projectId: string }
@@ -737,7 +740,12 @@ function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
       api<GenCustomFieldDef[]>(`/workspaces/${workspaceId}/projects/${selectedProjectId}/custom-fields`),
     enabled: Boolean(selectedProjectId),
   })
-  const fields = fieldsQuery.data ?? []
+  /*
+   * THE CHOSEN LIST'S FIELDS, not every field of its project: a field scoped to
+   * another list is one the task made here will not have, and the server
+   * refuses a value for it (`found-30-sep/field-route-takes-another-projects-field`).
+   */
+  const fields = fieldsOfList(fieldsQuery.data ?? [], targetListId)
 
   const generate = useMutation({
     mutationFn: () =>

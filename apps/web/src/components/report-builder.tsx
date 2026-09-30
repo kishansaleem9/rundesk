@@ -20,7 +20,7 @@ import {
   Send,
   GripVertical,
 } from 'lucide-react'
-import { api, downloadFilePost } from '../lib/api'
+import { api, downloadFilePost, refusalMessage } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { usePermissions } from '../hooks/use-permissions'
@@ -364,8 +364,8 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
         definition,
         `${(name || 'report').replace(/[^a-z0-9-_]+/gi, '-')}.pdf`,
       )
-    } catch {
-      toast.error(t('reportBuilder.toastPdfError'))
+    } catch (e) {
+      toast.error(refusalMessage(e, t('reportBuilder.toastPdfError')))
     }
   }
 

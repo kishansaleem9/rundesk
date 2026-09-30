@@ -7,11 +7,11 @@ p = '/home/user/rundesk/apps/api/src/modules/task-templates/task-templates.servi
 a = """    if (ctx.workspaceId !== workspaceId) throw new NotFoundException('Task not found in this workspace')
     await this.assertTaskOpenTo(workspaceId, taskId, actor)
 
-    const payload = await this.snapshotTask(taskId, { forTemplate: true })
+    const payload = await this.snapshotTask(taskId, ctx, { forTemplate: true })
 """
 b = """    if (ctx.workspaceId !== workspaceId) throw new NotFoundException('Task not found in this workspace')
 
-    const payload = await this.snapshotTask(taskId, { forTemplate: true })
+    const payload = await this.snapshotTask(taskId, ctx, { forTemplate: true })
 """
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

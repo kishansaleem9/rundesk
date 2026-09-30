@@ -369,12 +369,14 @@ describe('TasksService external links — CRUD + access', () => {
     )
   })
 
-  it('denies a non-member (access check)', async () => {
+  it('denies a non-member as the task that is not there (access check)', async () => {
+    // Not "Workspace not found": that told a user of another organisation the
+    // id was somebody's task (`found-30-sep/private-task-reads-say-403`, review).
     const { db } = makeCaptureDb([CTX, []]) // no membership row
     const svc = makeService(db)
     await assert.rejects(
       () => svc.addExternalLink('t1', 'outsider', { url: 'https://github.com/a/b/pull/1' }),
-      /workspace not found/i,
+      /^NotFoundException: Task not found$/,
     )
   })
 

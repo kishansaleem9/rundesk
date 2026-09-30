@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Button, Card, Input, cn, toast } from '@rundesk/ui'
 import { Shield, Search, Download } from 'lucide-react'
-import { api, downloadFile } from '../lib/api'
+import { api, downloadFile, refusalMessage } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import type { TranslationKey } from '../lib/i18n'
 import { localDayKey } from '../lib/local-date'
@@ -214,7 +214,7 @@ export function AuditLogPanel({ workspaceId, picker }: { workspaceId: string | n
     downloadFile(
       `/workspaces/${workspaceId}/audit-logs/export${qs ? `?${qs}` : ''}`,
       `audit-log-${localDayKey(new Date())}.csv`,
-    ).catch(() => toast.error(t('adminAudit.exportFailed')))
+    ).catch((e) => toast.error(refusalMessage(e, t('adminAudit.exportFailed'))))
   }
 
   return (

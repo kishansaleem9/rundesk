@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   IsArray,
   IsDateString,
   IsIn,
@@ -7,8 +8,32 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
+  Min,
+  ValidateNested,
 } from 'class-validator'
+import { Type } from 'class-transformer'
+import { ESTIMATE_MAX_SECONDS } from '../task-values'
+
+/**
+ * A tag named for a task being made (`found-30-sep/refused-create-leaves-tags`):
+ * found in its workspace by name, whatever the case, or made there with this
+ * colour once the task is. The create modal sent `POST /workspaces/:ws/labels`
+ * for each typed tag BEFORE the task, so a refused create left them behind.
+ * The rules of that route (`CreateLabelDto`): a name, and a colour if given.
+ */
+export class LabelByNameDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  name!: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  color?: string
+}
 
 // Note: only the create handler is converted to a DTO. The update handler keeps
 // an inline body because it relies on key-presence (`'dueDate' in body`) to
@@ -50,8 +75,16 @@ export class CreateTaskDto {
   @IsDateString()
   dueDate?: string
 
+  /**
+   * Whole seconds, nought or more (`found-30-sep/task-estimate-below-zero`):
+   * `@IsInt()` alone took -3600 and stored it. The template's route refuses one
+   * below nought (`InstantiateTemplateDto`), and so does `createTask` for every
+   * other way a task is made (`assertEstimate`).
+   */
   @IsOptional()
   @IsInt()
+  @Min(0)
+  @Max(ESTIMATE_MAX_SECONDS)
   timeEstimate?: number
 
   @IsOptional()
@@ -78,6 +111,14 @@ export class CreateTaskDto {
   @IsArray()
   @IsString({ each: true })
   labelIds?: string[]
+
+  /** Tags by name, made only once the task is (`LabelByNameDto`). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => LabelByNameDto)
+  labelsByName?: LabelByNameDto[]
 }
 
 /**

@@ -69,6 +69,8 @@ const chk = (cond, good, bad) => {
 // stub's, taken (`scripts/lib/free-port.mjs`).
 const PORT = await freePort()
 const BUCKET = 'rundesk-stub-cases'
+// A second bucket, of the pictures on show (`R2_PUBLIC_BUCKET_NAME`).
+const PICTURES = 'rundesk-stub-pictures'
 const KEY_NAME = 'tasks/probe/cover.png'
 
 /*
@@ -103,6 +105,12 @@ async function main() {
     // What a clip's title and length are read back from: the metadata the PUT carried.
     out.headMeta = head.Metadata ?? null
     out.roundTrip = (await r2.getObject(KEY)).equals(BYTES)
+    // A size the next HEAD claims, once: how Download all past its cap is staged
+    // without holding a GiB (\`found-30-sep/download-refusals-say-no-reason\`).
+    await fetch('http://127.0.0.1:${PORT}/__control/next-head-length?bytes=2147483648', { method: 'POST' })
+    out.claimedHead = (await r2.headObject(KEY)).ContentLength
+    out.afterClaimedHead = (await r2.headObject(KEY)).ContentLength
+    out.claimedGetBytes = (await r2.getObject(KEY)).length
     const getUrl = await r2.getObjectUrl(KEY)
     const got = await fetch(getUrl)
     out.signedGetStatus = got.status
@@ -152,6 +160,20 @@ async function main() {
     out.logSeq = log.seq
     out.logged = (log.requests as Array<{ n: number; method: string; key: string; bucket: string; copyOf?: string }>).map((r) => [r.n, r.method, r.key, r.bucket, r.copyOf ?? null])
     out.missingHead = await r2.headObject('tasks/probe/never.png').then(() => 'answered').catch((e: Error) => e.name)
+    // TWO BUCKETS, EACH A STORE OF ITS OWN: the pictures in theirs, a private
+    // object in the other, and each read unsigned at the other's path, as a
+    // public domain connected to one bucket reads (\`found-30-sep/public-cdn-url-makes-every-object-public\`).
+    const r2p = new R2Service({ get: (k: string) => ({ ...env, R2_PUBLIC_BUCKET_NAME: '${PICTURES}' } as Record<string, string>)[k] } as never)
+    await r2p.putObject('avatars/probe-1.png', BYTES, 'image/png')
+    await r2p.putObject('tasks/probe/private.txt', Buffer.from('private'), 'text/plain')
+    const unsigned = (bucket: string, key: string) => fetch('http://127.0.0.1:${PORT}/' + bucket + '/' + key).then((r) => r.status)
+    out.twoBuckets = {
+      pictureInPictures: await unsigned('${PICTURES}', 'avatars/probe-1.png'),
+      pictureInPrivate: await unsigned('${BUCKET}', 'avatars/probe-1.png'),
+      privateInPictures: await unsigned('${PICTURES}', 'tasks/probe/private.txt'),
+      privateInPrivate: await unsigned('${BUCKET}', 'tasks/probe/private.txt'),
+      noSuchBucket: await unsigned('rundesk-stub-nobody', 'avatars/probe-1.png'),
+    }
   } catch (err) {
     out.threw = err instanceof Error ? \`\${err.name}: \${err.message}\` : String(err)
   }
@@ -161,7 +183,7 @@ void main()
 `
 
 const startStub = () => {
-  const child = spawn(process.execPath, [STUB, '--port', String(PORT), '--bucket', BUCKET, '--strict'], {
+  const child = spawn(process.execPath, [STUB, '--port', String(PORT), '--bucket', BUCKET, '--bucket', PICTURES, '--strict'], {
     env: { ...process.env, RUNDESK_S3_STUB: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -232,6 +254,11 @@ if (out.none !== undefined) {
   chk(out.headLength === 28 && out.headType === 'image/png', 'HEAD reports the size and type that were stored', `HEAD said ${out.headLength} / ${out.headType}`)
   chk(out.roundTrip === true, 'getObject returns the bytes that were PUT, unchanged', 'the bytes came back different')
   chk(
+    out.claimedHead === 2147483648 && out.afterClaimedHead === 28 && out.claimedGetBytes === 28,
+    'a size armed for the next HEAD is answered by that HEAD alone, and GET still serves the bytes — so a task past the zip’s cap can be staged',
+    `the armed HEAD said ${out.claimedHead}, the one after it ${out.afterClaimedHead}, and GET served ${out.claimedGetBytes} byte(s)`,
+  )
+  chk(
     out.headMeta?.title === 'Launch walkthrough' && out.headMeta?.durationseconds === '42',
     'HEAD answers the metadata a presigned PUT carried in its URL — what a clip’s title and length are read back from',
     `HEAD's metadata was ${JSON.stringify(out.headMeta)}`,
@@ -293,6 +320,12 @@ if (out.none !== undefined) {
   )
   chk(out.afterDelete === 'NoSuchKey', 'a deleted object is gone, and says so with the code the SDK names', `after delete it answered ${out.afterDelete}`)
   chk(out.missingHead !== 'answered', 'and HEAD on a key that was never written does not answer as though it were', 'HEAD answered for an object that does not exist')
+  const tb = out.twoBuckets ?? {}
+  chk(
+    tb.pictureInPictures === 200 && tb.pictureInPrivate === 404 && tb.privateInPictures === 404 && tb.privateInPrivate === 200 && tb.noSuchBucket === 404,
+    'a second --bucket is a store of its own: what is put in one is read at its path and not at the other’s — a domain on the pictures’ bucket serves no private object',
+    `unsigned reads answered ${JSON.stringify(tb)}`,
+  )
   const logged = Array.isArray(out.logged) ? out.logged : []
   const has = (method, key) => logged.some(([, m, k]) => m === method && k === key)
   chk(
@@ -314,7 +347,7 @@ if (out.none !== undefined) {
   chk(
     // By BUCKET: `/__control/requests` parses as bucket `__control`, key
     // `requests`, so a test on the key would be true of every log there is.
-    logged.length > 0 && logged.every(([, , , b]) => b === BUCKET),
+    logged.length > 0 && logged.every(([, , , b]) => b === BUCKET || b === PICTURES),
     'and the control routes are not in it — only what the product asked of the bucket',
     `the log includes a request outside the bucket: ${JSON.stringify(logged.find(([, , , b]) => b !== BUCKET))}`,
   )
@@ -349,11 +382,16 @@ if (process.argv.includes('--mutate')) {
     ['a copy stores nothing', 'objects.set(key, copied)', 'void copied'],
     ['a copy stores other bytes than its source’s', 'body: Buffer.from(src.body),', "body: Buffer.from('X'),"],
     ['a copy keeps the source’s type when told to replace it', "contentType: replace ? req.headers['content-type'] ?? 'application/octet-stream' : src.contentType,", 'contentType: src.contentType,'],
-    ['a copy of nothing succeeds, storing an empty object', "const src = objects.get(srcKey)\n      if (!src) return s3Error(res, 404, 'NoSuchKey', `no object at ${srcKey}`)", "const src = objects.get(srcKey) ?? { body: Buffer.alloc(0), contentType: 'application/octet-stream' }"],
+    ['a copy of nothing succeeds, storing an empty object', "const src = stores.get(srcBucket).get(srcKey)\n      if (!src) return s3Error(res, 404, 'NoSuchKey', `no object at ${srcKey}`)", "const src = stores.get(srcBucket).get(srcKey) ?? { body: Buffer.alloc(0), contentType: 'application/octet-stream' }"],
     ['the log does not say what a copy was copied from', 'logged.copyOf = srcKey', 'void srcKey'],
     ['a deleted object is still there', 'objects.delete(key)', 'void key'],
     ['the arranged failure never fires', 'if (failNextPut) {', 'if (false) {'],
     ['the arranged failure LATCHES, leaking into the next upload', 'failNextPut = false\n      await readBody(req)', 'await readBody(req)'],
+    ['a size armed for the next HEAD is never answered', 'if (nextHeadLength !== null) {', 'if (false) {'],
+    // `found-30-sep/public-cdn-url-makes-every-object-public`: a bucket of the pictures' own.
+    ['every bucket is one store, as a domain on the whole account would be', 'const objects = stores.get(bucket)', 'const objects = stores.get(BUCKET)'],
+    ['a second --bucket is not served', "if (!stores.has(bucket)) return s3Error(res, 404, 'NoSuchBucket'", "if (bucket !== BUCKET) return s3Error(res, 404, 'NoSuchBucket'"],
+    ['a size armed for the next HEAD LATCHES, answered by every HEAD after it', 'const claimed = nextHeadLength\n      nextHeadLength = null', 'const claimed = nextHeadLength'],
     /*
      * TWO MUTATIONS HAD TO BE REWRITTEN, and both were wrong in the same
      * instructive way: they broke the stub without making it LIE.

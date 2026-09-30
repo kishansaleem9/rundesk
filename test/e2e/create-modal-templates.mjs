@@ -62,6 +62,21 @@
  * where a field of the same name is of another kind, so the route's rule is
  * the one kept: nothing is written that the field itself would refuse.
  *
+ * AND ONLY INTO A FIELD THE NEW TASK HAS, BY FIELD BEFORE NAME,
+ * `found-30-sep/template-values-find-fields-by-name-alone`. Values were mapped
+ * by name over every field of the project: one went into a field scoped to
+ * another list, which the task does not have, or into whichever of two fields
+ * of one name came back last; and two values from two fields of one name went
+ * into one, which a task cannot hold (409, the task made with neither). Now:
+ *
+ *   · a field scoped to another list is not written; of two of one name, the
+ *     task's own list's is taken over the project's;
+ *   · a template saved from a task, and a duplicate, give each value back to
+ *     the field it came from, and write each field once;
+ *   · and take no value of a field the task no longer has — one scoped to the
+ *     list it was moved out of, or of the project it was moved from — which
+ *     fell to a field of its name.
+ *
  * AND WHAT IS SET IN THE FORM BESIDE A TEMPLATE IS KEPT,
  * `found-30-sep/template-submit-ignores-the-form`. With a template chosen,
  * Create task sent the template's route the list and the title alone: the
@@ -86,6 +101,20 @@
  *     (`found-30-sep/create-modal-cuts-off-create`): the form could not scroll,
  *     and the note put Create out of reach at 1000.
  *
+ * AND A REFUSED CREATE LEAVES NO TAG, `found-30-sep/refused-create-leaves-tags`.
+ * The template's route made the template's missing tags before `createTask`
+ * asked about the list, the type, the people and the tags, and the modal made
+ * each typed tag before it sent the task: a create refused for its task type
+ * left them in the workspace, attached to nothing. The tags now go by name and
+ * are made only once the task is, in its transaction:
+ *
+ *   · a template's create refused for its type adds none of its tags, and made
+ *     it brings them;
+ *   · `POST /tasks` takes tags by name, finding one the workspace holds
+ *     whatever its case, and a refused create makes none;
+ *   · in the modal, plain and beside a template, a refused create says why and
+ *     adds no typed tag (read by SQL).
+ *
  *   node test/e2e/create-modal-templates.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
@@ -102,7 +131,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 33
+const EXPECTED_CHECKS = 45
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -752,6 +781,171 @@ try {
     `the route answered ${routeSaid[CONTACT]} for ${JSON.stringify(HELD[CONTACT])} and ${routeSaid[NOTE]} for the Note; ${appliedSaid}`,
   )
 
+  // ══ ONLY THE FIELDS THE TASK HAS, AND WHICH OF TWO OF ONE NAME ═══════════
+  console.log('\n▶ a template’s and a duplicate’s values, where a field is scoped to another list or shares its name')
+  /*
+   * `found-30-sep/template-values-find-fields-by-name-alone`. Values were mapped
+   * by name over every field of the project. Measured first on lane 7, three
+   * runs alike: a template applied in one list wrote its value into a field of
+   * that name scoped to another list, which the task does not have and no reader
+   * shows, and into the list-scoped one of two fields sharing a name, leaving
+   * the project's own empty; and a task holding two fields of one name, saved
+   * as a template and applied, or duplicated, answered 409 after making the
+   * task, which held neither value — both went into one field, and a task holds
+   * one value per field.
+   *
+   * In the second project, a side list beside its list; a Scope field scoped to
+   * the side list alone; and two Stage fields, one scoped to the side list and
+   * then one for the whole project. ClickUp lets two fields share a name
+   * ("multiple custom fields called the same thing", read through search
+   * excerpts) and its API sets a value only for a field "applicable" to the
+   * task. Where two share a name and a value names none, the one scoped to the
+   * task's own list is taken over the project's.
+   */
+  const SIDE_LIST = must('make the side list', await A('/lists', { method: 'POST', body: { projectId: OTHER_PROJECT, name: `${TAG} side list` } }))?.id
+  if (!SIDE_LIST) throw new Error('the side list came back without an id')
+  const SCOPE = `Scope ${TAG}`
+  const STAGE = `Stage ${TAG}`
+  const defineOther = async (what, body) => must(`make ${what}`, await A(`/workspaces/${WS}/projects/${OTHER_PROJECT}/custom-fields`, { method: 'POST', body }))?.id
+  const scopeSide = await defineOther('the side list’s Scope field', { name: SCOPE, type: 'text', listId: SIDE_LIST })
+  const stageSide = await defineOther('the side list’s Stage field', { name: STAGE, type: 'text', listId: SIDE_LIST })
+  const stageProject = await defineOther('the project’s Stage field', { name: STAGE, type: 'text' })
+  if (!scopeSide || !stageSide || !stageProject) throw new Error('the Scope or Stage fields came back without an id')
+  /** What a task holds in each of the three, read from the rows. */
+  const held3 = async (taskId) => {
+    if (!taskId) return null
+    const rows = await sql`select field_id, value from custom_field_values where task_id = ${taskId} and field_id in (${scopeSide}, ${stageSide}, ${stageProject})`
+    const of = (id) => { const r = rows.find((x) => x.field_id === id); return r ? ((typeof r.value === 'string' ? JSON.parse(r.value) : r.value)?.v ?? null) : null }
+    return { scopeSide: of(scopeSide), stageSide: of(stageSide), stageProject: of(stageProject) }
+  }
+  const T5_ID = must('make the template of names', await A(`/workspaces/${WS}/task-templates`, {
+    method: 'POST',
+    body: { name: `Names ${TAG}`, payload: { title: `Names ${TAG}`, customFieldValues: [{ fieldName: SCOPE, value: 'scoped' }, { fieldName: STAGE, value: 'staged' }] } },
+  }))?.id
+  if (!T5_ID) throw new Error('the template of names came back without an id')
+  const makeFrom = async (templateId, listId, title) => {
+    const res = await A(`/workspaces/${WS}/task-templates/${templateId}/instantiate`, { method: 'POST', body: { listId, titleOverride: title } })
+    const id = (await madeTasks(title))[0]?.id ?? null
+    return { res, id, held: await held3(id) }
+  }
+  const inList = await makeFrom(T5_ID, OTHER_LIST, `Names in the list ${TAG}`)
+  chk(
+    inList.res.ok && !!inList.id && JSON.stringify(inList.held) === JSON.stringify({ scopeSide: null, stageSide: null, stageProject: 'staged' }),
+    'a template’s value is not written into a field of its name scoped to another list, which the task made here does not have — and where such a field shares its name with the project’s own, the value goes into the project’s (read by SQL)',
+    `applying it answered ${said(inList.res)}; the task holds ${JSON.stringify(inList.held)}`,
+  )
+  const inSide = await makeFrom(T5_ID, SIDE_LIST, `Names in the side list ${TAG}`)
+  chk(
+    inSide.res.ok && !!inSide.id && JSON.stringify(inSide.held) === JSON.stringify({ scopeSide: 'scoped', stageSide: 'staged', stageProject: null }),
+    'and applied in the side list, whose tasks have both Stage fields, the value goes into the side list’s own, and the Scope field, the task’s here, is written',
+    `applying it answered ${said(inSide.res)}; the task holds ${JSON.stringify(inSide.held)}`,
+  )
+  /* A task in the side list holding both Stage fields, through their own route. */
+  const BOTH = `Both stages ${TAG}`
+  const bothId = must('make the task holding both Stage fields', await A('/tasks', { method: 'POST', body: { listId: SIDE_LIST, title: BOTH } }))?.id
+  if (!bothId) throw new Error('the task holding both Stage fields came back without an id')
+  must('set the project’s Stage', await A(`/workspaces/${WS}/tasks/${bothId}/custom-fields/${stageProject}`, { method: 'PUT', body: { value: 'project value' } }))
+  must('set the side list’s Stage', await A(`/workspaces/${WS}/tasks/${bothId}/custom-fields/${stageSide}`, { method: 'PUT', body: { value: 'list value' } }))
+  const savedBoth = await A(`/workspaces/${WS}/task-templates/from-task/${bothId}`, { method: 'POST', body: { name: `From both stages ${TAG}` } })
+  const bothInSide = savedBoth.data?.id ? await makeFrom(savedBoth.data.id, SIDE_LIST, `Both again ${TAG}`) : { res: savedBoth, id: null, held: null }
+  chk(
+    savedBoth.ok && bothInSide.res.ok && !!bothInSide.id &&
+      JSON.stringify(bothInSide.held) === JSON.stringify({ scopeSide: null, stageSide: 'list value', stageProject: 'project value' }),
+    'a task holding two fields of one name, saved as a template and applied in its own list, gives each value back to the field it came from (read by SQL)',
+    `saving it answered ${said(savedBoth)}; applying it ${said(bothInSide.res)}; the task holds ${JSON.stringify(bothInSide.held)}`,
+  )
+  const bothInList = savedBoth.data?.id ? await makeFrom(savedBoth.data.id, OTHER_LIST, `Both in the list ${TAG}`) : { res: savedBoth, id: null, held: null }
+  chk(
+    bothInList.res.ok && !!bothInList.id &&
+      JSON.stringify(bothInList.held) === JSON.stringify({ scopeSide: null, stageSide: null, stageProject: 'project value' }),
+    'and applied in the other list, where only the project’s Stage is the task’s, it makes the task and writes that field once, with the value taken from it',
+    `applying it answered ${said(bothInList.res)}; the task holds ${JSON.stringify(bothInList.held)}`,
+  )
+  const dupBoth = await A(`/workspaces/${WS}/task-templates/duplicate/${bothId}`, { method: 'POST', body: {} })
+  const dupBothId = (await sql`select id from tasks where list_id = ${SIDE_LIST} and title = ${`${BOTH} (copy)`}`)[0]?.id ?? null
+  const dupBothHeld = await held3(dupBothId)
+  chk(
+    dupBoth.ok && !!dupBothId && JSON.stringify(dupBothHeld) === JSON.stringify({ scopeSide: null, stageSide: 'list value', stageProject: 'project value' }),
+    'and a duplicate of that task copies each value into the field it came from, not both into one (read by SQL)',
+    `duplicating it answered ${said(dupBoth)}; ${dupBothId ? `the copy holds ${JSON.stringify(dupBothHeld)}` : 'no copy was made'}`,
+  )
+  /*
+   * A VALUE HELD FOR A FIELD THE TASK NO LONGER HAS is copied nowhere. A move
+   * changes the task's list and leaves its value rows (`moveTask`), so a task
+   * moved out of the side list still holds its row in the side list's Stage,
+   * which its fields, read back, no longer show. The snapshot read every row
+   * the task held, and a value whose field the copy lacks fell to the name:
+   * measured on lane 7, the duplicate showed the project's Stage holding the
+   * hidden value, the original showing it empty; a template saved from it held
+   * the value and wrote it the same way; and a task moved in from another
+   * project gave that project's Stage to this one's. Each copy is asked for a
+   * value the task does have, the Note or the Owner, so a copy that carries
+   * nothing does not pass.
+   */
+  /** Every value a task holds, by field id, read from the rows. */
+  const rowsOf = async (taskId) =>
+    taskId
+      ? Object.fromEntries((await sql`select field_id, value from custom_field_values where task_id = ${taskId}`)
+        .map((r) => [r.field_id, (typeof r.value === 'string' ? JSON.parse(r.value) : r.value)?.v ?? null]))
+      : null
+  const MOVED = `Moved out of the side list ${TAG}`
+  const movedId = must('make the task moved out of the side list', await A('/tasks', { method: 'POST', body: { listId: SIDE_LIST, title: MOVED } }))?.id
+  if (!movedId) throw new Error('the task moved out of the side list came back without an id')
+  must('set the side list’s Stage on it', await A(`/workspaces/${WS}/tasks/${movedId}/custom-fields/${stageSide}`, { method: 'PUT', body: { value: 'hidden draft' } }))
+  must('set its Note', await A(`/workspaces/${WS}/tasks/${movedId}/custom-fields/${otherField[NOTE]}`, { method: 'PUT', body: { value: 'moved note' } }))
+  must('move it into the list', await A(`/tasks/${movedId}/move`, { method: 'POST', body: { listId: OTHER_LIST, position: 0 } }))
+  const movedShows = must('read the moved task’s fields', await A(`/workspaces/${WS}/tasks/${movedId}/custom-fields`))
+  const stageShown = Array.isArray(movedShows) ? movedShows.filter((f) => f.definition?.name === STAGE).map((f) => f.value) : null
+  const movedHolds = await rowsOf(movedId)
+  const movedPremise = movedHolds?.[stageSide] === 'hidden draft' && JSON.stringify(stageShown) === JSON.stringify([null])
+  const movedSaid = `the moved task holds ${JSON.stringify(movedHolds)} and shows Stage as ${JSON.stringify(stageShown)}`
+  const NOTE_ONLY = { [otherField[NOTE]]: 'moved note' }
+  const dupMoved = await A(`/workspaces/${WS}/task-templates/duplicate/${movedId}`, { method: 'POST', body: {} })
+  const dupMovedId = (await sql`select id from tasks where list_id = ${OTHER_LIST} and title = ${`${MOVED} (copy)`}`)[0]?.id ?? null
+  const dupMovedHolds = await rowsOf(dupMovedId)
+  chk(
+    movedPremise && dupMoved.ok && !!dupMovedId && JSON.stringify(dupMovedHolds) === JSON.stringify(NOTE_ONLY),
+    'a task moved out of the side list keeps its value in the side list’s Stage, which it no longer shows — and a duplicate of it writes that value into no field, the project’s Stage of that name among them, while its Note is copied (read by SQL)',
+    `${movedSaid}; duplicating it answered ${said(dupMoved)}; ${dupMovedId ? `the copy holds ${JSON.stringify(dupMovedHolds)}` : 'no copy was made'}`,
+  )
+  const savedMoved = await A(`/workspaces/${WS}/task-templates/from-task/${movedId}`, { method: 'POST', body: { name: `From the moved task ${TAG}` } })
+  // As [field, name, value]: a payload is stored as jsonb, which keeps no key order.
+  const savedMovedValues = savedMoved.data?.payload?.customFieldValues?.map((v) => [v.fieldId ?? null, v.fieldName, v.value]) ?? null
+  const MOVED_AGAIN = `Moved task's template ${TAG}`
+  const movedAgain = savedMoved.data?.id ? await makeFrom(savedMoved.data.id, OTHER_LIST, MOVED_AGAIN) : { res: savedMoved, id: null }
+  const movedAgainHolds = await rowsOf(movedAgain.id)
+  chk(
+    movedPremise && savedMoved.ok && movedAgain.res.ok && !!movedAgain.id &&
+      JSON.stringify(savedMovedValues) === JSON.stringify([[otherField[NOTE], NOTE, 'moved note']]) &&
+      JSON.stringify(movedAgainHolds) === JSON.stringify(NOTE_ONLY),
+    'and saved as a template, it holds no value for that field — only the Note — and applied in the list writes none into the project’s Stage (read by SQL)',
+    `${movedSaid}; saving it answered ${said(savedMoved)}, holding ${JSON.stringify(savedMovedValues)}; applying it ${said(movedAgain.res)}; the task holds ${JSON.stringify(movedAgainHolds)}`,
+  )
+  /* A third project, with a Stage of its own and an Owner; a task moves into it from the second, holding the second's Stage. */
+  const THIRD_PROJECT = must('make the third project', await A('/projects', { method: 'POST', body: { spaceId: SPACE, name: `${TAG} third project` } }))?.id
+  const THIRD_LIST = must('make its list', await A('/lists', { method: 'POST', body: { projectId: THIRD_PROJECT, name: `${TAG} third list` } }))?.id
+  if (!THIRD_PROJECT || !THIRD_LIST) throw new Error('the third project or its list came back without an id')
+  const defineThird = async (what, body) => must(`make ${what}`, await A(`/workspaces/${WS}/projects/${THIRD_PROJECT}/custom-fields`, { method: 'POST', body }))?.id
+  const stageThird = await defineThird('the third project’s Stage field', { name: STAGE, type: 'text' })
+  const ownerThird = await defineThird('the third project’s Owner field', { name: `Owner ${TAG}`, type: 'text' })
+  if (!stageThird || !ownerThird) throw new Error('the third project’s fields came back without an id')
+  const CARRIED = `Carried in ${TAG}`
+  const carriedId = must('make the task moved into the third project', await A('/tasks', { method: 'POST', body: { listId: OTHER_LIST, title: CARRIED } }))?.id
+  if (!carriedId) throw new Error('the task moved into the third project came back without an id')
+  must('set the second project’s Stage on it', await A(`/workspaces/${WS}/tasks/${carriedId}/custom-fields/${stageProject}`, { method: 'PUT', body: { value: 'carried stage' } }))
+  must('move it into the third project', await A(`/tasks/${carriedId}/move`, { method: 'POST', body: { listId: THIRD_LIST, position: 0 } }))
+  must('set the third project’s Owner on it', await A(`/workspaces/${WS}/tasks/${carriedId}/custom-fields/${ownerThird}`, { method: 'PUT', body: { value: 'owner here' } }))
+  const carriedHolds = await rowsOf(carriedId)
+  const dupCarried = await A(`/workspaces/${WS}/task-templates/duplicate/${carriedId}`, { method: 'POST', body: {} })
+  const dupCarriedId = (await sql`select id from tasks where list_id = ${THIRD_LIST} and title = ${`${CARRIED} (copy)`}`)[0]?.id ?? null
+  const dupCarriedHolds = await rowsOf(dupCarriedId)
+  chk(
+    carriedHolds?.[stageProject] === 'carried stage' && dupCarried.ok && !!dupCarriedId &&
+      JSON.stringify(dupCarriedHolds) === JSON.stringify({ [ownerThird]: 'owner here' }),
+    'and a task moved in from another project, still holding that project’s Stage, is duplicated without it: nothing goes into this project’s Stage of that name, while the Owner it has here is copied (read by SQL)',
+    `the moved task holds ${JSON.stringify(carriedHolds)}; duplicating it answered ${said(dupCarried)}; ${dupCarriedId ? `the copy holds ${JSON.stringify(dupCarriedHolds)}` : 'no copy was made'}`,
+  )
+
   // ══ USE TEMPLATE, WITH THE FORM FILLED IN ════════════════════════════════
   console.log('\n▶ Use Template, with the form filled in beside it')
   /*
@@ -867,7 +1061,8 @@ try {
    * form that sent every box would put an empty or default value over the
    * template's; the request is read off the wire, and the task by SQL.
    */
-  const SENT = ['assigneeIds', 'description', 'dueDate', 'labelIds', 'listId', 'priority', 'titleOverride']
+  // The typed tag goes by name (`labelsByName`), made by the server once the task is (`found-30-sep/refused-create-leaves-tags`).
+  const SENT = ['assigneeIds', 'description', 'dueDate', 'labelsByName', 'listId', 'priority', 'titleOverride']
   const sentKeys = mergedSent ? Object.keys(mergedSent).sort() : null
   chk(
     JSON.stringify(sentKeys) === JSON.stringify(SENT) && !!merged && merged.time_estimate === T4.timeEstimate
@@ -945,6 +1140,115 @@ try {
     'in a window 700 high, with the template chosen and the form filled in, Create task lies below the window’s edge and the modal scrolls to it: pressing it makes the task',
     `Create task's foot is ${shortLayout ? `${shortLayout.bottom}px down the modal in a window ${shortLayout.window} high` : 'nowhere (the modal had gone)'}; ` +
       `the template's route answered ${shortStatus ?? 'nothing'}; ${shortRows.length} task(s) so titled`,
+  )
+
+  // ══ A REFUSED CREATE LEAVES NO TAG ═══════════════════════════════════════
+  console.log('\n▶ found-30-sep/refused-create-leaves-tags — a refused create makes no tag')
+  /*
+   * Measured first on lane 5, three runs of a probe on the old build: a task
+   * from a template holding a tag the workspace did not have, refused for its
+   * task type (400), made no task and left the tag in the workspace — the
+   * template's route made its missing tags before `createTask` asked anything.
+   * And read: the modal made each typed tag (`POST /workspaces/:ws/labels`)
+   * before it sent the task. Now the tags go by name, and are made only once
+   * the task is. A task type that is not the list's is the refusal: a type
+   * chosen in the modal and deleted before Create is exactly that.
+   */
+  const tagsNamed = async (name) =>
+    Number((await sql`select count(*)::int as n from labels where workspace_id = ${WS} and lower(name) = lower(${name})`)[0]?.n ?? -1)
+  const tagsOn = async (title) =>
+    (await sql`select l.name from tasks t join task_label_assignments a on a.task_id = t.id join labels l on l.id = a.label_id
+               where t.list_id = ${LIST} and t.title = ${title}`).map((r) => r.name).sort()
+  const TPL_TAG = `template-only-tag-${TAG}`
+  const TAG_TPL_ID = must('make the template holding a new tag', await A(`/workspaces/${WS}/task-templates`, {
+    method: 'POST', body: { name: `Tagged ${TAG}`, payload: { title: `Tagged ${TAG}`, labels: [TPL_TAG] } },
+  }))?.id
+  if (!TAG_TPL_ID) throw new Error('the tagged template came back without an id')
+  const REFUSED_TPL = `Refused from a template ${TAG}`
+  const refusedTpl = await A(`/workspaces/${WS}/task-templates/${TAG_TPL_ID}/instantiate`, {
+    method: 'POST', body: { listId: LIST, titleOverride: REFUSED_TPL, taskTypeId: NOBODY },
+  })
+  const leftByTemplate = await tagsNamed(TPL_TAG)
+  const refusedTplMade = (await madeTasks(REFUSED_TPL)).length
+  const MADE_TPL = `Made from the tagged template ${TAG}`
+  const madeTpl = await A(`/workspaces/${WS}/task-templates/${TAG_TPL_ID}/instantiate`, { method: 'POST', body: { listId: LIST, titleOverride: MADE_TPL } })
+  const madeTplTags = await tagsOn(MADE_TPL)
+  chk(
+    refusedTpl.status === 400 && refusedTplMade === 0 && leftByTemplate === 0
+      && madeTpl.status === 201 && JSON.stringify(madeTplTags) === JSON.stringify([TPL_TAG]),
+    'a task from a template refused for its task type (400) makes no task and adds none of the template’s tags to the workspace, while made, the same template brings its tag (read by SQL)',
+    `refused, it answered ${said(refusedTpl)}, made ${refusedTplMade} task(s) and left ${leftByTemplate} tag(s) named ${TPL_TAG}; ` +
+      `made, it answered ${said(madeTpl)}, tagged ${JSON.stringify(madeTplTags)}`,
+  )
+
+  // Tags by name through POST /tasks: one the workspace holds, typed in another case, and one it does not.
+  const HELD_TAG = `held-tag-${TAG}`
+  must('make the tag the workspace holds', await A(`/workspaces/${WS}/labels`, { method: 'POST', body: { name: HELD_TAG, color: '#3366ff' } }))
+  const NEW_TAG = `new-tag-${TAG}`
+  const BY_NAME = `Tagged by name ${TAG}`
+  const byName = await A('/tasks', {
+    method: 'POST', body: { listId: LIST, title: BY_NAME, labelsByName: [{ name: HELD_TAG.toUpperCase() }, { name: NEW_TAG, color: '#ff3366' }] },
+  })
+  const byNameTags = await tagsOn(BY_NAME)
+  const heldCount = await tagsNamed(HELD_TAG)
+  const NEVER_TAG = `never-made-${TAG}`
+  const REFUSED_PLAIN = `Refused plain ${TAG}`
+  const refusedPlain = await A('/tasks', {
+    method: 'POST', body: { listId: LIST, title: REFUSED_PLAIN, taskTypeId: NOBODY, labelsByName: [{ name: NEVER_TAG }] },
+  })
+  const neverCount = await tagsNamed(NEVER_TAG)
+  chk(
+    byName.status === 201 && JSON.stringify(byNameTags) === JSON.stringify([HELD_TAG, NEW_TAG].sort()) && heldCount === 1
+      && refusedPlain.status === 400 && neverCount === 0 && (await madeTasks(REFUSED_PLAIN)).length === 0,
+    'POST /tasks takes tags by name — the one the workspace holds found whatever its case, the other made — and a create refused for its task type (400) makes none (read by SQL)',
+    `made, it answered ${said(byName)}, tagged ${JSON.stringify(byNameTags)} with ${heldCount} tag(s) named ${HELD_TAG}; ` +
+      `refused, it answered ${said(refusedPlain)} and left ${neverCount} tag(s) named ${NEVER_TAG}`,
+  )
+
+  /*
+   * THE MODAL. A task type made for this, chosen in the modal, and deleted
+   * before Create: the create is refused (400) with the reason on a toast, and
+   * the tag typed — and, from a template, the template's own — is nowhere.
+   */
+  const refusedInModal = async (label, typedTag, templateId) => {
+    const typeId = must(`make the task type for ${label}`, await A(`/workspaces/${WS}/task-types`, { method: 'POST', body: { name: `Type ${label} ${TAG}` } }))?.id
+    if (!typeId) throw new Error(`the task type for ${label} came back without an id`)
+    await openModal(page)
+    await chooseList(page)
+    if (templateId) {
+      await openMenu(page)
+      await openSub(page, 'use')
+      await page.getByTestId(`quick-create-tpl-use-${templateId}`).click({ timeout: 5000 }).catch(() => {})
+      await waitUntil(async () => (await readText(trigger, { timeoutMs: 1000 })).includes(`Tagged ${TAG}`), { timeoutMs: 5000 })
+    }
+    const title = `${label} ${TAG}`
+    await titleBox(page).fill(title, { timeout: 5000 }).catch(() => {})
+    await page.getByTestId('quick-create-tag-input').fill(typedTag, { timeout: 5000 }).catch(() => {})
+    await page.getByTestId('quick-create-tag-input').press('Enter', { timeout: 5000 }).catch(() => {})
+    const chose = await page.getByTestId('quick-create-task-type').selectOption(typeId, { timeout: 10_000 }).then(() => true, () => false)
+    const gone = await A(`/workspaces/${WS}/task-types/${typeId}`, { method: 'DELETE' })
+    await waitUntil(() => page.getByTestId('quick-create-submit').isEnabled().catch(() => false), { timeoutMs: 8000 })
+    await page.getByTestId('quick-create-submit').click({ timeout: 8000 }).catch(() => {})
+    let toast = ''
+    await waitUntil(async () => (toast = (await toasts(page)).find((s) => /does not belong/i.test(s)) ?? '').length > 0, { timeoutMs: 15_000 })
+    return { chose, deleted: gone.status >= 200 && gone.status < 300, toast, made: (await madeTasks(title)).length, typed: await tagsNamed(typedTag) }
+  }
+  const plainTag = `typed-refused-${TAG}`
+  const plain = await refusedInModal('Refused in the modal', plainTag, null)
+  chk(
+    plain.chose && plain.deleted && plain.toast.length > 0 && plain.made === 0 && plain.typed === 0,
+    'in the modal, a create refused after a tag was typed (its task type gone, 400) says why, makes no task, and adds the typed tag nowhere (read by SQL)',
+    `the type was chosen ${plain.chose} and deleted ${plain.deleted}; the toast read ${JSON.stringify(plain.toast || (await toasts(page)))}; ` +
+      `${plain.made} task(s) made; ${plain.typed} tag(s) named ${plainTag}`,
+  )
+  const fromTplTag = `typed-beside-template-${TAG}`
+  const beside = await refusedInModal('Refused beside a template', fromTplTag, TAG_TPL_ID)
+  const templateTagLeft = await tagsNamed(TPL_TAG)
+  chk(
+    beside.chose && beside.deleted && beside.toast.length > 0 && beside.made === 0 && beside.typed === 0 && templateTagLeft === 1,
+    'and with a template chosen, the refused create adds neither the tag typed beside it nor the template’s own a second time (read by SQL)',
+    `the type was chosen ${beside.chose} and deleted ${beside.deleted}; the toast read ${JSON.stringify(beside.toast || (await toasts(page)))}; ` +
+      `${beside.made} task(s) made; ${beside.typed} tag(s) named ${fromTplTag}; ${templateTagLeft} named ${TPL_TAG} (one, made with the task above)`,
   )
 
   // ══ 23. A MEMBER, WITHOUT template.manage ════════════════════════════════

@@ -132,9 +132,11 @@ try {
   const v = await track(member, inView)
   chk(
     g.start === 201 && g.stopped && g.manual === 201 && g.made === 2 && g.running === 0
-      && gNot.start === 403 && gNot.manual === 403 && gNot.made === 0
+      // 404: a task not shared with the guest is not theirs to open, so it is
+      // answered as one that is not there (`found-30-sep/private-task-reads-say-403`).
+      && gNot.start === 404 && gNot.manual === 404 && gNot.made === 0
       && v.start === 201 && v.stopped && v.manual === 201 && v.made === 2,
-    'a guest starts, stops and logs time on a task shared with them at View — not on one that is not (403, none made) — and a member of a view-only space does as the guest does',
+    'a guest starts, stops and logs time on a task shared with them at View — not on one that is not (404, as for a task that is not there; none made) — and a member of a view-only space does as the guest does',
     `guest, shared ${JSON.stringify(g)}; guest, not shared ${JSON.stringify(gNot)}; view-only member ${JSON.stringify(v)}`,
   )
 

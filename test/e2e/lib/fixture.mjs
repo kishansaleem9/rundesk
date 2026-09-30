@@ -72,11 +72,15 @@ import { signInApi } from './signin.mjs'
  *     gave no body: a route that reads a body refuses a request without one.
  *   · `dataOrBody: true` — `data` is the whole parsed body when it carries no
  *     `data`, so a refusal's `{ data: null, error }` reads as `data.error`.
+ *   · `headers: { name: value }` — sent with every call, beside the token: a
+ *     header the web sends on its own writes that a rule reads, so a check of
+ *     that rule through the API names it as the web does (`task-values`: the
+ *     writer's zone, `x-time-zone`).
  */
-export function apiAs(base, { noAnswer = 'status', emptyBodyOn = [], dataOrBody = false } = {}) {
+export function apiAs(base, { noAnswer = 'status', emptyBodyOn = [], dataOrBody = false, headers: sent = {} } = {}) {
   return (token) => async (route, init = {}) => {
     const body = init.body ?? (emptyBodyOn.includes(init.method) ? {} : undefined)
-    const headers = token ? { authorization: `Bearer ${token}` } : {}
+    const headers = { ...sent, ...(token ? { authorization: `Bearer ${token}` } : {}) }
     if (body) headers['content-type'] = 'application/json'
     let res
     try {
