@@ -76,8 +76,13 @@ const EMBEDDED_LIST = `Launch tasks ${TAG}`
 const text = (t) => ({ type: 'text', text: t })
 const para = (t) => ({ type: 'paragraph', content: [text(t)] })
 const cell = (type, t) => ({ type, content: [para(t)] })
-/** The doc as its editor writes it: every block the public page registers (A5.8). */
-const CONTENT = {
+/**
+ * The doc as its editor writes it: every block the public page registers
+ * (A5.8). The embed names a real list, as one embedded from the editor does:
+ * a view that reads the list (the signed-in one) then asks the API for it,
+ * and one that names no list asks for nothing (pdp-13 went unproven so).
+ */
+const contentFor = (listId) => ({
   type: 'doc',
   content: [
     { type: 'heading', attrs: { level: 2 }, content: [text(HEADING)] },
@@ -91,9 +96,9 @@ const CONTENT = {
       ],
     },
     { type: 'callout', content: [para(CALLOUT)] },
-    { type: 'listEmbed', attrs: { listId: null, listName: EMBEDDED_LIST } },
+    { type: 'listEmbed', attrs: { listId, listName: EMBEDDED_LIST } },
   ],
-}
+})
 
 /**
  * What the page draws of the doc, read in the page: each block's text, only
@@ -137,6 +142,12 @@ try {
   if (madeWs.status >= 300 || !madeWs.data?.id) throw new Error(`could not make a workspace: ${said(madeWs)}`)
   const WS = madeWs.data.id
   workspacesMade.push(WS)
+
+  /* The list the doc embeds, in the suite's own workspace. */
+  const [space] = await sql`insert into spaces (workspace_id, name) values (${WS}, ${`Space ${TAG}`}) returning id`
+  const [project] = await sql`insert into projects (space_id, name) values (${space.id}, ${`Project ${TAG}`}) returning id`
+  const [list] = await sql`insert into lists (project_id, name) values (${project.id}, ${EMBEDDED_LIST}) returning id`
+  const CONTENT = contentFor(list.id)
 
   const madeDoc = await A(`/workspaces/${WS}/docs`, { method: 'POST', body: { title: TITLE, icon: ICON } })
   if (madeDoc.status >= 300 || !madeDoc.data?.id) throw new Error(`could not make the doc: ${said(madeDoc)}`)
@@ -318,6 +329,9 @@ try {
   }
   if (sql) {
     await sql`delete from docs where title like ${'%' + TAG}`.catch(() => {})
+    await sql`delete from lists where name like ${'%' + TAG}`.catch(() => {})
+    await sql`delete from projects where name like ${'%' + TAG}`.catch(() => {})
+    await sql`delete from spaces where name like ${'%' + TAG}`.catch(() => {})
     await sql.end({ timeout: 5 }).catch(() => {})
   }
   await browser.close().catch(() => {})

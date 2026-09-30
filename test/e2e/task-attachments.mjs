@@ -40,7 +40,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
-import { waitUntil } from './lib/wait.mjs'
+import { waitUntil, waitForCount } from './lib/wait.mjs'
 import { storeBase, storeRequests } from './lib/store.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
@@ -160,6 +160,22 @@ try {
   if (!(await waitUntil(async () => (await cards.count()) === SEEDED, { timeoutMs: 20_000 }))) {
     throw new Error(`the attachments panel drew ${await cards.count()} cards, not ${SEEDED}`)
   }
+  /*
+   * AND THEN FOR THE PANEL'S OWN LIST, BECAUSE IT MOVES EVERY CARD
+   * (`found-30-sep/task-attachments-flaky`). The panel first draws the rows the
+   * task itself carries. Those have no url and no image type, so the cards have
+   * no links and a type tile for a thumbnail. When the panel's own
+   * `GET /tasks/:id/attachments` answers, it draws them again, with their links,
+   * and puts the upload and link form above them, 175 px lower. Measured on lane
+   * 4, the list answered 180–370 ms after the tab was pressed in 7 runs of 20,
+   * after the pointer had reached the first card. The card moved from under it
+   * and its actions faded back to 0. When the list answered between the two box
+   * reads below, the card's box was read at y 600 and the cluster's at 782.
+   * Only that list gives a card its links, so this section reads once every card
+   * has its Download link. Not a throw: a list that never answers leaves the
+   * checks below to fail in their own words.
+   */
+  await waitForCount(cards.getByTestId('attachment-download'), SEEDED, { timeoutMs: 20_000 })
 
   const header = page.getByTestId('task-attachments-header')
   // DRAWN: the header is shown, and then its innerText leaves out a count hidden inside it.
@@ -201,10 +217,13 @@ try {
   const opacityOf = (loc) => loc.evaluate((el) => Number(getComputedStyle(el).opacity))
   const before = await opacityOf(firstActions)
   await firstCard.hover({ timeout: 8000 }).catch(() => {})
-  const shown = await waitUntil(async () => (await opacityOf(firstActions)) > 0.9, { timeoutMs: 8_000 })
+  // The value the check expects, waited for; then read once more, and that read
+  // decides. The wait's own answer decided before, and a poll that caught the
+  // cluster mid-fade as its card moved away passed on a card nobody hovered.
+  await waitUntil(async () => (await opacityOf(firstActions)) > 0.9, { timeoutMs: 8_000 })
   const after = await opacityOf(firstActions)
   chk(
-    before < 0.1 && shown,
+    before < 0.1 && after > 0.9,
     `the actions are invisible at rest (opacity ${before}) and come up on hover (opacity ${after})`,
     before >= 0.1
       ? `the actions are already at opacity ${before} before the pointer arrives — they are not hover actions, ` +
@@ -215,7 +234,9 @@ try {
   /*
    * GEOMETRY: the cluster belongs to ITS card. A cluster measured outside the
    * card's box would still be "visible" and still be wired to the right id
-   * while pointing at the wrong row on screen.
+   * while pointing at the wrong row on screen. The two boxes are two reads, so
+   * they are taken after the panel's own list has moved the cards (above), not
+   * on either side of it.
    */
   // `boundingBox()` THROWS when the locator matches nothing — it waits for the
   // element first — and returns null only for one that exists with no box. Every
@@ -265,7 +286,17 @@ try {
   }
 
   const firstRow = seededRows.find((r) => (r.fileName ?? '').includes('file-0-'))
-  const download = page.getByTestId('attachment-download').first()
+  /*
+   * THIS attachment's card, found by its id rather than by being first. These
+   * checks read the first card's links and compared them with file-0's row, as
+   * though the cards came in the order they were linked. They come in the order
+   * the API lists them, and it lists them unordered (no ORDER BY; the table has
+   * no index on the task). Once autovacuum had run on lane 4, 9 seedings in 15
+   * came back in another order, the first card was file-1 or file-2, and these
+   * three checks failed together (`found-30-sep/task-attachments-flaky`).
+   */
+  const firstRowCard = page.locator(`[data-testid="attachment-card"][data-attachment-id="${firstRow?.id}"]`)
+  const download = firstRowCard.getByTestId('attachment-download')
   // A chk MESSAGE is an argument, so it is evaluated on a pass as well as a fail:
   // both reads are bounded and caught up here rather than inside the call. The
   // anchor is a locator held in a variable — the shape rule six could not see
@@ -279,7 +310,7 @@ try {
       `the attachment's own url is "${firstRow?.url}"`,
   )
 
-  const expand = page.getByTestId('attachment-expand').first()
+  const expand = firstRowCard.getByTestId('attachment-expand')
   // The same shape, and the same reason: the message runs either way, so these
   // reads are bounded and caught above the call, off a locator held in a variable.
   const expandTarget = await expand.getAttribute('target', { timeout: 8000 }).catch(() => null)

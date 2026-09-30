@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 371 items, 47 open, 8 partly fixed, 316 closed, counted from this file's headings on 30 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 374 items, 49 open, 8 partly fixed, 317 closed, counted from this file's headings on 30 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1625,6 +1625,39 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 
 *To close:* read `ok` (or `must`) in those 137 conditions, or bind those suites with `noAnswer: 'throw'`. Add a gate that refuses a status compared with `<` and no lower bound, with a planted case and a mutation.
 
+### `found-30-sep/attachments-tab-draws-twice` — open (visible bug, small; found closing `found-30-sep/task-attachments-flaky`)
+
+**The Attachments tab draws its cards from the task's own rows, then again from its list, and every card jumps 175 px**
+
+*Evidence, 30 September, lane 4:*
+- `AttachmentsPanel` draws `probe.data ?? inline`, and `inline` is the task payload's raw rows (`contentType`, `sizeBytes`, `uploadedById`, no `url`), typed as `Attachment[]`, which they are not.
+- Until the panel's own list answers, each card shows a "PNG" tile for its image, "—" for its size, and no Download or Expand. In the timed runs the list answered 80–720 ms after the tab was pressed. The exception is when it had already answered for the Overview, whose description reads the same list under the same query key (`descriptionAssets`); then the tab draws once.
+- When `GET /tasks/:id/attachments` answers, the cards are drawn again and the upload and link form appears above them. Every card moves 175 px down and grows from 74 to 78 px.
+- A pointer resting on a card is left on the form, and the card's actions fade out.
+- `task-attachments` failed on it 10 runs in 29 before its wait (hover 9, position 1).
+
+*To close:* draw the cards once, from one shape, and keep the form from moving cards already drawn. Check that the first card's box does not change after it is first drawn, and that its first draw has its links.
+
+### `found-30-sep/attachments-unordered` — open (visible bug, small; found closing `found-30-sep/task-attachments-flaky`)
+
+**A task's attachments come back in whatever order Postgres finds them**
+
+*Evidence, 30 September, lane 4:*
+- `listAttachments` and `getTask`'s attachments select from `task_attachments` with no ORDER BY, and the table has no index on `task_id`. Both are a sequential scan in heap order.
+- Each pooled connection inserts into its own target page. So once autovacuum has freed space, three files linked in a row land on three pages.
+- 9 seedings of three links in 15 came back out of order, for example file-1, file-2, file-0 from heap (0,3), (5,35), (8,5).
+- The panel shows them in that order, so a new file can land first or in the middle.
+
+*To close:* find out which order ClickUp lists a task's attachments in and give both reads that order. Check it with files written out of heap order.
+
+### `found-30-sep/attachment-card-names-uploader-by-id` — open (visible bug, small; found closing `found-30-sep/task-attachments-flaky`)
+
+**An attachment card names its uploader by user id**
+
+*Evidence, 30 September, lane 4:* `listAttachments` returns `uploadedBy: row.uploadedById`, and the card draws `` `${formatBytes(a.fileSize)} · ${a.uploadedBy}` ``. So a card reads "1.0 KB · 978243e1-64ba-4709-b874-4ea6228b5ed7", which is the admin's id (`diag-cardtext.log`).
+
+*To close:* hand back the uploader's name, or draw it from the members the page already holds. Check that the card shows a name.
+
 ### `found-30-sep/template-save-dialog-says-admin-only` — open (visible bug, small; found closing `ledger-rows/row-1874`)
 
 **The Template Center's save dialog says "(admin only)", in all four locales, though the route asks `template.manage`**
@@ -1719,7 +1752,7 @@ Measured first, on lane 5, in a browser signed in nowhere: the heading was empty
 
 Checks:
 - `public-doc-page` is new, with 12 checks and nothing stubbed but one failure the browser answers on purpose, registered in CI (245 in `postgres-harnesses`). It opens a doc's link signed in nowhere and reads the title, the date, the icon, the words and the blocks the page registers (a ticked to-do, a table, a callout and an embedded list's name). Opening the link asks the API for nothing it refuses, and the page is read-only. A link never made, a link turned off, and an archived doc's link each say "Doc not found". Sharing again makes a new link and the old one stays closed. A 500 says the doc could not be loaded. Before, 5/12 on lane 1's build of 29 September: the six drawing checks and the failure's sentence failed, and nothing asked for was refused only because nothing was drawn. With the envelope read and the embed still live, the blocks check failed on lane 5 (10 of the first 11). After, 12/12 on lane 5, twice: before and after its page read was reshaped for the text-reads gate.
-- `pdp-1..13` are new: each names the check it reddens (the envelope read as the doc, the heading, the date, the icon, a block unregistered, a page that takes typing, a failure called a revoked link and a 404 called a failure, a link turned off that stays, an archived doc that opens, a new link that is the old one, a lookup that ignores the slug, and the live embed mounted again). Against a 12/12 baseline on lane 1, eleven redden the check they name at `77aed0c`, and `pdp-3` at `73c520c`: at `77aed0c` it reddened nothing, because the doc was written in the same second as the page drew "now", and the suite now dates its doc in the past. `pdp-13` reddens the blocks check but not the one it names, at either commit: the suite's embed names no list, so even the live view asks the API for nothing, and "asks the API for nothing it refuses" cannot fail. (The refused requests are also read last in the section now, after the network has gone quiet.) The embed is to name a real list of the suite's own, and `pdp-13` to be measured again.
+- `pdp-1..13` are new: each names the check it reddens (the envelope read as the doc, the heading, the date, the icon, a block unregistered, a page that takes typing, a failure called a revoked link and a 404 called a failure, a link turned off that stays, an archived doc that opens, a new link that is the old one, a lookup that ignores the slug, and the live embed mounted again). Against a 12/12 baseline on lane 1, eleven redden the check they name at `77aed0c`, and `pdp-3` at `73c520c`: at `77aed0c` it reddened nothing, because the doc was written in the same second as the page drew "now", and the suite now dates its doc in the past. `pdp-13` reddened the blocks check but not the one it names, at either commit: the suite's embed named no list, so even the live view asked the API for nothing, and "asks the API for nothing it refuses" could not fail. The embed now names a list of the suite's own, and `pdp-13` reddens its check with the request it makes as nobody, `401 /api/v1/tasks/list/<the list>` (10/12, measured on lane 7 with a bundle built with the patch and the source restored, sha1 checked). The refused requests are read last in the section, after the network has gone quiet.
 - Regression on lanes 5 and 7: the ten suites that read, share, archive or route to docs, all green, 170 checks (doc-boundaries 17, doc-level-controls 7, doc-write-levels 5, doc-trash-level 5, menu-offers 9, command-palette 43, doc-import 16, doc-task-links 13, stale-chunk-recovery 27, addressability-live 28).
 
 ### `found-30-sep/public-cdn-url-makes-every-object-public` — open (security, small; found closing `resume-defects/resume-7`)
@@ -1775,13 +1808,25 @@ Checks:
 
 Not measured here: whether R2 itself answers a non-ASCII metadata value RFC 2047-encoded, as S3 does. If it does, a clip titled with an accent would read back encoded in the library; the product reads `head.Metadata?.title` as it is.
 
-### `found-30-sep/task-attachments-flaky` — open (test tooling, small; found closing `resume-defects/resume-7`)
+### `found-30-sep/task-attachments-flaky` — **closed** (test tooling, small; found closing `resume-defects/resume-7`)
 
 **`task-attachments` fails a different check on some runs, on the main tree's build as on others**
 
 *Evidence, 30 September, lane 4:* six runs gave 16, 14 and 17 of 17 on the clip build, and 17, 16 and 17 on the main tree's. The failing checks differed each time: a card's actions at rest and on hover, a card's position, and once three anchor checks of a linked file.
 
 *To close:* find what each failing check reads too early, and make it wait for what it reads, as the other suites' fixed waits were converted.
+
+*Closed, 30 September* (by an agent on lane 4; merged and run again here). Three checks read too early, or read the wrong card. Each cause was measured on lane 4, with the bundle built from `77aed0c`.
+- The panel draws its cards twice. First it draws the rows the task itself carries, which have no url and no image type. When its own `GET /tasks/:id/attachments` answers, it draws them again, with their links, and puts the upload and link form above them. Every card moves 175 px down.
+- In 7 of 20 timed runs the list answered 180–370 ms after the tab was pressed, after the pointer had reached the first card. The card moved from under the pointer and its actions faded back to 0: "hovering left them at opacity 0". The section now waits until every card has its Download link, which only that list gives it.
+- The position check read the card's box, then the cluster's, in two calls. When the list landed between them, the card was read at y 601 and the cluster at 782. Holding the list until just after the first read reddened it in 2 runs of 2. Both boxes are now read after the move.
+- The hover check decided on the wait's answer. In a timed replica, one poll caught the cluster above 0.9 as its card moved away, and the check passed with "(opacity 0.0312413)" in its sentence. It now reads the opacity again after the wait, and that read decides.
+- The three anchor checks read the first card and compared it with file-0's row. The API lists a task's files with no ORDER BY, and the table has no index on the task. Once autovacuum had run, 9 seedings in 15 came back in another order, so file-1 or file-2 came first. The checks now read file-0's own card, found by its id.
+- Before, the suite as committed failed 15 runs in 29: the hover check 9 times, the anchor trio 6 times, the position check once. After, the converted suite was 17/17 in 34 runs of 34, and so was a copy of it that logged the order and the timing, in 10 more. Ten of the 34 alternated with the committed suite, which failed 5 of its 10 beside them. The check count and every sentence are unchanged.
+- Each of the twelve `tat-*` patches reddens the check it names against the converted suite. `tat-9`..`tat-12` change the API, so they ran on a private API built from the same tree over lane 4's database and store. Lane 4's own API was not restarted.
+
+Found while measuring it: `found-30-sep/attachments-tab-draws-twice`, `found-30-sep/attachments-unordered` and `found-30-sep/attachment-card-names-uploader-by-id`.
+- Merged here and run again: 17/17 in four runs (three on lane 5, one on lane 7).
 
 ### `found-29-sep/priority-readd-answers-a-ticked-off-row` — **closed** (visible bug, small; found closing `ledger-rows/row-850`)
 
