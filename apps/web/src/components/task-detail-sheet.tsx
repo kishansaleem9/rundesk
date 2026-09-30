@@ -17,7 +17,11 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
   cn,
   toast,
@@ -915,6 +919,62 @@ function TaskTypePicker({
   )
 }
 
+/**
+ * Adding this task to somebody's Personal Priorities, with the toast that says
+ * whose list it went on and links there.
+ *
+ * ONE IMPLEMENTATION FOR THE THREE WAYS IN: the prompt after assigning, the
+ * Priority field, and the task menu's Add to › Personal Priorities
+ * (`ledger-rows/row-845`). Your own list takes your own add, and a colleague's
+ * takes the colleague route (`ledger-rows/row-850`). `onDone` is the caller's
+ * part, such as answering the prompt; the toast is everybody's.
+ */
+function usePriorityAdds(workspaceId: string | undefined, taskId: string | null) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const currentUserId = useAuthStore((s) => s.user?.id) ?? ''
+  const actions = usePriorityActions(workspaceId, currentUserId)
+  const addMine = (onDone?: () => void) => {
+    if (!taskId) return
+    actions.add.mutate(
+      { taskId },
+      {
+        onSuccess: () => {
+          onDone?.()
+          // The toast links to where the task went. "Added" with no way to look
+          // is a claim the reader has to take on trust.
+          toast.success(t('planner.addedToPriorities'), {
+            action: workspaceId
+              ? {
+                  label: t('planner.openPriorities'),
+                  onClick: () => navigate({ to: `/app/${workspaceId}/calendar` }),
+                }
+              : undefined,
+          })
+        },
+      },
+    )
+  }
+  const addTheirs = (them: { userId: string; name: string | null }, onDone?: () => void) => {
+    if (!taskId) return
+    actions.addFor.mutate(
+      { userId: them.userId, taskId },
+      {
+        onSuccess: () => {
+          onDone?.()
+          toast.success(t('planner.addedToTheirPriorities', { name: them.name ?? t('taskDetail.userFallback') }), {
+            action: {
+              label: t('planner.openPriorities'),
+              onClick: () => openPersonPanel(them.userId),
+            },
+          })
+        },
+      },
+    )
+  }
+  return { addMine, addTheirs, pending: actions.add.isPending || actions.addFor.isPending, currentUserId }
+}
+
 export function TaskDetailSheet({
   taskId: taskIdProp,
   open,
@@ -945,6 +1005,18 @@ export function TaskDetailSheet({
   const { t } = useTranslation()
   const { formatDate } = useDateFormat()
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
+  /*
+   * `ledger-rows/row-845` — the menu's Add to › Personal Priorities: whose
+   * lists it offers (you first, a guest only themself) and the add itself,
+   * shared with the prompt and the Priority field.
+   */
+  const { role: menuViewerRole } = useWorkspaceRole(workspaceId)
+  const menuMembersQuery = useQuery({
+    queryKey: ['workspace-members', workspaceId],
+    queryFn: () => api<Array<{ userId: string; displayName: string; email: string }>>(`/workspaces/${workspaceId}/members`),
+    enabled: Boolean(workspaceId),
+  })
+  const menuPriorityAdds = usePriorityAdds(workspaceId, taskId)
   /*
    * §V2-S06 — a `?comment=` in the URL means Comments, not Overview. Keyed on
    * the comment id so following a second saved comment re-opens the tab even if
@@ -1954,6 +2026,55 @@ export function TaskDetailSheet({
                         />
                         {isFavorited ? t('favorites.remove') : t('favorites.add')}
                       </DropdownMenuItem>
+                      {/*
+                        `ledger-rows/row-845` — ClickUp's "+ Add to". From its
+                        help centre: "click Add to, and select Personal
+                        Priorities. You can then search or select a user". Its
+                        other entry, "Add to another List", needs a task to live
+                        in two lists, which is `commit-log/log-713a611-1`, and is
+                        not offered until it can be done.
+                      */}
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger data-testid="task-menu-add-to">
+                          <ListPlus className="mr-2 h-4 w-4" />
+                          {t('taskDetail.addTo')}
+                        </DropdownMenuSubTrigger>
+                        {/*
+                          ONE LEVEL, NOT TWO. ClickUp nests Personal Priorities
+                          under Add to, and a third menu level was built that
+                          way first. At the sheet's right edge it had no room
+                          and flipped over its parents. About 200 ms after it
+                          opened, the pointer read as back on the main menu, and
+                          both submenus closed with nothing chosen (measured on
+                          lane 7). So the people are listed under a Personal
+                          Priorities heading inside Add to.
+                        */}
+                        <DropdownMenuSubContent className="max-h-80 w-60 overflow-y-auto">
+                          <DropdownMenuLabel data-testid="task-menu-add-to-priorities" className="text-[11px] text-muted-foreground">
+                            {t('planner.personalPriorities')}
+                          </DropdownMenuLabel>
+                          {priorityPeople({
+                            members: menuMembersQuery.data ?? [],
+                            currentUserId: menuPriorityAdds.currentUserId,
+                            viewerRole: menuViewerRole,
+                          }).map((m) => {
+                            const name = m.displayName || m.email
+                            const mine = m.userId === menuPriorityAdds.currentUserId
+                            return (
+                              <DropdownMenuItem
+                                key={m.userId}
+                                data-testid={`task-menu-priority-person-${m.userId}`}
+                                disabled={menuPriorityAdds.pending}
+                                onSelect={() =>
+                                  mine ? menuPriorityAdds.addMine() : menuPriorityAdds.addTheirs({ userId: m.userId, name })
+                                }
+                              >
+                                <span className="truncate">{mine ? t('planner.priorityPersonYou', { name }) : name}</span>
+                              </DropdownMenuItem>
+                            )
+                          })}
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
                       <DropdownMenuSeparator />
                       {/*
                         §V2-08 — "Send email to task". The address has routed to
@@ -2404,7 +2525,8 @@ function OverviewPanel({
   const currentUserId = useAuthStore((s) => s.user?.id) ?? ''
   const { role: viewerRole } = useWorkspaceRole(workspaceId)
   const { data: myPriorities } = usePriorities(workspaceId, currentUserId)
-  const priorityActions = usePriorityActions(workspaceId, currentUserId)
+  // The add with its toast, shared with the Priority field and the task menu (`ledger-rows/row-845`).
+  const priorityAdds = usePriorityAdds(workspaceId, taskId)
   /*
    * Whose priorities the open prompt offers: yours, or the colleague you just
    * assigned, by name (`ledger-rows/row-850`). Null while nothing is offered.
@@ -2907,49 +3029,17 @@ function OverviewPanel({
    * (`found-29-sep/priority-field-adds-to-nobody-else`), and a prompt about a
    * colleague stays open when you add the task to your own.
    */
-  const addToMyPriorities = () => {
-    priorityActions.add.mutate(
-      { taskId },
-      {
-        onSuccess: () => {
-          setPriorityPrompt((p) => (p && p.userId !== currentUserId ? p : null))
-          // The toast links to where the task went. "Added" with no way to look
-          // is a claim the reader has to take on trust.
-          toast.success(t('planner.addedToPriorities'), {
-            action: workspaceId
-              ? {
-                  label: t('planner.openPriorities'),
-                  onClick: () => navigate({ to: `/app/${workspaceId}/calendar` }),
-                }
-              : undefined,
-          })
-        },
-      },
-    )
-  }
+  const addToMyPriorities = () =>
+    priorityAdds.addMine(() => setPriorityPrompt((p) => (p && p.userId !== currentUserId ? p : null)))
 
   /*
    * `ledger-rows/row-850` — the colleague's half. The toast says whose list the
    * task went on, and its link opens that person: their panel starts on their
-   * priorities, where the task now says who added it.
+   * priorities, where the task now says who added it. Only the prompt about
+   * THEM is answered; one about somebody else stays.
    */
-  const addToTheirPriorities = (them: { userId: string; name: string | null }) => {
-    priorityActions.addFor.mutate(
-      { userId: them.userId, taskId },
-      {
-        onSuccess: () => {
-          // Only the prompt about THEM is answered; one about somebody else stays.
-          setPriorityPrompt((p) => (p && p.userId !== them.userId ? p : null))
-          toast.success(t('planner.addedToTheirPriorities', { name: them.name ?? t('taskDetail.userFallback') }), {
-            action: {
-              label: t('planner.openPriorities'),
-              onClick: () => openPersonPanel(them.userId),
-            },
-          })
-        },
-      },
-    )
-  }
+  const addToTheirPriorities = (them: { userId: string; name: string | null }) =>
+    priorityAdds.addTheirs(them, () => setPriorityPrompt((p) => (p && p.userId !== them.userId ? p : null)))
 
   const removeAssignee = useMutation({
     mutationFn: (userId: string) => api(`/tasks/${taskId}/assignees/${userId}`, { method: 'DELETE' }),
@@ -3400,7 +3490,7 @@ function OverviewPanel({
                           type="button"
                           role="menuitem"
                           data-testid={`priority-person-${m.userId}`}
-                          disabled={priorityActions.add.isPending || priorityActions.addFor.isPending}
+                          disabled={priorityAdds.pending}
                           onClick={() => {
                             setPriorityPeopleOpen(false)
                             if (mine) addToPriorities()
@@ -3604,7 +3694,7 @@ function OverviewPanel({
                 type="button"
                 size="sm"
                 data-testid="priority-prompt-add"
-                disabled={priorityActions.add.isPending || priorityActions.addFor.isPending}
+                disabled={priorityAdds.pending}
                 onClick={addToPriorities}
                 className="h-7 px-2 text-[11px]"
               >

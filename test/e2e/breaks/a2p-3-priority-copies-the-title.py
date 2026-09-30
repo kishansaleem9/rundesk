@@ -29,13 +29,21 @@
 # rail read below needs the navigation the click performs, so the reorder costs
 # nothing and this patch reddens the one check it is about.
 #
+# RE-AIMED, 30 SEPTEMBER. The add moved into `usePriorityAdds`, which the
+# prompt, the Priority field and the task menu share (`ledger-rows/row-845`).
+# That helper holds the task's id, not its title. So the patch passes the id as
+# a line of text: the same mistake, a string where the task belongs. The row
+# again points at nothing, and the rail now shows the id where the title was, so
+# "and THAT task is in the Priorities rail" can redden beside the check named
+# here.
+#
 # Reddens: assign-to-priorities: "the task is on your priorities, by id — not a copy of its title"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
-a = """    priorityActions.add.mutate(
+a = """    actions.add.mutate(
       { taskId },"""
-b = """    priorityActions.add.mutate(
-      detail.title,"""
+b = """    actions.add.mutate(
+      String(taskId),"""
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

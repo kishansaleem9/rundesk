@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 354 items, 38 open, 7 partly fixed, 309 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 354 items, 37 open, 7 partly fixed, 310 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -5401,13 +5401,29 @@ FAILs. video-regression 94/94.
 
 *To close:* Research how ClickUp's planner sidebar 'Add a new section' works (custom section contents and rule). Store custom sections next to railSections and render them in the planner rail.
 
-### `ledger-rows/row-845` — open, medium
+### `ledger-rows/row-845` — **closed**, medium
 
 **Task menu 'Add to ›' — absent, held only because no frame opens the submenu**
 
 *Evidence:* reaudit.md:845 and 2905-2936. Task menu testids (task-detail-sheet.tsx:1619-1788) run from description-history to delete, with no add-to. Parts that exist: tasks.list_id is a single notNull FK (tasks.ts:17), so tasks-in-multiple-lists would need a join table; sprint_tasks join (sprints.ts:22); user_priorities (priorities.ts:32); favorites.
 
 *To close:* Research ClickUp's 'Add to' submenu contents and build to them. If it includes a list (tasks in multiple lists), that is a new join table plus list-read changes. Items like sprint or priorities reuse existing tables.
+
+*Researched, 29 September* (help centre excerpts: "Task settings menu", "Use Personal Priorities on tasks", "Tasks in Multiple Lists"). The task menu's "+ Add to" has two entries:
+- "Personal Priorities": "click the ellipsis icon in the upper-right corner, click Add to, and select Personal Priorities. You can then search or select a user."
+- "Add to another List", which needs the Tasks in Multiple Lists ClickApp: one task in several lists.
+
+*Closed, 29 September:*
+- The task menu has "Add to ›", under Favorite. It lists the workspace's people under a "Personal Priorities" heading, you first, and a guest only themself (`priorityPeople`). Radix's type-ahead is the search.
+- One level, not ClickUp's two. "Add to › Personal Priorities ›" was built first. At the sheet's right edge its third level had no room and flipped over its parents. About 200 ms after it opened, the pointer read as back on the main menu, and both submenus closed with nothing chosen. Measured on lane 7 with the pointer resting on the trigger. One level stays open.
+- Choosing somebody adds the task through `usePriorityAdds`, the one add-with-toast now shared by the prompt after assigning, the Priority field and this menu. Your own list takes your own add. A colleague's takes the colleague route (`ledger-rows/row-850`), with its rules and its toast.
+- "Add to another List" is not offered. A task in two lists is `commit-log/log-713a611-1`, which stays open for it. Offering an entry that cannot be done is what the menus stopped doing (`delete-and-public-link-offered-to-everyone`).
+- `assign-to-priorities` has two new checks, 30 in all: the menu offers you first and the teammate, and choosing the teammate puts the task on their list, as added by you. Both are read from the server by the task's id.
+- Before, on lane 7 with the unchanged product: 28/30, both new checks failing with nothing offered.
+- After: 30/30 on lane 7.
+- `acp-38` (Add to cannot be opened) is 28/30, reddening both. `acp-39` (every choice onto your own list) is 29/30, reddening the colleague's.
+- Regression on lanes 5–7: 15 suites that use the task menu, the task sheet or priorities, all green, 323 checks.
+- `a2p-3` (the prompt's add passes a string where the task belongs) anchored on the prompt's own add, which moved into `usePriorityAdds`. That helper holds the task's id and not its title, so the patch now passes the id as a line of text. It is 27/30: its own check, the rail's, and the Priority field's add, since all three share it. The preflight found the lost anchor. Its two patch gates were run again once it was re-aimed: all 2111 patches apply, and every claim is verified.
 
 ### `ledger-rows/section3-team-analytics` — open, medium
 

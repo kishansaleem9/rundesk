@@ -53,7 +53,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 28
+const EXPECTED_CHECKS = 30
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -136,6 +136,9 @@ try {
     insert into tasks (list_id, title) values (${list.id}, ${`Mute subject ${TAG}`}) returning id`
   const [afterMuteTask] = await sql`
     insert into tasks (list_id, title) values (${list.id}, ${`After mute ${TAG}`}) returning id`
+  /* Added to somebody's priorities from the task menu's Add to ›. */
+  const [menuTask] = await sql`
+    insert into tasks (list_id, title) values (${list.id}, ${`Task menu ${TAG}`}) returning id`
   /* Added to somebody's priorities from its Priority field, not by assigning. */
   /* How many rows a person's list holds for one task, read in the database itself. */
   const rowsForTask = async (userId, taskId) =>
@@ -531,6 +534,45 @@ try {
     (await rowsForTask(me.id, fieldTask.id)) === 1,
     'and choosing yourself puts it on yours',
     `your list holds it ${await rowsForTask(me.id, fieldTask.id)} time(s)`,
+  )
+
+  // -------------------------------------------------------------------------
+  console.log('\n▶ and so does the task menu\'s Add to ›')
+
+  /*
+   * `ledger-rows/row-845`. ClickUp: "click the ellipsis icon in the
+   * upper-right corner, click Add to, and select Personal Priorities. You can
+   * then search or select a user." The same people as the Priority field, you
+   * first, and the same add behind them.
+   */
+  await openTask(menuTask.id)
+  await page.getByTestId('task-more-menu').click({ timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('task-menu-add-to').click({ timeout: 8000 }).catch(() => {})
+  const menuPerson = (id) => page.getByTestId(`task-menu-priority-person-${id}`)
+  await menuPerson(me.id).waitFor({ state: 'visible', timeout: 8000 }).catch(() => {})
+  const menuOffered = await page
+    .locator('[data-testid^="task-menu-priority-person-"]')
+    .filter({ visible: true })
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')?.slice('task-menu-priority-person-'.length)))
+    .catch(() => [])
+  chk(
+    menuOffered[0] === me.id && menuOffered.includes(mateId),
+    'the task menu\'s Add to › Personal Priorities offers you first, then your colleagues',
+    `it offered ${JSON.stringify(menuOffered)}; you are ${me.id}, the teammate ${mateId}`,
+  )
+  await menuPerson(mateId).click({ timeout: 8000 }).catch(() => {})
+  let theirMenuRow = null
+  await waitUntil(async () => {
+    theirMenuRow = (await sql`select added_by_id from user_priorities
+      where user_id = ${mateId} and workspace_id = ${workspaceId} and task_id = ${menuTask.id}`)[0] ?? null
+    return !!theirMenuRow
+  }, { timeoutMs: 10_000 })
+  chk(
+    !!theirMenuRow && theirMenuRow.added_by_id === me.id && (await rowsForTask(me.id, menuTask.id)) === 0,
+    'and choosing a colleague there puts the task on their priorities, as added by you',
+    theirMenuRow
+      ? `their row says it was added by ${theirMenuRow.added_by_id === me.id ? 'you' : theirMenuRow.added_by_id}; your list holds it ${await rowsForTask(me.id, menuTask.id)} time(s)`
+      : 'nothing reached their list',
   )
 
   // -------------------------------------------------------------------------
