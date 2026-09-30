@@ -1965,13 +1965,44 @@ Checks:
 
 *To close:* research ClickUp's sidebar save, then offer Save as Template on a folder's and a list's menu, with tags, and check that each makes a template of the right kind.
 
-### `found-30-sep/killed-suites-leave-members-behind` — open (test tooling, small; found closing `ledger-rows/row-1874`)
+### `found-30-sep/killed-suites-leave-members-behind` — **closed** (test tooling, small; found closing `ledger-rows/row-1874`)
 
 **A suite killed mid-run leaves the people it joined to the shared workspace**
 
 *Evidence, 30 September:* `template-center` joins two people to the shared workspace for a run. A run killed with SIGKILL leaves them as members, as it already left its templates, since the `finally` cannot run. The break runner kills runs that overrun, so this happens.
 
 *To close:* tag the people a suite makes (as its templates are tagged) and sweep tagged leftovers at the start of the next run, and check that a killed run's people are gone after the next one.
+
+
+*Closed, 30 September.* Measured first on lane 6 at `f532edc`: `template-center` SIGKILLed three seconds after its setup left its two people members of Main, with their organizations and workspaces, and its ten templates. The next clean run left them all there.
+- The tag is the journal `made.mjs` writes, not a name: `<suite>.<pid>.<started>.jsonl`, appended before each call that makes something returns. A name pattern cannot tell a killed run's rows from the same suite running now from another worktree; a process that is gone is not running.
+- The first registration of any later run on the same database sweeps every journal whose process is gone (and whose number, if reused, no longer runs that suite) before it makes anything, and says what it removed.
+- After, four times (the last on `bac7eae` with the final library): killed the same way, the run's journal named its 2 accounts and 10 templates. The next run removed them with their organizations and workspaces, then its own. From before the kill to after it, no account, organization, workspace, member of Main or template was added. `check-made-sweep.mjs` does the same with a probe process on every CI run.
+- Merged here onto `2d38c0e` (one clash: `request-access` had moved onto `signUpApi` in the batch before, which now registers each person, so that side was kept). The gate names none over the 262 suites, and 19 of 19 mutations bite; it and its cases run in preflight too. Run again on lanes 2, 4, 5 and 7: the 25 suites this changed and `sign-in-and-password`, all green, 456 checks, and the four named suites it changed through `signUpApi` alone (`project-template-key`, `like-literal`, `role-permissions-web`, `space-default-permission`) 5, 5, 5 and 36, all green. `check-made-sweep.mjs` against lane 6: 24 cases hold, and 21 of 21 mutations bite (a first run cut off by a 15-minute limit of mine left one mutant file beside its subject, removed).
+
+### `found-30-sep/suite-cleanup-leaves-stored-objects` — open (test tooling, small; found closing `found-30-sep/suite-runs-leave-accounts-behind`)
+
+**What a suite uploads stays in the lane's store after the sweep deletes its rows**
+
+*Evidence, 30 September:* after `stable-images` ran on lane 6 with the new cleanup, the store stub (bucket `rundesk-v6`, listed with `ListObjectsV2`) held `avatars/8cd8d0e3-…png` and `workspace-logos/d3cdb4de-…png`, whose user and workspace no longer exist. The sweeper deletes rows by SQL. `WorkspacesService.deleteForGood` purges a workspace's keys and prefixes; nothing purges an avatar. The stub keeps objects in memory for its lifetime, and `lane_store_up` keeps a running one.
+
+*To close:* have the sweeper remove the objects a swept workspace or account names (the prefixes `storedKeysOf` lists, and `avatars/<userId>-`) through the stub's S3 API, and check by listing that a run that uploads leaves no object.
+
+### `found-30-sep/lanes-hold-earlier-runs-leftovers` — open (test tooling, small; found closing `found-30-sep/suite-runs-leave-accounts-behind`)
+
+**The cleanup removes what runs make from now on; every lane still holds what runs made before it**
+
+*Evidence, 30 September, lane 6:* 651 `@rundesk.invalid` accounts, 389 archived workspaces, 153 archived spaces in Main (of 164) and 33 archived lists in Main's live spaces were there before this change and are there after it: the sweep removes only what a journal names.
+
+*To close:* once per lane, remove `@rundesk.invalid` accounts with the organizations only they own (the sweeper's rule), and the archived workspaces, spaces and lists suites made (by their stamped names); count before and after by SQL, lane by lane.
+
+### `found-30-sep/suite-leftovers-unmeasured` — open (test tooling, medium; found closing `found-30-sep/suite-runs-leave-accounts-behind`)
+
+**What a run leaves was measured for 36 of 259 suites**
+
+*Evidence, 30 September:* the six named suites, the 21 converted and nine more were run with every table counted before and after, and nine of them turned out to leave rows the first cleanup did not see (a form, invitations, lists, docs, tasks, time blocks, notifications, an account made through a page; all fixed). The library covers accounts from `signUpApi` or a registered route, and workspaces, spaces, lists and invitations made through `apiAs`. It does not see what is made through the page or by other routes (an account made so is at least named at the run's end): Main held archived spaces named `Folders e2e-fd-…`, `AI e2e-cma-…`, `treefind-*-…`, `Views swv-…`, `Attach e2e-aoc-…`, `Control capg-…`, and live `Space-list check …`, `Space e2e-hdrstatus-…`, `Space e2e-fieldcreate-…`; 26 suites insert rows by SQL.
+
+*To close:* run every suite once on a lane with every table counted before and after (the scratch `run.sh`/`content.sh` do it), register what each leaves (`madeRow`), and add a check that a run adds no row outside the admin's sessions, rate-limit counters and Main's audit trail.
 
 ### `found-30-sep/legacy-break-patches-directory` — **closed** (test tooling, small; found closing `ledger-rows/row-1874`)
 
@@ -3527,7 +3558,7 @@ Two writers of one format drift apart the way the duplicated lists in this ledge
 - `schema-drift-selfcheck.sh` plants such a checkout. 10 of 10 hold, four new: it builds its own reference under its own name, with its index in it; it reads a database without that index as drift, naming the index; this checkout's reference keeps its key and still reads the same database as no drift; and a reference kept in another directory gets a database of its own. The planted database and directories are removed at the end.
 - The script is renamed over the old one, so a shell sourcing it mid-edit reads one whole version.
 
-### `found-30-sep/suite-runs-leave-accounts-behind` — open (test tooling, medium; found closing `found-30-sep/templates-null-array-field-values`)
+### `found-30-sep/suite-runs-leave-accounts-behind` — **closed** (test tooling, medium; found closing `found-30-sep/templates-null-array-field-values`)
 
 **Suites leave the people they sign up, and the workspaces and spaces they "delete", on every run, not only a killed one**
 
@@ -3545,6 +3576,17 @@ Two writers of one format drift apart the way the duplicated lists in this ledge
 It is the wider form of `found-30-sep/killed-suites-leave-members-behind`: most of what is left is left by runs that ended well.
 
 *To close:* have each suite delete what it made, as `create-modal-templates` does: accounts, their organizations, and workspaces and spaces removed rather than archived. Sweep tagged leftovers at the start of a run, and check that a run leaves no row it made.
+
+
+*Closed, 30 September.* Measured first on lane 6, one clean run each on `f532edc`: `template-center` left 2 accounts, 2 organizations, 2 workspaces and an archived space in Main; `project-template-key` 3, 3 and 4 (one archived) with 2 templates and a custom role; `like-literal` and `role-permissions-web` 2, 2 and 3 (one archived) each; `space-default-permission` 1, 1, 1 and five archived spaces in Main; `space-create-menu` an archived space and a form in Main. The lane held 651 `@rundesk.invalid` accounts, 389 archived workspaces, and 153 archived spaces in Main of 164.
+- One registry for every suite, `test/e2e/lib/made.mjs`. `signUpApi` registers each person before asking for them. `apiAs` registers what `POST /workspaces`, `/spaces`, `/lists` and `/invitations` make. A suite registers anything else with `madeRow`. Each registration goes into a journal on disk before the call returns.
+- When a run ends, `made-sweep.mjs` deletes what its journal names, by SQL: the rows; the organizations only its accounts own, made since the run began; the notifications its accounts caused; then the accounts made since the run began (an older one, registered by mistake, is kept and said). The product has no route that deletes an account or an organization. A row left behind is named and fails the run. An account made during the run that no run registered is named too.
+- 21 suites that made people by a raw route register them, and eight more register a form, invitations, docs, tasks, time blocks or an account made through a page. `check-suite-made-registered.mjs` refuses a suite that makes an account without a registration of its own before the request (31 sites in 21 suites) — an arrow with no braces or a loop that makes accounts, with its registration only outside it, among them — and a `signUpApi` that stops registering (29 cases, 19 of 19 mutations bite). `check-made-sweep.mjs` runs probe processes against Postgres (24 cases, 21 of 21 mutations bite). Both are in CI.
+- The sweep refuses a journal that says no start (its name does not parse and it has no `{"run":{"started":…}}` line): the start is what keeps the admin and older organizations out of it. A run whose first registered row is not in the database it cleans (`DATABASE_URL` is not the API's) stops there, removes nothing, sets its list aside and exits 1 saying how to sweep it where the rows are; a journal none of whose rows is in the database, whose run never saw it hold one, is refused the same way.
+- After, on lane 6: each of the six suites, three runs in a row and once more on `bac7eae`, added no account, organization, workspace, space, member, template, role, invitation or form, and no other row but the admin's sessions, rate-limit counters and Main's audit trail. All passed, as did the 21 converted suites and nine more (one run of `auth-route-limits` met a sign-up window the suites before it had spent, and passed alone).
+
+Found while closing it: `found-30-sep/suite-cleanup-leaves-stored-objects`, `found-30-sep/lanes-hold-earlier-runs-leftovers` and `found-30-sep/suite-leftovers-unmeasured`.
+- Merged here onto `2d38c0e` (one clash: `request-access` had moved onto `signUpApi` in the batch before, which now registers each person, so that side was kept). The gate names none over the 262 suites, and 19 of 19 mutations bite; it and its cases run in preflight too. Run again on lanes 2, 4, 5 and 7: the 25 suites this changed and `sign-in-and-password`, all green, 456 checks, and the four named suites it changed through `signUpApi` alone (`project-template-key`, `like-literal`, `role-permissions-web`, `space-default-permission`) 5, 5, 5 and 36, all green. `check-made-sweep.mjs` against lane 6: 24 cases hold, and 21 of 21 mutations bite (a first run cut off by a 15-minute limit of mine left one mutant file beside its subject, removed).
 
 ### `found-30-sep/template-values-written-unchecked` — **closed** (visible bug, small; found closing `found-30-sep/templates-null-array-field-values`)
 

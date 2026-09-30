@@ -59,7 +59,7 @@
  */
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
-import { apiClient, login, pickWorkspace, firstSweepList } from './lib/fixture.mjs'
+import { apiClient, login, pickWorkspace, firstSweepList, madeRow, madeSpace } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS, signUpApi } from './lib/signin.mjs'
 import { waitUntil, waitForCount, readText } from './lib/wait.mjs'
@@ -111,7 +111,11 @@ const sql = await openDb()
  * holds `template.manage` by default; a plain member does not, and is who the
  * tags edit refuses. Signed up here, joined to the shared workspace for the
  * run, and removed from it in the `finally` — or at once, if the setup itself
- * fails, before the error is thrown on.
+ * fails, before the error is thrown on. Their accounts, organizations and
+ * personal workspaces, the templates and the applied space are registered
+ * (`signUpApi`, `madeRow`, `madeSpace`) and deleted when the run ends, and a
+ * run killed before then has them swept by the next one
+ * (`found-30-sep/killed-suites-leave-members-behind`).
  */
 const joined = []
 const created = []
@@ -221,6 +225,7 @@ try {
       throw new Error(`could not create fixture ${f.n}: HTTP ${res.status} ${JSON.stringify(res.error ?? res.data)}`)
     }
     created.push(res.data.id)
+    madeRow('project_templates', res.data.id)
   }
 } catch (e) {
   // Nothing half-made is left in the shared workspace: no template, no member.
@@ -815,7 +820,10 @@ try {
     savedId = row?.id ?? null
     return Boolean(savedId)
   }, { timeoutMs: 15_000 })
-  if (savedId) created.push(savedId)
+  if (savedId) {
+    created.push(savedId)
+    madeRow('project_templates', savedId)
+  }
   const savedTags = await tagsInDb(savedId)
   chk(JSON.stringify(savedTags) === JSON.stringify(['Q3', 'Launch day']),
     'a template saved from the page with Q3, "  Launch   day " and q3 carries Q3 and Launch day (read from the database)',
@@ -935,9 +943,10 @@ try {
   chk(applied.status < 300 && Boolean(applied.data?.space?.id),
     'applying a Space template makes a space, with no target space asked for',
     `HTTP ${applied.status}, space=${JSON.stringify(applied.data?.space ?? null)} err=${JSON.stringify(applied.error ?? null)}`)
-  if (applied.data?.space?.id) {
-    await api(`/spaces/${applied.data.space.id}`, { method: 'DELETE' })
-  }
+  // Registered, so it is deleted when the run ends: `DELETE /spaces/:id` only
+  // archives, and 59 archived "applied space"s were in Main Workspace on lane 6
+  // (`found-30-sep/suite-runs-leave-accounts-behind`).
+  if (applied.data?.space?.id) madeSpace(applied.data.space.id)
   const listTpl = created[4]
   const noTarget = await api(`/workspaces/${WS}/project-templates/apply`, {
     method: 'POST',

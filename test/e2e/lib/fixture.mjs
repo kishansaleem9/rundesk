@@ -23,6 +23,37 @@
  */
 
 import { signInApi } from './signin.mjs'
+import { madeWorkspace, madeSpace, madeRow } from './made.mjs'
+
+/*
+ * WHAT A RUN MAKES, REGISTERED FOR REMOVAL (`made.mjs`, which says how and
+ * why). Here so a suite imports its fixtures and its cleanup from one place.
+ */
+export { madeAccount, madeWorkspace, madeSpace, madeRow } from './made.mjs'
+
+/*
+ * THE ROUTES WHOSE ANSWER IS A NEW WORKSPACE, SPACE, LIST OR INVITATION, by
+ * exact path: `apiAs` registers what they made, so every suite that makes its
+ * own workspace (155 did, 136 of them archiving it at the end and none
+ * deleting it) or a space or list in the shared one has it removed when the
+ * run ends, without a line of its own
+ * (`found-30-sep/suite-runs-leave-accounts-behind`). `DELETE /lists/:id`, like
+ * the space's, only archives: `list-filters`, `view-visibility` and
+ * `planner-blocks` left a list in Main Workspace a run. An invitation belongs
+ * to the organization, which for the admin's is never the run's, and
+ * `DELETE /invitations/:id` only revokes it: `auth-route-limits` left three a
+ * run.
+ *
+ * NOT TASKS: `ensureSweepFixture` and `ensureShared` keep tasks in the shared
+ * workspace from run to run on purpose, and a suite beside this one may be
+ * reading them. A suite registers the tasks it makes there itself.
+ */
+const MADE_BY_POST = {
+  '/workspaces': madeWorkspace,
+  '/spaces': madeSpace,
+  '/lists': (id) => madeRow('lists', id),
+  '/invitations': (id) => madeRow('invitations', id),
+}
 
 /**
  * THE API CLIENT, ONCE (`suite-hygiene/apiAs-duplicated-62`).
@@ -57,6 +88,9 @@ import { signInApi } from './signin.mjs'
  *   · When nothing answers (the API is down, the connection dropped), a status
  *     of 0: `{ status: 0, ok: false, data: null, error: { message: 'no answer',
  *     cause } }`. A setup reads it as a refusal; `must` below names it.
+ *   · A workspace, space, list or invitation it is answered with a new id of
+ *     (`POST /workspaces`, `/spaces`, `/lists`, `/invitations`, 2xx) is
+ *     registered with `made.mjs`, and removed for good when the run ends.
  *
  * WHAT A SUITE MAY STILL ASK FOR, where its own copy did something else and a
  * check stood on it. Each is an option, so the difference is written where the
@@ -100,6 +134,8 @@ export function apiAs(base, { noAnswer = 'status', emptyBodyOn = [], dataOrBody 
       /* not JSON: a CSV, a PDF, a page, or no body at all */
     }
     const said = json?.message ?? json?.error?.message
+    const made = init.method === 'POST' && res.status >= 200 && res.status < 300 ? MADE_BY_POST[route] : null
+    if (made && /^[0-9a-f-]{36}$/i.test(String(json?.data?.id ?? ''))) made(json.data.id)
     return {
       status: res.status,
       ok: res.status >= 200 && res.status < 300,

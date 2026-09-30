@@ -30,7 +30,7 @@
  */
 import { signInApi } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeAccount } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -99,6 +99,8 @@ try {
   await sql`update workspaces set block_public_sharing = true where id = ${WA}`
 
   const member = { email: `db-${stamp}@rundesk.invalid`, password: 'Member@12345!' }
+  // Registered, so the account is removed when the run ends (`lib/made.mjs`).
+  madeAccount({ email: member.email })
   const signup = await apiAs(null)('/auth/signup', {
     method: 'POST',
     body: {

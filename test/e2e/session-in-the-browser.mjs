@@ -40,7 +40,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeAccount } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -133,6 +133,10 @@ try {
   const link = invited.data?.id ? await H(`/invitations/${invited.data.id}/link`) : null
   const token = link?.data?.claimUrl ? new URL(link.data.claimUrl).searchParams.get('token') : null
   if (!token) throw new Error(`could not invite ${newcomer}: ${said(invited)}`)
+  // The page's Accept makes the newcomer's account, through no route this file
+  // names: registered here, before it is made, so it goes when the run ends
+  // (`lib/made.mjs`; one was left on lane 6 a run).
+  madeAccount({ email: newcomer })
   const invitee = await newPage()
   await invitee.goto(`${stack.base}/accept-invite?token=${encodeURIComponent(token)}`, { waitUntil: 'domcontentloaded' })
   await invitee.locator('#name').fill('Session newcomer')

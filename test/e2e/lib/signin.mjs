@@ -30,6 +30,8 @@
  * credential failure only turns a clear error into a slow one.
  */
 
+import { madeAccount } from './made.mjs'
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
@@ -126,8 +128,16 @@ export async function signInApi(base, email, password, { attempts = 4 } = {}) {
  * through a `registerApi` here, is retired and answers 410
  * (`found-30-sep/register-counted-apart-from-signup`): it made accounts on a
  * counter of its own, beside sign-up's.
+ *
+ * AND EVERY PERSON IT MAKES IS REMOVED WHEN THE RUN ENDS
+ * (`found-30-sep/suite-runs-leave-accounts-behind`): registered with
+ * `made.mjs` by email before the request goes, so a run killed while the
+ * answer is on its way has still said whose account it is, and by id once
+ * the answer names it. Their organizations and personal workspaces go with
+ * them; see `made.mjs`.
  */
 export async function signUpApi(base, body, { attempts = 4 } = {}) {
+  if (body?.email) madeAccount({ email: body.email })
   for (let attempt = 1; ; attempt++) {
     const res = await fetch(`${base}/auth/signup`, {
       method: 'POST',
@@ -135,7 +145,10 @@ export async function signUpApi(base, body, { attempts = 4 } = {}) {
       body: JSON.stringify(body),
     })
     const json = await res.json().catch(() => null)
-    if (json?.data?.accessToken) return json.data
+    if (json?.data?.accessToken) {
+      if (json.data.user?.id) madeAccount({ id: json.data.user.id })
+      return json.data
+    }
     if (!isRateLimited(res.status)) {
       throw new Error(`could not sign up ${body?.email}: ${res.status} ${JSON.stringify(json).slice(0, 200)}`)
     }

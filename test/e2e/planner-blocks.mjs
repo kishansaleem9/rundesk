@@ -21,7 +21,7 @@
  */
 import { signInApi } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeAccount, madeRow } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -115,6 +115,9 @@ try {
   const edge = await A(`/planner/${workspaceId}/blocks`, {
     method: 'POST', body: { title: `Edge ${stamp}`, startsAt: BOUNDARY, endsAt: '2026-08-10T01:00:00.000Z' },
   })
+  // A block with no task is the admin's own, in the shared workspace: nothing
+  // else removes it, so it is registered to go when the run ends (`lib/made.mjs`).
+  if (edge.data?.id) madeRow('task_time_blocks', edge.data.id)
   chk(edge.status < 400, 'a block can be a typed line with no task at all',
     `POST returned ${edge.status} ${JSON.stringify(edge.error)}`)
   const w1 = (await A(`/planner/${workspaceId}/blocks?from=${WEEK1_FROM}&to=${WEEK1_TO}`)).data ?? []
@@ -164,6 +167,7 @@ try {
   const dropped = await A(`/planner/${workspaceId}/blocks`, {
     method: 'POST', body: { title: `Dropped ${stamp}`, startsAt: MON },
   })
+  if (dropped.data?.id) madeRow('task_time_blocks', dropped.data.id)
   const mins = dropped.data
     ? (new Date(dropped.data.endsAt) - new Date(dropped.data.startsAt)) / 60000
     : null
@@ -188,6 +192,8 @@ try {
 
   console.log('\n▶ a planner is one person\'s')
   const peer = { email: `plannerpeer-${stamp}@rundesk.invalid`, password: 'Member@12345!' }
+  // Registered, so the account is removed when the run ends (`lib/made.mjs`).
+  madeAccount({ email: peer.email })
   const signup = await apiAs(null)('/auth/signup', {
     method: 'POST',
     body: {

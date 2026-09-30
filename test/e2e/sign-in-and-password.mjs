@@ -73,7 +73,7 @@ import http from 'node:http'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeAccount } from './lib/fixture.mjs'
 import { openDb } from './lib/db.mjs'
 
 const { io } = createRequire(path.resolve(import.meta.dirname, '../../apps/web/package.json'))('socket.io-client')
@@ -201,6 +201,8 @@ let madeCount = 0
 const signUpAs = async (body) => {
   let res = null
   for (let attempt = 1; attempt <= 3; attempt += 1) {
+    // Registered before each ask (it is idempotent), so the account is removed when the run ends (`lib/made.mjs`).
+    if (body?.email) madeAccount({ email: body.email })
     res = await visit('/auth/signup', { from: MAKERS[madeCount++ % MAKERS.length], method: 'POST', body })
     if (res.data?.workspaces?.[0]?.id) {
       workspacesMade.push({ id: res.data.workspaces[0].id, as: apiAs(res.data.accessToken), email: body.email })
@@ -344,6 +346,8 @@ try {
   const inviteToken = link?.data?.claimUrl ? new URL(link.data.claimUrl).searchParams.get('token') : null
   if (!inviteToken) throw new Error(`could not invite ${invitedLegacy.email}: ${said(invited)}${link ? `; its link answered ${said(link)}` : ''}`)
   const preview = await visit(`/invitations/preview?token=${encodeURIComponent(inviteToken)}`, { from: freshAddress() })
+  // Claiming makes an account for an invitee without one; this one has one, and is registered either way.
+  madeAccount({ email: invitedLegacy.email })
   const claimed = await visit('/invitations/claim', { from: freshAddress(), method: 'POST', body: { token: inviteToken, fullName: 'Sign-in invited twin', password: PASSWORD } })
   const invitedSpellings = await spellingsOf(invitedLegacy.email)
   chk(
@@ -653,6 +657,8 @@ try {
   const toRevokedLink = toRevoked.data?.id ? await O(`/invitations/${toRevoked.data.id}/link`) : null
   const toRevokedToken = toRevokedLink?.data?.claimUrl ? new URL(toRevokedLink.data.claimUrl).searchParams.get('token') : null
   if (!toRevokedToken) throw new Error(`could not invite ${revoked.email}: ${said(toRevoked)}`)
+  // A claim can make an account; this one names the run's own, registered again so the site says whose.
+  madeAccount({ email: revoked.email })
   const claimedByEnded = await visit('/invitations/claim', { from: freshAddress(), method: 'POST', token: revB.accessToken, body: { token: toRevokedToken } })
   if (claimedByEnded.status !== 201) pendingInvitations.push({ id: toRevoked.data.id, as: O })
   const [endedJoined] = await sql`select role from workspace_members where workspace_id = ${owner.workspaceId} and user_id = ${revoked.id}`
@@ -687,6 +693,8 @@ try {
   const newcomerLink = toNewcomer.data?.id ? await O(`/invitations/${toNewcomer.data.id}/link`) : null
   const newcomerToken = newcomerLink?.data?.claimUrl ? new URL(newcomerLink.data.claimUrl).searchParams.get('token') : null
   if (!newcomerToken) throw new Error(`could not invite ${newcomerEmail}: ${said(toNewcomer)}`)
+  // Accepting makes the newcomer's account: registered, so it is removed when the run ends (`lib/made.mjs`).
+  madeAccount({ email: newcomerEmail })
   const accepted = await visit('/invitations/claim', { from: freshAddress(), method: 'POST', body: { token: newcomerToken, fullName: 'Sign-in newcomer', password: PASSWORD } })
   if (accepted.status !== 201) pendingInvitations.push({ id: toNewcomer.data.id, as: O })
   const jarN = accepted.cookies
@@ -708,6 +716,8 @@ try {
   if (!existingToken) throw new Error(`could not invite ${existing.email}: ${said(toExisting)}`)
   const jarE = existing.cookies ?? {}
   if (!jarE.access_token || !jarE.csrf_token) throw new Error(`sign-up set no cookies for ${existing.email}: ${JSON.stringify(Object.keys(jarE))}`)
+  // The run's own account again (a claim can make one): registered at the site, as every claim is.
+  madeAccount({ email: existing.email })
   const byCookies = await visit('/invitations/claim', {
     from: freshAddress(),
     method: 'POST',

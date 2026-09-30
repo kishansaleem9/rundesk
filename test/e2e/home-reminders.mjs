@@ -28,7 +28,7 @@
  */
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
-import { apiClient, login } from './lib/fixture.mjs'
+import { apiClient, login, madeAccount } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
@@ -93,6 +93,8 @@ try {
   await sql`update reminders set notified_at = now() where id = ${goneOff.data.id}`
 
   const other = { email: `hr-${stamp}@rundesk.invalid`, password: 'Member@12345!' }
+  // Registered, so the account is removed when the run ends (`lib/made.mjs`).
+  madeAccount({ email: other.email })
   // Plain fetch: the fixture client always sends a bearer token, and a signup
   // is made by somebody who has none.
   const signupRes = await fetch(`${B}/api/v1/auth/signup`, {

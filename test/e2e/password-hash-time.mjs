@@ -38,7 +38,7 @@
  *   node test/e2e/password-hash-time.mjs --api 3011
  */
 import http from 'node:http'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeAccount } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -156,6 +156,8 @@ try {
   const REAL = ['real-1', 'real-2', 'real-3', 'real-4']
   for (const who of [...REAL, 'locked', 'burst']) {
     const body = { email: mail(who), fullName: `Hash time ${who}`, password: PASSWORD, organizationName: `Hash time ${who} ${TAG}` }
+    // Registered, so the account is removed when the run ends (`lib/made.mjs`).
+    madeAccount({ email: body.email })
     let made = await visit('/auth/signup', { from: MAKER, method: 'POST', body })
     /*
      * SIGN-UP'S TEN A MINUTE, WAITED OUT AS THE API SAYS, as `signUpApi` does:
@@ -167,6 +169,8 @@ try {
       const waitMs = (Math.min(Number(made.error?.details?.retryAfter ?? 5) || 5, 60) + 1) * 1000
       console.log(`  (signing up ${who}: ten a minute from ${MAKER}, so waiting ${Math.round(waitMs / 1000)} s as the API says)`)
       await sleep(waitMs)
+      // The same person, asked for again: registered again (it is idempotent), as every sign-up is.
+      madeAccount({ email: body.email })
       made = await visit('/auth/signup', { from: MAKER, method: 'POST', body })
     }
     if (made.status !== 201 || !made.data?.accessToken) throw new Error(`could not sign up ${who}: ${said(made)}`)

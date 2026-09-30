@@ -64,7 +64,7 @@
 import http from 'node:http'
 import { randomBytes } from 'node:crypto'
 import { signInApi, signUpApi } from './lib/signin.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeAccount } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -334,6 +334,8 @@ try {
    * one sign-up in this minute, of the ten.
    */
   const registerEmail = mail('old-register')
+  // Registered, so the account sign-up makes below is removed when the run ends (`lib/made.mjs`).
+  madeAccount({ email: registerEmail })
   const oldRoute = await visit('/auth/register', { method: 'POST', body: { email: registerEmail, displayName: `Old register ${TAG}`, password: PASSWORD } })
   const stillFree = await visit('/auth/signup', { method: 'POST', body: { email: registerEmail, fullName: `Old register ${TAG}`, password: PASSWORD, organizationName: `Old register ${TAG}` } })
   if (stillFree.data?.workspaces?.[0]?.id) workspacesMade.push({ id: stillFree.data.workspaces[0].id, as: apiAs(stillFree.data.accessToken) })
@@ -363,7 +365,12 @@ try {
   /* Each route, and what its own answer is: the thing it does, or its own refusal, never the limiter's. */
   const ROUTES = {
     signup: {
-      ask: () => visit('/auth/signup', { method: 'POST', body: { email: mail('burst'), fullName: `Burst ${TAG}`, password: PASSWORD, organizationName: `Burst ${TAG}` } }),
+      ask: () => {
+        // The account whichever sign-up is let through makes (the rest are 409s for the same
+        // address): registered before each goes, as each could be that one (`lib/made.mjs`).
+        madeAccount({ email: mail('burst') })
+        return visit('/auth/signup', { method: 'POST', body: { email: mail('burst'), fullName: `Burst ${TAG}`, password: PASSWORD, organizationName: `Burst ${TAG}` } })
+      },
       first: (r) => r.status === 201 && !!r.data?.accessToken,
       answered: (r) => (r.status === 201 && !!r.data?.accessToken) || r.status === 409,
     },
@@ -374,10 +381,14 @@ try {
     },
     claim: {
       /* The first accepts ACCEPTED; the rest name no invitation, which the route answers 404. */
-      ask: (i = 0) => visit('/invitations/claim', {
-        method: 'POST',
-        body: i === 0 ? { token: ACCEPTED, fullName: `Accepter ${TAG}`, password: PASSWORD } : { token: randomBytes(32).toString('base64url') },
-      }),
+      ask: (i = 0) => {
+        // The first claim makes the accepter's account: registered before it goes (`lib/made.mjs`).
+        if (i === 0) madeAccount({ email: mail('accepter') })
+        return visit('/invitations/claim', {
+          method: 'POST',
+          body: i === 0 ? { token: ACCEPTED, fullName: `Accepter ${TAG}`, password: PASSWORD } : { token: randomBytes(32).toString('base64url') },
+        })
+      },
       first: (r) => r.status === 201 && !!r.data?.accessToken,
       answered: (r) => (r.status === 201 && !!r.data?.accessToken) || r.status === 404,
     },
@@ -476,6 +487,7 @@ try {
   )
 
   /* Somebody else, in the same minute. */
+  madeAccount({ email: mail('elsewhere') })
   const elsewhere = await visit('/auth/signup', { from: OTHER_ADDRESS, method: 'POST', body: { email: mail('elsewhere'), fullName: `Elsewhere ${TAG}`, password: PASSWORD, organizationName: `Elsewhere ${TAG}` } })
   if (elsewhere.data?.workspaces?.[0]?.id) workspacesMade.push({ id: elsewhere.data.workspaces[0].id, as: apiAs(elsewhere.data.accessToken) })
   chk(

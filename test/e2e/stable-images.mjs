@@ -18,7 +18,7 @@
  */
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
-import { apiClient, login } from './lib/fixture.mjs'
+import { apiClient, login, madeAccount } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
@@ -79,6 +79,8 @@ const noSignature = (address) => address.startsWith('/api/v1/public/images/') &&
 try {
   // A fresh account: its avatar is its own, and its workspace is its own.
   const email = `stable-images-${stamp}@rundesk.invalid`
+  // Registered, so the account is removed when the run ends (`lib/made.mjs`).
+  madeAccount({ email })
   const signup = await fetch(`${B}/api/v1/auth/signup`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

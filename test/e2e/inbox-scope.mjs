@@ -34,7 +34,7 @@
  */
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
-import { apiClient, login } from './lib/fixture.mjs'
+import { apiClient, login, madeAccount } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
@@ -92,6 +92,8 @@ try {
   // The fixture's apiClient NEVER THROWS — every call below is read off `status`.
   api = apiClient(`${B}/api/v1`, auth.accessToken)
 
+  // Registered, so the account is removed when the run ends (`lib/made.mjs`).
+  madeAccount({ email: R_EMAIL })
   const signupRes = await fetch(`${B}/api/v1/auth/signup`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

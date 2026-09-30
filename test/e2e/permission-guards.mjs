@@ -17,7 +17,7 @@
  *   node test/e2e/permission-guards.mjs --api 3011
  */
 import path from 'node:path'
-import { apiClient, login } from './lib/fixture.mjs'
+import { apiClient, login, madeAccount } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 
 const argOf = (name, fallback) => {
@@ -59,6 +59,8 @@ try {
 
   const person = async (label, role) => {
     const email = `pg-${label}-${stamp}@rundesk.invalid`
+    // Registered, so the account is removed when the run ends (`lib/made.mjs`).
+    madeAccount({ email })
     const res = await fetch(`${B}/api/v1/auth/signup`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

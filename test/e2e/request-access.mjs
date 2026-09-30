@@ -30,7 +30,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeAccount, madeRow } from './lib/fixture.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -177,6 +177,8 @@ try {
     body: { listId, title: `Private plan ${stamp}` },
   })
   const taskId = created.data?.id
+  // In a shared list, where it stayed after the run: registered, so it goes when the run ends (`lib/made.mjs`).
+  if (taskId) madeRow('tasks', taskId)
   // Private on the PATCH, not the POST: create does not take a visibility, so
   // asking for one there silently yields a public task and the 403 under test
   // never happens — which is how this fixture failed the first time.

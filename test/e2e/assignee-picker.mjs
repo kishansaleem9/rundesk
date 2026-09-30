@@ -38,7 +38,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeRow } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -258,14 +258,21 @@ try {
   )
 
   await page.getByTestId('assignee-invite').click({ timeout: 10_000 }).catch(() => {})
+  let inviteId = null
   chk(
     await waitUntil(async () => {
       const invites = (await A(`/invitations/workspace/${workspaceId}`)).data ?? []
-      return invites.some((i) => i.email === inviteEmail)
+      const found = invites.find((i) => i.email === inviteEmail)
+      if (found?.id) inviteId = found.id
+      return Boolean(found)
     }, { timeoutMs: 15_000 }),
     'and the invitation is really created',
     'the invite button reported success and no invitation exists',
   )
+  // Made through the page, so `apiAs` never saw it; it belongs to the admin's
+  // organization, which outlives the run. Registered, so it goes when the run
+  // ends (`lib/made.mjs`): a "newcomer-…" invitation was left on lane 6 a run.
+  if (inviteId) madeRow('invitations', inviteId)
 
   /*
    * A NAME that matches nobody is NOT an invitation — it is a miss. Offering to

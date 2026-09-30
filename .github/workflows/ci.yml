@@ -523,6 +523,19 @@ jobs:
       - name: And that gate can fail, and each case bites
         run: node scripts/check-suites-registered-cases.mjs --mutate
 
+      # A run's people are removed when it ends, and a killed run's by the next
+      # (test/e2e/lib/made.mjs), but only the people it registered: lane 6 held
+      # 651 accounts that runs had signed up and left
+      # (found-30-sep/suite-runs-leave-accounts-behind). signUpApi registers
+      # each person; a suite that makes one another way — a raw /auth/signup,
+      # an invitation claimed, a user inserted by SQL — registers them in the
+      # block that makes them, before the request.
+      - name: A suite that makes a person hands them to the cleanup
+        run: node scripts/check-suite-made-registered.mjs
+
+      - name: And that gate can fail, and each case bites
+        run: node scripts/check-suite-made-registered-cases.mjs --mutate
+
       - name: The S3 stub is faithful to the SDK, and each case bites
         run: node scripts/check-s3-stub.mjs --mutate
 
@@ -740,6 +753,16 @@ jobs:
 
       - name: Load the fixtures
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f apps/api/test/calls-http-fixtures.sql
+
+      # What a suite registers goes when its run ends, and a run killed with
+      # SIGKILL has it swept by the next one
+      # (found-30-sep/suite-runs-leave-accounts-behind,
+      # found-30-sep/killed-suites-leave-members-behind).
+      # Probe processes against this database; each rule of the registry and
+      # the sweep is broken in turn and a case must notice. Before the suites,
+      # which all run through it.
+      - name: A run's people go when it ends, a killed run's with the next
+        run: node scripts/check-made-sweep.mjs --mutate
 
       # The harnesses import the compiled service, guards and controllers, so
       # what runs here is what ships rather than a re-compilation of it.

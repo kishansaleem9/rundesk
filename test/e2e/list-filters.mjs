@@ -17,7 +17,7 @@
  */
 import { signInApi } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeAccount } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -170,6 +170,8 @@ try {
 
   console.log('\n▶ a saved filter is yours')
   const peer = { email: `filterpeer-${stamp}@rundesk.invalid`, password: 'Member@12345!' }
+  // Registered, so the account is removed when the run ends (`lib/made.mjs`).
+  madeAccount({ email: peer.email })
   const signup = await apiAs(null)('/auth/signup', {
     method: 'POST',
     body: {

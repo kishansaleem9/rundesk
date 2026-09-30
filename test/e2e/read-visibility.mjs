@@ -20,7 +20,7 @@
  */
 import { signInApi } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeAccount } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -72,6 +72,8 @@ try {
 
   const account = async (label) => {
     const email = `rv-${label}-${stamp}@rundesk.invalid`
+    // Registered, so the account is removed when the run ends (`lib/made.mjs`).
+    madeAccount({ email })
     const res = await apiAs(null)('/auth/signup', {
       method: 'POST',
       body: {

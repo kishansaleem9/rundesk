@@ -25,7 +25,7 @@
  */
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
-import { apiClient, login } from './lib/fixture.mjs'
+import { apiClient, login, madeAccount } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { openDb } from './lib/db.mjs'
 
@@ -75,6 +75,8 @@ try {
   /** A fresh account — which is also the owner of a fresh organisation and its workspace. */
   const signUp = async (label) => {
     const email = `${TAG}-${label}@rundesk.invalid`
+    // Registered, so the account is removed when the run ends (`lib/made.mjs`).
+    madeAccount({ email })
     const res = await fetch(`${B}/api/v1/auth/signup`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -201,6 +203,8 @@ try {
     values (${outsider.orgId}, ${legacyEmail}, 'owner',
             ${sql.json([{ workspaceId: WS, role: 'workspace_admin' }, { workspaceId: outsider.ownWorkspaceId, role: 'member' }])},
             ${outsider.id}, ${legacyToken}, now() + interval '1 day')`
+  // Claiming it makes an account: registered, so it is removed when the run ends.
+  madeAccount({ email: legacyEmail })
   const claimed = await fetch(`${B}/api/v1/invitations/claim`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

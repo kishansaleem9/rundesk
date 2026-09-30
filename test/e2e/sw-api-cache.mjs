@@ -26,6 +26,7 @@ import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { madeAccount } from './lib/made.mjs'
 import { waitUntil } from './lib/wait.mjs'
 
 const argOf = (name, fallback) => {
@@ -158,6 +159,8 @@ try {
 
   // A member's pages have the topbar, and its Sign out.
   const memberEmail = `sw-${Date.now()}@rundesk.invalid`
+  // Registered, so the account is removed when the run ends (`lib/made.mjs`).
+  madeAccount({ email: memberEmail })
   const signup = await fetch(`${B}/api/v1/auth/signup`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

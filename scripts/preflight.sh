@@ -61,6 +61,8 @@ step "and they read this tree, not a nested one" node scripts/check-find-in-tree
 step "every suite has a break patch"    node scripts/check-break-coverage.mjs
 step "every suite has a CI step"        node scripts/check-suites-registered.mjs
 step "and that gate can fail"           node scripts/check-suites-registered-cases.mjs --mutate
+step "a suite that makes a person hands them to the cleanup" node scripts/check-suite-made-registered.mjs
+step "and that gate bites, case by case" node scripts/check-suite-made-registered-cases.mjs --mutate
 step "no branch changes the run's length" node scripts/check-suite-check-branches.mjs
 step "and that rule can fail at all"    node scripts/check-branches-cases.mjs --mutate
 step "nothing ends a section on a throw" node scripts/check-suite-section-enders.mjs

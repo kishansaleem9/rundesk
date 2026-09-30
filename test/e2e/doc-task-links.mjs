@@ -34,7 +34,7 @@ import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { waitUntil } from './lib/wait.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeAccount, madeRow } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -114,11 +114,17 @@ try {
     method: 'POST', body: { title: `Unlinked doc ${stamp}` },
   })).data
   if (!doc?.id || !other?.id) throw new Error('could not make docs')
+  // In the shared workspace, and nothing here deleted them: registered, so they
+  // go when the run ends (`lib/made.mjs`).
+  madeRow('docs', doc.id)
+  madeRow('docs', other.id)
 
   const open = (await A('/tasks', { method: 'POST', body: { listId, title: `Public linked ${stamp}` } })).data
   const secret = (await A('/tasks', { method: 'POST', body: { listId, title: `Private linked ${stamp}` } })).data
   cleanup.push(() => A(`/tasks/${open.id}`, { method: 'DELETE' }))
   cleanup.push(() => A(`/tasks/${secret.id}`, { method: 'DELETE' }))
+  // `DELETE /tasks/:id` puts a task in the Trash, where it stays: registered as well.
+  for (const t of [open, secret]) if (t?.id) madeRow('tasks', t.id)
   await A(`/tasks/${secret.id}`, { method: 'PATCH', body: { visibility: 'private' } })
 
   console.log('\n▶ §V2-10 — the doc end of the link')
@@ -152,6 +158,8 @@ try {
   // ── Visibility ────────────────────────────────────────────────────────────
   console.log('\n▶ and it does not become a way to read private titles')
   const outsider = { email: `docpeer-${stamp}@rundesk.invalid`, password: 'Member@12345!' }
+  // Registered, so the account is removed when the run ends (`lib/made.mjs`).
+  madeAccount({ email: outsider.email })
   const signup = await apiAs(null)('/auth/signup', {
     method: 'POST',
     body: {

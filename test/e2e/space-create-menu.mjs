@@ -52,7 +52,7 @@
 import path from 'node:path'
 import { readFileSync } from 'node:fs'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
-import { apiClient, login, pickWorkspace } from './lib/fixture.mjs'
+import { apiClient, login, pickWorkspace, madeRow } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
@@ -599,6 +599,9 @@ try {
 
   const forms = await api(`/workspaces/${WS}/forms`)
   const made = (forms.data ?? []).find((f) => f.title === FORM_NAME)
+  // A form belongs to the workspace, not the space: deleting the space only unhooks its list, and
+  // 17 "Menu form"s were in Main Workspace on lane 6. Registered, so it goes when the run ends.
+  if (made?.id) madeRow('forms', made.id)
   chk(
     !!targetList && submitDisabledWithNoList && !!made && made.targetListId === targetList,
     'a form created through the menu exists and files into the list it was given',

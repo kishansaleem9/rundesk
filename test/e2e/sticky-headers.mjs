@@ -21,7 +21,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeAccount } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -108,6 +108,8 @@ try {
   // scroll into view, by the pane the header sticks to.
   const BIG = await make('/lists', { projectId: PROJECT, name: `${TAG} big list` }, 'the big list')
   await sql`insert into tasks (list_id, title, position) select ${BIG}, ${`${TAG} big `} || lpad(n::text, 3, '0'), n from generate_series(1, 150) as n`
+  // The thirty, registered so they are removed when the run ends (`lib/made.mjs`) as well as by the `finally`.
+  for (let n = 1; n <= 30; n += 1) madeAccount({ email: `${TAG}-${n}@rundesk.invalid` })
   await sql`
     with u as (
       insert into users (email, display_name)
