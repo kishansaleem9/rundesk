@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@n
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
+import { PUBLIC_ROUTE_LIMITS, RateLimit, RateLimitGuard } from '../../common/guards/rate-limit.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { ClientPortalService } from './client-portal.service'
 import type { CurrentUserPayload } from '../tasks/types'
@@ -57,14 +58,19 @@ export class ClientPortalController {
 /**
  * Public, anonymous, token-only read. No auth guard — `/portal/<token>` works
  * for any client with the link. Returns only the linked project's client-safe
- * projection (see ClientPortalService.getPublicView).
+ * projection (see ClientPortalService.getPublicView). Limited per address:
+ * every view reads the project's tasks and writes when it was last viewed
+ * (`found-30-sep/public-routes-unthrottled`).
  */
 @ApiTags('client-portal-public')
 @Controller()
+@UseGuards(RateLimitGuard)
 export class ClientPortalPublicController {
   constructor(private readonly portals: ClientPortalService) {}
 
   @Get('portal/:token')
+  // Opening the portal asks this once: a page's budget (PUBLIC_ROUTE_LIMITS).
+  @RateLimit(PUBLIC_ROUTE_LIMITS.page)
   @ApiOperation({ summary: 'Get a client portal by token (no auth required)' })
   getPublic(@Param('token') token: string) {
     return this.portals.getPublicView(token)

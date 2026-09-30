@@ -56,6 +56,45 @@ export const RATE_LIMIT_KEY = 'rate_limit_options'
 /** Decorator: attach a per-route rate-limit policy read by {@link RateLimitGuard}. */
 export const RateLimit = (options: RateLimitOptions) => SetMetadata(RATE_LIMIT_KEY, options)
 
+/**
+ * WHAT ANYBODY MAY ASK WITHOUT AN ACCOUNT, PER ADDRESS
+ * (`found-30-sep/public-routes-unthrottled`).
+ *
+ * A shared doc (`/public/docs/:slug`), a clip's link (`/public/clips/:token`),
+ * a client portal (`/portal/:token`), a custom domain's branding
+ * (`/public/workspace-by-domain`), the status page (`/status`) and the
+ * pictures (`/public/images/…`) answer anybody, signed in or not. Guessing is
+ * not the risk — a clip token is 192 random bits — a flood is: every open of a
+ * clip asks the store about the object and signs it, every open of a portal
+ * reads its project's tasks and writes when it was last viewed.
+ *
+ * ClickUp documents limits for its API alone, per token (100 a minute on
+ * Free Forever, Unlimited and Business; a 429 past it), and nothing for its
+ * public links. An anonymous request has one key, its address, so these are
+ * per address, set far above what one visitor sends and far below a flood.
+ * Many visitors behind one address — an office — share one budget; that is
+ * the cost of keying by address, as it is for sign-in's ten a minute. The
+ * address is `req.ip`: behind a reverse proxy it is the visitor's only where
+ * `TRUST_PROXY` lets Fastify read it (main.ts); where it does not, every
+ * visitor is the proxy and each budget is the whole site's.
+ */
+export const PUBLIC_ROUTE_LIMITS = {
+  /**
+   * A page anybody may open: a doc, a clip, a portal, the status page, and the
+   * branding a custom domain's app asks for as it loads. Each asks once per
+   * page load, so 120 a minute is two page loads a second for a whole minute —
+   * the budget a public form's read already has (`PublicFormsController.getBySlug`).
+   */
+  page: { limit: 120, windowMs: 60_000 },
+  /**
+   * An avatar or a logo. One page draws dozens — every assignee in a list,
+   * every member in People — for members as well as visitors, so ten times a
+   * page's budget. A browser keeps each answer ten minutes (`max-age=600` on
+   * the redirect), so one person asks for each picture about once.
+   */
+  image: { limit: 1_200, windowMs: 60_000 },
+} as const satisfies Record<string, RateLimitOptions>
+
 // Fallback (in-memory) housekeeping: stale keys are swept no more often than
 // this, and any key untouched for longer than the retention horizon is dropped,
 // bounding memory under spraying while the shared store is unavailable.

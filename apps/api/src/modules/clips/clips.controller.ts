@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { PUBLIC_ROUTE_LIMITS, RateLimit, RateLimitGuard } from '../../common/guards/rate-limit.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { ClipsService } from './clips.service'
 
@@ -72,14 +73,19 @@ export class ClipsController {
  * public links, as ClickUp's clips need none; the session is read when there
  * is one, because a workspace that blocks public sharing lets only its members
  * in. Signed again on every call — see `ClipsService.watch`.
+ *
+ * Limited per address before the session is read, so a flood is refused
+ * before it costs the store a look at the object (`found-30-sep/public-routes-unthrottled`).
  */
 @ApiTags('clips')
 @Controller('public/clips')
-@UseGuards(OptionalJwtAuthGuard)
+@UseGuards(RateLimitGuard, OptionalJwtAuthGuard)
 export class ClipsPublicController {
   constructor(private readonly clips: ClipsService) {}
 
   @Get(':token')
+  // Opening the link asks this once: a page's budget (PUBLIC_ROUTE_LIMITS).
+  @RateLimit(PUBLIC_ROUTE_LIMITS.page)
   @ApiOperation({ summary: 'Open a clip’s link: its title and a freshly signed playback URL' })
   watch(@Param('token') token: string, @CurrentUser() user: { id: string; role?: string } | null) {
     return this.clips.watch(token, user)

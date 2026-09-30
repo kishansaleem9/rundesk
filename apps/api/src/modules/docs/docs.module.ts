@@ -4,10 +4,11 @@ import { DocsController, DocsPublicController } from './docs.controller'
 import { RealtimeModule } from '../realtime/realtime.module'
 import { NotificationsModule } from '../notifications/notifications.module'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { RateLimitGuard } from '../../common/guards/rate-limit.guard'
 
 @Module({
   imports: [RealtimeModule, NotificationsModule],
-  providers: [DocsService, WorkspaceMemberGuard],
+  providers: [DocsService, WorkspaceMemberGuard, RateLimitGuard],
   controllers: [DocsController, DocsPublicController],
   exports: [DocsService],
 })

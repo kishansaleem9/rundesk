@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { SupportService } from './support.service'
 import { SupportController, PublicStatusController } from './support.controller'
 import { PlansModule } from '../plans/plans.module'
+import { RateLimitGuard } from '../../common/guards/rate-limit.guard'
 
 /**
  * Customer Support & Help Center (Plan §14.4). Human support (tickets + SLA) and
@@ -12,7 +13,7 @@ import { PlansModule } from '../plans/plans.module'
 @Module({
   imports: [PlansModule],
   controllers: [SupportController, PublicStatusController],
-  providers: [SupportService],
+  providers: [SupportService, RateLimitGuard],
   exports: [SupportService],
 })
 export class SupportModule {}

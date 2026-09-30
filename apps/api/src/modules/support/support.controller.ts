@@ -13,6 +13,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { SupportService } from './support.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { PUBLIC_ROUTE_LIMITS, RateLimit, RateLimitGuard } from '../../common/guards/rate-limit.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 
 type Actor = { id: string; role?: string }
@@ -140,14 +141,18 @@ export class SupportController {
 
 /**
  * Public status page (Plan §14.4). No auth — anyone can read the current
- * component health + recent incidents. Served at GET /api/v1/status.
+ * component health + recent incidents. Served at GET /api/v1/status. Limited
+ * per address like every page anybody may open (`found-30-sep/public-routes-unthrottled`).
  */
 @ApiTags('support')
 @Controller('status')
+@UseGuards(RateLimitGuard)
 export class PublicStatusController {
   constructor(private readonly support: SupportService) {}
 
   @Get()
+  // Opening the page asks this once: a page's budget (PUBLIC_ROUTE_LIMITS).
+  @RateLimit(PUBLIC_ROUTE_LIMITS.page)
   @ApiOperation({ summary: 'Public status page: components + recent incidents + overall banner' })
   getStatus() {
     return this.support.getStatusPage()

@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { FeatureFlagGuard } from '../../common/guards/feature-flag.guard'
+import { PUBLIC_ROUTE_LIMITS, RateLimit, RateLimitGuard } from '../../common/guards/rate-limit.guard'
 import { FeatureFlag } from '../../common/decorators/feature-flag.decorator'
 import { FLAGS } from '@rundesk/feature-flags'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -13,14 +14,18 @@ import type { CurrentUserPayload } from '../tasks/types'
 /**
  * Anonymous public-share endpoint. Lives at the root path so the slug is
  * stable and shareable as a clean URL. No auth guard so /d/<slug> works
- * for any visitor with the link.
+ * for any visitor with the link — and a limit per address, so one address
+ * cannot flood it (`found-30-sep/public-routes-unthrottled`).
  */
 @ApiTags('docs')
 @Controller()
+@UseGuards(RateLimitGuard)
 export class DocsPublicController {
   constructor(private docs: DocsService) {}
 
   @Get('public/docs/:slug')
+  // Opening the link asks this once: a page's budget (PUBLIC_ROUTE_LIMITS).
+  @RateLimit(PUBLIC_ROUTE_LIMITS.page)
   getPublic(@Param('slug') slug: string) {
     return this.docs.getByPublicShare(slug)
   }

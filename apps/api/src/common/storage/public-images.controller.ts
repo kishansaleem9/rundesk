@@ -1,8 +1,9 @@
-import { Controller, Get, NotFoundException, Param, Res } from '@nestjs/common'
+import { Controller, Get, NotFoundException, Param, Res, UseGuards } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
 import type { FastifyReply } from 'fastify'
 import { R2Service } from './r2.service'
 import { isKeyDirectlyUnder } from './object-key-shape'
+import { PUBLIC_ROUTE_LIMITS, RateLimit, RateLimitGuard } from '../guards/rate-limit.guard'
 
 /**
  * The pictures people put on show — avatars and workspace logos — and nothing
@@ -42,14 +43,19 @@ export function isPublicImagePath(url: unknown, prefix: (typeof PUBLIC_IMAGE_PRE
  * a freshly signed URL, cached for less than that URL lives. Unauthenticated
  * like the pictures themselves (a logo is drawn on the custom-domain sign-in
  * page, before anybody signs in); the key's shape is checked, so no `..` or
- * extra segment reaches another object.
+ * extra segment reaches another object. And limited per address, like every
+ * route anybody may call (`found-30-sep/public-routes-unthrottled`).
  */
 @ApiTags('public-images')
 @Controller('public/images')
+@UseGuards(RateLimitGuard)
 export class PublicImagesController {
   constructor(private readonly r2: R2Service) {}
 
   @Get(':folder/:name')
+  // One page draws dozens of pictures, members' pages too: ten times a page's
+  // budget (PUBLIC_ROUTE_LIMITS.image).
+  @RateLimit(PUBLIC_ROUTE_LIMITS.image)
   async show(@Param('folder') folder: string, @Param('name') name: string, @Res() reply: FastifyReply) {
     const key = `${folder}/${name}`
     if (!this.r2.configured || !PUBLIC_IMAGE_PREFIXES.some((prefix) => isKeyDirectlyUnder(key, prefix))) {

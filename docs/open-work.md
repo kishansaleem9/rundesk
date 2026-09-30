@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 374 items, 49 open, 8 partly fixed, 317 closed, counted from this file's headings on 30 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 378 items, 52 open, 8 partly fixed, 318 closed, counted from this file's headings on 30 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1625,6 +1625,38 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 
 *To close:* read `ok` (or `must`) in those 137 conditions, or bind those suites with `noAnswer: 'throw'`. Add a gate that refuses a status compared with `<` and no lower bound, with a planted case and a mutation.
 
+### `found-30-sep/client-address-behind-nginx` — open (security, small; found closing `found-30-sep/public-routes-unthrottled`)
+
+**Behind nginx, every visitor may be one address, so each per-address limit is the whole site's**
+
+*Evidence, 30 September, read and not measured:* production runs the API behind nginx (`deploy/docker-compose.prod.yml` binds it to loopback). Neither that file nor `deploy/env.production.template` sets `TRUST_PROXY`, and `main.ts` reads the client's address from `X-Forwarded-For` only when it is `true`. Unset, `req.ip` is nginx's for everyone: sign-in's ten a minute, and the public routes' 120 and 1,200, are one budget for the whole site. Set, `trustProxy: true` trusts every hop, and nginx appends to the client's own header (`$proxy_add_x_forwarded_for`), so a client chooses its address.
+
+*To close:* trust exactly one hop, nginx (`trustProxy: 1` or its address), and set it in the production compose. Check it through nginx with a forged `X-Forwarded-For`.
+
+### `found-30-sep/test-email-route-open` — open (security, small; found closing `found-30-sep/public-routes-unthrottled`)
+
+**`POST /email/test` sends mail for anybody outside production**
+
+*Evidence, 30 September:* the route has no guard. Wherever `NODE_ENV` is not `production` it sends any subject and HTML to any address. Lane 3 answered an anonymous `{}` with 201 `{ ok: true }`. Production refuses it.
+
+*To close:* an admin guard, or no route outside development; a check that an anonymous caller is refused.
+
+### `found-30-sep/register-unthrottled` — open (security, small; found closing `found-30-sep/public-routes-unthrottled`)
+
+**The old `POST /auth/register` makes accounts with no limit, beside signup's ten a minute**
+
+*Evidence, 30 September, read:* `AuthController.register` is deprecated but routed, and carries no `@RateLimit`. Each call makes an account and a workspace. The invitation routes (`claim`, `decline`, `preview`) and `sso/lookup` have none either.
+
+*To close:* limit or retire `register`, decide the invitation and SSO routes' budgets, and check a burst on each.
+
+### `found-30-sep/public-pages-read-429-as-gone` — open (visible bug, small; found closing `found-30-sep/public-routes-unthrottled`)
+
+**A public page refused for too many requests says its link is gone**
+
+*Evidence, 30 September, read:* `clip-link-page.tsx` shows "This clip is not available" ("the clip may have been deleted") for any failure but a 401. `portal.$token.tsx` shows its not-found page for any failure. `custom-domain.ts` drops the branding without a word. The 429 says when to come back (`Retry-After`, and `retryAfter` in the body).
+
+*To close:* on a 429, say that there were too many requests and when to try again. Check it by answering the page's request with a 429 in the browser.
+
 ### `found-30-sep/attachments-tab-draws-twice` — open (visible bug, small; found closing `found-30-sep/task-attachments-flaky`)
 
 **The Attachments tab draws its cards from the task's own rows, then again from its list, and every card jumps 175 px**
@@ -1779,13 +1811,31 @@ Checks:
 
 *To close:* give comment clips a link under the task's read rule, and check that it opens for those who may read the task and nobody else.
 
-### `found-30-sep/public-routes-unthrottled` — open (security, small; found closing `resume-defects/resume-7`)
+### `found-30-sep/public-routes-unthrottled` — **closed** (security, small; found closing `resume-defects/resume-7`)
 
 **The public routes are not rate-limited**
 
 *Evidence, 30 September:* `GET /public/clips/:token` has no throttle, and neither do the public doc, portal and image routes. The only global guard is CSRF. A clip token is 192 random bits, so guessing is not the risk; a flood is.
 
 *To close:* throttle the public routes per address, and check that a burst is refused with 429 while an ordinary viewer is not.
+
+*Closed, 30 September* (built by an agent on lane 3, merged and measured again here). ClickUp documents limits for its API alone: "The ClickUp API applies rate limits per token", 100 requests a minute on Free Forever, Unlimited and Business, and "If you exceed the rate limit, the API returns a HTTP 429 status code" (developer docs, read through search results; the site is blocked here). Its help centre says nothing of limits on public links, Docs or Clips.
+
+So the safe rule: what anybody may ask without an account is limited per address, the one key such a request has, far above one visitor and far below a flood. The budgets are `PUBLIC_ROUTE_LIMITS`, beside `RateLimitGuard`:
+- A page, 120 a minute: a shared doc, a clip's link, a client portal, the status page and a custom domain's branding. Each is asked once per page load. A public form's read already had this budget.
+- A picture, 1,200 a minute: ten times a page, because one page draws dozens of avatars and logos, for members too.
+- Past it, 429 with a Retry-After, as sign-in's limits answer. The counter is the guard's own: per route, address and minute, shared by every replica.
+- The machines' routes are not limited: the TLS proxy's ask, Stripe's and the inbound webhooks, the calendar feed, SCIM, Zapier and the health checks. Each is one caller for many, and a refusal loses a certificate, an event or a feed.
+- The sign-in and invitation routes are as they were (`found-30-sep/register-unthrottled`).
+
+Checks:
+- `public-route-limits` is new, with 11 checks and nothing stubbed, registered in CI (247 in `postgres-harnesses`). It reads, on each of the six routes, a burst one past the budget refused with 429 and a Retry-After. It also reads another address (127.0.0.2) and another route still served, the visitor served again after the minute, and four machine routes answering 1,201 without a 429. Its bursts start as a fresh minute begins. It ends only once that minute has passed, since every suite on a lane asks from 127.0.0.1. Before, 2/11 on lane 3: every burst was served whole. After, 11/11.
+- `public-route-limits.test.ts` is new, with 20 tests. Each public handler carries its policy behind the guard; the machines' routes carry neither. Driven with the real routes' metadata, the guard refuses the 121st open of a doc from one address, and nobody else.
+- `prl-1..18` are new: 11 aimed at the suite and 7 unit claims, each reddening what it names (lane 3, baseline 11/11). `prl-3`'s first run found that a burst could land in a minute an earlier suite had asked in, which is why the bursts wait for a fresh one.
+- Regression on lane 3, run straight after the new suite: `doc-boundaries` 17/17, `object-key-boundaries` 23/23, `clip-links` 19/19 (20/20 here, with the check the store stub made possible), `clip-created-card` 26/26, `stable-images` 6/6, `hook-portal-access` 11/11 and `public-doc-page` 12/12. None met a 429.
+
+Found while building it: `found-30-sep/client-address-behind-nginx`, `found-30-sep/test-email-route-open`, `found-30-sep/register-unthrottled` and `found-30-sep/public-pages-read-429-as-gone`.
+- Merged here and run again: `public-route-limits` 11/11 alone on lane 5, then on lanes 5 and 7 the seven suites that call the public routes, all green, 115 checks, none meeting a 429 (doc-boundaries 17, clip-links 20, public-doc-page 12, object-key-boundaries 23, clip-created-card 26, stable-images 6, hook-portal-access 11). Its suite moved onto lib/fixture.mjs's one client.
 
 ### `found-30-sep/store-stub-drops-object-metadata` — **closed** (test tooling, small; found closing `resume-defects/resume-7`)
 

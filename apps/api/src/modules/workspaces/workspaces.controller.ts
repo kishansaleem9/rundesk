@@ -10,6 +10,7 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 // No route here asks it any more; break patches `mrg-1` and `td-4` put it back
 // on one to prove their checks, and must still compile.
 import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
+import { PUBLIC_ROUTE_LIMITS, RateLimit, RateLimitGuard } from '../../common/guards/rate-limit.guard'
 import { isManagerRole } from '../../common/permissions/item-visibility'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { CreateWorkspaceDto } from './dto/create-workspace.dto'
@@ -435,6 +436,12 @@ export class WorkspacesPublicController {
   constructor(private readonly workspacesService: WorkspacesService) {}
 
   @Get('public/workspace-by-domain')
+  // Anybody's browser asks this once per page load on a custom domain: a
+  // page's budget, per address (`found-30-sep/public-routes-unthrottled`). On
+  // this route, not the class: `authorizeTls` below is the TLS proxy's, one
+  // machine asking for every host it serves, and is never throttled.
+  @UseGuards(RateLimitGuard)
+  @RateLimit(PUBLIC_ROUTE_LIMITS.page)
   @ApiOperation({ summary: 'Resolve a verified custom domain to its workspace branding (no auth)' })
   async workspaceByDomain(
     @Query('host') hostParam?: string,
