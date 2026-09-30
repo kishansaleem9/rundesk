@@ -2638,13 +2638,119 @@ Checks:
 - `acd-1` (no date), `acd-2` (the reader's clock, not the server's date) and `acd-3` (day and month only, ClickUp's way) are aimed at the check. The break runner measured them at `de24716` (lane 1): each 25/26 against 26/26.
 - Regression on lanes 5 and 7: the suites that draw attachment cards, `attach-on-create` 14, `clip-created-card` 26, `task-cover` 42 and `comment-recording` 33, all green.
 
-### `found-30-sep/attachments-have-no-download-all` — open (parity, small; found closing `found-30-sep/attachments-tab-draws-twice`)
+### `found-30-sep/attachments-have-no-download-all` — **closed** (parity, small; found closing `found-30-sep/attachments-tab-draws-twice`)
 
 **The Attachments section has no Download all**
 
 *Evidence, 30 September:* ClickUp: "you can download all your task attachments into a zipped file by clicking the download icon in the upper-right corner of the Attachments section" (help centre, through search excerpts). Rundesk has no such control and no route for it.
 
 *To close:* a zip of the task's files under its read rule, links left out or listed, and the icon; check the zip's entries against the list.
+
+
+*Closed, 30 September* (built by an agent on lane 7). ClickUp: "Download all your task attachments into a
+zipped file for easy sharing. To download all task attachments, click the download icon in the upper-right
+corner of the Attachments section" ("Add attachments to tasks", read through search excerpts); a comment's files
+are among them ("Attachments in comments are also displayed in the attachments section"). Its zip is always
+"clickup-attachments", and its feedback board asks for the task's name ("Download All Attachments: .Zip File Name
+Should = Task Name"). It does not say what the zip does with a file linked from a cloud drive. Measured first on
+lane 7: `GET /tasks/:id/attachments/zip` answered 404 "Cannot GET", and the Attachments header held its count
+and no control.
+- `GET /tasks/:id/attachments/zip` streams the task's files, comments' among them, in the list's order, as
+  `<title>-attachments.zip` (`filename*` carries a title in any script). Its links are listed in `links.txt`,
+  name then address, since the product holds no bytes for them and fetching a typed address from the API's
+  network would be a forged request.
+- Entry names are one segment with no separator and no `..`; a repeat is `notes (2).txt`, compared without case.
+- The read rule is `readableTask`'s, the list's own, answered 404 for a task the caller may not open, as for one
+  that is not there. A task with no files is 404; the icon is drawn only when the list holds a file.
+- Each file is sized by `HEAD` first; past 1 GiB the answer is a refusal before a byte. No Zip64: the writer
+  (`zip-stream.ts`, data descriptors, `zlib.crc32` or a CRC of its own where Node has none, store or deflate
+  by type) stops rather than pass a ZIP32 limit.
+- A download icon at the right of the Attachments header, in four locales; the page saves under the name the
+  server gives.
+
+Checks: `task-attachments`, 26 → 32: the icon, and none for links alone; the saved zip's files byte for byte in
+the list's order, against the upload and the store's copy; distinct names with no path; `links.txt`; the name;
+and a member refused the task gets 404 where they had the zip while it was open to them.
+- Before, the six failed in three runs of three (26/32). After, 32/32 three runs in a row at `de24716` and
+  again at `9b5ced3`.
+- `zip-stream.test.ts` (6), `zip-names.test.ts` (2), `tasks-attachments-zip.test.ts` (5) read every archive
+  back with Info-ZIP; `content-disposition.test.ts` (1). A seventh in `zip-stream.test.ts` checks the CRC
+  below.
+- `dla-1..8` redden their checks, each 31/32 on lane 7; `dla-9..22` redden their unit tests (`dla-10` four more,
+  since unzip cannot read its archive).
+- Regression on lane 7: `task-attachments` 32, `attach-on-create` 14, `clip-created-card` 26, `task-cover` 42,
+  `comment-recording` 33, `object-key-boundaries` 23, all green.
+
+Found while building it: `found-30-sep/private-task-reads-say-403`, `found-30-sep/list-export-saved-as-list-csv`,
+`found-30-sep/node-engines-below-zlib-crc32` (closed with it), `found-30-sep/download-refusals-say-no-reason` and
+`found-30-sep/two-zip-writers`.
+- Merged here and run again on lanes 5 and 7, with a CRC of its own where Node has none (`found-30-sep/node-engines-below-zlib-crc32`, below): `task-attachments` 32/32, `attach-on-create` 14, `object-key-boundaries` 23, `clip-created-card` 26, `task-cover` 42, `comment-recording` 33 and `list-export` 30, all green, 200 checks.
+
+### `found-30-sep/private-task-reads-say-403` — open (security, small; found closing `found-30-sep/attachments-have-no-download-all`)
+
+**A task's own reads tell a member refused it that it exists; the service reads answer as if it did not**
+
+*Evidence, 30 September, lane 7:* a member of the workspace, refused a private task, gets 403 from
+`GET /tasks/:id` ("This task is private", `ResourceMemberGuard`), and the guard answers 403 for a private list,
+space or project too, while an id that names nothing is 404. The service reads of such a task answer 404:
+duplicating, saving as a template, reminders, custom fields, calendar sync, and now Download all
+(`readableTask`, "refused as a task that is not there, as every read of a task its reader may not open is").
+So the task's own route says whether an id is a task.
+
+*To close:* decide one answer for a task the caller may not open, and give it to the guard and the services
+alike; check it on a private task, list and space.
+
+### `found-30-sep/list-export-saved-as-list-csv` — open (visible bug, small; found closing `found-30-sep/attachments-have-no-download-all`)
+
+**A list's export is saved as "list.csv" whatever the list is called**
+
+*Evidence, 30 September, read, not measured:* `GET /tasks/list/:id/export` names the file after the list
+(`Content-Disposition: attachment; filename="<list name>.csv"`), and the web saves it as `list.csv` or
+`list.xlsx` (`downloadFile(…, 'list.csv')` in the list route). The doc export works its name out on the page
+from the title, a second copy of the server's rule.
+
+*To close:* save under the name the server gives, as Download all now does (`downloadFile` with no name reads
+`Content-Disposition`), and check the saved name for a list with a name.
+
+### `found-30-sep/node-engines-below-zlib-crc32` — **closed** (deploy, small; found closing `found-30-sep/attachments-have-no-download-all`)
+
+**The API may run on a Node without `zlib.crc32`, which Download all needs**
+
+*Evidence, 30 September, read:* `package.json` says `"node": ">=20.0.0"` and `deploy/Dockerfile.api` builds
+`FROM node:20-alpine`. `zlib.crc32` exists from Node 20.15.0 and 22.2.0. The floating 20-alpine tag is past
+20.15 today, and the lanes and CI run 22; an image pinned to an earlier 20 would start and then fail the first
+zip after its headers were sent.
+
+*To close:* raise `engines` to `>=20.15.0` (or 22) and pin the image's minor version, or give the writer a CRC
+of its own when `zlib.crc32` is missing.
+
+*Closed, 30 September,* with `found-30-sep/attachments-have-no-download-all`, by the second way: the writer takes `zlib.crc32` where Node has it and a table-driven CRC-32 of its own where it does not (`crc32Table`, `zip-stream.ts`). So an image on any Node 20 writes the zip, and `engines` and the image are left as they are.
+- `zip-stream.test.ts`, "agrees with zlib.crc32 over a whole buffer and over the same buffer fed in parts": the stand-in against Node's over 70 000 bytes whole and in 4096-byte parts, as the writer feeds a store's stream, and 0 for no bytes. 7/7 with it.
+- `dla-23` (the last XOR skipped) and `dla-24` (each chunk starts again, the value handed in ignored) redden it, each 6/7, run against sandbox copies here.
+- Read, not run: that the writer picks the stand-in when `zlib.crc32` is missing. Every Node here is 22, and no Node before 20.15 was installed to start the API on.
+
+### `found-30-sep/download-refusals-say-no-reason` — open (visible bug, small; found closing `found-30-sep/attachments-have-no-download-all`)
+
+**A refused download says "could not", never why**
+
+*Evidence, 30 September, read, not measured:* `downloadFile` (`lib/api.ts`) throws `Download failed (<status>)`
+and never reads the refusal's envelope. So Download all past its cap ("This task's files come to N MB, and a zip
+of them holds 1024 MB at most: download them one at a time") shows only "Could not download the attachments",
+and a list or doc export refused shows its own fixed toast in the same way. Not measured: the lanes' store
+holds objects in memory, and a task past 1 GiB was not staged.
+
+*To close:* carry the envelope's message on the `ApiError`, show it where it is meant for the reader (the 400s),
+and check it with a cap lowered for the run, or with a HEAD stubbed to answer past it.
+
+### `found-30-sep/two-zip-writers` — open (code, small; found closing `found-30-sep/attachments-have-no-download-all`)
+
+**The xlsx export carries a ZIP writer and a CRC table of its own**
+
+*Evidence, 30 September, read:* `common/export/xlsx.ts` builds its archive with a private `zip()` and a
+table-driven `crc32`, buffered, beside `common/export/zip-stream.ts`, which streams and uses `zlib.crc32`.
+Two writers of one format drift apart the way the duplicated lists in this ledger did.
+
+*To close:* write the workbook with `zipStream`, and check `list-export`'s xlsx checks still pass.
 
 ### `found-30-sep/schema-reference-reads-the-main-tree` — **closed** (test tooling, small; found closing `found-30-sep/attachments-unordered`)
 

@@ -1,5 +1,6 @@
 import { Injectable, Inject, Optional, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
+import { Readable } from 'node:stream'
 import { eq, and, or, asc, desc, ilike, inArray, isNull, isNotNull, notInArray, sql, type SQL } from 'drizzle-orm'
 import {
   taskTypes,
@@ -43,6 +44,19 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { TRASH_RETENTION_DAYS } from '../trash/trash.service'
 import { toCsv } from '../../common/export/csv'
 import { toXlsx } from '../../common/export/xlsx'
+import { zipStream, type ZipEntry } from '../../common/export/zip-stream'
+import { uniqueEntryNames } from '../../common/export/zip-names'
+import { isUuid } from '../../common/validation/uuid'
+import {
+  ATTACHMENTS_ZIP_MAX_BYTES,
+  LINKS_ENTRY_NAME,
+  attachmentsZipName,
+  linksText,
+  mapAtMost,
+  zipContents,
+  zipMethodFor,
+  type ZipAttachmentRow,
+} from './attachments-zip'
 import {
   asDateFormat,
   asTimeFormat,
@@ -3264,6 +3278,131 @@ export class TasksService {
     if (!storageKey) return null
     if (isLinkAttachmentKey(storageKey)) return storageKey
     return this.r2.configured ? this.r2.getObjectUrl(storageKey) : storageKey
+  }
+
+  /**
+   * DOWNLOAD ALL (`found-30-sep/attachments-have-no-download-all`): every file
+   * the task's list holds, comments' among them, as one zip, in the list's
+   * order, and its links listed in `links.txt` after them. What goes in, and
+   * what it is called, is `attachments-zip.ts`; how it is written,
+   * `zip-stream.ts`.
+   *
+   * THE READ RULE, ANSWERED AS NOT FOUND. The rule `GET /tasks/:id/attachments`
+   * asks, `readableTask`'s, row for row: membership, the container, a guest's
+   * reach, the private list and the private task. A task this person may not
+   * open is refused as a task that is not there, as every service read of such
+   * a task is, so the refusal does not say that it exists.
+   *
+   * NOTHING IS SENT UNTIL IT IS KNOWN TO FIT. Each file's size is asked of the
+   * store (`HEAD`), since the size a row carries is what the uploader declared.
+   * Past `ATTACHMENTS_ZIP_MAX_BYTES` the answer is a refusal, before the first
+   * byte; once the zip is under way a failure can only cut it short. A file
+   * whose object is gone is left out, as its Download link would fail. And a
+   * task with no files is answered 404, not with an empty zip: ClickUp shows a
+   * task's attachment control only once it has attachments, and the page shows
+   * this one only when there are files.
+   *
+   * The files are then read one at a time from the store, as the zip is read.
+   */
+  async attachmentsZip(
+    taskId: string,
+    reader: { id: string; role?: string | null },
+  ): Promise<{ fileName: string; disposition: string; stream: Readable }> {
+    const task = await this.taskOpenTo(taskId, reader)
+    if (!task) throw new NotFoundException('Task not found')
+    const rows: ZipAttachmentRow[] = await this.db
+      .select({
+        id: taskAttachments.id,
+        fileName: taskAttachments.fileName,
+        contentType: taskAttachments.contentType,
+        storageKey: taskAttachments.storageKey,
+        createdAt: taskAttachments.createdAt,
+      })
+      .from(taskAttachments)
+      .where(eq(taskAttachments.taskId, task.id))
+      .orderBy(...ATTACHMENT_ORDER)
+    const { files, links } = zipContents(rows)
+    if (files.length > 0 && !this.r2.configured) throw new BadRequestException('R2 storage is not configured')
+
+    const missing = (err: unknown) => {
+      const e = err as { name?: string; $metadata?: { httpStatusCode?: number } } | null
+      return e?.name === 'NotFound' || e?.name === 'NoSuchKey' || e?.$metadata?.httpStatusCode === 404
+    }
+    const sized = await mapAtMost(8, files, async (file) => {
+      try {
+        const head = await this.r2.headObject(file.storageKey)
+        return { file, bytes: Number(head.ContentLength ?? 0) }
+      } catch (err) {
+        if (missing(err)) return null
+        throw err
+      }
+    })
+    const present = sized.filter((s): s is { file: ZipAttachmentRow; bytes: number } => s !== null)
+    // No files, or none the store still holds: nothing to zip.
+    if (present.length === 0) throw new NotFoundException('This task has no files to download')
+    const total = present.reduce((sum, s) => sum + s.bytes, 0)
+    if (total > ATTACHMENTS_ZIP_MAX_BYTES) {
+      const mb = (n: number) => Math.ceil(n / (1024 * 1024))
+      throw new BadRequestException(
+        `This task's files come to ${mb(total)} MB, and a zip of them holds ${mb(ATTACHMENTS_ZIP_MAX_BYTES)} MB at most: download them one at a time`,
+      )
+    }
+
+    const listed = links.length ? linksText(links) : null
+    const names = uniqueEntryNames([...present.map((s) => s.file.fileName), ...(listed ? [LINKS_ENTRY_NAME] : [])])
+    const entries: ZipEntry[] = present.map(({ file }, i) => ({
+      name: names[i],
+      method: zipMethodFor(file.contentType),
+      modifiedAt: file.createdAt,
+      open: async () => {
+        try {
+          return await this.r2.getObjectStream(file.storageKey)
+        } catch (err) {
+          // Gone since it was sized: left out, and the archive is still whole.
+          if (missing(err)) return null
+          throw err
+        }
+      },
+    }))
+    if (listed) {
+      entries.push({
+        name: names[present.length],
+        method: 'deflate',
+        modifiedAt: links[links.length - 1].createdAt,
+        open: async () => Buffer.from(listed, 'utf8'),
+      })
+    }
+    const { fileName, disposition } = attachmentsZipName(task.title)
+    return {
+      fileName,
+      disposition,
+      // A byte stream, so what waits unread is counted in bytes, not in chunks.
+      stream: Readable.from(zipStream(entries, { maxBytes: ATTACHMENTS_ZIP_MAX_BYTES + Buffer.byteLength(listed ?? '') }), {
+        objectMode: false,
+        highWaterMark: 64 * 1024,
+      }),
+    }
+  }
+
+  /**
+   * The task's id and title when this person may open it, by `readableTask`,
+   * the rule every service read of a task asks; else null, for a task that is
+   * not there and one they may not open alike. A seam the zip's tests answer.
+   */
+  private async taskOpenTo(taskId: string, reader: { id: string; role?: string | null }): Promise<{ id: string; title: string } | null> {
+    if (!isUuid(taskId)) return null
+    const [row] = await this.db
+      .select({ id: tasks.id, title: tasks.title, workspaceId: spaces.workspaceId })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    if (!row) return null
+    return (await readableTask(this.db, row.workspaceId, taskId, { id: reader.id, role: reader.role ?? null }))
+      ? { id: row.id, title: row.title }
+      : null
   }
 
   async addAttachment(

@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream'
 import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import {
@@ -108,6 +109,22 @@ export class R2Service {
     // AWS SDK v3 streams expose transformToByteArray() in Node and browsers.
     const bytes = await (body as { transformToByteArray(): Promise<Uint8Array> }).transformToByteArray()
     return Buffer.from(bytes)
+  }
+
+  /**
+   * An object's bytes as a stream, for a caller that passes them on rather
+   * than reading them: a task's files, zipped as they arrive
+   * (`found-30-sep/attachments-have-no-download-all`). The same object the
+   * Download link's signed URL names — the bucket and the key — read with the
+   * API's own credentials instead of a signature. Throws as `getObject` does:
+   * `NoSuchKey` when nothing is there. Whoever takes the stream reads it to
+   * the end or destroys it, or the connection to the store stays open.
+   */
+  async getObjectStream(key: string): Promise<Readable> {
+    this.requireConfigured()
+    const res = await this.client!.send(new GetObjectCommand({ Bucket: this.bucketName!, Key: key }))
+    // In Node the SDK's body IS a Readable (an IncomingMessage with helpers mixed in).
+    return (res.Body as Readable | undefined) ?? Readable.from([])
   }
 
   async getObjectUrl(key: string, expiresInSeconds = 900): Promise<string> {

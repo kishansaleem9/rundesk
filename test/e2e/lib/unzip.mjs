@@ -1,4 +1,4 @@
-import { inflateRawSync } from 'node:zlib'
+import { crc32, inflateRawSync } from 'node:zlib'
 
 /**
  * Enough of a ZIP reader to open an .xlsx in a test, with no dependency.
@@ -53,6 +53,49 @@ export function unzip(buf) {
     const raw = buf.subarray(dataAt, dataAt + compressedSize)
 
     out.set(name, method === 0 ? Buffer.from(raw) : inflateRawSync(raw))
+    p += 46 + nameLen + extraLen + commentLen
+  }
+  return out
+}
+
+/**
+ * EVERY ENTRY, IN THE CENTRAL DIRECTORY'S ORDER, as a list — for an archive
+ * whose ORDER and REPEATS are what is being checked (a task's "Download all",
+ * `found-30-sep/attachments-have-no-download-all`). `unzip` above answers a
+ * Map, which folds two entries of one name into one and so cannot see a zip
+ * that has them.
+ *
+ * Each entry says whether its bytes' CRC-32 is the one the directory records:
+ * a writer that got the CRC wrong makes an archive a real `unzip` refuses, and
+ * reading the bytes back alone would never notice.
+ *
+ * @returns {Array<{ name: string, data: Buffer, method: number, flags: number, crcOk: boolean }>}
+ */
+export function unzipEntries(buf) {
+  let eocd = -1
+  for (let i = buf.length - 22; i >= 0 && i >= buf.length - 22 - 0xffff; i -= 1) {
+    if (buf.readUInt32LE(i) === EOCD_SIG) { eocd = i; break }
+  }
+  if (eocd === -1) throw new Error('not a zip: no end-of-central-directory record')
+  const count = buf.readUInt16LE(eocd + 10)
+  let p = buf.readUInt32LE(eocd + 16)
+  const out = []
+  for (let n = 0; n < count; n += 1) {
+    if (buf.readUInt32LE(p) !== CEN_SIG) throw new Error(`bad central directory entry at ${p}`)
+    const flags = buf.readUInt16LE(p + 8)
+    const method = buf.readUInt16LE(p + 10)
+    const crc = buf.readUInt32LE(p + 16)
+    const compressedSize = buf.readUInt32LE(p + 20)
+    const nameLen = buf.readUInt16LE(p + 28)
+    const extraLen = buf.readUInt16LE(p + 30)
+    const commentLen = buf.readUInt16LE(p + 32)
+    const localOffset = buf.readUInt32LE(p + 42)
+    const name = buf.subarray(p + 46, p + 46 + nameLen).toString('utf8')
+    if (buf.readUInt32LE(localOffset) !== LOC_SIG) throw new Error(`entry ${name} does not point at a local header`)
+    const dataAt = localOffset + 30 + buf.readUInt16LE(localOffset + 26) + buf.readUInt16LE(localOffset + 28)
+    const raw = buf.subarray(dataAt, dataAt + compressedSize)
+    const data = method === 0 ? Buffer.from(raw) : inflateRawSync(raw)
+    out.push({ name, data, method, flags, crcOk: crc32(data) === crc })
     p += 46 + nameLen + extraLen + commentLen
   }
   return out

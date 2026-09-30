@@ -10,6 +10,8 @@ import {
   Query,
   Ip,
   UseGuards,
+  Header,
+  StreamableFile,
   BadRequestException, Res } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -703,6 +705,26 @@ export class TasksController {
     @CurrentUser() user: CurrentUserPayload,
   ) {
     return this.tasks.listAttachments(taskId, user.id)
+  }
+
+  /**
+   * DOWNLOAD ALL (`found-30-sep/attachments-have-no-download-all`): the task's
+   * files as one zip, streamed from the store as it is read, named after the
+   * task. See `TasksService.attachmentsZip`.
+   *
+   * NOT BEHIND `ResourceMemberGuard`, which refuses a task in a private list or
+   * space with 403 and so says that it is there. The service asks the same
+   * rule (`readableTask`) and answers 404 for a task this person may not open,
+   * as for one that does not exist. Not cached: it is somebody's files.
+   */
+  @Get(':taskId/attachments/zip')
+  @Header('Cache-Control', 'private, no-store')
+  async downloadAttachmentsZip(
+    @Param('taskId') taskId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    const zip = await this.tasks.attachmentsZip(taskId, { id: user.id, role: user.role })
+    return new StreamableFile(zip.stream, { type: 'application/zip', disposition: zip.disposition })
   }
 
   @Post(':taskId/attachments')

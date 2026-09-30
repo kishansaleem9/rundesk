@@ -93,7 +93,7 @@ import {
   // `ledger-rows/row-751`).
   Brain as BrainIcon,
 } from 'lucide-react'
-import { api, ApiError } from '../lib/api'
+import { api, ApiError, downloadFile } from '../lib/api'
 import { useAiDock } from '../lib/ai-dock'
 import { offerUndo } from '../lib/undoable-delete'
 import { useActivityRail, setActivityRail } from '../lib/activity-rail'
@@ -407,6 +407,8 @@ type Attachment = {
   uploaderName?: string | null
   createdAt?: string | null
   url?: string | null
+  /** A file the store holds, or a link somebody attached: only files go into "Download all". */
+  kind?: 'file' | 'link'
 }
 
 /**
@@ -5944,6 +5946,27 @@ function AttachmentsPanel({
   const attachments: Attachment[] = listed ?? (waiting ? [] : inline.map(attachmentFromTaskRow))
   const count = waiting ? inline.length : attachments.length
   const uploadWired = !notWired
+  /*
+   * DOWNLOAD ALL (`found-30-sep/attachments-have-no-download-all`). ClickUp:
+   * "download all your task attachments into a zipped file by clicking the
+   * download icon in the upper-right corner of the Attachments section". Offered
+   * once the list says there is a FILE to put in it, as ClickUp shows a task's
+   * attachment control only once it has attachments: the zip is the files, and
+   * a task of links alone has nothing to zip (the server answers 404 for it).
+   * The zip is named by the server, after the task, and saved under that name.
+   */
+  const hasFiles = attachments.some((a) => a.kind === 'file' && !!a.url)
+  const [zipping, setZipping] = useState(false)
+  const downloadAll = async () => {
+    setZipping(true)
+    try {
+      await downloadFile(`/tasks/${taskId}/attachments/zip`)
+    } catch {
+      toast.error(t('taskDetail.attachmentsDownloadAllFailed'))
+    } finally {
+      setZipping(false)
+    }
+  }
   const addAttachment = useMutation({
     mutationFn: () =>
       api(`/tasks/${taskId}/attachments`, {
@@ -6041,6 +6064,25 @@ function AttachmentsPanel({
       >
         <span className="text-sm font-medium">{t('taskDetail.tab.attachments')}</span>
         <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
+        {/*
+          In the header's upper-right corner, where ClickUp's is. Drawn with the
+          cards, when the list answers; its negative margin keeps the header
+          the height it was, so nothing below it moves when it appears.
+        */}
+        {hasFiles ? (
+          <button
+            type="button"
+            data-testid="task-attachments-download-all"
+            onClick={() => void downloadAll()}
+            disabled={zipping}
+            aria-busy={zipping}
+            title={t('taskDetail.attachmentsDownloadAll')}
+            aria-label={t('taskDetail.attachmentsDownloadAll')}
+            className="-my-0.5 ml-auto inline-flex h-6 w-6 items-center justify-center self-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+          >
+            <Download className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
       </div>
       {/*
         THIS ZONE USED TO BE A PICTURE OF A DROP ZONE.

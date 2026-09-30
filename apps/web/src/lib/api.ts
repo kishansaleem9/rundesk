@@ -1,5 +1,6 @@
 import { useAuthStore } from '../store/auth'
 import { reconnectRealtime } from './realtime'
+import { filenameFromContentDisposition } from './content-disposition'
 
 const API_BASE = '/api/v1'
 
@@ -126,8 +127,12 @@ type ApiOptions = Omit<RequestInit, 'body'> & {
  * Download a file from an authenticated API route as a Blob and save it.
  * Browser <a download> navigations can't send the Authorization header (the JWT
  * is header-only), so file exports must go through fetch with the bearer token.
+ *
+ * Without a `filename`, it is saved under the name the response gives
+ * (`Content-Disposition`), so a name the server works out — a task's "Download
+ * all" is named after the task — is not worked out a second time here.
  */
-export async function downloadFile(path: string, filename: string): Promise<void> {
+export async function downloadFile(path: string, filename?: string): Promise<void> {
   const token = useAuthStore.getState().accessToken
   let res = await fetchWithAuth(path, { method: 'GET' }, token)
   if (res.status === 401 && useAuthStore.getState().isAuthenticated()) {
@@ -140,7 +145,7 @@ export async function downloadFile(path: string, filename: string): Promise<void
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = filename
+  a.download = filename ?? filenameFromContentDisposition(res.headers.get('content-disposition')) ?? 'download'
   document.body.appendChild(a)
   a.click()
   a.remove()

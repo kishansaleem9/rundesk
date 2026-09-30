@@ -2815,6 +2815,10 @@ export const en = {
   'taskDetail.attachmentMore': 'More',
   'taskDetail.attachmentCopyName': 'Copy file name',
   'taskDetail.attachmentNameCopied': 'File name copied',
+  // `found-30-sep/attachments-have-no-download-all` — the Attachments header's
+  // download icon, and what it says when the zip could not be made.
+  'taskDetail.attachmentsDownloadAll': 'Download all attachments',
+  'taskDetail.attachmentsDownloadAllFailed': 'Could not download the attachments',
   // §V2-S05 frame `04:11` — the `Comment ▾` mode switch. Email is listed and
   // refused: Rundesk's mail goes the other way, into a task, never out.
   'taskDetail.commentModeLabel': 'How this gets posted',
@@ -9674,6 +9678,8 @@ export const es: Record<TranslationKey, string> = {
   'taskDetail.attachmentMore': 'Más',
   'taskDetail.attachmentCopyName': 'Copiar nombre del archivo',
   'taskDetail.attachmentNameCopied': 'Nombre del archivo copiado',
+  'taskDetail.attachmentsDownloadAll': 'Descargar todos los adjuntos',
+  'taskDetail.attachmentsDownloadAllFailed': 'No se pudieron descargar los adjuntos',
   'taskDetail.commentModeLabel': 'Cómo se publica',
   'taskDetail.commentModeComment': 'Comentario',
   'taskDetail.commentModeEmail': 'Correo',
@@ -16408,6 +16414,8 @@ export const ar: Record<TranslationKey, string> = {
   'taskDetail.attachmentMore': 'المزيد',
   'taskDetail.attachmentCopyName': 'نسخ اسم الملف',
   'taskDetail.attachmentNameCopied': 'تم نسخ اسم الملف',
+  'taskDetail.attachmentsDownloadAll': 'تنزيل كل المرفقات',
+  'taskDetail.attachmentsDownloadAllFailed': 'تعذّر تنزيل المرفقات',
   'taskDetail.commentModeLabel': 'كيف يُنشر هذا',
   'taskDetail.commentModeComment': 'تعليق',
   'taskDetail.commentModeEmail': 'بريد إلكتروني',
@@ -23063,6 +23071,8 @@ export const ur: Record<TranslationKey, string> = {
   'taskDetail.attachmentMore': 'مزید',
   'taskDetail.attachmentCopyName': 'فائل کا نام کاپی کریں',
   'taskDetail.attachmentNameCopied': 'فائل کا نام کاپی ہو گیا',
+  'taskDetail.attachmentsDownloadAll': 'تمام منسلکات ڈاؤن لوڈ کریں',
+  'taskDetail.attachmentsDownloadAllFailed': 'منسلکات ڈاؤن لوڈ نہیں ہو سکیں',
   'taskDetail.commentModeLabel': 'یہ کیسے پوسٹ ہوگا',
   'taskDetail.commentModeComment': 'تبصرہ',
   'taskDetail.commentModeEmail': 'ای میل',

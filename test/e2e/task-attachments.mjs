@@ -54,20 +54,32 @@
  *
  * AND A COMMENT'S FILES CAME BACK IN HEAP ORDER TOO (`found-30-sep/comment-files-unordered`):
  * the third read of a task's files, the one the comments list makes, had no
- * ORDER BY either. The last section posts three files on one comment, attached
- * in the same order and rewritten into the heap in the same other one, and
- * reads them from the list and from the comment as drawn.
+ * ORDER BY either. The section after the removals posts three files on one
+ * comment, attached in the same order and rewritten into the heap in the same
+ * other one, and reads them from the list and from the comment as drawn.
+ *
+ * AND THERE WAS NO DOWNLOAD ALL (`found-30-sep/attachments-have-no-download-all`).
+ * ClickUp: "you can download all your task attachments into a zipped file by
+ * clicking the download icon in the upper-right corner of the Attachments
+ * section" (help centre, through search excerpts). The last section gives a
+ * task of its own four uploaded files — two called `notes.txt`, one of them a
+ * comment's, one called `../outside.txt` — and two links, presses the icon, and
+ * opens what the browser saved: the files byte for byte in the list's order,
+ * under names that are distinct and hold no path, the links in `links.txt`, the
+ * zip named after the task; and a member refused the task gets 404 for it.
  *
  *   node test/e2e/task-attachments.mjs --api 3011 --dist apps/web/dist
  */
+import fs from 'node:fs'
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil, waitForCount } from './lib/wait.mjs'
 import { storeBase, storeRequests } from './lib/store.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { unzipEntries } from './lib/unzip.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -75,7 +87,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 26
+const EXPECTED_CHECKS = 32
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -108,6 +120,8 @@ const chromium = await resolveChromium()
 const stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
 const browser = await chromium.launch(launchOptions())
 let sql = null
+// The member the last section signs up, removed at the end with what signing up made.
+let memberId = null
 
 const TAG = `e2e-attach-${Date.now()}`
 /** The fixture's own size, so "the count is 3" is not a claim about the database. */
@@ -825,6 +839,214 @@ try {
     'and the comment draws them in that order',
     `the comment drew ${JSON.stringify(drawnNotes)}; they were attached ${noteNamesOf(noteAttached)}${noteUnproven}${noteMade}`,
   )
+
+  // -------------------------------------------------------------------------
+  console.log('\n▶ Download all: the task\'s files as one zip, from the header\'s download icon')
+
+  /*
+   * DOWNLOAD ALL (`found-30-sep/attachments-have-no-download-all`). A task of
+   * its own, given, in this order: `notes.txt`; a link, `spec`; `pixel.png`, a
+   * real PNG with this run's tag after its end; a second `notes.txt`, posted on
+   * a comment, since ClickUp's section lists a comment's files too; a file
+   * called `../outside.txt`, a name nothing checks; and a second link, `board`.
+   * Four uploads the product's own way (presign, PUT, record), so their bytes
+   * are in the lane's store, and two links. What the zip must hold follows.
+   */
+  const ZIP_TITLE = `Files/for "review" ${TAG}`
+  const zipTask = (await A('/tasks', { method: 'POST', body: { listId: list.id, title: ZIP_TITLE } })).data
+  if (!zipTask?.id) throw new Error('could not make the task Download all is read on')
+  const PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+    'base64',
+  )
+  /** One file the product's own way; its id, or a throw naming the step that was refused. */
+  const upload = async (fileName, contentType, bytes) => {
+    const pre = await A(`/tasks/${zipTask.id}/attachments/presign`, {
+      method: 'POST',
+      body: { fileName, contentType, sizeBytes: bytes.length },
+    })
+    const put = pre.data?.uploadUrl
+      ? await fetch(pre.data.uploadUrl, { method: 'PUT', headers: { 'content-type': contentType }, body: bytes })
+          .then((r) => r.status, () => 0)
+      : 0
+    const rec = pre.data?.storageKey && put === 200
+      ? await A(`/tasks/${zipTask.id}/attachments`, {
+          method: 'POST',
+          body: { fileName, storageKey: pre.data.storageKey, contentType, sizeBytes: bytes.length },
+        })
+      : { status: 0, data: null }
+    if (!rec.data?.id) throw new Error(`uploading ${fileName} answered presign ${pre.status}, PUT ${put}, record ${rec.status}`)
+    return rec.data.id
+  }
+  const link = async (fileName, url) => {
+    const r = await A(`/tasks/${zipTask.id}/attachments`, { method: 'POST', body: { fileName, url, contentType: 'text/url', sizeBytes: 0 } })
+    if (!r.data?.id) throw new Error(`linking ${fileName} answered ${r.status}`)
+    return r.data.id
+  }
+  const FILES = [
+    { fileName: 'notes.txt', contentType: 'text/plain', bytes: Buffer.from(`first notes ${TAG}\n`) },
+    { fileName: 'pixel.png', contentType: 'image/png', bytes: Buffer.concat([PNG, Buffer.from(`\n${TAG}`)]) },
+    { fileName: 'notes.txt', contentType: 'text/plain', bytes: Buffer.from(`second notes, on a comment ${TAG}\n`) },
+    { fileName: '../outside.txt', contentType: 'text/plain', bytes: Buffer.from(`a name with a path in it ${TAG}\n`) },
+  ]
+  const LINKS = [
+    { fileName: 'spec', url: `https://example.invalid/${TAG}/spec` },
+    { fileName: 'board', url: `https://example.invalid/${TAG}/board` },
+  ]
+  // One awaited request each, so each row's created_at is later than the one before.
+  FILES[0].id = await upload(FILES[0].fileName, FILES[0].contentType, FILES[0].bytes)
+  LINKS[0].id = await link(LINKS[0].fileName, LINKS[0].url)
+  FILES[1].id = await upload(FILES[1].fileName, FILES[1].contentType, FILES[1].bytes)
+  FILES[2].id = await upload(FILES[2].fileName, FILES[2].contentType, FILES[2].bytes)
+  FILES[3].id = await upload(FILES[3].fileName, FILES[3].contentType, FILES[3].bytes)
+  LINKS[1].id = await link(LINKS[1].fileName, LINKS[1].url)
+  const onComment = await A(`/tasks/${zipTask.id}/comments`, {
+    method: 'POST',
+    body: { body: `The second notes ${TAG}`, attachmentIds: [FILES[2].id] },
+  })
+  if (onComment.status >= 300) throw new Error(`posting the second notes.txt on a comment answered ${onComment.status}`)
+  // The list, as the panel reads it: its files in its order, each with its Download link.
+  const zipListed = (await A(`/tasks/${zipTask.id}/attachments`)).data ?? []
+  const listedFiles = zipListed.filter((r) => r.kind === 'file')
+  const listedLinks = zipListed.filter((r) => r.kind === 'link')
+  // And each file's bytes through its Download link: the store's own copy.
+  const fromStore = await Promise.all(
+    listedFiles.map((r) => (r.url ? fetch(r.url).then((res) => res.arrayBuffer()).then((b) => Buffer.from(b), () => null) : null)),
+  )
+
+  /*
+   * THE ICON, WHERE CLICKUP'S IS: in the header's upper-right corner, on a
+   * task with files. And none on a task whose attachments are links alone —
+   * the comment task above, whose three are links — since a zip of no files
+   * is nothing to download.
+   */
+  await page.getByTestId('task-tab-attachments').click({ timeout: 8000 }).catch(() => {})
+  await waitForCount(page.getByTestId('attachment-card'), SEEDED, { timeoutMs: 20_000 })
+  const iconOnLinks = await page.getByTestId('task-attachments-download-all').count().catch(() => -1)
+  await page.goto(
+    `${stack.base}/app/${workspaceId}/${space.id}/${project.id}/${list.id}?task=${zipTask.id}`,
+    { waitUntil: 'domcontentloaded' },
+  )
+  await settleCookies()
+  await page.getByTestId('task-tab-attachments').click({ timeout: 20_000 }).catch(() => {})
+  await waitForCount(page.getByTestId('attachment-card'), FILES.length + LINKS.length, { timeoutMs: 20_000 })
+  const downloadAll = page.getByTestId('task-attachments-header').getByTestId('task-attachments-download-all')
+  await waitUntil(() => downloadAll.isVisible().catch(() => false), { timeoutMs: 8_000 })
+  const iconShown = await downloadAll.isVisible().catch(() => false)
+  const iconLabel = await downloadAll.getAttribute('aria-label', { timeout: 8000 }).catch(() => null)
+  chk(
+    iconShown && !!iconLabel && iconOnLinks === 0,
+    'the Attachments header carries a download icon when the task has files, and none when its attachments are links alone',
+    `on the task with files the header's icon is ${iconShown ? 'shown' : 'not shown'}, labelled ${JSON.stringify(iconLabel)}; ` +
+      `the task of links alone draws ${iconOnLinks} of them`,
+  )
+
+  /*
+   * PRESSED, IT SAVES ONE ZIP — Playwright's download event, and the file the
+   * browser saved, opened. Its entries are read in the central directory's
+   * order, repeats kept, each with whether its CRC is its bytes'.
+   */
+  const [saved] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30_000 }).catch(() => null),
+    downloadAll.click({ timeout: 8000 }).catch(() => {}),
+  ])
+  const savedPath = saved ? await saved.path().catch(() => null) : null
+  const zipBytes = savedPath ? fs.readFileSync(savedPath) : null
+  const savedName = saved ? saved.suggestedFilename() : null
+  let entries = []
+  let unreadable = null
+  try {
+    entries = zipBytes ? unzipEntries(zipBytes) : []
+  } catch (err) {
+    unreadable = err?.message ?? String(err)
+  }
+  const saidOfZip = !saved
+    ? 'pressing the icon saved nothing'
+    : unreadable
+      ? `the browser saved ${savedName} (${zipBytes?.length ?? 0} bytes), which is not a zip: ${unreadable}`
+      : `the browser saved ${savedName}, holding ${JSON.stringify(entries.map((e) => `${e.name} (${e.data.length} bytes${e.crcOk ? '' : ', CRC wrong'})`))}`
+  const fileEntries = entries.filter((e) => e.name !== 'links.txt')
+  const byteForByte = fileEntries.map((e, i) =>
+    !!listedFiles[i] && e.crcOk && e.data.equals(FILES.find((f) => f.id === listedFiles[i].id)?.bytes ?? Buffer.alloc(1)) &&
+      !!fromStore[i] && e.data.equals(fromStore[i]),
+  )
+  chk(
+    entries.length > 0 && listedFiles.length === FILES.length && fileEntries.length === listedFiles.length &&
+      byteForByte.every(Boolean),
+    'pressing it saves one zip holding the task\'s files, byte for byte, in the list\'s order — each the bytes its Download link serves',
+    `${saidOfZip}; the list holds ${listedFiles.length} files, ${JSON.stringify(listedFiles.map((r) => r.fileName))}, ` +
+      `and entry by entry the bytes are ${JSON.stringify(byteForByte)} against the list's files and the store's copies`,
+  )
+
+  /*
+   * NAMES: an entry's name is a path, so no name may hold one, and two files
+   * of one name are two entries of two names. The files' entries, compared as
+   * a set: their order is the check above's, and links.txt the one below's.
+   */
+  const entryNames = fileEntries.map((e) => e.name)
+  const WANT_NAMES = ['notes.txt', 'pixel.png', 'notes (2).txt', '._outside.txt']
+  const distinct = new Set(entryNames.map((n) => n.toLowerCase())).size === entryNames.length
+  chk(
+    entryNames.length > 0 && distinct && entryNames.every((n) => !/[/\\]/.test(n) && !n.includes('..')) &&
+      [...entryNames].sort().join('|') === [...WANT_NAMES].sort().join('|'),
+    'and its entries have distinct names that hold no path — the second notes.txt is notes (2).txt, and ../outside.txt is ._outside.txt',
+    `${saidOfZip}; the files' names are ${distinct ? '' : 'NOT '}distinct, against ${JSON.stringify(WANT_NAMES)}`,
+  )
+
+  /* LINKS ARE LISTED, NOT FETCHED: each by its name, then its address, in the list's order. */
+  const linksEntry = entries.find((e) => e.name === 'links.txt')
+  const WANT_LINKS = LINKS.map((l) => `${l.fileName}\n${l.url}\n`).join('\n')
+  chk(
+    !!linksEntry && linksEntry.crcOk && linksEntry.data.toString('utf8') === WANT_LINKS &&
+      listedLinks.map((r) => r.id).join() === LINKS.map((l) => l.id).join(),
+    'and its links are listed in links.txt, each by its name and then its address, in the list\'s order',
+    `${saidOfZip}; links.txt reads ${JSON.stringify(linksEntry?.data.toString('utf8') ?? null)} against ${JSON.stringify(WANT_LINKS)}`,
+  )
+
+  /*
+   * NAMED AFTER THE TASK. ClickUp's is always "clickup-attachments.zip", and
+   * its feedback board asks for the task's name. The title's characters that no
+   * file name may hold (`/`, `"`) become underscores.
+   */
+  const WANT_ZIP_NAME = `${ZIP_TITLE.replace(/[/\\:*?"<>|]/g, '_')}-attachments.zip`
+  chk(
+    savedName === WANT_ZIP_NAME,
+    'and the zip is saved under the task\'s name — <title>-attachments.zip, with the characters no file name may hold made safe',
+    `the browser saved ${JSON.stringify(savedName)}; the task is ${JSON.stringify(ZIP_TITLE)}, so ${JSON.stringify(WANT_ZIP_NAME)}`,
+  )
+
+  /*
+   * THE READ RULE, ANSWERED 404. A member signed up for this run, in this
+   * workspace: while the task is open to them they get its zip; once the task
+   * is private (its creator's, its assignees' and the managers'), they get 404
+   * from the route, as for a task that is not there, and the admin still gets
+   * the zip. The task's own read is shown beside it.
+   */
+  const MEMBER = { email: `${TAG}-member@rundesk.invalid`, password: 'Member@12345!' }
+  const signedUp = await signUpApi(API, {
+    fullName: `Zip member ${TAG}`,
+    email: MEMBER.email,
+    password: MEMBER.password,
+    organizationName: `Zip member ${TAG}`,
+  })
+  memberId = signedUp.user?.id ?? null
+  const M = apiAs(signedUp.accessToken)
+  const joined = await A(`/workspaces/${workspaceId}/members`, { method: 'POST', body: { email: MEMBER.email, role: 'member' } })
+  if (joined.status >= 300 || !memberId) throw new Error(`could not add the member to the workspace: ${joined.status} ${joined.message}`)
+  const ZIP_ROUTE = `/tasks/${zipTask.id}/attachments/zip`
+  const isZip = (r) => r.status === 200 && /application\/zip/.test(r.type) && r.text.startsWith('PK')
+  const memberOpen = await M(ZIP_ROUTE)
+  const madePrivate = await A(`/tasks/${zipTask.id}`, { method: 'PATCH', body: { visibility: 'private' } })
+  const memberRefused = await M(ZIP_ROUTE)
+  const memberReadsTask = await M(`/tasks/${zipTask.id}`)
+  const adminStill = await A(ZIP_ROUTE)
+  chk(
+    isZip(memberOpen) && madePrivate.status === 200 && memberRefused.status === 404 && isZip(adminStill),
+    'a member refused the task gets 404 from Download all — the same member had its zip while the task was open to them, and the admin still has it',
+    `the member's zip answered ${memberOpen.status} (${memberOpen.type}) while the task was open and ${memberRefused.status} once it ` +
+      `was private (making it private answered ${madePrivate.status}; the task itself now answers them ${memberReadsTask.status}); ` +
+      `the admin's answers ${adminStill.status} (${adminStill.type})`,
+  )
 } catch (err) {
   failed += 1
   const frame = String(err?.stack ?? '').split('\n').find((l) => l.includes('task-attachments.mjs'))
@@ -838,6 +1060,23 @@ try {
     await sql`delete from lists where name like ${'%' + TAG}`.catch(() => {})
     await sql`delete from projects where name like ${'%' + TAG}`.catch(() => {})
     await sql`delete from spaces where name like ${'%' + TAG}`.catch(() => {})
+    if (memberId) {
+      /*
+       * The member Download all's refusal was read by, and what signing up made
+       * them: an organization of their own with a workspace in it — only one
+       * nobody else belongs to — then their memberships and the account, as
+       * `create-modal-templates` removes its member.
+       */
+      await sql`
+        delete from organizations o
+        where o.id in (select organization_id from organization_members where user_id = ${memberId})
+          and not exists (select 1 from organization_members m where m.organization_id = o.id and m.user_id <> ${memberId})`
+        .catch((e) => console.log(`  cleanup left behind: the member's own organization (${e.message})`))
+      await sql`delete from workspace_members where user_id = ${memberId}`
+        .catch((e) => console.log(`  cleanup left behind: the member's memberships (${e.message})`))
+      await sql`delete from users where id = ${memberId}`
+        .catch((e) => console.log(`  cleanup left behind: the member ${memberId} (${e.message})`))
+    }
     await sql.end({ timeout: 5 }).catch(() => {})
   }
   await browser.close().catch(() => {})
