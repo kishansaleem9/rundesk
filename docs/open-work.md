@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 381 items, 54 open, 8 partly fixed, 319 closed, counted from this file's headings on 30 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 381 items, 53 open, 8 partly fixed, 320 closed, counted from this file's headings on 30 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1649,13 +1649,34 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 
 *To close:* limit or retire `register`, decide the invitation and SSO routes' budgets, and check a burst on each.
 
-### `found-30-sep/public-pages-read-429-as-gone` — open (visible bug, small; found closing `found-30-sep/public-routes-unthrottled`)
+### `found-30-sep/public-pages-read-429-as-gone` — **closed** (visible bug, small; found closing `found-30-sep/public-routes-unthrottled`)
 
 **A public page refused for too many requests says its link is gone**
 
 *Evidence, 30 September, read:* `clip-link-page.tsx` shows "This clip is not available" ("the clip may have been deleted") for any failure but a 401. `portal.$token.tsx` shows its not-found page for any failure. `custom-domain.ts` drops the branding without a word. The 429 says when to come back (`Retry-After`, and `retryAfter` in the body).
 
 *To close:* on a 429, say that there were too many requests and when to try again. Check it by answering the page's request with a 429 in the browser.
+
+*Closed, 30 September.* ClickUp documents nothing about its public pages being refused. HTTP defines 429 as "the user has sent too many requests in a given amount of time", whose answer "MAY include a Retry-After header indicating how long to wait before making a new request" (RFC 6585 §4). So the page says the second part and then does it.
+
+Measured first, on lane 5, with the refusal answered in the browser:
+- the clip page said "This clip is not available";
+- the client portal said "Portal unavailable";
+- the public doc page said it could not be loaded, and none of them asked again.
+- The portal also asks again every 45 seconds. When one of those asks was refused, or failed for any reason, the portal already on screen was replaced by "Portal unavailable": `isError` stays true beside the data it had.
+
+The fix:
+- `retryAfterSeconds` in `lib/api.ts` reads a 429's wait from the envelope's `details.retryAfter`, the rate limiter's; a 429 with none waits five seconds. The doc page reads its `Retry-After` header.
+- `useRetryAfter` counts the wait down a second at a time and asks once when it runs out.
+- `PublicBusy` says "Too many requests", "It will try again in N seconds", and offers "Try again now". It is used on the three pages, in four locales.
+- The portal draws an error page only when nothing was ever drawn. A 404 says the portal is unavailable, and any other failure says it could not be loaded.
+- A custom domain's branding, refused, is asked again once after a wait of a minute or less, rather than being dropped for the whole visit (`lib/branding-retry.ts`).
+
+Checks:
+- `public-pages-busy` is new, with 10 checks, registered in CI (249 in `postgres-harnesses`). Its refusals are answered in the browser, since a real 429 would spend the lane's budget for a minute. It covers the doc, the clip and the portal: each refused says so and in how many seconds, and asks again by itself once the wait is over; "Try again now" asks at once. A portal already drawn stays drawn when its 45-second refresh is refused (the page's clock is jumped 46 seconds). A 500 says the portal could not be loaded, and an unknown link says it is unavailable. Before, 1/10 on lane 5: every check failed but the last. After, 10/10.
+- `branding-retry.test.ts` is new, with 5 tests.
+- `pbz-1..10` are new: 8 aimed at the suite and 2 unit claims. The break runner measures the suite's after this commit.
+- Regression on lanes 5 and 7, the pages that read the public routes and two that boot the app: all green, 104 checks (public-doc-page 12, clip-links 20, hook-portal-access 11, stable-images 6, stale-chunk-recovery 27, addressability-live 28); `public-pages-busy` 10/10 on both lanes.
 
 ### `found-30-sep/attachments-tab-draws-twice` — open (visible bug, small; found closing `found-30-sep/task-attachments-flaky`)
 

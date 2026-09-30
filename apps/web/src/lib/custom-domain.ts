@@ -10,6 +10,7 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import { api } from './api'
+import { brandingRetryDelayMs } from './branding-retry'
 import { applyBrandColor, applyAccentColor } from './branding'
 
 export type CustomDomainWorkspace = {
@@ -75,6 +76,10 @@ export async function bootstrapCustomDomain(): Promise<void> {
   }
 
   useCustomDomainStore.getState().set({ status: 'checking' })
+  await lookupBranding(host, 0)
+}
+
+async function lookupBranding(host: string, attempt: number): Promise<void> {
   try {
     const ws = await api<CustomDomainWorkspace | null>(
       `/public/workspace-by-domain?host=${encodeURIComponent(host)}`,
@@ -88,9 +93,12 @@ export async function bootstrapCustomDomain(): Promise<void> {
     } else {
       useCustomDomainStore.getState().set({ status: 'none' })
     }
-  } catch {
-    // 404 (host isn't a verified custom domain) or any error → normal app.
+  } catch (err) {
+    // 404 (host isn't a verified custom domain) or any error → normal app,
+    // meanwhile; a refusal for too many requests is asked again once.
     useCustomDomainStore.getState().set({ status: 'none' })
+    const delay = brandingRetryDelayMs(err, attempt)
+    if (delay !== null) setTimeout(() => void lookupBranding(host, attempt + 1), delay)
   }
 }
 

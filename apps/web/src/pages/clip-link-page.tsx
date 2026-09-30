@@ -28,7 +28,9 @@ import { getRouteApi } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@rundesk/ui'
 import { Loader2, Lock, Video } from 'lucide-react'
-import { api, ApiError } from '../lib/api'
+import { api, ApiError, retryAfterSeconds } from '../lib/api'
+import { useRetryAfter } from '../lib/use-retry-after'
+import { PublicBusy } from '../components/public-busy'
 import { useTranslation } from '../lib/i18n'
 import { formatDuration } from '../lib/composer-recording'
 import type { ClipLinkAudience } from '../lib/clip-publish'
@@ -83,6 +85,10 @@ export function ClipLinkPage() {
     else setPlaybackFailed(true)
   }
 
+  /* Refused for too many requests: say so, count the wait down, then ask again. */
+  const busyFor = view.data ? null : retryAfterSeconds(view.error)
+  const busyLeft = useRetryAfter(busyFor, view.errorUpdatedAt, () => void view.refetch())
+
   if (view.isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground gap-2">
@@ -90,6 +96,10 @@ export function ClipLinkPage() {
         {t('clipLink.loading')}
       </div>
     )
+  }
+
+  if (busyFor !== null) {
+    return <PublicBusy seconds={busyLeft ?? busyFor} onRetry={() => void view.refetch()} testId="clip-link-busy" />
   }
 
   if (view.isError || !view.data) {

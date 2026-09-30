@@ -1,7 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { Loader2, AlertCircle, CheckCircle2, Circle, CircleDashed, Diamond, Calendar } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, ApiError, retryAfterSeconds } from '../lib/api'
+import { useRetryAfter } from '../lib/use-retry-after'
+import { PublicBusy } from '../components/public-busy'
 import { useTranslation } from '../lib/i18n'
 
 export const Route = createFileRoute('/portal/$token')({
@@ -51,6 +53,10 @@ function ClientPortalPage() {
     refetchOnWindowFocus: true,
   })
 
+  /* Refused for too many requests before anything was drawn: say so, count the wait down, then ask again. */
+  const busyFor = portalQuery.data ? null : retryAfterSeconds(portalQuery.error)
+  const busyLeft = useRetryAfter(busyFor, portalQuery.errorUpdatedAt, () => void portalQuery.refetch())
+
   if (portalQuery.isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-surface-50 dark:bg-background">
@@ -59,13 +65,26 @@ function ClientPortalPage() {
     )
   }
 
-  if (portalQuery.isError || !portalQuery.data) {
+  if (busyFor !== null) {
+    return <PublicBusy seconds={busyLeft ?? busyFor} onRetry={() => void portalQuery.refetch()} testId="client-portal-busy" />
+  }
+
+  /*
+   * ONLY WHAT WAS NEVER DRAWN IS AN ERROR PAGE. The portal asks again every 45
+   * seconds and on focus, and a failed ask keeps the data it had: showing
+   * "unavailable" over it turned a moment's refusal into a page that said the
+   * link was gone. A 404 is a link that no longer opens; any other failure is
+   * a failure to load, which is not the same sentence
+   * (`found-30-sep/public-pages-read-429-as-gone`).
+   */
+  if (!portalQuery.data) {
+    const gone = portalQuery.error instanceof ApiError && portalQuery.error.status === 404
     return (
       <div className="min-h-screen flex items-center justify-center bg-surface-50 dark:bg-background px-4">
-        <div className="text-center">
+        <div className="text-center" data-testid={gone ? 'client-portal-not-found' : 'client-portal-failed'}>
           <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
-          <h1 className="text-lg font-semibold">{t('clientPortal.notFoundTitle')}</h1>
-          <p className="text-muted-foreground text-sm mt-1 max-w-sm">{t('clientPortal.notFoundBody')}</p>
+          <h1 className="text-lg font-semibold">{gone ? t('clientPortal.notFoundTitle') : t('clientPortal.failedTitle')}</h1>
+          <p className="text-muted-foreground text-sm mt-1 max-w-sm">{gone ? t('clientPortal.notFoundBody') : t('clientPortal.failedBody')}</p>
         </div>
       </div>
     )

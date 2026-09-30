@@ -7,6 +7,8 @@ import TaskItem from '@tiptap/extension-task-item'
 import { TableKit } from '@tiptap/extension-table'
 import { useEffect } from 'react'
 import { Callout, ListEmbedStatic } from '../lib/tiptap-doc-blocks'
+import { useRetryAfter } from '../lib/use-retry-after'
+import { PublicBusy } from '../components/public-busy'
 
 export const Route = createFileRoute('/d/$slug')({
   component: PublicDocViewer,
@@ -27,9 +29,20 @@ type PublicDoc = {
  * load it, which is not the same sentence.
  */
 class PublicDocError extends Error {
-  constructor(readonly status: number) {
+  constructor(
+    readonly status: number,
+    /** For a 429, the wait its `Retry-After` asked for, in seconds. */
+    readonly retryAfter: number | null = null,
+  ) {
     super(status === 404 ? 'Not found' : 'Failed to load')
   }
+}
+
+/** A 429's wait from its `Retry-After`, five seconds if it names none (`found-30-sep/public-pages-read-429-as-gone`). */
+const retryAfterOf = (res: Response) => {
+  if (res.status !== 429) return null
+  const seconds = Number(res.headers.get('retry-after'))
+  return Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : 5
 }
 
 function PublicDocViewer() {
@@ -42,7 +55,7 @@ function PublicDocViewer() {
       // public share link resolves on whatever hostname it's opened from — not
       // only the one pinned in VITE_DEV_API_ORIGIN.
       const res = await fetch(`/api/v1/public/docs/${encodeURIComponent(slug)}`)
-      if (!res.ok) throw new PublicDocError(res.status)
+      if (!res.ok) throw new PublicDocError(res.status, retryAfterOf(res))
       // Every answer is wrapped as `{ data, meta, error }` (ResponseInterceptor):
       // the doc is `data`. Read as the doc itself, the envelope drew no title,
       // "Invalid Date" and an empty page
@@ -78,12 +91,23 @@ function PublicDocViewer() {
     }
   }, [editor, docQuery.data?.content])
 
+  /* Refused for too many requests: say so, count the wait down, then ask again. */
+  const busyFor =
+    !docQuery.data && docQuery.error instanceof PublicDocError && docQuery.error.status === 429
+      ? docQuery.error.retryAfter
+      : null
+  const busyLeft = useRetryAfter(busyFor, docQuery.errorUpdatedAt, () => void docQuery.refetch())
+
   if (docQuery.isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground">
         Loading…
       </div>
     )
+  }
+
+  if (busyFor !== null) {
+    return <PublicBusy seconds={busyLeft ?? busyFor} onRetry={() => void docQuery.refetch()} testId="public-doc-busy" />
   }
 
   if (docQuery.isError || !docQuery.data) {

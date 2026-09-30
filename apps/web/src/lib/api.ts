@@ -14,6 +14,18 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * How long a refusal for too many requests asks to wait, in whole seconds, or
+ * null when the error is not one. The rate limiter answers 429 with
+ * `details.retryAfter` beside its `Retry-After` header
+ * (`found-30-sep/public-pages-read-429-as-gone`); a 429 without it waits five.
+ */
+export function retryAfterSeconds(error: unknown): number | null {
+  if (!(error instanceof ApiError) || error.status !== 429) return null
+  const seconds = Number((error.details as { retryAfter?: unknown } | null | undefined)?.retryAfter)
+  return Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : 5
+}
+
 type Envelope<T> = {
   data: T | null
   meta?: Record<string, unknown>
