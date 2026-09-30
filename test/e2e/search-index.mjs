@@ -46,6 +46,7 @@ import { signInApi, signUpApi } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil } from './lib/wait.mjs'
 import { searchStubBase, searchEngine, stubDocument, stubDocuments, stubRequests, searchesSince, stubAway } from './lib/search.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -72,16 +73,9 @@ const chk = (cond, good, bad) => {
   else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad && bad !== good ? ` — ${bad}` : ''}`) }
 }
 
-/* NEVER THROWS — `{status, data, error}`. Every call site reads `status`. */
-const apiAs = (token) => async (route, init = {}) => {
-  const headers = token ? { authorization: `Bearer ${token}` } : {}
-  if (init.body) headers['content-type'] = 'application/json'
-  const res = await fetch(`${API}${route}`, { ...init, headers, body: init.body ? JSON.stringify(init.body) : undefined })
-    .catch(() => null)
-  if (!res) return { status: 0, data: null, error: { message: 'no answer' } }
-  const json = await res.json().catch(() => null)
-  return { status: res.status, data: json?.data, error: json?.error }
-}
+/* NEVER THROWS — `{status, data, error}`. Every call site reads `status`.
+ * lib/fixture.mjs's one client, not a copy (`suite-hygiene/apiAs-duplicated-62`). */
+const apiAs = apiAsAt(API)
 const said = (res) => `${res.status} ${JSON.stringify(res.error ?? null).slice(0, 120)}`
 /** The indexers run after the write answers (`void this.indexTaskInSearch`), so their results are waited for. */
 const until = (fn) => waitUntil(fn, { timeoutMs: 15_000, stepMs: 250 })

@@ -35,8 +35,14 @@ const TEXT = /\.(m?[jt]sx?|cjs|py|sh|ya?ml|json|md|sql|css|html|awk)$/
 
 /** The ledger's sections: an id is `<section>/<slug>`. */
 const SECTIONS = ['found-\\d{2}-sep', 'ledger-rows', 'commit-log', 'suite-hygiene', 'resume-defects', 'harness', 'product-siblings']
-/* Not after a path character, so `test/harness/x` is a path and not a citation. */
-const CITED = new RegExp(`(?<![A-Za-z0-9_./-])((?:${SECTIONS.join('|')})/[a-z0-9][a-z0-9-]*)`, 'g')
+/*
+ * Not after a path character, so `test/harness/x` is a path and not a citation.
+ * A slug may carry capitals, because the ledger's do: read in lower case only,
+ * `suite-hygiene/apiAs-duplicated-62` was cited as `suite-hygiene/api`, an item
+ * that does not exist, so the id could not be cited at all (the other,
+ * `checks-read-textContent-not-what-is-shown`, was cited without its section).
+ */
+const CITED = new RegExp(`(?<![A-Za-z0-9_./-])((?:${SECTIONS.join('|')})/[A-Za-z0-9][A-Za-z0-9-]*)`, 'g')
 /** A comment line's leader: what a wrapped citation continues after. */
 const LEADER = /^\s*(?:\/\/+|\*|#+|<!--|--)?\s*/
 
@@ -55,7 +61,7 @@ export function citationsIn(text, file) {
     for (const m of line.matchAll(CITED)) {
       let id = m[1]
       if (id.endsWith('-') && m.index + m[0].length === line.trimEnd().length && i + 1 < lines.length) {
-        const rest = lines[i + 1].replace(LEADER, '').match(/^[a-z0-9][a-z0-9-]*/)
+        const rest = lines[i + 1].replace(LEADER, '').match(/^[A-Za-z0-9][A-Za-z0-9-]*/)
         if (rest) id += rest[0]
       }
       out.push({ id, where: `${file}:${i + 1}` })

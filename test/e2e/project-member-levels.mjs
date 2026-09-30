@@ -22,6 +22,7 @@
  */
 import { signInApi, signUpApi } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -47,17 +48,12 @@ const chk = (cond, good, bad) => {
 
 const stamp = Date.now()
 const TAG = `pml${stamp}`
-/* NEVER THROWS — `{status, data, message}`. Every call site reads `status`. */
-const apiAs = (token) => async (route, init = {}) => {
-  const headers = { authorization: `Bearer ${token}` }
-  const body = init.body ?? (['POST', 'PATCH', 'PUT'].includes(init.method) ? {} : undefined)
-  if (body) headers['content-type'] = 'application/json'
-  const res = await fetch(`${API}${route}`, { ...init, headers, body: body ? JSON.stringify(body) : undefined }).catch(() => null)
-  if (!res) return { status: 0, data: null, message: '' }
-  const json = await res.json().catch(() => null)
-  const message = json?.error?.message
-  return { status: res.status, data: json?.data, message: Array.isArray(message) ? message.join('; ') : String(message ?? '') }
-}
+/* NEVER THROWS — `{status, data, message}`. Every call site reads `status`.
+ * lib/fixture.mjs's one client, not a copy (`suite-hygiene/apiAs-duplicated-62`),
+ * whose `message` is this copy's rule (a list joined with '; ', '' for none);
+ * like the copy, a write without a body sends `{}`: a route that reads a body
+ * refuses a request with none. */
+const apiAs = apiAsAt(API, { emptyBodyOn: ['POST', 'PATCH', 'PUT'] })
 
 let sql = null
 let WS = null

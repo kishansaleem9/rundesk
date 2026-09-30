@@ -72,12 +72,10 @@ const chk = (c, good, badMsg) => (c ? ok(good) : bad(badMsg && badMsg !== good ?
 const auth = await login(API, EMAIL, PASSWORD)
 const api = apiClient(API, auth.accessToken)
 
-/** Bytes, for the two exports — `apiClient` parses JSON and an export is not JSON. */
-const raw = async (route) => {
-  const res = await fetch(`${API}${route}`, { headers: { authorization: `Bearer ${auth.accessToken}` } })
-  const text = await res.text()
-  return { status: res.status, text }
-}
+/* The two exports, read as text: an export is not JSON, and the client hands
+ * back the body as sent beside `data`. This was a copy of the client that kept
+ * only the text (`suite-hygiene/apiAs-duplicated-62`). */
+const raw = api
 
 let sql = null
 let browser = null

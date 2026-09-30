@@ -6,6 +6,7 @@ import {
   lists,
   tasks,
   spaces,
+  users,
   TEMPLATE_TARGET_TYPES,
   TEMPLATE_COMPLEXITIES,
   TEMPLATE_CATEGORIES,
@@ -39,6 +40,71 @@ export type TemplateFacets = {
   complexity: FacetBucket<TemplateComplexity>[]
   category: FacetBucket<TemplateCategory | 'other'>[]
   useCase: FacetBucket<TemplateUseCase | 'other'>[]
+  /**
+   * `ledger-rows/row-1874` — the frame's top-row **Created by**: one bucket per
+   * person who made a template in the corpus, with their name, in name order.
+   * The value is their user id, which is what `createdBy=` takes back. The
+   * built-ins have no maker and are in no bucket.
+   */
+  createdBy: Array<FacetBucket & { name: string }>
+  /**
+   * And **Tags**: one bucket per word whatever its case, alphabetical. The
+   * value is one spelling of it, and `tag=` matches any.
+   */
+  tag: FacetBucket[]
+}
+
+/**
+ * `ledger-rows/row-1874` — a template's tags, cleaned once, where they are
+ * written: saved with the template (`saveFromProject`, `create`) or changed
+ * afterwards (`setTags`).
+ *
+ * Trimmed, a run of spaces made one, blanks dropped, and one per word whatever
+ * its case — the first spelling kept — so "Q3" and "q3 " are one chip on the
+ * card and one bucket in the facet, which groups them in SQL by `lower()`.
+ *
+ * REFUSED PAST ITS BOUNDS, NOT CUT TO FIT, which is where this parts from
+ * `normalizeMeetingTags`: that one slices a long tag and keeps the first
+ * twenty. A template is shown to the whole workspace and filtered on by
+ * everybody in it. A tag cut short is a different tag from the one typed, and
+ * filtering on what was typed finds nothing; a twenty-first dropped without a
+ * word is a tag its saver believes the template carries. So the write is
+ * refused, in words that say which bound and by how much, and nothing is
+ * written. The bounds are meetings' own; ClickUp's help centre gives a task
+ * forty tags and says nothing of a template's.
+ */
+export const TEMPLATE_TAG_MAX_LENGTH = 40
+export const TEMPLATE_TAGS_MAX = 20
+export function normalizeTemplateTags(value: unknown): string[] {
+  if (value === undefined || value === null) return []
+  if (!Array.isArray(value)) throw new BadRequestException('Tags must be a list of words')
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of value) {
+    if (typeof raw !== 'string') throw new BadRequestException('Every tag must be text')
+    const tag = raw.trim().replace(/\s+/g, ' ')
+    if (!tag) continue
+    // Characters as a person counts them, not UTF-16 units: an emoji is one.
+    const chars = Array.from(tag)
+    if (chars.length > TEMPLATE_TAG_MAX_LENGTH) {
+      throw new BadRequestException(
+        `A tag can be at most ${TEMPLATE_TAG_MAX_LENGTH} characters, and "${chars.slice(0, 24).join('')}…" has ${chars.length}`,
+      )
+    }
+    const key = tag.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(tag)
+  }
+  if (out.length > TEMPLATE_TAGS_MAX) {
+    throw new BadRequestException(`A template can carry at most ${TEMPLATE_TAGS_MAX} tags, and these are ${out.length}`)
+  }
+  return out
+}
+
+/** `db.execute`'s rows, whichever shape the driver hands them back in. */
+function rowsOf<T>(found: unknown): T[] {
+  return (Array.isArray(found) ? found : ((found as { rows?: unknown[] })?.rows ?? [])) as T[]
 }
 
 /** `other` is a real bucket: `category`/`use_case` are nullable on purpose. */
@@ -462,6 +528,8 @@ export class ProjectTemplatesService implements OnModuleInit {
       complexity?: string | string[]
       category?: string
       useCase?: string
+      createdBy?: string
+      tag?: string
     } = {},
   ): Promise<{ templates: Array<typeof projectTemplates.$inferSelect>; total: number; facets: TemplateFacets }> {
     const csv = (v: string | string[] | undefined): string[] =>
@@ -477,6 +545,10 @@ export class ProjectTemplatesService implements OnModuleInit {
     const category = isCategory(rawCategory) || rawCategory === 'other' ? rawCategory : null
     const rawUseCase = (params.useCase ?? '').trim()
     const useCase = isUseCase(rawUseCase) || rawUseCase === 'other' ? rawUseCase : null
+    // `ledger-rows/row-1874` — the frame's other two top-row facets. A tag is
+    // matched the way it is stored and counted: spaces made one, any case.
+    const createdBy = (params.createdBy ?? '').trim()
+    const tag = (params.tag ?? '').trim().replace(/\s+/g, ' ')
 
     // Visible corpus: platform built-ins + this workspace's own, nothing else.
     const visible = or(
@@ -515,6 +587,15 @@ export class ProjectTemplatesService implements OnModuleInit {
         useCase === 'other' ? isNull(projectTemplates.useCase) : eq(projectTemplates.useCase, useCase),
       )
     }
+    if (createdBy) {
+      // A malformed id is nobody, and nobody made anything: the grid comes back
+      // empty rather than the filter being dropped in silence — and Postgres is
+      // never handed a uuid it would refuse with a 500.
+      selected.push(isUuid(createdBy) ? eq(projectTemplates.createdById, createdBy) : sql`false`)
+    }
+    if (tag) {
+      selected.push(sql`exists (select 1 from unnest(${projectTemplates.tags}) as t where lower(t) = lower(${tag}))`)
+    }
 
     const templates = await this.db
       .select()
@@ -523,12 +604,19 @@ export class ProjectTemplatesService implements OnModuleInit {
       .orderBy(desc(projectTemplates.isBuiltIn), asc(projectTemplates.name))
 
     /*
-     * Four GROUP BYs over the same basis, plus the scope pair. Grouped in SQL
+     * Six GROUP BYs over the same basis, plus the scope pair. Grouped in SQL
      * rather than counted in JS over `templates`, which is the narrowed set —
      * counting that would make every facet agree with the grid and disagree
      * with the database.
+     *
+     * The last two are `ledger-rows/row-1874`'s. CREATED BY joins `users` for
+     * the name, and the inner join is what leaves the built-ins out: nobody in
+     * a workspace made them, so they belong to no bucket rather than to an
+     * "unknown" one. TAGS unnests the array and groups by `lower()`, one bucket
+     * per word whatever its case, and counts TEMPLATES (distinct ids), so a row
+     * written around the normaliser with a word twice is still counted once.
      */
-    const [typeRows, complexityRows, categoryRows, useCaseRows, builtInRows] = await Promise.all([
+    const [typeRows, complexityRows, categoryRows, useCaseRows, builtInRows, creatorRows, tagFound] = await Promise.all([
       this.db
         .select({ value: projectTemplates.targetType, count: sql<number>`count(*)::int` })
         .from(projectTemplates).where(countBasis).groupBy(projectTemplates.targetType),
@@ -544,6 +632,19 @@ export class ProjectTemplatesService implements OnModuleInit {
       this.db
         .select({ value: projectTemplates.isBuiltIn, count: sql<number>`count(*)::int` })
         .from(projectTemplates).where(scopeBasis).groupBy(projectTemplates.isBuiltIn),
+      this.db
+        .select({ value: projectTemplates.createdById, name: users.displayName, count: sql<number>`count(*)::int` })
+        .from(projectTemplates)
+        .innerJoin(users, eq(users.id, projectTemplates.createdById))
+        .where(countBasis)
+        .groupBy(projectTemplates.createdById, users.displayName)
+        .orderBy(sql`lower(${users.displayName})`, projectTemplates.createdById),
+      this.db.execute(sql`
+        select min(t) as value, count(distinct ${projectTemplates.id})::int as count
+        from ${projectTemplates}, unnest(${projectTemplates.tags}) as t
+        where ${countBasis}
+        group by lower(t)
+        order by lower(t)`),
     ])
 
     const tally = (rows: Array<{ value: string | null; count: number }>, nullKey = '∅') => {
@@ -571,11 +672,17 @@ export class ProjectTemplatesService implements OnModuleInit {
         complexity: TEMPLATE_COMPLEXITIES.map((v) => ({ value: v, count: complexityCounts.get(v) ?? 0 })),
         category: CATEGORY_BUCKETS.map((v) => ({ value: v, count: categoryCounts.get(v) ?? 0 })),
         useCase: USE_CASE_BUCKETS.map((v) => ({ value: v, count: useCaseCounts.get(v) ?? 0 })),
+        createdBy: creatorRows.map((r) => ({ value: String(r.value), name: r.name, count: Number(r.count) || 0 })),
+        tag: rowsOf<{ value: string; count: number }>(tagFound).map((r) => ({ value: String(r.value), count: Number(r.count) || 0 })),
       },
     }
   }
 
   async getOne(workspaceId: string, id: string) {
+    // A malformed id is a template that is not there. Handed to Postgres it
+    // was refused as uuid syntax, a 500, on every route that reads one
+    // (`ledger-rows/row-1874` added one more: the tags edit).
+    if (!isUuid(id)) throw new NotFoundException('Template not found')
     const [row] = await this.db
       .select()
       .from(projectTemplates)
@@ -612,8 +719,13 @@ export class ProjectTemplatesService implements OnModuleInit {
       category?: string
       useCase?: string
       targetType?: string
+      tags?: unknown
     },
   ) {
+    // Refused before anything is read (`ledger-rows/row-1874`): ClickUp saves
+    // a template with "a template name, description, tags", and a tag past
+    // its bounds is refused in words rather than cut (`normalizeTemplateTags`).
+    const tags = normalizeTemplateTags(dto.tags)
     // The project, in this workspace, as the saver may open it.
     const project = isUuid(dto.projectId) ? await readableProject(this.db, workspaceId, dto.projectId, actor) : null
     if (!project) throw new NotFoundException('Project not found in this workspace')
@@ -669,6 +781,7 @@ export class ProjectTemplatesService implements OnModuleInit {
         complexity: complexityOf(payload),
         category: isCategory(dto.category) ? dto.category : null,
         useCase: isUseCase(dto.useCase) ? dto.useCase : null,
+        tags,
       })
       .returning()
     return row
@@ -687,6 +800,7 @@ export class ProjectTemplatesService implements OnModuleInit {
       complexity?: string
       category?: string
       useCase?: string
+      tags?: unknown
     },
   ) {
     if (!dto.payload?.lists) throw new BadRequestException('Template payload must contain lists')
@@ -702,6 +816,8 @@ export class ProjectTemplatesService implements OnModuleInit {
     if (targetType === 'list' && dto.payload.lists.length !== 1) {
       throw new BadRequestException('A list template must carry exactly one list')
     }
+    // `ledger-rows/row-1874` — cleaned, or refused in words, as a save's are.
+    const tags = normalizeTemplateTags(dto.tags)
     const [row] = await this.db
       .insert(projectTemplates)
       .values({
@@ -716,8 +832,33 @@ export class ProjectTemplatesService implements OnModuleInit {
         complexity: isComplexity(dto.complexity) ? dto.complexity : complexityOf(dto.payload),
         category: isCategory(dto.category) ? dto.category : null,
         useCase: isUseCase(dto.useCase) ? dto.useCase : null,
+        tags,
       })
       .returning()
+    return row
+  }
+
+  /**
+   * `ledger-rows/row-1874` — a template's tags, changed after it was saved.
+   * ClickUp: "You can add or edit tags in the Template Center at any time".
+   * The route asks `template.manage`, as saving and deleting one do. The list
+   * sent replaces the list held; an empty one clears it.
+   *
+   * A BUILT-IN IS REFUSED: it is one row shown to every workspace, so a tag
+   * one workspace wrote on it would appear in all of them.
+   */
+  async setTags(workspaceId: string, id: string, value: unknown) {
+    const tpl = await this.getOne(workspaceId, id)
+    if (tpl.isBuiltIn || !tpl.workspaceId) throw new BadRequestException('A built-in template cannot be tagged')
+    // Absent is not "none": a body that forgot the list must not clear it.
+    if (value === undefined) throw new BadRequestException('Send the tags as a list; an empty list clears them')
+    const tags = normalizeTemplateTags(value)
+    const [row] = await this.db
+      .update(projectTemplates)
+      .set({ tags, updatedAt: new Date() })
+      .where(and(eq(projectTemplates.id, tpl.id), eq(projectTemplates.workspaceId, workspaceId)))
+      .returning()
+    if (!row) throw new NotFoundException('Template not found')
     return row
   }
 

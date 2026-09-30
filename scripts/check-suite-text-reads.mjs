@@ -2,10 +2,8 @@
 /*
  * A CHECK THAT SAYS TEXT IS SHOWN READS WHAT IS DRAWN: NEVER `textContent`,
  * AND `innerText` ONLY OF AN ELEMENT KNOWN TO BE DRAWN
- * (the ledger's `checks-read-textContent-not-what-is-shown`, a found-23-sep
- * item — cited without its section because `check-ledger-ids.mjs` reads an id
- * as lowercase, and this one has a capital C — and, one step on,
- * `found-29-sep/innertext-reads-hidden-leaves`).
+ * (the ledger's `found-23-sep/checks-read-textContent-not-what-is-shown`
+ * and, one step on, `found-29-sep/innertext-reads-hidden-leaves`).
  *
  * `textContent` is every character in an element, drawn or not: text inside
  * `hidden`, `display: none` or a closed `<details>` reads exactly as if it

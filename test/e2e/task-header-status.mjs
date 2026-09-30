@@ -33,6 +33,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -63,18 +64,12 @@ const chk = (cond, good, bad) => {
 }
 
 /*
- * `apiClient` NEVER THROWS — it resolves `{status, data, error}`. A `.catch()`
- * on it is inert, so every call below is judged on `status`.
+ * `apiAs` NEVER THROWS on a status — it resolves `{status, data, error}`. A
+ * `.catch()` on it is inert, so every call below is judged on `status`. It is
+ * lib/fixture.mjs's one client, not a copy (`suite-hygiene/apiAs-duplicated-62`),
+ * and like the copy it throws only when nothing answers at all.
  */
-const apiAs = (token) => async (route, init = {}) => {
-  const headers = token ? { authorization: `Bearer ${token}` } : {}
-  if (init.body) headers['content-type'] = 'application/json'
-  const res = await fetch(`${API}${route}`, {
-    ...init, headers, body: init.body ? JSON.stringify(init.body) : undefined,
-  })
-  const json = await res.json().catch(() => null)
-  return { status: res.status, data: json?.data, error: json?.error }
-}
+const apiAs = apiAsAt(API, { noAnswer: 'throw' })
 
 const chromium = await resolveChromium()
 const stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })

@@ -18,6 +18,7 @@
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { signInApi, signUpApi } from './lib/signin.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 // The web app's own realtime client, from its own dependencies.
 const { io } = createRequire(path.resolve(import.meta.dirname, '../../apps/web/package.json'))('socket.io-client')
@@ -44,18 +45,9 @@ const chk = (cond, good, bad) => {
   else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad && bad !== good ? ` — ${bad}` : ''}`) }
 }
 
-/* NEVER THROWS — `{status, data, error, text}`. Every call site reads `status`. */
-const apiAs = (token) => async (route, init = {}) => {
-  const headers = token ? { authorization: `Bearer ${token}` } : {}
-  if (init.body) headers['content-type'] = 'application/json'
-  const res = await fetch(`${API}${route}`, { ...init, headers, body: init.body ? JSON.stringify(init.body) : undefined })
-    .catch(() => null)
-  if (!res) return { status: 0, data: null, error: { message: 'no answer' }, text: '' }
-  const text = await res.text().catch(() => '')
-  let json = null
-  try { json = JSON.parse(text) } catch {}
-  return { status: res.status, data: json?.data, error: json?.error, text }
-}
+/* NEVER THROWS — `{status, data, error, text}`. Every call site reads `status`.
+ * lib/fixture.mjs's one client, not a copy (`suite-hygiene/apiAs-duplicated-62`). */
+const apiAs = apiAsAt(API)
 const said = (res) => `${res.status} ${JSON.stringify(res.error?.message ?? null)}`
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms))
 const waitFor = async (pred, ms = 10_000) => {

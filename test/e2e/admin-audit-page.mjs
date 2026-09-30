@@ -20,6 +20,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
 import { openDb } from './lib/db.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -47,6 +48,9 @@ const chromium = await resolveChromium()
 const stack = await startLocalStack({ dist: path.resolve(REPO, argOf('--dist', 'apps/web/dist')), apiPort: API_PORT })
 const B = stack.base
 const API = `${B}/api/v1`
+/* lib/fixture.mjs's one API client, not a copy (`suite-hygiene/apiAs-duplicated-62`);
+ * like the `call` helper it replaces, it throws when nothing answers at all. */
+const apiAs = apiAsAt(API, { noAnswer: 'throw' })
 const stamp = Date.now()
 const TAG = `aap-${stamp}`
 const PICKED = `${TAG} happened in the picked workspace`
@@ -61,10 +65,7 @@ try {
   if (!sql) throw new Error('no DATABASE_URL — the events are planted by SQL')
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   token = auth.accessToken
-  const call = async (route, init = {}) => {
-    const res = await fetch(`${API}${route}`, { ...init, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: init.body ? JSON.stringify(init.body) : undefined })
-    return { status: res.status, data: (await res.json().catch(() => null))?.data }
-  }
+  const call = apiAs(token)
   const mine = await call('/workspaces')
   const firstWs = mine.data?.[0]?.workspace?.id
   if (!firstWs) throw new Error(`the admin has no workspace to be first: ${mine.status}`)

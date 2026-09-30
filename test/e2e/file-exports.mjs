@@ -26,6 +26,7 @@ import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -53,6 +54,11 @@ const chromium = await resolveChromium()
 const stack = await startLocalStack({ dist: path.resolve(REPO, argOf('--dist', 'apps/web/dist')), apiPort: API_PORT })
 const B = stack.base
 const API = `${B}/api/v1`
+/* lib/fixture.mjs's one API client, not a copy (`suite-hygiene/apiAs-duplicated-62`);
+ * like the `api` helper it replaces, it throws when nothing answers at all. Its
+ * `error` is the envelope's, and `text` the body as sent. `download` below stays
+ * its own: it reads a file's bytes, which no JSON client hands back. */
+const apiAs = apiAsAt(API, { noAnswer: 'throw' })
 let browser = null
 let WS = null
 let token = null
@@ -76,11 +82,7 @@ const headerOf = (bytes) => bytes.toString().split('\n')[0].split(',').map((c) =
 try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   token = auth.accessToken
-  const api = async (route, init = {}) => {
-    const res = await fetch(`${API}${route}`, { ...init, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: init.body ? JSON.stringify(init.body) : undefined })
-    const json = await res.json().catch(() => null)
-    return { status: res.status, json, data: json?.data }
-  }
+  const api = apiAs(token)
   const me = (await api('/users/me')).data?.id
   const made = await api('/workspaces', { method: 'POST', body: { name: `exports-${Date.now()}` } })
   if (!made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
@@ -109,9 +111,9 @@ try {
   chk(isPdf(pdf), 'and as a PDF: application/pdf, a file that begins %PDF-', said(pdf))
   const run = await api(`/workspaces/${WS}/reports/custom/run`, { method: 'POST', body: definition })
   chk(
-    run.status < 300 && run.json?.error === null && Array.isArray(run.data?.rows) && run.data.rows.length > 0,
+    run.status < 300 && run.error === null && Array.isArray(run.data?.rows) && run.data.rows.length > 0,
     'while the same report run for the screen still arrives in the envelope: { data: { rows }, error: null }',
-    `${run.status} ${JSON.stringify(run.json).slice(0, 120)}`,
+    `${run.status} ${run.text.slice(0, 120)}`,
   )
 
   // ══ 2. THE OTHER TWO ═════════════════════════════════════════════════════

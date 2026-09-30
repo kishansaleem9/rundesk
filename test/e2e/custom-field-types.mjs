@@ -42,6 +42,7 @@ import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
 /* Teardown only — see the `finally` block. No check reads the database. */
 import { openDb } from './lib/db.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -71,18 +72,13 @@ const chk = (cond, good, bad) => {
   else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad && bad !== good ? ` \u2014 ${bad}` : ''}`) }
 }
 
-/* This client NEVER THROWS — it resolves `{status, data, error}`. A `.catch()`
- * on it is inert and a failed call would read as a success, so every call below
- * is judged on `status` and, where the refusal is the point, on the message. */
-const apiAs = (token) => async (route, init = {}) => {
-  const headers = token ? { authorization: `Bearer ${token}` } : {}
-  if (init.body) headers['content-type'] = 'application/json'
-  const res = await fetch(`${API}${route}`, {
-    ...init, headers, body: init.body ? JSON.stringify(init.body) : undefined,
-  })
-  const json = await res.json().catch(() => null)
-  return { status: res.status, data: json?.data, error: json?.error }
-}
+/* This client NEVER THROWS on a status — it resolves `{status, data, error}`. A
+ * `.catch()` on it is inert and a failed call would read as a success, so every
+ * call below is judged on `status` and, where the refusal is the point, on the
+ * message. It is lib/fixture.mjs's one client, not a copy
+ * (`suite-hygiene/apiAs-duplicated-62`), and like the copy it throws only when
+ * nothing answers at all. */
+const apiAs = apiAsAt(API, { noAnswer: 'throw' })
 /** The envelope carries `{message}` on a refusal; this is the text of it. */
 const said = (r) => String(r?.error?.message ?? r?.error ?? '')
 

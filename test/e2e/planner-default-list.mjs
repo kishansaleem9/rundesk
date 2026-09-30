@@ -23,6 +23,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
 import { openDb } from './lib/db.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -50,6 +51,10 @@ const chromium = await resolveChromium()
 const stack = await startLocalStack({ dist: path.resolve(REPO, argOf('--dist', 'apps/web/dist')), apiPort: API_PORT })
 const B = stack.base
 const API = `${B}/api/v1`
+/* lib/fixture.mjs's one API client, not a copy (`suite-hygiene/apiAs-duplicated-62`);
+ * like the `call` and `asMember` helpers it replaces, it throws when nothing
+ * answers at all. */
+const apiAs = apiAsAt(API, { noAnswer: 'throw' })
 const stamp = Date.now()
 const TAG = `pdl-${stamp}`
 let browser = null
@@ -65,10 +70,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   token = auth.accessToken
   const me = auth.user.id
-  call = async (route, init = {}) => {
-    const res = await fetch(`${API}${route}`, { ...init, headers: { authorization: `Bearer ${token}`, ...(init.body ? { 'content-type': 'application/json' } : {}) }, body: init.body ? JSON.stringify(init.body) : undefined })
-    return { status: res.status, data: (await res.json().catch(() => null))?.data }
-  }
+  call = apiAs(token)
   const make = async (route, body, what) => {
     const res = await call(route, { method: 'POST', body })
     if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${res.status}`)
@@ -183,10 +185,7 @@ try {
   })
   const joined = await call(`/workspaces/${WS}/members`, { method: 'POST', body: { email: memberEmail, role: 'member' } })
   if (joined.status >= 300) throw new Error(`could not add the member: ${joined.status}`)
-  const asMember = async (route, init = {}) => {
-    const res = await fetch(`${API}${route}`, { ...init, headers: { authorization: `Bearer ${member.accessToken}`, ...(init.body ? { 'content-type': 'application/json' } : {}) }, body: init.body ? JSON.stringify(init.body) : undefined })
-    return { status: res.status, data: (await res.json().catch(() => null))?.data }
-  }
+  const asMember = apiAs(member.accessToken)
   await asMember(`/planner/${WS}/settings`, { method: 'PATCH', body: { defaultListId: PRIVATE_LIST } })
   const memberChannel = await asMember(`/workspaces/${WS}/chat/channels`, { method: 'POST', body: { name: `pdl-m-${stamp}` } })
   const REFUSED = `${TAG} the member's task`

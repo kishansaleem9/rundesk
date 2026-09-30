@@ -32,6 +32,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
 import { waitUntil, readText, waitForCount } from './lib/wait.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -155,19 +156,10 @@ const API = REMOTE ? `http://127.0.0.1:${API_PORT}/api/v1` : `http://127.0.0.1:$
 
 const apiLogin = (who) => signInApi(API, who.email, who.password)
 
-const apiAs = (token) => async (route, init = {}) => {
-  // Only declare a JSON body when there is one: Fastify refuses an empty body
-  // that claims to be JSON, which is exactly what a bodyless DELETE sends.
-  const headers = { authorization: `Bearer ${token}` }
-  if (init.body) headers['content-type'] = 'application/json'
-  const res = await fetch(`${API}${route}`, {
-    ...init,
-    headers,
-    body: init.body ? JSON.stringify(init.body) : undefined,
-  })
-  const json = await res.json().catch(() => null)
-  return { status: res.status, data: json?.data, error: json?.error }
-}
+// lib/fixture.mjs's one client, not a copy (`suite-hygiene/apiAs-duplicated-62`).
+// It throws when nothing answers, as the copy did, so a dead API stops the run
+// rather than answering a status of 0 that a check could take for success.
+const apiAs = apiAsAt(API, { noAnswer: 'throw' })
 
 async function signIn(page, origin, who) {
   await page.goto(`${origin}/login`, { waitUntil: 'domcontentloaded' })

@@ -35,6 +35,7 @@
  */
 import { signInApi } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -64,15 +65,10 @@ const chk = (cond, good, bad) => {
 // A path that cannot go on fails what is left with the reason — `lib/chain.mjs`.
 const chain = makeChain(chk)
 
-const apiAs = (token) => async (route, init = {}) => {
-  const headers = token ? { authorization: `Bearer ${token}` } : {}
-  if (init.body) headers['content-type'] = 'application/json'
-  const res = await fetch(`${API}${route}`, {
-    ...init, headers, body: init.body ? JSON.stringify(init.body) : undefined,
-  })
-  const json = await res.json().catch(() => null)
-  return { status: res.status, data: json?.data, error: json?.error }
-}
+// lib/fixture.mjs's one client, not a copy (`suite-hygiene/apiAs-duplicated-62`).
+// It throws when nothing answers, as the copy did, so a dead API stops the run
+// rather than answering a status of 0 that a check could take for success.
+const apiAs = apiAsAt(API, { noAnswer: 'throw' })
 
 const TAG = `lss-${Date.now()}`
 const made = []

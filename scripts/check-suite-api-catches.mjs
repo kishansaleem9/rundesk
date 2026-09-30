@@ -3,12 +3,13 @@
  * A CATCH ON AN API CLIENT'S CALL DOES NOT SWALLOW WHAT IT CATCHES
  * (`suite-hygiene/inert-catches`, `resume-defects/resume-3`).
  *
- * Every API client the suites use — `apiClient` in `lib/fixture.mjs`, the
- * local `apiAs(token)` copies, helpers such as `call` and `api` — answers
- * EVERY HTTP status by returning `{ status, data, error }`. A 500, a 403, a
- * 404: each returns normally. The client rejects only when `fetch` itself
- * does, which is when the API is not there at all. A raw `fetch` is the same.
- * So
+ * Every API client the suites use — `lib/fixture.mjs`'s `apiAs(base)(token)`,
+ * which each suite binds as `apiAs` (`suite-hygiene/apiAs-duplicated-62`), and
+ * `apiClient` over it — answers EVERY HTTP status by returning `{ status, data,
+ * error, … }`. A 500, a 403, a 404: each returns normally. The client rejects
+ * only when nothing answers at all, and only where a suite asked it to
+ * (`noAnswer: 'throw'`, as `apiClient` does); elsewhere that is a status of 0.
+ * A raw `fetch` rejects then too. So
  *
  *     if (WS && A) await A(`/workspaces/${WS}`, { method: 'DELETE' }).catch(() => {})
  *

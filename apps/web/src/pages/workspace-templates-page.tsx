@@ -21,8 +21,17 @@
  * The vocabulary and its ORDER come from the server too. This file holds
  * labels, not a second list — three copies of "space, folder, list" is how the
  * third one ends up with four entries nobody notices.
+ *
+ * `ledger-rows/row-1874` — the frame's top row is a search box and THREE facet
+ * buttons, **Use Cases · Tags · Created by**, and only the first was here.
+ * ClickUp (help centre, "Find a template"): "click Tags to filter by tags, and
+ * click Created by to filter by creator". Both are server facets like the
+ * others, counted in SQL over the same corpus, and drawn the way Use Cases is.
+ * Tags are set when a template is saved and changed afterwards from its card
+ * ("Under the template name, click the tag icon"), by whoever may manage
+ * templates.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { TaskTemplatesSection } from '../components/task-templates-section'
@@ -64,6 +73,7 @@ import {
   FolderKanban,
   Boxes,
   List as ListIcon,
+  Tag as TagIcon,
 } from 'lucide-react'
 import { InlineSkeleton } from '../components/loading-skeletons'
 
@@ -85,11 +95,16 @@ type ProjectTemplate = {
   complexity: string
   category: string | null
   useCase: string | null
+  /** `ledger-rows/row-1874`: absent from a server older than the column. */
+  tags?: string[]
+  createdById?: string | null
   payload: { lists: TemplateList[] }
   createdAt: string
 }
 
 type FacetBucket = { value: string; count: number }
+/** A Created-by bucket: the value is the maker's user id, shown by name. */
+type CreatorBucket = FacetBucket & { name: string }
 type BrowseResult = {
   templates: ProjectTemplate[]
   total: number
@@ -99,6 +114,8 @@ type BrowseResult = {
     complexity: FacetBucket[]
     category: FacetBucket[]
     useCase: FacetBucket[]
+    createdBy?: CreatorBucket[]
+    tag?: FacetBucket[]
   }
 }
 
@@ -187,7 +204,10 @@ export function TemplatesPage() {
   const [complexities, setComplexities] = useState<string[]>([])
   const [useCase, setUseCase] = useState('')
   const [category, setCategory] = useState('')
+  const [tag, setTag] = useState('')
+  const [createdBy, setCreatedBy] = useState('')
   const [applyTemplate, setApplyTemplate] = useState<ProjectTemplate | null>(null)
+  const [tagsOf, setTagsOf] = useState<ProjectTemplate | null>(null)
   const [saveOpen, setSaveOpen] = useState(false)
   const mayManageTemplates = usePermissions(workspaceId ?? undefined).can('template.manage') === true
 
@@ -207,8 +227,10 @@ export function TemplatesPage() {
     if (complexities.length) p.set('complexity', complexities.join(','))
     if (useCase) p.set('useCase', useCase)
     if (category) p.set('category', category)
+    if (tag) p.set('tag', tag)
+    if (createdBy) p.set('createdBy', createdBy)
     return p.toString()
-  }, [debouncedQuery, scope, types, complexities, useCase, category])
+  }, [debouncedQuery, scope, types, complexities, useCase, category, tag, createdBy])
 
   const browseQuery = useQuery({
     queryKey: ['project-templates', 'browse', workspaceId, search],
@@ -221,7 +243,34 @@ export function TemplatesPage() {
   const templates = useMemo(() => browseQuery.data?.templates ?? [], [browseQuery.data])
   const facets = browseQuery.data?.facets
   const total = browseQuery.data?.total ?? 0
-  const anyFacet = types.length > 0 || complexities.length > 0 || Boolean(useCase) || Boolean(category)
+  const anyFacet =
+    types.length > 0 || complexities.length > 0 || Boolean(useCase) || Boolean(category) || Boolean(tag) || Boolean(createdBy)
+
+  /*
+   * `ledger-rows/row-1874` — the two open vocabularies. Use Cases' buckets are a
+   * fixed list that always holds the chosen value (at 0 when nothing matches);
+   * these are whatever the corpus holds, so a chosen tag or maker the search
+   * has narrowed away is not among them. It is kept in the menu at 0, as Use
+   * Cases keeps its own, or the select would show "All" while still filtering.
+   * A maker's name is remembered from when it was last counted.
+   */
+  const makerNames = useRef(new Map<string, string>())
+  useEffect(() => {
+    for (const b of facets?.createdBy ?? []) makerNames.current.set(b.value, b.name)
+  }, [facets])
+  const makerBuckets = useMemo(() => {
+    const rows = facets?.createdBy ?? []
+    return createdBy && !rows.some((b) => b.value === createdBy)
+      ? [...rows, { value: createdBy, count: 0, name: makerNames.current.get(createdBy) ?? createdBy }]
+      : rows
+  }, [facets, createdBy])
+  const tagBuckets = useMemo(() => {
+    const rows = facets?.tag ?? []
+    return tag && !rows.some((b) => b.value.toLowerCase() === tag.toLowerCase())
+      ? [...rows, { value: tag, count: 0 }]
+      : rows
+  }, [facets, tag])
+  const knownTags = useMemo(() => (facets?.tag ?? []).map((b) => b.value), [facets])
 
   const toggle = (list: string[], value: string, set: (v: string[]) => void) =>
     set(list.includes(value) ? list.filter((v) => v !== value) : [...list, value])
@@ -282,8 +331,8 @@ export function TemplatesPage() {
         )}
       </header>
 
-      {/* Search + the frame's top-bar Use Cases dropdown + the scope rail. */}
-      <div className="flex flex-wrap items-center gap-3">
+      {/* Search + the frame's top-bar Use Cases · Tags · Created by + the scope rail. */}
+      <div className="flex flex-wrap items-center gap-3" data-testid="templates-top-row">
         <div className="relative max-w-sm w-full">
           <Input
             leadingIcon={<Search className="h-4 w-4" />}
@@ -324,6 +373,46 @@ export function TemplatesPage() {
           </select>
         </label>
 
+        {/*
+          `ledger-rows/row-1874` — Tags, then Created by, the frame's order. The
+          same control as Use Cases, drawn and counted the same way: one
+          request per choice, the count beside each value taken by the server
+          over the corpus the search and the scope leave, never the grid.
+        */}
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="sr-only">{t('templates.tags')}</span>
+          <select
+            data-testid="templates-facet-tag"
+            value={tag ? (tagBuckets.find((b) => b.value.toLowerCase() === tag.toLowerCase())?.value ?? tag) : ''}
+            onChange={(e) => setTag(e.target.value)}
+            className="h-9 rounded-md border border-border/60 bg-card/40 px-3 text-sm text-foreground"
+          >
+            <option value="">{t('templates.tagsAll')}</option>
+            {tagBuckets.map((b) => (
+              <option key={b.value.toLowerCase()} value={b.value}>
+                {b.value} ({b.count})
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="sr-only">{t('templates.createdBy')}</span>
+          <select
+            data-testid="templates-facet-createdby"
+            value={createdBy}
+            onChange={(e) => setCreatedBy(e.target.value)}
+            className="h-9 rounded-md border border-border/60 bg-card/40 px-3 text-sm text-foreground"
+          >
+            <option value="">{t('templates.createdByAll')}</option>
+            {makerBuckets.map((b) => (
+              <option key={b.value} value={b.value}>
+                {b.name} ({b.count})
+              </option>
+            ))}
+          </select>
+        </label>
+
         <div
           className="flex items-center gap-1 bg-card/40 border border-border/60 rounded-lg p-1"
           data-testid="templates-scope-rail"
@@ -355,7 +444,7 @@ export function TemplatesPage() {
             size="sm"
             className="h-8 text-xs"
             data-testid="templates-facet-clear"
-            onClick={() => { setTypes([]); setComplexities([]); setUseCase(''); setCategory('') }}
+            onClick={() => { setTypes([]); setComplexities([]); setUseCase(''); setCategory(''); setTag(''); setCreatedBy('') }}
           >
             <X className="h-3 w-3" /> {t('templates.clearFilters')}
           </Button>
@@ -439,6 +528,9 @@ export function TemplatesPage() {
                         typeLabel={labelOf(TYPE_LABEL, tpl.targetType)}
                         complexityLabel={labelOf(COMPLEXITY_LABEL, tpl.complexity)}
                         onUse={() => setApplyTemplate(tpl)}
+                        // The key that saves a template changes its tags, as the
+                        // API asks; a built-in is every workspace's, so nobody's.
+                        onEditTags={mayManageTemplates && !tpl.isBuiltIn ? () => setTagsOf(tpl) : undefined}
                       />
                     ))}
                   </div>
@@ -461,6 +553,15 @@ export function TemplatesPage() {
           workspaceId={workspaceId}
           open={saveOpen}
           onOpenChange={setSaveOpen}
+          knownTags={knownTags}
+        />
+      )}
+      {workspaceId && (
+        <EditTagsDialog
+          workspaceId={workspaceId}
+          template={tagsOf}
+          knownTags={knownTags}
+          onClose={() => setTagsOf(null)}
         />
       )}
     </div>
@@ -544,16 +645,20 @@ function TemplateCard({
   typeLabel,
   complexityLabel,
   onUse,
+  onEditTags,
 }: {
   template: ProjectTemplate
   typeLabel: string
   complexityLabel: string
   onUse: () => void
+  /** Absent for whoever may not change them, and for a built-in. */
+  onEditTags?: () => void
 }) {
   const { t, tCount } = useTranslation()
   const Icon = iconFor(template.icon)
   const lists = template.payload?.lists?.length ?? 0
   const tasks = taskCount(template)
+  const tags = template.tags ?? []
   return (
     <Card
       variant="glass"
@@ -564,6 +669,7 @@ function TemplateCard({
       data-complexity={template.complexity}
       data-category={template.category ?? 'other'}
       data-use-case={template.useCase ?? 'other'}
+      data-created-by={template.createdById ?? ''}
     >
       <div className="relative h-32 overflow-hidden flex items-center justify-center" style={{ background: coverFor(template.icon) }}>
         <div className="absolute inset-0 bg-grid-dim opacity-40" />
@@ -584,8 +690,38 @@ function TemplateCard({
       <div className="p-4">
         <div className="flex items-center gap-2 mb-1">
           <span className="font-medium truncate flex-1">{template.name}</span>
+          {/*
+            `ledger-rows/row-1874` — ClickUp: "Under the template name, click the
+            tag icon and select one or more tags."
+          */}
+          {onEditTags && (
+            <button
+              type="button"
+              data-testid="templates-card-edit-tags"
+              data-template-id={template.id}
+              aria-label={t('templates.editTags')}
+              title={t('templates.editTags')}
+              onClick={onEditTags}
+              className="shrink-0 rounded p-1 text-muted-foreground hover:bg-card/60 hover:text-foreground"
+            >
+              <TagIcon className="h-3.5 w-3.5" />
+            </button>
+          )}
           <Badge variant="outline" className="text-[10px] shrink-0">{complexityLabel}</Badge>
         </div>
+        {tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-1.5" data-testid="templates-card-tags">
+            {tags.map((tg) => (
+              <span
+                key={tg.toLowerCase()}
+                data-testid="templates-card-tag"
+                className="inline-flex items-center rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-medium text-accent"
+              >
+                {tg}
+              </span>
+            ))}
+          </div>
+        )}
         <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed min-h-[2rem]">
           {template.description}
         </p>
@@ -792,10 +928,12 @@ function SaveTemplateDialog({
   workspaceId,
   open,
   onOpenChange,
+  knownTags,
 }: {
   workspaceId: string
   open: boolean
   onOpenChange: (v: boolean) => void
+  knownTags: string[]
 }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -805,6 +943,7 @@ function SaveTemplateDialog({
   const [description, setDescription] = useState('')
   const [category, setCategory] = useState('')
   const [useCase, setUseCase] = useState('')
+  const [tags, setTags] = useState<string[]>([])
 
   const spacesQuery = useQuery({
     queryKey: ['spaces', workspaceId],
@@ -837,6 +976,9 @@ function SaveTemplateDialog({
           description: description.trim() || undefined,
           category: category || undefined,
           useCase: useCase || undefined,
+          // `ledger-rows/row-1874` — ClickUp saves a template with "a template
+          // name, description, tags"; the server cleans them or refuses them.
+          tags,
         },
       }),
     onSuccess: () => {
@@ -856,6 +998,7 @@ function SaveTemplateDialog({
     setDescription('')
     setCategory('')
     setUseCase('')
+    setTags([])
   }
 
   return (
@@ -948,6 +1091,10 @@ function SaveTemplateDialog({
               </select>
             </div>
           </div>
+          <div className="space-y-1.5">
+            <Label>{t('templates.tagsOptional')}</Label>
+            <TagsInput testId="templates-save-tags" value={tags} onChange={setTags} suggestions={knownTags} />
+          </div>
         </div>
         <DialogFooter>
           <Button
@@ -963,6 +1110,151 @@ function SaveTemplateDialog({
             disabled={save.isPending || !effectiveProject || !name.trim()}
           >
             <Check className="h-3.5 w-3.5" /> {save.isPending ? t('common.saving') : t('templates.saveTemplate')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/**
+ * `ledger-rows/row-1874` — a template's tags as chips. Type one and press
+ * Enter (or a comma); × takes one off, and Backspace in the empty box takes
+ * the last. The words already in use are offered as you type.
+ *
+ * Cleaned here as the server cleans them — trimmed, a run of spaces made one,
+ * one per word whatever its case — so the chips show what will be kept. The
+ * BOUNDS are not copied here: forty characters and twenty tags are the
+ * server's to refuse, in its own words, and a second copy of them in the
+ * browser is one that drifts.
+ */
+function TagsInput({
+  testId,
+  value,
+  onChange,
+  suggestions,
+}: {
+  testId: string
+  value: string[]
+  onChange: (next: string[]) => void
+  suggestions: string[]
+}) {
+  const { t } = useTranslation()
+  const [draft, setDraft] = useState('')
+  const listId = useId()
+  const has = (tag: string) => value.some((v) => v.toLowerCase() === tag.toLowerCase())
+  const add = (raw: string) => {
+    let next = value
+    for (const part of raw.split(',')) {
+      const tag = part.trim().replace(/\s+/g, ' ')
+      if (tag && !next.some((v) => v.toLowerCase() === tag.toLowerCase())) next = [...next, tag]
+    }
+    if (next !== value) onChange(next)
+    setDraft('')
+  }
+  return (
+    <div
+      data-testid={testId}
+      className="flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-border/60 bg-card/40 px-2 py-1.5"
+    >
+      {value.map((tag) => (
+        <span
+          key={tag.toLowerCase()}
+          data-testid={`${testId}-chip`}
+          className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-xs font-medium text-accent"
+        >
+          {tag}
+          <button
+            type="button"
+            data-testid={`${testId}-remove`}
+            aria-label={t('templates.removeTag', { tag })}
+            onClick={() => onChange(value.filter((v) => v !== tag))}
+            className="rounded-full hover:text-foreground"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </span>
+      ))}
+      <input
+        data-testid={`${testId}-input`}
+        list={listId}
+        value={draft}
+        placeholder={value.length === 0 ? t('templates.tagsPlaceholder') : undefined}
+        onChange={(e) => (e.target.value.includes(',') ? add(e.target.value) : setDraft(e.target.value))}
+        onKeyDown={(e) => {
+          // An IME's Enter picks a character; it is not the end of a tag.
+          if (e.nativeEvent.isComposing) return
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            add(draft)
+          } else if (e.key === 'Backspace' && !draft && value.length > 0) {
+            onChange(value.slice(0, -1))
+          }
+        }}
+        // A word typed and left, then Save pressed, is a tag too.
+        onBlur={() => { if (draft.trim()) add(draft) }}
+        className="min-w-[8rem] flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+      />
+      <datalist id={listId}>
+        {suggestions.filter((s) => !has(s)).map((s) => <option key={s} value={s} />)}
+      </datalist>
+    </div>
+  )
+}
+
+/**
+ * `ledger-rows/row-1874` — a template's tags, changed after it was saved.
+ * ClickUp: "You can add or edit tags in the Template Center at any time". The
+ * list sent replaces the list held (`PATCH …/project-templates/:id/tags`), and
+ * the route asks `template.manage`, which is why only a manager's cards offer
+ * the tag icon that opens this.
+ */
+function EditTagsDialog({
+  workspaceId,
+  template,
+  knownTags,
+  onClose,
+}: {
+  workspaceId: string
+  template: ProjectTemplate | null
+  knownTags: string[]
+  onClose: () => void
+}) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [tags, setTags] = useState<string[]>([])
+  // Seeded from the template each time the dialog opens on one.
+  useEffect(() => { setTags(template?.tags ?? []) }, [template])
+
+  const save = useMutation({
+    mutationFn: () =>
+      api<ProjectTemplate>(`/workspaces/${workspaceId}/project-templates/${template!.id}/tags`, {
+        method: 'PATCH',
+        body: { tags },
+      }),
+    onSuccess: () => {
+      toast.success(t('templates.tagsSavedToast'))
+      // The facet counts move with the tags, so the whole browse is re-asked.
+      qc.invalidateQueries({ queryKey: ['project-templates'] })
+      onClose()
+    },
+    onError: (e: unknown) => toast.error(e instanceof ApiError ? e.message : t('templates.tagsSaveError')),
+  })
+
+  return (
+    <Dialog open={Boolean(template)} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent data-testid="templates-tags-dialog" data-template-id={template?.id}>
+        <DialogHeader>
+          <DialogTitle>{t('templates.editTagsTitle', { name: template?.name ?? '' })}</DialogTitle>
+          <DialogDescription>{t('templates.editTagsDescription')}</DialogDescription>
+        </DialogHeader>
+        <TagsInput testId="templates-tags" value={tags} onChange={setTags} suggestions={knownTags} />
+        <DialogFooter>
+          <Button variant="outline" data-testid="templates-tags-cancel" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button data-testid="templates-tags-save" onClick={() => save.mutate()} disabled={save.isPending}>
+            <Check className="h-3.5 w-3.5" /> {save.isPending ? t('common.saving') : t('templates.saveTags')}
           </Button>
         </DialogFooter>
       </DialogContent>

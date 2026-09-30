@@ -24,25 +24,116 @@
 
 import { signInApi } from './signin.mjs'
 
-/** A tiny API client bound to one token, shaped like the ones in the suites. */
-export function apiClient(base, token) {
-  return async (route, init = {}) => {
-    const headers = { authorization: `Bearer ${token}` }
-    if (init.body) headers['content-type'] = 'application/json'
-    const res = await fetch(`${base}${route}`, {
-      ...init,
-      headers,
-      body: init.body ? JSON.stringify(init.body) : undefined,
-    })
-    const text = await res.text()
-    let json
+/**
+ * THE API CLIENT, ONCE (`suite-hygiene/apiAs-duplicated-62`).
+ *
+ * `apiAs(base)(token)` is a client of the API at `base` (`…/api/v1`), signed in
+ * as `token`. `await A(route, { method, body })` answers
+ *
+ *     { status, ok, data, error, message, text, type }
+ *
+ * for EVERY HTTP status: a 403 or a 500 comes back like a 200, so a caller
+ * reads `status` (or `ok`), and a `.catch()` on a call has nothing to catch
+ * (`suite-hygiene/inert-catches`). `data` and `error` are the envelope's, which
+ * the API puts round every JSON answer (its response interceptor, and its
+ * exception filter's `{ data: null, error }`). `message` is what the server
+ * said, as one string: a list of validation messages joined with '; ', and ''
+ * when it said nothing. `text` is the body as sent and `type` its content type,
+ * so a CSV, a PDF or a page can be read as well.
+ *
+ * 172 suites carried a copy of this, in 21 variants once comments and spacing
+ * are set aside, and none of them was the fixture's. They differed in what a
+ * caller would not think to ask: whether a null token sent `Bearer null`, what
+ * came back when nothing answered, whether the body was parsed as text, which
+ * fields came back. Each was right for its suite, and a new suite copied
+ * whichever it was nearest. The rules they now share:
+ *
+ *   · A null, undefined or empty token sends NO Authorization header. An
+ *     anonymous call is anonymous; `Bearer null` is a malformed token, which a
+ *     route is free to refuse differently from none.
+ *   · A JSON content type only with a body. Fastify refuses an empty body that
+ *     claims to be JSON, which is what a bodyless DELETE used to send (five
+ *     teardowns answered 400 for it, `suite-hygiene/inert-catches`).
+ *   · When nothing answers (the API is down, the connection dropped), a status
+ *     of 0: `{ status: 0, ok: false, data: null, error: { message: 'no answer',
+ *     cause } }`. A setup reads it as a refusal; `must` below names it.
+ *
+ * WHAT A SUITE MAY STILL ASK FOR, where its own copy did something else and a
+ * check stood on it. Each is an option, so the difference is written where the
+ * suite binds the client instead of hidden in a copy:
+ *
+ *   · `noAnswer: 'throw'` — reject, naming the call, when nothing answers,
+ *     instead of answering 0. 67 copies, the 14 helpers that were the same
+ *     client under other names (`call`, `A`, `api`) and `apiClient` rejected,
+ *     and their suites' checks were written against that: `status < 300` alone,
+ *     which a 0 would pass. There a dead API has to stop the run, not read as
+ *     success.
+ *   · `emptyBodyOn: ['POST', …]` — send `{}` on these methods when the caller
+ *     gave no body: a route that reads a body refuses a request without one.
+ *   · `dataOrBody: true` — `data` is the whole parsed body when it carries no
+ *     `data`, so a refusal's `{ data: null, error }` reads as `data.error`.
+ */
+export function apiAs(base, { noAnswer = 'status', emptyBodyOn = [], dataOrBody = false } = {}) {
+  return (token) => async (route, init = {}) => {
+    const body = init.body ?? (emptyBodyOn.includes(init.method) ? {} : undefined)
+    const headers = token ? { authorization: `Bearer ${token}` } : {}
+    if (body) headers['content-type'] = 'application/json'
+    let res
+    try {
+      res = await fetch(`${base}${route}`, { ...init, headers, body: body ? JSON.stringify(body) : undefined })
+    } catch (err) {
+      // undici says `fetch failed` and puts the reason (ECONNREFUSED, a reset) in `cause`.
+      const cause = String(err?.cause?.code ?? err?.cause?.message ?? err?.message ?? err)
+      if (noAnswer === 'throw') throw new Error(`no answer from ${init.method ?? 'GET'} ${route}: ${cause}`, { cause: err })
+      return { status: 0, ok: false, data: null, error: { message: 'no answer', cause }, message: '', text: '', type: '' }
+    }
+    const type = res.headers.get('content-type') ?? ''
+    const text = await res.text().catch(() => '')
+    let json = null
     try {
       json = JSON.parse(text)
     } catch {
-      json = { raw: text }
+      /* not JSON: a CSV, a PDF, a page, or no body at all */
     }
-    return { status: res.status, data: json?.data, error: json?.error }
+    const said = json?.message ?? json?.error?.message
+    return {
+      status: res.status,
+      ok: res.status >= 200 && res.status < 300,
+      data: dataOrBody ? (json?.data ?? json) : json?.data,
+      error: json?.error,
+      message: Array.isArray(said) ? said.join('; ') : String(said ?? ''),
+      text,
+      type,
+    }
   }
+}
+
+/**
+ * The answer's `data` when the API said yes (2xx); otherwise a throw that names
+ * what could not be done and what the API said, or that nothing answered.
+ *
+ * For a read or a write that what follows cannot do without:
+ * `must(await A('/workspaces', { method: 'POST', body }), 'make the workspace').id`
+ * says "could not make the workspace: answered 403 …" where `(await A(…)).data.id`
+ * says "Cannot read properties of undefined", about nothing in particular
+ * (`suite-hygiene/unguarded-derefs`).
+ */
+export function must(res, what) {
+  const status = res?.status
+  if (status >= 200 && status < 300) return res.data
+  const said = status
+    ? `answered ${status} ${JSON.stringify(res?.error?.message ?? null)}`
+    : `got no answer${res?.error?.cause ? ` (${res.error.cause})` : ''}`
+  throw new Error(`could not ${what}: ${said}`)
+}
+
+/**
+ * `apiAs(base)(token)`, for the callers written before it. It rejected when
+ * nothing answered, and those callers' checks were written against that, so it
+ * still does.
+ */
+export function apiClient(base, token) {
+  return apiAs(base, { noAnswer: 'throw' })(token)
 }
 
 /**
@@ -232,18 +323,14 @@ export async function ensureShared(
    * EVERY WRITE HERE IS READ. This client never throws on a status, so a write
    * that was refused used to leave the row missing and the check that needed
    * it passing or failing about something else (`resume-defects/resume-3`).
-   * A refused write now stops the suite, naming what could not be staged.
+   * A refused write now stops the suite, naming what could not be staged:
+   * `must` above, the one this file exports, where this function once had its
+   * own with the arguments the other way round.
    */
-  const must = (what, res) => {
-    if (!res || res.status === 0 || res.status >= 300) {
-      throw new Error(`ensureShared could not ${what}: ${res?.status ?? 'no answer'} ${JSON.stringify(res?.error?.message ?? null)}`)
-    }
-    return res.data
-  }
   const existing = (await api(`/tasks/list/${listId}`)).data ?? []
   const tasks = Array.isArray(existing) ? existing : (existing.tasks ?? [])
   let task = tasks.find((t) => t.title === taskTitle)
-  if (!task) task = must('make the shared task', await api('/tasks', { method: 'POST', body: { listId, title: taskTitle } }))
+  if (!task) task = must(await api('/tasks', { method: 'POST', body: { listId, title: taskTitle } }), 'make the shared task')
   // Assigned to both, because "open tasks with them" means exactly that — a
   // task only one of you is on is not shared. On EVERY run, not only when the
   // task is made: the peer is whoever `ensureDm` picks, which is the first
@@ -252,7 +339,7 @@ export async function ensureShared(
   // no-op, and this client never throws).
   if (task?.id) {
     for (const userId of [myUserId, peerUserId]) {
-      if (userId) must('assign the shared task', await api(`/tasks/${task.id}/assignees`, { method: 'POST', body: { userId } }))
+      if (userId) must(await api(`/tasks/${task.id}/assignees`, { method: 'POST', body: { userId } }), 'assign the shared task')
     }
   }
 
@@ -277,14 +364,14 @@ export async function ensureShared(
     const statuses = (await api(`/lists/${listId}/statuses`)).data ?? []
     const closedKey = (Array.isArray(statuses) ? statuses : []).find((s) => s.category === 'closed')?.key
     if (!closedKey) throw new Error(`ensureShared could not close a task: the list has no closed status (${JSON.stringify(statuses)})`)
-    const closed = must('make the closed task', await api('/tasks', {
+    const closed = must(await api('/tasks', {
       method: 'POST',
       body: { listId, title: closedTaskTitle },
-    }))
+    }), 'make the closed task')
     for (const userId of [myUserId, peerUserId]) {
-      if (userId) must('assign the closed task', await api(`/tasks/${closed.id}/assignees`, { method: 'POST', body: { userId } }))
+      if (userId) must(await api(`/tasks/${closed.id}/assignees`, { method: 'POST', body: { userId } }), 'assign the closed task')
     }
-    must(`close the closed task (${closedKey})`, await api(`/tasks/${closed.id}`, { method: 'PATCH', body: { status: closedKey } }))
+    must(await api(`/tasks/${closed.id}`, { method: 'PATCH', body: { status: closedKey } }), `close the closed task (${closedKey})`)
   }
 
   const meetings = (await api(`/workspaces/${workspaceId}/meetings`)).data ?? []
@@ -301,7 +388,7 @@ export async function ensureShared(
   let meeting = list.find((m) => m.title === meetingTitle && attends(m, myUserId) && attends(m, peerUserId))
   if (!meeting) {
     const startsAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-    meeting = must('make the shared meeting', await api(`/workspaces/${workspaceId}/meetings`, {
+    meeting = must(await api(`/workspaces/${workspaceId}/meetings`, {
       method: 'POST',
       body: {
         title: meetingTitle,
@@ -310,14 +397,14 @@ export async function ensureShared(
         provider: 'manual',
         attendeeIds: [myUserId, peerUserId].filter(Boolean),
       },
-    }))
+    }), 'make the shared meeting')
   }
 
   /* The solo one: same workspace, same shape, one attendee. */
   if (soloMeetingTitle && !list.some((m) => m.title === soloMeetingTitle)) {
     // The negative check's row: if this is refused, "a meeting only one of you
     // attended is not listed" would pass about a meeting that does not exist.
-    must('make the solo meeting', await api(`/workspaces/${workspaceId}/meetings`, {
+    must(await api(`/workspaces/${workspaceId}/meetings`, {
       method: 'POST',
       body: {
         title: soloMeetingTitle,
@@ -326,7 +413,7 @@ export async function ensureShared(
         provider: 'manual',
         attendeeIds: [myUserId].filter(Boolean),
       },
-    }))
+    }), 'make the solo meeting')
   }
   return { task, meeting }
 }

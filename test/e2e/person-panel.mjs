@@ -19,6 +19,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { readText } from './lib/wait.mjs'
 import { makeChain } from './lib/chain.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -126,17 +127,10 @@ const API = `http://127.0.0.1:${API_PORT}/api/v1`
 const MODEL = `http://127.0.0.1:${argOf('--model', process.env.E2E_MODEL_PORT ?? String(9200 + (API_PORT - 3020)))}`
 const stubCalls = async () => (await fetch(`${MODEL}/__control/seen`).then((r) => r.json()).catch(() => null))?.calls ?? null
 
-const apiAs = (token) => async (route, init = {}) => {
-  const headers = { authorization: `Bearer ${token}` }
-  if (init.body) headers['content-type'] = 'application/json'
-  const res = await fetch(`${API}${route}`, {
-    ...init,
-    headers,
-    body: init.body ? JSON.stringify(init.body) : undefined,
-  })
-  const json = await res.json().catch(() => null)
-  return { status: res.status, data: json?.data, error: json?.error }
-}
+// lib/fixture.mjs's one client, not a copy (`suite-hygiene/apiAs-duplicated-62`).
+// It throws when nothing answers, as the copy did, so a dead API stops the run
+// rather than answering a status of 0 that a check could take for success.
+const apiAs = apiAsAt(API, { noAnswer: 'throw' })
 
 const done = async (browser, stack, restore) => {
   // The timezone, priorities and time off are the admin's, and so every later

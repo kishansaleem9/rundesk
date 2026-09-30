@@ -43,6 +43,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil } from './lib/wait.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -72,18 +73,12 @@ const chk = (cond, good, bad) => {
   else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad && bad !== good ? ` \u2014 ${bad}` : ''}`) }
 }
 
-/* `apiClient` never throws — it resolves `{status, data, error}`, so a
- * `.catch()` on it is inert. Every call is judged on `status` AND on what the
- * body actually said. */
-const apiAs = (token) => async (route, init = {}) => {
-  const headers = token ? { authorization: `Bearer ${token}` } : {}
-  if (init.body) headers['content-type'] = 'application/json'
-  const res = await fetch(`${API}${route}`, {
-    ...init, headers, body: init.body ? JSON.stringify(init.body) : undefined,
-  })
-  const json = await res.json().catch(() => null)
-  return { status: res.status, data: json?.data, error: json?.error, message: json?.message ?? json?.error?.message }
-}
+/* `apiAs` never throws on a status — it resolves `{status, data, error,
+ * message}`, so a `.catch()` on it is inert. Every call is judged on `status`
+ * AND on what the body actually said. It is lib/fixture.mjs's one client, not a
+ * copy (`suite-hygiene/apiAs-duplicated-62`): its `message` is this copy's field,
+ * made one string, and like the copy it throws only when nothing answers at all. */
+const apiAs = apiAsAt(API, { noAnswer: 'throw' })
 
 /** Everything the server said, flattened, so a message can be looked for in it. */
 const said = (r) => JSON.stringify({ e: r.error, m: r.message, d: r.data } ?? {}).toLowerCase()

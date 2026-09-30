@@ -6,7 +6,8 @@
  * gate there: every cited id an item; a misnamed id (the `080102d` miss); a
  * citation wrapped at a hyphen over two comment lines, joined whether it then
  * names an item or not; a path that looks like a section (`test/harness/…`);
- * a citation in a skipped directory; an empty ledger; a tree citing nothing.
+ * a citation in a skipped directory; an id with capitals in it, read whole
+ * whether the ledger has it or not; an empty ledger; a tree citing nothing.
  * `--mutate` breaks the gate one rule at a time.
  *
  *   node scripts/check-ledger-ids-cases.mjs [--mutate]
@@ -86,6 +87,14 @@ console.log('\n▶ what the gate lets be')
   const r = plant(tree({ 'apps/web/node_modules/pkg/index.js': '// found-25-sep/not-ours\n', 'apps/web/dist/a.js': '// found-25-sep/built-copy\n' }))
   chk(r.code === 0, 'node_modules and dist are not read', `it exited ${r.code}: ${r.out.trim()}`)
 }
+{
+  // The ledger's own ids carry capitals (`suite-hygiene/apiAs-duplicated-62`).
+  const r = plant(tree({
+    'docs/open-work.md': `${LEDGER}### \`suite-hygiene/apiAs-duplicated-62\` — open, medium\n`,
+    'test/e2e/x.mjs': "// lib/fixture.mjs's one client (`suite-hygiene/apiAs-duplicated-62`)\n",
+  }))
+  chk(r.code === 0 && /ok — 3 ledger id\(s\) cited, each an item of the ledger \(4 headings\)/.test(r.out), 'an id with capitals in it is read whole, and names its item', `it exited ${r.code}: ${r.out.trim()}`)
+}
 
 console.log('\n▶ what the gate must find')
 {
@@ -95,6 +104,10 @@ console.log('\n▶ what the gate must find')
 {
   const r = plant(tree({ 'scripts/s3-stub.mjs': WRAPPED('newest-200') }))
   chk(r.code === 1 && /found-23-sep\/clip-library-lists-the-newest-200 is no item/.test(r.out), 'a wrapped citation is joined before it is read, so a wrong tail is caught too', `it exited ${r.code}: ${r.out.trim()}`)
+}
+{
+  const r = plant(tree({ 'test/e2e/y.mjs': '// (`suite-hygiene/apiAs-duplicated-61`)\n' }))
+  chk(r.code === 1 && /suite-hygiene\/apiAs-duplicated-61 is no item/.test(r.out), 'and one the ledger lacks is named whole, not cut at its first capital', `it exited ${r.code}: ${r.out.trim()}`)
 }
 {
   const r = plant(tree({ '.github/workflows/ci.yml': '      # harness/wt-break-tripple-vite-build\n' }))
@@ -127,6 +140,7 @@ if (process.argv.includes('--mutate') && !process.env.GATE_UNDER_TEST) {
       ['unknown-passes', 'const unknown = [...cited].filter(([id]) => !headings.has(id))', 'const unknown = []'],
       ['no-join', "        if (rest) id += rest[0]\n", '\n'],
       ['paths-count', 'const CITED = new RegExp(`(?<![A-Za-z0-9_./-])(', 'const CITED = new RegExp(`(?<![A-Za-z0-9_])('],
+      ['lower-case-slugs', "/[A-Za-z0-9][A-Za-z0-9-]*)`, 'g')", "/[a-z0-9][a-z0-9-]*)`, 'g')"],
       ['skips-nothing', "const SKIP_DIRS = new Set(['node_modules', 'dist', '.turbo', 'coverage', 'build', '.git'])", 'const SKIP_DIRS = new Set()'],
       ['no-ci', "'deploy', 'packages', '.github']", "'deploy', 'packages']"],
       ['empty-ledger-passes', 'if (headings.size === 0) problems.push(', 'if (false) problems.push('],

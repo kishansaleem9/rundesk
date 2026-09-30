@@ -1,0 +1,25 @@
+-- The Template Center's Tags facet (`ledger-rows/row-1874`).
+--
+-- Frame `12:14` draws the Template Center's top row as a search box and three
+-- facet buttons, Use Cases · Tags · Created by. Use Cases was built; Created
+-- by needs no column (`created_by_id` was written on every save and read by
+-- nothing); Tags had nowhere to live. ClickUp (help centre, "Organize
+-- templates with tags" and "Find a template"): "Use color-coded tags to
+-- quickly organize your templates", a template is saved with "a template name,
+-- description, tags", its tags can be changed "in the Template Center at any
+-- time", and "click Tags to filter by tags".
+--
+-- A text[] on the row, after `chat_message_saves.tags` (0062) and
+-- `meetings.tags` (0127): a few free words per template, read to filter and to
+-- count. Task labels are the other pattern here and are not reused — a shared
+-- vocabulary with colours and an admin surface is a heavier promise than the
+-- facet makes.
+--
+-- NOT NULL DEFAULT '{}', so every template already saved, and every built-in,
+-- reads as carrying no tags rather than as unknown, and the facet's `unnest`
+-- needs no null case. No index: the facet counts and the filter both narrow
+-- by workspace first (`ix_project_templates_ws_scope`), over a few dozen rows,
+-- and the filter compares `lower()` of each element, which a GIN index on the
+-- array cannot serve.
+ALTER TABLE "project_templates"
+  ADD COLUMN IF NOT EXISTS "tags" text[] NOT NULL DEFAULT '{}';

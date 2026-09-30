@@ -41,6 +41,7 @@
  */
 import { signInApi, signUpApi } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -75,19 +76,13 @@ const chk = (cond, good, bad) => {
 const chain = makeChain(chk)
 
 /*
- * NEVER THROWS — it returns `{status, data, error}`. So every call site below
- * reads `status` explicitly; a `.catch(() => {})` on one of these would be
- * inert and a failed request would read as a success.
+ * NEVER THROWS on a status — it returns `{status, data, error}`. So every call
+ * site below reads `status` explicitly; a `.catch(() => {})` on one of these
+ * would be inert and a failed request would read as a success. It is
+ * lib/fixture.mjs's one client, not a copy (`suite-hygiene/apiAs-duplicated-62`),
+ * and like the copy it throws only when nothing answers at all.
  */
-const apiAs = (token) => async (route, init = {}) => {
-  const headers = token ? { authorization: `Bearer ${token}` } : {}
-  if (init.body) headers['content-type'] = 'application/json'
-  const res = await fetch(`${API}${route}`, {
-    ...init, headers, body: init.body ? JSON.stringify(init.body) : undefined,
-  })
-  const json = await res.json().catch(() => null)
-  return { status: res.status, data: json?.data, error: json?.error }
-}
+const apiAs = apiAsAt(API, { noAnswer: 'throw' })
 
 const messageOf = (error) =>
   typeof error === 'string' ? error : (error?.message ?? JSON.stringify(error ?? null))

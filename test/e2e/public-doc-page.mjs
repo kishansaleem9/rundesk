@@ -29,6 +29,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -54,17 +55,10 @@ const chk = (cond, good, bad) => {
   else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad && bad !== good ? ` — ${bad}` : ''}`) }
 }
 
-/* NEVER THROWS — `{status, data, error}`. Every call site reads `status`. */
-const apiAs = (token) => async (route, init = {}) => {
-  const headers = token ? { authorization: `Bearer ${token}` } : {}
-  if (init.body) headers['content-type'] = 'application/json'
-  const res = await fetch(`${API}${route}`, {
-    ...init, headers, body: init.body ? JSON.stringify(init.body) : undefined,
-  }).catch(() => null)
-  if (!res) return { status: 0, data: null, error: { message: 'no answer from the API' } }
-  const json = await res.json().catch(() => null)
-  return { status: res.status, data: json?.data, error: json?.error }
-}
+/* NEVER THROWS — `{status, data, error}`. Every call site reads `status`.
+ * lib/fixture.mjs's one client, not a copy (`suite-hygiene/apiAs-duplicated-62`);
+ * like the copy, it answers status 0 when nothing answers. */
+const apiAs = apiAsAt(API)
 const said = (res) => `${res.status} ${JSON.stringify(res.error ?? res.data ?? null).slice(0, 160)}`
 /** What the public route answers a visitor with no account, for a slug. */
 const anonymous = apiAs(null)
@@ -136,6 +130,7 @@ try {
   const auth = await signInApi(API, ME.email, ME.password)
   A = apiAs(auth.accessToken)
   sql = await openDb()
+  if (!sql) throw new Error('no DATABASE_URL — this suite dates its doc in the past, to tell the doc’s time from the visitor’s now')
 
   /* A WORKSPACE OF ITS OWN, so no other suite's docs or sharing change under it. */
   const madeWs = await A('/workspaces', { method: 'POST', body: { name: `Public doc page ${TAG}` } })
@@ -151,7 +146,14 @@ try {
   const shared = await A(`/docs/${D}/share`, { method: 'POST' })
   const SLUG = shared.data?.publicShareId
   if (shared.status >= 300 || !SLUG) throw new Error(`could not share the doc: ${said(shared)}`)
-  /* When the doc last changed, as the server holds it: making the link is a change too. */
+  /*
+   * DATED IN THE PAST, so the time the page draws cannot be the visitor's own
+   * clock by chance: the doc was written a moment ago, and a page that draws
+   * "now" drew the same second (pdp-3 went unreddened that way). The column
+   * is written directly; no route sets a doc's time.
+   */
+  await sql`update docs set updated_at = ${new Date('2026-03-14T09:26:53.000Z')} where id = ${D}`
+  /* When the doc last changed, as the server holds it. */
   const readBack = await A(`/docs/${D}`)
   const UPDATED_AT = readBack.data?.updatedAt ?? null
   if (!UPDATED_AT) throw new Error(`could not read the doc back: ${said(readBack)}`)
@@ -214,13 +216,6 @@ try {
     `drawn: ticked ${JSON.stringify(drawn.ticked)}, cells ${JSON.stringify(drawn.cells)}, callouts ${JSON.stringify(drawn.callouts)}, embeds ${JSON.stringify(drawn.embeds)}`,
   )
 
-  page.off('response', onResponse)
-  chk(
-    refused.length === 0,
-    'opening the link asks the API for nothing it refuses a visitor',
-    `refused: ${JSON.stringify(refused)}`,
-  )
-
   /* A visitor types into the paragraph and clicks the ticked to-do. */
   await page.getByText(PARAGRAPH).click({ timeout: 3000 }).catch(() => {})
   await page.keyboard.type(' typed by a visitor')
@@ -234,6 +229,19 @@ try {
       afterTyping.ticked.includes(TODO),
     'the page is read-only: typing changes nothing and the ticked to-do stays ticked',
     `the editor’s contenteditable is ${JSON.stringify(afterTyping.editable)}; paragraphs ${JSON.stringify(afterTyping.paragraphs)}; ticked ${JSON.stringify(afterTyping.ticked)}`,
+  )
+
+  /*
+   * READ LAST IN THE SECTION, once the network has gone quiet: a block drawn
+   * by a view of its own asks the API after the doc is drawn, and under load
+   * that answer came back after an earlier read (pdp-13 went unproven so).
+   */
+  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {})
+  page.off('response', onResponse)
+  chk(
+    refused.length === 0,
+    'opening the link asks the API for nothing it refuses a visitor',
+    `refused: ${JSON.stringify(refused)}`,
   )
 
   console.log('\n— links that do not open, and one that failed')

@@ -32,6 +32,7 @@ import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
 import { storeBase, storeRequests } from './lib/store.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -61,17 +62,10 @@ const chk = (cond, good, bad) => {
   else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad && bad !== good ? ` — ${bad}` : ''}`) }
 }
 
-/* NEVER THROWS — `{status, data, error}`. Every call site reads `status`. */
-const apiAs = (token) => async (route, init = {}) => {
-  const headers = token ? { authorization: `Bearer ${token}` } : {}
-  if (init.body) headers['content-type'] = 'application/json'
-  const res = await fetch(`${API}${route}`, {
-    ...init, headers, body: init.body ? JSON.stringify(init.body) : undefined,
-  }).catch(() => null)
-  if (!res) return { status: 0, data: null, error: { message: 'no answer from the API' } }
-  const json = await res.json().catch(() => null)
-  return { status: res.status, data: json?.data, error: json?.error }
-}
+/* NEVER THROWS — `{status, data, error}`. Every call site reads `status`.
+ * lib/fixture.mjs's one client, not a copy (`suite-hygiene/apiAs-duplicated-62`);
+ * like the copy, it answers status 0 when nothing answers. */
+const apiAs = apiAsAt(API)
 const said = (res) => `${res.status} ${JSON.stringify(res.error ?? res.data ?? null).slice(0, 160)}`
 /** The bytes a URL serves and its status; status 0 when nothing answered. */
 const fetchBytes = async (url) => {

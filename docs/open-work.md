@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 361 items, 41 open, 8 partly fixed, 312 closed, counted from this file's headings on 30 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 371 items, 48 open, 8 partly fixed, 315 closed, counted from this file's headings on 30 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1616,6 +1616,86 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - The next preflight caught the cause. The run printed "(it said: at ChildProcess._handle.onexit …)": the mutant's stub had exited on EADDRINUSE. The gates drew their ports from their pid, `9300 + pid % 400` and `9500 + pid % 300`. Those ranges overlap each other, and stubs left by ended mutant runs were still listening in them (`found-29-sep/killed-mutants-outlive-their-run`). Both gates now take a port the OS chose (`scripts/lib/free-port.mjs`).
 - `STUB_GATE_MUTANT_TIMEOUT_MS` sets the limit for a slower machine.
 - After: the two gates together, 22 of 22 and 11 of 11, at load ~10.
+
+### `found-30-sep/status-zero-passes-status-only-checks` — open (test tooling, medium; found closing `suite-hygiene/apiAs-duplicated-62`)
+
+**When nothing answers, the one client answers status 0, and 137 conditions in 57 suites compare the status with no lower bound**
+
+*Evidence, 30 September (the agent's count):* the 105 suites whose copies answered 0 when nothing answered keep that answer, now the one client's default. Their checks compare a status below 300 or 400 with no lower bound 137 times. Most are ANDed with a read-back that a dead API would also fail. But a check that rests on the status alone passes with nothing answering: `dependency-read-access:111` and `related-task-access:95` would say "the member could open the hidden blocker" about a dead API. The 80 suites bound with `noAnswer: 'throw'` hold 165 more such comparisons, which the option keeps harmless.
+
+*To close:* read `ok` (or `must`) in those 137 conditions, or bind those suites with `noAnswer: 'throw'`. Add a gate that refuses a status compared with `<` and no lower bound, with a planted case and a mutation.
+
+### `found-30-sep/template-save-dialog-says-admin-only` — open (visible bug, small; found closing `ledger-rows/row-1874`)
+
+**The Template Center's save dialog says "(admin only)", in all four locales, though the route asks `template.manage`**
+
+*Evidence, 30 September:* `templates.saveDescription` still reads "(admin only)". The save route has asked `template.manage` since `found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`, so a member granted the key may save, and the dialog tells them they may not.
+
+*To close:* drop the parenthesis in the four locales, or say who may save by the key, and check the dialog's words for a member who holds it.
+
+### `found-30-sep/template-tags-spelled-by-collation` — open (visible bug, small; found closing `ledger-rows/row-1874`)
+
+**The Tags menu shows each word in whichever spelling the database's collation sorts first**
+
+*Evidence, 30 September:* the facet shows one spelling per word, `min(t)`. "Q3" sorts first under C.UTF-8 (the lanes) and "q3" under en_US. The filter matches any case, so only the label changes, and `template-center` compares lower-cased.
+
+*To close:* choose the spelling by a rule (the most used, then the newest), not by collation, and check a word saved as "Q3" and "q3" shows the same label on both collations.
+
+### `found-30-sep/no-save-list-or-folder-as-template` — open (feature, medium; found closing `ledger-rows/row-1874`)
+
+**A Folder or a List cannot be saved as a template from the sidebar**
+
+*Evidence, 30 September:* ClickUp saves a Folder or a List as a template from the sidebar (⋯ › Templates › Save as Template, with tags). Rundesk's only save dialog is the Template Center's "Save project as template". It never sends `targetType: 'list'`, though the API makes a list template of a one-list project when asked, so a list template can only be made through the API.
+
+*To close:* research ClickUp's sidebar save, then offer Save as Template on a folder's and a list's menu, with tags, and check that each makes a template of the right kind.
+
+### `found-30-sep/killed-suites-leave-members-behind` — open (test tooling, small; found closing `ledger-rows/row-1874`)
+
+**A suite killed mid-run leaves the people it joined to the shared workspace**
+
+*Evidence, 30 September:* `template-center` joins two people to the shared workspace for a run. A run killed with SIGKILL leaves them as members, as it already left its templates, since the `finally` cannot run. The break runner kills runs that overrun, so this happens.
+
+*To close:* tag the people a suite makes (as its templates are tagged) and sweep tagged leftovers at the start of the next run, and check that a killed run's people are gone after the next one.
+
+### `found-30-sep/legacy-break-patches-directory` — open (test tooling, small; found closing `ledger-rows/row-1874`)
+
+**`test/e2e/break-patches/` holds old copies of patches that no gate reads, some of which no longer apply**
+
+*Evidence, 30 September:* `test/e2e/break-patches/template-center-10-clear-forgets-an-axis.py` (20 September) and `space-create-menu-5-twolists.py` no longer apply. `check-break-patches.py` reads `test/e2e/breaks/`, so nothing notices.
+
+*To close:* measure what in that directory is not also in `test/e2e/breaks/`, move anything still meant to be run, and delete the rest, with the README saying where patches live.
+
+### `found-30-sep/templates-null-array-field-values` — open (visible bug, small; found closing `ledger-rows/row-1060`)
+
+**A task template stores a list- or people-valued custom field as `null` on every write**
+
+*Evidence, 30 September, measured on lane 3 by the agent that built row-1060:* `TaskTemplatesService.normalisePayload` keeps a `customFieldValues[].value` only if it is a string, number or boolean, and turns anything else into `null`. But the schema widened `value` to `string[]` (`packages/db/src/schema/task-templates.ts:73-77`) precisely so that a template would not silently drop a task's people field. It runs on create, on save-from-task and on every PATCH that carries a payload. A template created with `[{fieldName:'People', value:['u1','u2']},{fieldName:'Budget', value:5}]` is stored as `People: null, Budget: 5`. So Update existing template keeps scalar custom-field values and cannot keep an array one, and its panel promises only checklists and subtasks.
+
+*To close:* keep an array of strings in `normalisePayload`, with a unit test each way and a patch that reddens it. Then the Update panel may promise custom fields too.
+
+### `found-30-sep/template-submit-ignores-the-form` — open (visible bug, small; found closing `ledger-rows/row-1060`)
+
+**With a template chosen, Create task ignores everything else typed in the form, and nothing says so**
+
+*Evidence, 30 September:* the submit sends `{ listId, titleOverride }` to instantiate. Priority, description, dates, estimate, tags, task type and assignees typed into the same form are not applied, although the route already accepts `assigneeIds`. `docs/clickup-research.md` §9 records this as a defect and proposes letting the fields the person touched win over the template. It was kept as it is by row-1060's brief.
+
+*To close:* research how ClickUp applies a template to a form that already holds values, then apply what was typed (or say, before Create, which fields the template will replace), and check it with a suite.
+
+### `found-30-sep/menus-drop-a-press-while-closing` — open (visible bug, small; found closing `ledger-rows/row-1060`)
+
+**A dropdown pressed while the last one is still closing opens and shuts again at once**
+
+*Evidence, 30 September, measured on lane 3 by the agent:* a closed `DropdownMenu` stays mounted through its exit animation. A press on the trigger in that window opens the new menu, and 3 ms later the leaving layer takes it as a press outside and closes it. In a scratch loop under load: 2 of 6 rounds, with the old menu still mounted 355 ms after closing; 0 of 10 once the loop waited for it to go. Measured on the create modal's Templates menu only. It comes from the shared `@rundesk/ui` dropdown's exit animation, so other menus on it presumably share it. `create-modal-templates` waits for the old menu to leave before pressing.
+
+*To close:* measure it on two other menus, then make a closing layer ignore presses on a trigger (or drop the exit animation's outside-press handling), and check that a press during the exit opens the menu and it stays open.
+
+### `found-30-sep/save-as-template-asks-no-description` — open (feature, small; found closing `ledger-rows/row-1060`)
+
+**Save as template in the create modal takes no description, and Update's picker has no search**
+
+*Evidence, 30 September:* ClickUp's save offers an optional description, which the API accepts as `description`, and its update picker is searched. The frame shows neither, and the brief asked for the name only.
+
+*To close:* add the optional description and a search over the templates, as ClickUp does, and check both.
 
 ### `found-30-sep/public-doc-page-reads-the-envelope` — **closed** (visible bug, small; found closing `resume-defects/resume-7`)
 
@@ -4997,13 +5077,39 @@ kept its suite's count and failed its later checks with the reason; with the sam
 forcing, the original chat-message-actions and panel-collapse ran 66 of 73 and 54
 of 57 and passed two checks about things that never happened.
 
-### `suite-hygiene/apiAs-duplicated-62` — open, medium
+### `suite-hygiene/apiAs-duplicated-62` — **closed**, medium
 
 **62 suites hand-roll an API client in 5 variants beside lib/fixture.mjs apiClient**
 
 *Evidence:* `^const apiAs = ` appears in 62 suites. Hashing the whole function bodies gives 5 variants: 54 copies (activity-rail…), 5 copies (addressability-live…) that always send `authorization: Bearer ${token}`, so an anonymous call sends 'Bearer null'; 1 in task-ai-bar that adds a `message` field; 1 GET-only in malformed-ids; and 1 multi-line in chat-message-actions. lib/fixture.mjs:28-46 apiClient differs again: it parses text and keeps `raw`. syncup-live has a third shape, api(token, method, path, body). The ledger extracted chain.mjs (docs/video2-reaudit.md:4076-4078) for two copies and claim-match.mjs (4071-4075) for two.
 
 *To close:* Export apiAs(base)(token) from lib/fixture.mjs with the null-token rule and the message field, move suites onto it, and have the one copy expose `ok` and a `must(res, what)` helper, which would also remove most of finding unguarded-derefs.
+
+*Closed, 30 September.* By then it was 172 suites, not 62, because the suites added since had copied the copy. With comments and spacing set aside, the 172 were 21 variants. Thirteen more suites had the same client under another name: ten `call`s, an `A`, an `asMember`, file-exports' `api`, and syncup-live's `api(token, method, path, body)`. They differed where a caller does not look:
+- 87 sent `Bearer null` for a null token;
+- 67 rejected when nothing answered, and 105 answered 0;
+- some parsed the body as text and kept it, one kept the whole body as `data`, and four sent `{}` on a write with no body.
+
+`lib/fixture.mjs` now exports the one client, `apiAs(base)(token)`:
+- it answers `{ status, ok, data, error, message, text, type }` for every status;
+- it sends no Authorization header for a null token;
+- it carries `task-ai-bar`'s `message` as one string.
+
+Beside it, `must(res, what)` hands back `data` on a 2xx and otherwise throws "could not make the workspace: answered 403 …". `apiClient` is the same client and still rejects when nothing answers. `ensureShared` uses `must`.
+
+Each suite binds the client where its copy stood (`const apiAs = apiAsAt(API)`), so no call site moved. Where a suite's checks stood on its copy's behaviour, that behaviour is an option at the binding, with its reason:
+- `noAnswer: 'throw'` for the 80 whose clients rejected. Those suites and `apiClient`'s callers compare `status < 300` alone 165 times, and a 0 would pass each.
+- `emptyBodyOn` for four, and `dataOrBody` for two.
+
+No check sentence and no `EXPECTED_CHECKS` changed. file-exports' one reader of the whole body reads `error` instead. `clip-links` and `public-doc-page`, added after the agent's tree, were moved the same way when it was merged.
+
+Checks:
+- `scripts/check-suite-api-clients.mjs --mutate`, in preflight and CI's verify job, refuses an `apiAs` a suite writes, and, by shape, any function that fetches a route its caller passes and hands back `data`. At `83108a9` it finds 358 sites in 185 suites: each copy by name and by shape, and the 14 helpers by shape, and nothing else. Now it finds none. 16/16 cases pass, and 16 of 16 mutations bite.
+- `check-ledger-ids` read this item's own id as `suite-hygiene/api`, which is no item, so it could not be cited. It reads capitals now, with a case each way and a mutation. The ledger's other mixed-case id had been cited without its section for the same reason, in `check-suite-text-reads.mjs` and in `ci.yml`'s comment on that gate. Both now cite `found-23-sep/checks-read-textContent-not-what-is-shown`, and the gate finds both.
+- An agent ran the 231 suites whose client changed, on lanes 1 and 2: the 186 edited, and 45 that reach the client through `apiClient`. 230 were at their `EXPECTED_CHECKS` with 0 failed. `assign-to-priorities` failed its colleague sections the same way with its own copy and with the main tree's file (15 of 25 at `83108a9`, 15 of 30 at `507ecfb`, on both lanes), because those lanes' web builds predated `ea3e28f`, which added what the sections read.
+- Merged here and run again on lane 5, on this tree: 17 suites covering each option, the two batch 136 also changed (`clip-created-card`, `object-key-boundaries`), the two moved here (`clip-links`, `public-doc-page`), `file-exports`, `task-ai-bar` and the agent's one red. All green, 294 checks; `assign-to-priorities` is 30/30 on a current build.
+
+Found while closing it: `found-30-sep/status-zero-passes-status-only-checks`.
 
 ### `suite-hygiene/ci-no-store-for-store-suites` — **closed** (unvalidated on a runner until CI runs again)
 
@@ -5808,7 +5914,7 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 - In CI (236).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-### `ledger-rows/row-1060` — open, medium
+### `ledger-rows/row-1060` — **closed**, medium
 
 **Create-modal Templates menu — 1 of 4 actions (Use Template only)**
 
@@ -5816,13 +5922,50 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Replace the select with the frame's four-item menu: Use Template, Create instantly (instantiate with no form), Save as template (POST / with a payload snapshotted from the form), Update existing (PATCH /:id with that payload).
 
-### `ledger-rows/row-1874` — open, medium
+*Closed, 30 September* (built by an agent on lane 3, merged and measured again here). Frame `00:52` draws the create modal's footer `Templates` opening four actions in two groups: Use Template and Create instantly from template, then Save as template and Update existing template. ClickUp's help centre ("Create a task", read through search excerpts) names the same four for its task creation modal: "create the task instantly from a template, load a task template, save the task as a template, or update an existing task template". Before, on lane 3 at `a268975`: the modal had the one select, and the new suite passed 0 of 15.
+
+- The select is a `Templates` button now, with the frame's two groups and the divider between. Each `›` is a submenu of the workspace's task templates, drawn over the modal. An Escape in any of them closes the menu, not the modal.
+- Use Template chooses the template the submit makes the task from, as the select did. The button names it, with an X that takes it back.
+- Create instantly makes the task at once through `POST …/instantiate`, in the modal's list, under the typed title if there is one. It ends as a create does: the modal closes and the toast names the task and its list, with View task.
+- Save as template and Update existing template ask for the name in the modal (the typed title, or the template's own, renamable) and say what is written and what is kept. They write the form's title, description, priority, estimate in seconds, start and due as days from today, and tags, through `POST /task-templates` and `PATCH /task-templates/:id`. An update leaves out what the form cannot say, so the service's merge keeps the template's checklists, subtasks and scalar custom-field values. Enter in the name box writes the template and does not submit the task.
+- It is offered as far as it can be done. With no templates, only Save. Without `template.manage`, which the API asks, no Save or Update. With neither, no button. Four locales.
+- The submit read `.id` off the instantiate route's `{ taskId, task }`. Measured through the old select: the watcher went to `/tasks/undefined/watchers` and the page landed on the list with no task open. It reads `taskId` now.
+
+Checks:
+- `create-modal-templates` is new, with 15 checks, registered in CI (246 in `postgres-harnesses`). Before, 0/15 on lane 3 (no menu). After, 15/15 on lane 3. Its early runs raced twice, both in the suite: it read a task as soon as the row existed, before the route had written the subtask (it now waits for the route's answer), and it pressed Templates while the last menu was still leaving (below).
+- `create-modal-templates-1..15` are new, each reddening the check it claims on lane 3: Create instantly only choosing, dropping the typed title, or reading the answer as a task; Save keeping only the title, asking in a prompt, not refreshing the list, or letting Enter make the task; Update wiping checklists; Save and Update offered to anybody; the choice ignored by the submit, or not shown; a submenu's Escape reaching the modal; submenus under the modal; everything offered with no templates; no divider.
+- The agent's regression on lane 3: the 21 suites that open the create modal, 21/21 (521 checks).
+- Merged here and run again: `create-modal-templates` 15/15 on lane 7, and on lane 5 nine of the suites that open the create modal, all green, 287 checks (create-menu-ai 24, attach-on-create 14, time-estimate 13, guest-create-menu 6, create-task-chevron 9, task-depth 92, custom-field-types 32, role-permissions-web 5, video1-fast-items 92). The suite's first run here stopped at its start: moved onto the one client, it bound the client before the address it calls was declared, which the copy it replaced never did. It binds it after now.
+- `docs/video2-reaudit.md` §5's row moves from P to B, closed by `create-modal-templates` 15/15: 156 built · 8 partial · 10 missing.
+
+Found while building it: `found-30-sep/templates-null-array-field-values`, `found-30-sep/template-submit-ignores-the-form`, `found-30-sep/menus-drop-a-press-while-closing` and `found-30-sep/save-as-template-asks-no-description`.
+
+### `ledger-rows/row-1874` — **closed**, medium
 
 **Template Center Tags and Created-by facets — absent; created_by_id is written and never read**
 
 *Evidence:* reaudit.md:1874-1896 (M). templates.ts:86 createdById, :103-104 relation. It is written at project-templates.service.ts:636, 675 and 812, and no other createdById reference exists in the module or in workspace-templates-page.tsx. There is no tags column.
 
 *To close:* Add a Created-by facet (count in SQL like the others) and a tags column or join table with a Tags facet.
+
+*Closed, 30 September* (built by an agent on lane 6, merged and measured again here). ClickUp's help centre ("Find a template", "Organize templates with tags", read through search excerpts): "click Tags to filter by tags, and click Created by to filter by creator"; a template is saved with "a template name, description, tags", and its tags can be changed "in the Template Center at any time", under the template name. The sources say nothing of limits. Before, on lane 6 at `edf71e0`: the top row had Use Cases only, `created_by_id` was written on every save and read by nothing, and there was no tags column.
+
+- The top row reads Use Cases · Tags · Created by. The two new menus are drawn and counted as Use Cases is.
+- Created by counts over `created_by_id` in SQL, named from `users`. Built-ins, which nobody made, are in no bucket. `createdBy=<userId>` narrows, and a malformed id matches nobody.
+- Tags are `project_templates.tags`, `text[] NOT NULL DEFAULT '{}'`, migration 0169. They are trimmed and kept once per word whatever the case. Past 40 characters or 20 tags (the meeting tags' limits) they are refused in words, not cut. They are set in the Save dialog and changed from a card's tag icon (`PATCH …/project-templates/:id/tags`, which asks `template.manage`; a built-in is refused). They are counted with `unnest`, grouped by `lower()`, and `tag=<word>` narrows, in any case.
+- In passing, a malformed template id answers 404, not 500, on get, delete, apply and the tags route.
+- Four locales.
+- Where ClickUp goes further, recorded rather than built: its tags are coloured and can be renamed or deleted across templates, and a guest with edit rights may tag a template. Here a tag is a word on each template, and only `template.manage` tags.
+
+Checks:
+- `template-center` had 53 checks and has 79. Before, the final suite on the unchanged product: 53/79, all 26 new checks red. After, 79/79 on lane 6, and 79/79 here on lane 5.
+- `template-center-11..33` are new, 23 aimed at the suite, each reddening what it names against a 79/79 baseline on lane 6. `template-center-10` is re-aimed onto the Clear line, which now clears six axes.
+- `ptt-1..16` are unit claims, each reddening its test in `project-templates.service.test.ts` (16 tests, new). The API's unit tests: 1747/1747.
+- Migration 0169 is applied to every lane database and `rundesk_pristine`.
+- Merged here and run again on lanes 5 and 7, with 0169 applied: `template-center` 79/79 and the six other suites that save or browse templates, all green, 204 checks (like-literal 5, space-wizard 23, project-template-key 4, space-default-permission 36, sidebar-sections 25, space-create-menu 32).
+- `docs/video2-reaudit.md` §5's row moves from M to B, closed by `template-center` 79/79: 157 built · 8 partial · 9 missing.
+
+Found while building it: `found-30-sep/template-save-dialog-says-admin-only`, `found-30-sep/template-tags-spelled-by-collation`, `found-30-sep/no-save-list-or-folder-as-template`, `found-30-sep/killed-suites-leave-members-behind` and `found-30-sep/legacy-break-patches-directory`.
 
 ### `ledger-rows/row-1904` — open, medium
 

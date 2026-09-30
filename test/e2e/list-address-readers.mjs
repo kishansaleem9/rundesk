@@ -22,6 +22,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -50,15 +51,9 @@ const TAG = `lar${stamp}`
 const stack = await startLocalStack({ dist: path.resolve(REPO, argOf('--dist', 'apps/web/dist')), apiPort: API_PORT })
 const B = stack.base
 const API = `${B}/api/v1`
-/* NEVER THROWS — `{status, data, error}`. Every call site reads `status`. */
-const apiAs = (token) => async (route, init = {}) => {
-  const headers = { authorization: `Bearer ${token}` }
-  if (init.body) headers['content-type'] = 'application/json'
-  const res = await fetch(`${API}${route}`, { ...init, headers, body: init.body ? JSON.stringify(init.body) : undefined }).catch(() => null)
-  if (!res) return { status: 0, data: null, error: { message: 'no answer' } }
-  const json = await res.json().catch(() => null)
-  return { status: res.status, data: json?.data, error: json?.error }
-}
+/* NEVER THROWS — `{status, data, error}`. Every call site reads `status`.
+ * lib/fixture.mjs's one client, not a copy (`suite-hygiene/apiAs-duplicated-62`). */
+const apiAs = apiAsAt(API)
 const said = (res) => `${res.status} ${JSON.stringify(res.error?.message ?? null)}`
 
 let sql = null

@@ -83,6 +83,24 @@ export const projectTemplates = pgTable('project_templates', {
   complexity:   text('complexity').$type<TemplateComplexity>().notNull().default('beginner'),
   category:     text('category').$type<TemplateCategory>(),
   useCase:      text('use_case').$type<TemplateUseCase>(),
+  /**
+   * `ledger-rows/row-1874` — the frame's top-row **Tags** facet (migration
+   * 0169). ClickUp: "Use color-coded tags to quickly organize your templates",
+   * set when a template is saved and editable afterwards from the Template
+   * Center.
+   *
+   * Free words on the row, as `meetings.tags` and `chat_message_saves.tags`
+   * are, and not task labels: those are a shared vocabulary with colours and an
+   * admin surface. Cleaned once, by `normalizeTemplateTags` — trimmed, one per
+   * word whatever its case, and bounded — so the facet can count them in SQL
+   * with `unnest` and trust what it counts. Built-ins carry none.
+   */
+  tags:         text('tags').array().notNull().default([]),
+  /**
+   * Who saved it — the frame's top-row **Created by** facet reads this
+   * (`ledger-rows/row-1874`); it was written on every save and read by nothing.
+   * Null on the built-ins, which nobody in a workspace made.
+   */
   createdById:  uuid('created_by_id').references(() => users.id),
   createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:    timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

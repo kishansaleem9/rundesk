@@ -6,19 +6,26 @@ import {
   Button,
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
   Input,
   cn,
   toast,
 } from '@rundesk/ui'
-import { Layers, Upload, X, Bell, Paperclip, Search, Sparkles, Lock, ChevronDown } from 'lucide-react'
+import { Layers, Upload, X, Bell, Paperclip, Search, Sparkles, Lock, ChevronDown, Check, RefreshCw, Save } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { CreateSpaceWizard } from './create-space-wizard'
 import { colorForTagName } from './task-tags'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { useCreatable } from '../hooks/use-creatable'
-import { localDateTimeValue } from '../lib/local-date'
+import { usePermissions } from '../hooks/use-permissions'
+import { daysFromToday, localDateTimeValue } from '../lib/local-date'
 import { parseEstimate } from '../lib/estimate'
 import { CREATE_TYPES, createTypeOf, type CreateKind } from '../lib/create-types'
 
@@ -508,7 +515,174 @@ const CREATABLE_FIELD_TYPES: Array<{ value: string; labelKey: TranslationKey }> 
 
 /** §G15 frame #12 — what the create footer needs to know about. */
 type TaskTemplate = { id: string; name: string }
+/**
+ * What `POST …/task-templates/:id/instantiate` answers: the new task's id as
+ * `taskId`, beside the task. Not a task, so it has no `id` of its own.
+ */
+type InstantiatedTask = { taskId: string; task?: { title?: string } }
+/** Which of the Templates menu's two writes has its panel open, and on what. */
+type TemplatePanel = { kind: 'save' } | { kind: 'update'; template: TaskTemplate }
 type WorkspaceMember = { userId: string; displayName?: string | null; email?: string | null }
+
+/**
+ * `ledger-rows/row-1060`, frame `00:52` — the create footer's **Templates**,
+ * a menu of four in two groups: **Use Template** and **Create instantly from
+ * template**, a divider, then **Save as template** (a floppy) and **Update
+ * existing template** (a circular arrow). ClickUp's help centre names the same
+ * four for its task creation modal ("Create a task", from search excerpts):
+ * "create the task instantly from a template, load a task template, save the
+ * task as a template, or update an existing task template".
+ *
+ * This was one of the four, as a `<select>` that made the submit instantiate
+ * the template chosen. Choosing under Use Template still does exactly that, and
+ * the choice is on the button, with an X beside it to take it back.
+ *
+ * OFFERED AS FAR AS IT CAN BE DONE. With no templates there is nothing to use,
+ * make from or update, so only Save is left; Save and Update are
+ * `template.manage` (the API answers 403 without it,
+ * `task-templates.controller.ts`), so a person without it is never offered
+ * them; with neither, there is no button. Create instantly needs a list to
+ * make the task in, and says so until one is chosen.
+ */
+function TemplatesMenu({
+  templates,
+  chosenId,
+  mayManage,
+  instantBlocked,
+  onUse,
+  onClear,
+  onInstant,
+  onSave,
+  onUpdate,
+  onCloseAutoFocus,
+}: {
+  templates: TaskTemplate[]
+  chosenId: string
+  mayManage: boolean
+  /** Why Create instantly cannot run now: no list yet, or a create in flight. */
+  instantBlocked: 'list' | 'busy' | null
+  onUse: (id: string) => void
+  onClear: () => void
+  onInstant: (template: TaskTemplate) => void
+  onSave: () => void
+  onUpdate: (template: TaskTemplate) => void
+  onCloseAutoFocus: (e: Event) => void
+}) {
+  const { t } = useTranslation()
+  const chosen = templates.find((tpl) => tpl.id === chosenId)
+  const any = templates.length > 0
+  if (!any && !mayManage) return null
+  /*
+   * The submenus are portalled like the menu, so each sits above the modal's
+   * z-[10000] on its own, and each keeps its Escape: the modal closes on any
+   * Escape that reaches the document, and one spent closing a submenu must not
+   * throw away the half-filled task (the Create Task ▾ menu's rule, below).
+   */
+  const keepEscape = (e: KeyboardEvent) => e.stopPropagation()
+  const listOf = (prefix: string, pick: (template: TaskTemplate) => void, checked?: string) => (
+    <DropdownMenuPortal>
+      <DropdownMenuSubContent className="z-[10002] w-60" data-testid={`quick-create-tpl-list-${prefix}`} onEscapeKeyDown={keepEscape}>
+        {templates.map((tpl) => (
+          <DropdownMenuItem
+            key={tpl.id}
+            data-testid={`quick-create-tpl-${prefix}-${tpl.id}`}
+            onSelect={() => pick(tpl)}
+          >
+            {checked !== undefined && (
+              <Check className={cn('h-3.5 w-3.5 shrink-0', tpl.id === checked ? 'opacity-100' : 'opacity-0')} aria-hidden />
+            )}
+            <span className="truncate">{tpl.name}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuSubContent>
+    </DropdownMenuPortal>
+  )
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            data-testid="quick-create-templates"
+            className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+          >
+            <Layers className="h-3.5 w-3.5" />
+            <span className="max-w-[12rem] truncate">
+              {chosen ? t('quickCreate.templateChosen', { name: chosen.name }) : t('quickCreate.templates')}
+            </span>
+            <ChevronDown className="h-3 w-3" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="start"
+          className="z-[10001] w-64"
+          data-testid="quick-create-tpl-menu"
+          onEscapeKeyDown={keepEscape}
+          onCloseAutoFocus={onCloseAutoFocus}
+        >
+          {any && (
+            <DropdownMenuGroup>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger inset data-testid="quick-create-tpl-action-use">
+                  {t('quickCreate.templateUse')}
+                </DropdownMenuSubTrigger>
+                {listOf('use', (tpl) => onUse(tpl.id), chosenId)}
+              </DropdownMenuSub>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger
+                  inset
+                  data-testid="quick-create-tpl-action-instant"
+                  disabled={instantBlocked !== null}
+                  className="data-[disabled]:opacity-60"
+                >
+                  <span className="flex flex-col">
+                    <span>{t('quickCreate.templateInstant')}</span>
+                    {instantBlocked === 'list' && (
+                      <span className="text-[11px] text-muted-foreground" data-testid="quick-create-tpl-needs-list">
+                        {t('quickCreate.templateNeedsList')}
+                      </span>
+                    )}
+                  </span>
+                </DropdownMenuSubTrigger>
+                {listOf('instant', onInstant)}
+              </DropdownMenuSub>
+            </DropdownMenuGroup>
+          )}
+          {any && mayManage && <DropdownMenuSeparator data-testid="quick-create-tpl-divider" />}
+          {mayManage && (
+            <DropdownMenuGroup>
+              <DropdownMenuItem data-testid="quick-create-tpl-action-save" onSelect={onSave}>
+                <Save className="h-3.5 w-3.5" aria-hidden />
+                {t('quickCreate.templateSave')}
+              </DropdownMenuItem>
+              {any && (
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger className="gap-2" data-testid="quick-create-tpl-action-update">
+                    <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+                    {t('quickCreate.templateUpdate')}
+                  </DropdownMenuSubTrigger>
+                  {listOf('update', onUpdate)}
+                </DropdownMenuSub>
+              )}
+            </DropdownMenuGroup>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {chosen && (
+        <button
+          type="button"
+          data-testid="quick-create-templates-clear"
+          aria-label={t('quickCreate.templateClear', { name: chosen.name })}
+          title={t('quickCreate.templateClear', { name: chosen.name })}
+          onClick={onClear}
+          className="rounded p-0.5 text-muted-foreground hover:bg-surface-50 hover:text-foreground"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
+    </span>
+  )
+}
 
 /**
  * §V2-S01 frame `00:05` — the footer's **Create Task ▾**, a primary `Create
@@ -601,6 +775,17 @@ function TaskForm({
   const [progressDoneIs100, setProgressDoneIs100] = useState(true)
   // §G15 frame #12 — the three footer controls.
   const [templateId, setTemplateId] = useState('')
+  /*
+   * `ledger-rows/row-1060` — Save as template and Update existing template ask
+   * for the template's name here, in the modal, rather than in a browser
+   * prompt: `templatePanel` is which of the two is open, and on what.
+   */
+  const [templatePanel, setTemplatePanel] = useState<TemplatePanel | null>(null)
+  const [templateName, setTemplateName] = useState('')
+  const templateNameRef = useRef<HTMLInputElement>(null)
+  /* Set when a menu item opens the panel, so the closing menu hands the cursor
+   * to the name box rather than back to the Templates button. */
+  const focusTemplateName = useRef(false)
   const [watcherIds, setWatcherIds] = useState<string[]>([])
   /**
    * §V2-S02 frame `01:10` — the create modal's **Attachments** section, with
@@ -739,6 +924,8 @@ function TaskForm({
     queryFn: () => api<TaskTemplate[]>(`/workspaces/${workspaceId}/task-templates`),
     enabled: Boolean(workspaceId),
   }).data ?? []
+  // Saving and updating a template are `template.manage`, as the API has it.
+  const mayManageTemplates = usePermissions(workspaceId).can('template.manage') === true
   const members = useQuery({
     queryKey: ['workspace-members', workspaceId],
     queryFn: () => api<WorkspaceMember[]>(`/workspaces/${workspaceId}/members`),
@@ -913,6 +1100,22 @@ function TaskForm({
     onError: (e) => toast.error(e instanceof Error ? e.message : t('quickCreate.fieldFailed')),
   })
 
+  /*
+   * A task made from a template, in the chosen list, the typed title winning
+   * when there is one. The route answers `{ taskId, task }`: the submit read
+   * `.id` off that answer, so a task made from a template came back as
+   * `undefined` — measured on the old select, its watcher was posted to
+   * `/tasks/undefined/watchers` (and its files would have been), and the page
+   * went to the list with no task open, the router dropping `task: undefined`.
+   */
+  const instantiate = async (id: string, titleOverride: string): Promise<CreatedTask> => {
+    const made = await api<InstantiatedTask>(`/workspaces/${workspaceId}/task-templates/${id}/instantiate`, {
+      method: 'POST',
+      body: { listId, ...(titleOverride.trim() ? { titleOverride: titleOverride.trim() } : {}) },
+    })
+    return { id: made.taskId, title: made.task?.title }
+  }
+
   const create = useMutation({
     // `then` is the Create Task ▾ choice. It changes nothing about the task
     // made here, only what `onSuccess` does once it exists.
@@ -950,10 +1153,7 @@ function TaskForm({
        * title wins, rather than this form trying to reproduce it.
        */
       const task = templateId
-        ? await api<{ id: string }>(`/workspaces/${workspaceId}/task-templates/${templateId}/instantiate`, {
-            method: 'POST',
-            body: { listId, titleOverride: title },
-          })
+        ? await instantiate(templateId, title)
         : await api<{ id: string }>(`/tasks`, {
             method: 'POST',
             // Omit status → backend seeds the list's first/default status.
@@ -1047,6 +1247,87 @@ function TaskForm({
   })
 
   /*
+   * `ledger-rows/row-1060` — **Create instantly from template**: the task is
+   * made from the template the moment it is chosen, in the list this form has
+   * chosen, with the typed title if there is one. Nothing else in the form is
+   * read and nothing is submitted. It ends as a normal create does: the modal
+   * closes, and the toast names the task and its list with a way to open it.
+   */
+  const instant = useMutation({
+    mutationFn: (template: TaskTemplate) => instantiate(template.id, title),
+    onSuccess: (task) => {
+      qc.invalidateQueries({ queryKey: ['tasks', listId] })
+      createdThen(task, 'close')
+    },
+    // A refusal (the list not open to them, the template gone) in the
+    // server's words, and the form kept, as the submit's own create does.
+    onError: (e) =>
+      toast.error(e instanceof Error ? e.message : t('quickCreate.taskFailed')),
+  })
+
+  /*
+   * THE FORM, AS A TEMPLATE'S PAYLOAD (`TaskTemplatePayload`,
+   * `packages/db/src/schema/task-templates.ts`): what this form can say, and
+   * only that. The estimate goes through the parser the create uses, in
+   * seconds; the dates become days from today, which is how a template keeps a
+   * date; the tags go by name, which is how a template keeps a tag.
+   *
+   * Checklists, subtasks and custom-field values are left OUT, not sent empty.
+   * A new template starts without them; an updated one keeps its own, because
+   * the service merges the payload it is sent over the one it holds, key by
+   * key (`TaskTemplatesService.update`). Assignees, the task type, watchers and
+   * files are not part of a template at all.
+   */
+  const formAsTemplate = () => {
+    const estimate = parseEstimate(estimateHours)
+    return {
+      title: title.trim(),
+      description: description.trim() || null,
+      priority,
+      timeEstimate: estimate ? estimate.seconds : null,
+      startDateOffsetDays: daysFromToday(startDate),
+      dueDateOffsetDays: daysFromToday(dueDate),
+      labels: tagNames,
+    }
+  }
+
+  const openTemplatePanel = (panel: TemplatePanel, name: string) => {
+    focusTemplateName.current = true
+    setTemplatePanel(panel)
+    setTemplateName(name)
+  }
+  const closeTemplatePanel = () => {
+    setTemplatePanel(null)
+    setTemplateName('')
+  }
+
+  /*
+   * **Save as template** makes a new template of this form; **Update existing
+   * template** writes it over the one chosen. Neither makes a task, and the
+   * form keeps everything in it, so the task can still be made afterwards.
+   */
+  const saveTemplate = useMutation({
+    mutationFn: (panel: TemplatePanel) => {
+      const body = { name: templateName.trim(), payload: formAsTemplate() }
+      return panel.kind === 'save'
+        ? api<TaskTemplate>(`/workspaces/${workspaceId}/task-templates`, { method: 'POST', body })
+        : api<TaskTemplate>(`/workspaces/${workspaceId}/task-templates/${panel.template.id}`, { method: 'PATCH', body })
+    },
+    onSuccess: (saved, panel) => {
+      qc.invalidateQueries({ queryKey: ['task-templates', workspaceId] })
+      const name = saved?.name ?? templateName.trim()
+      toast.success(t(panel.kind === 'save' ? 'quickCreate.templateSaved' : 'quickCreate.templateUpdated', { name }))
+      closeTemplatePanel()
+    },
+    onError: (e, panel) =>
+      toast.error(
+        e instanceof Error
+          ? e.message
+          : t(panel.kind === 'save' ? 'quickCreate.templateSaveFailed' : 'quickCreate.templateUpdateFailed'),
+      ),
+  })
+
+  /*
    * Opening a task is going to its list's page with `?task=`, where the sheet
    * lives. Worked out when the task is made, because the toast's View can be
    * pressed after the form has moved on to another list. A list picked under
@@ -1079,6 +1360,7 @@ function TaskForm({
     setTagNames([])
     setTagDraft('')
     setTemplateId('')
+    closeTemplatePanel()
     setWatcherIds([])
     setAttachments([])
   }
@@ -1110,8 +1392,9 @@ function TaskForm({
     titleRef.current?.focus()
   }
 
-  // Both halves of Create Task ▾ ask this: a title, a list, nothing in flight.
-  const canCreate = Boolean(title.trim() && listId) && !create.isPending
+  // Both halves of Create Task ▾ ask this: a title, a list, nothing in flight
+  // (a Create instantly from template is a create too).
+  const canCreate = Boolean(title.trim() && listId) && !create.isPending && !instant.isPending
 
   return (
     <form
@@ -1641,22 +1924,23 @@ function TaskForm({
         already existed and had no entry point from here.
       */}
       <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-2">
-        {templates.length > 0 && (
-          <label className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <Layers className="h-3.5 w-3.5" />
-            <select
-              value={templateId}
-              onChange={(e) => setTemplateId(e.target.value)}
-              data-testid="quick-create-template"
-              className="h-7 rounded-md border border-border bg-card px-1.5 text-[11px]"
-            >
-              <option value="">{t('quickCreate.noTemplate')}</option>
-              {templates.map((tpl) => (
-                <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
-              ))}
-            </select>
-          </label>
-        )}
+        <TemplatesMenu
+          templates={templates}
+          chosenId={templateId}
+          mayManage={mayManageTemplates}
+          instantBlocked={!listId ? 'list' : create.isPending || instant.isPending ? 'busy' : null}
+          onUse={setTemplateId}
+          onClear={() => setTemplateId('')}
+          onInstant={(tpl) => instant.mutate(tpl)}
+          onSave={() => openTemplatePanel({ kind: 'save' }, title.trim())}
+          onUpdate={(tpl) => openTemplatePanel({ kind: 'update', template: tpl }, tpl.name)}
+          onCloseAutoFocus={(e) => {
+            if (!focusTemplateName.current) return
+            focusTemplateName.current = false
+            e.preventDefault()
+            templateNameRef.current?.focus()
+          }}
+        />
 
         <label
           className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground"
@@ -1706,6 +1990,61 @@ function TaskForm({
           </label>
         )}
       </div>
+
+      {/*
+        `ledger-rows/row-1060` — the name, asked for here. ClickUp's own "Save
+        as new Template" asks for a name, and its Update existing Template lets
+        the template be renamed on the way; what is written, and what is kept,
+        is said beside the button that writes it, because an update "cannot be
+        reverted to its previous state" (help centre, "Use task templates").
+      */}
+      {templatePanel && (
+        <div
+          data-testid="quick-create-tpl-panel"
+          data-action={templatePanel.kind}
+          className="space-y-1.5 rounded-md border border-dashed border-border/70 px-2 py-1.5"
+        >
+          <div className="text-[11px] font-medium" data-testid="quick-create-tpl-heading">
+            {templatePanel.kind === 'save'
+              ? t('quickCreate.templateSave')
+              : t('quickCreate.templateUpdateHeading', { name: templatePanel.template.name })}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={templateNameRef}
+              value={templateName}
+              onChange={(e) => setTemplateName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return
+                // Enter writes the template. It must not also submit the form,
+                // which would make the task.
+                e.preventDefault()
+                if (templateName.trim() && !saveTemplate.isPending) saveTemplate.mutate(templatePanel)
+              }}
+              data-testid="quick-create-tpl-name"
+              aria-label={t('quickCreate.templateNamePlaceholder')}
+              placeholder={t('quickCreate.templateNamePlaceholder')}
+              className="h-7 w-52 rounded-md border border-border bg-card px-1.5 text-[11px]"
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              data-testid="quick-create-tpl-confirm"
+              disabled={!templateName.trim() || saveTemplate.isPending}
+              onClick={() => saveTemplate.mutate(templatePanel)}
+            >
+              {templatePanel.kind === 'save' ? t('quickCreate.templateSaveConfirm') : t('quickCreate.templateUpdateConfirm')}
+            </Button>
+            <Button type="button" size="sm" variant="ghost" data-testid="quick-create-tpl-cancel" onClick={closeTemplatePanel}>
+              {t('common.cancel')}
+            </Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground" data-testid="quick-create-tpl-hint">
+            {templatePanel.kind === 'save' ? t('quickCreate.templateSaveHint') : t('quickCreate.templateUpdateHint')}
+          </p>
+        </div>
+      )}
 
       {/*
         Frame `01:10` — the **Attachments** section. It only exists once there

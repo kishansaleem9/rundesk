@@ -64,6 +64,7 @@ step "and rule six's reader holds up"    node scripts/check-suite-reads.mjs --mu
 step "and every ender rule bites"        node scripts/check-suite-enders.mjs --mutate
 step "a check of shown text reads what is drawn" node scripts/check-suite-text-reads.mjs --mutate
 step "no silent catch on an API client" node scripts/check-suite-api-catches.mjs --mutate
+step "and no suite hand-rolls one"      node scripts/check-suite-api-clients.mjs --mutate
 step "no new process.exit in a suite"   node scripts/check-suite-process-exit.mjs --mutate
 step "a refusal-standing suite declares it" node scripts/check-suite-lane-need.mjs --mutate
 step "the S3 stub is faithful to the SDK" node scripts/check-s3-stub.mjs --mutate

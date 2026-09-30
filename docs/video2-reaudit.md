@@ -915,7 +915,7 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 
 ## 4. Counts
 
-**174 rows: 155 built · 9 partial · 10 missing.**
+**174 rows: 157 built · 8 partial · 9 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -952,8 +952,8 @@ rather than believed:
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
 | §2, the sections table | 121 | 7 | 5 | 133 |
-| §5, recovered from the frame observations | 34 | 2 | 5 | 41 |
-| **consolidated** | **155** | **9** | **10** | **174** |
+| §5, recovered from the frame observations | 36 | 1 | 4 | 41 |
+| **consolidated** | **157** | **8** | **9** | **174** |
 
 FOUR ROWS MOVED FROM `P` TO `B` AND THE TOTAL DID NOT CHANGE, which is the
 only shape of movement this table should ever show for a build — and the fourth
@@ -1085,17 +1085,19 @@ said so. §4's table credits §5 with **31 · 4 · 6**; the line above says
 survived several readings — which is precisely how the 173-that-was-two-numbers
 got as far as it did, recorded at the top of §4.
 
-They are the same forty-one rows at two moments. Nineteen have closed since
-this section was written — sixteen that were missing and three that were
-partial — and nineteen is the whole difference. (Seventeen until 29 September,
-when the project-status breakdown and the busy state were read against the tree
-and found built and measured.)
+They are the same forty-one rows at two moments. Twenty-one have closed
+since this section was written — seventeen that were missing and four that
+were partial — and twenty-one is the whole difference. (Seventeen until 29
+September, when the project-status breakdown and the busy state were read
+against the tree and found built and measured; nineteen until 30 September,
+when the create modal's Templates menu was built, and twenty until the
+Template Center's Tags and Created-by facets were.)
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
 | as recovered (this section, and the three appendices below) | 15 | 5 | 21 | 41 |
-| closed since, each named on its own row by the suite that proves it | +19 | −3 | −16 | 0 |
-| **live (what §4 credits §5 with)** | **34** | **2** | **5** | **41** |
+| closed since, each named on its own row by the suite that proves it | +21 | −4 | −17 | 0 |
+| **live (what §4 credits §5 with)** | **36** | **1** | **4** | **41** |
 
 Both numbers are kept rather than one being overwritten, because the
 as-recovered split is what the three appendices below add up to, and a section
@@ -1151,7 +1153,8 @@ Frames extracted and looked at for this pass: `00:05`, `00:50`, `00:52`,
   accepts a `payload`, and nothing in `apps/web/src` ever snapshots a task into
   an existing template; the only web caller of that PATCH is the rename/describe
   dialog (`task-templates-section.tsx:227-232`).
-- status: P
+- status: B
+- closed by: create-modal-templates 15/15
 - defect class: none
 - why not already a row: the ledger's `B | + Create new field on the create
   modal; 17 field types` and `B | Create-modal tab strip; …` cover the modal's
@@ -1960,7 +1963,8 @@ file never transcribed (`Card size`, `Card cover`).
   declares the `createdBy` relation to `users`; `grep -n "createdBy"` over the
   page returns nothing, and no query reads it back. **Tags are absent entirely**
   — no column, no join table, no UI.
-- status: M
+- status: B
+- closed by: template-center 79/79
 - defect class: its mirror, for the Created-by half — `project_templates.created_by_id`
   is written on every save (`project-templates.service.ts:635`, `:674`, `:803`)
   and read by no surface.

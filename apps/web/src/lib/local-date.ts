@@ -23,3 +23,18 @@ export const localDayKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() +
 
 /** A local wall-clock time as a `datetime-local` box holds it: `YYYY-MM-DDTHH:mm`. */
 export const localDateTimeValue = (d: Date) => `${localDayKey(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+
+/**
+ * A `datetime-local` value as whole days from today, both on the reader's
+ * clock: how a task template keeps a date (`startDateOffsetDays`,
+ * `dueDateOffsetDays`), which the server adds to the day the template is used.
+ * Calendar days rather than 24-hour spans, so 9am the day after tomorrow is 2
+ * at any hour today. Null for an empty or unreadable box.
+ */
+export function daysFromToday(value: string, now = new Date()): number | null {
+  if (!value) return null
+  const at = new Date(value)
+  if (Number.isNaN(at.getTime())) return null
+  const day = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())
+  return Math.round((day(at) - day(now)) / 86_400_000)
+}

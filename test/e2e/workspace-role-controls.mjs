@@ -21,6 +21,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -55,16 +56,8 @@ let sql = null
 const workspaces = []
 let token = null
 
-const apiAs = (tok) => async (route, init = {}) => {
-  const res = await fetch(`${API}${route}`, {
-    ...init,
-    headers: { authorization: `Bearer ${tok}`, ...(init.body ? { 'content-type': 'application/json' } : {}) },
-    body: init.body ? JSON.stringify(init.body) : undefined,
-  }).catch(() => null)
-  if (!res) return { status: 0, data: null }
-  const json = await res.json().catch(() => null)
-  return { status: res.status, data: json?.data }
-}
+// lib/fixture.mjs's one client, not a copy (`suite-hygiene/apiAs-duplicated-62`).
+const apiAs = apiAsAt(API)
 
 try {
   sql = await openDb()

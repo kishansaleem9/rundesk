@@ -14,7 +14,7 @@ defect classes, and the trap list) and `docs/video2-reaudit.md` (the ledger).
 
 ## 1. The count
 
-**174 rows — 155 built · 9 partial · 10 missing.** `docs/video2-reaudit.md`
+**174 rows — 157 built · 8 partial · 9 missing.** `docs/video2-reaudit.md`
 §4 carries the arithmetic. §5 holds the 41 rows recovered from
 `docs/video2-frame-observations.md` after the originals were lost, and every
 row closed this session carries a `closed by:` line naming the suite and its

@@ -29,6 +29,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -58,15 +59,10 @@ const stack = await startLocalStack({ dist: path.resolve(REPO, argOf('--dist', '
 const B = stack.base
 const API = `${B}/api/v1`
 /* NEVER THROWS — `{status, data}`. Every call site reads `status`. A POST
- * always carries a body: an empty one under a JSON content type is a 400. */
-const apiAs = (token) => async (route, init = {}) => {
-  const headers = { authorization: `Bearer ${token}` }
-  const body = init.body ?? (init.method === 'POST' ? {} : undefined)
-  if (body) headers['content-type'] = 'application/json'
-  const res = await fetch(`${API}${route}`, { ...init, headers, body: body ? JSON.stringify(body) : undefined }).catch(() => null)
-  if (!res) return { status: 0, data: null }
-  return { status: res.status, data: (await res.json().catch(() => null))?.data }
-}
+ * always carries a body: an empty one under a JSON content type is a 400. The
+ * client is lib/fixture.mjs's one, not a copy (`suite-hygiene/apiAs-duplicated-62`),
+ * told to send `{}` on a POST without one, as the copy did. */
+const apiAs = apiAsAt(API, { emptyBodyOn: ['POST'] })
 /** What a consent address's signed state says — read, never followed. */
 const stateOf = (authUrl) => {
   try {

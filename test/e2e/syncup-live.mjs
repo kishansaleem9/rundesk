@@ -41,6 +41,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
 import { storeBase } from './lib/store.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -311,18 +312,14 @@ const stack = REMOTE
 
 console.log(`  driving ${stack.base}${REMOTE && !IS_LOOPBACK ? `  (${HOST} pinned to 127.0.0.1)` : ''}`)
 
-const api = async (token, method, p, body) => {
-  const res = await fetch(`${stack.apiBase}/api/v1${p}`, {
-    method,
-    headers: {
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-      ...(body ? { 'content-type': 'application/json' } : {}),
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  })
-  const parsed = await res.json().catch(() => null)
-  return { status: res.status, data: parsed?.data ?? parsed }
-}
+/*
+ * lib/fixture.mjs's one API client, not a copy (`suite-hygiene/apiAs-duplicated-62`),
+ * under this suite's own `api(token, method, path, body)`. As the copy did, it
+ * throws when nothing answers at all, and its `data` is the whole body when that
+ * has no `data`: the recording's refusal below is read as `data.error`.
+ */
+const apiAs = apiAsAt(`${stack.apiBase}/api/v1`, { noAnswer: 'throw', dataOrBody: true })
+const api = (token, method, p, body) => apiAs(token)(p, { method, body })
 
 console.log('\n0. a workspace with two people and a channel')
 /*

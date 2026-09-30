@@ -23,6 +23,7 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 import { signInApi, signUpApi } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const { io } = createRequire(path.resolve(import.meta.dirname, '../../apps/web/package.json'))('socket.io-client')
 
@@ -48,15 +49,9 @@ const chk = (cond, good, bad) => {
   else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad && bad !== good ? ` — ${bad}` : ''}`) }
 }
 
-/* NEVER THROWS — `{status, data, error}`. Every call site reads `status`. */
-const apiAs = (token) => async (route, init = {}) => {
-  const headers = { authorization: `Bearer ${token}` }
-  if (init.body) headers['content-type'] = 'application/json'
-  const res = await fetch(`${API}${route}`, { ...init, headers, body: init.body ? JSON.stringify(init.body) : undefined }).catch(() => null)
-  if (!res) return { status: 0, data: null, error: null }
-  const json = await res.json().catch(() => null)
-  return { status: res.status, data: json?.data, error: json?.error }
-}
+/* NEVER THROWS — `{status, data, error}`. Every call site reads `status`.
+ * lib/fixture.mjs's one client, not a copy (`suite-hygiene/apiAs-duplicated-62`). */
+const apiAs = apiAsAt(API)
 const has = (res, word) => res.status === 200 && JSON.stringify(res.data ?? null).includes(word)
 
 const stamp = Date.now()

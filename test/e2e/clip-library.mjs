@@ -15,6 +15,7 @@
  *   node test/e2e/clip-library.mjs --api 3021
  */
 import { signInApi } from './lib/signin.mjs'
+import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -26,6 +27,9 @@ const EXPECTED_CHECKS = 2
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
+/* lib/fixture.mjs's one API client, not a copy (`suite-hygiene/apiAs-duplicated-62`);
+ * like the `call` helper it replaces, it throws when nothing answers at all. */
+const apiAs = apiAsAt(API, { noAnswer: 'throw' })
 const ADMIN = {
   email: process.env.E2E_EMAIL ?? 'admin@rundesk.internal',
   password: process.env.E2E_PASSWORD ?? 'Admin@123!',
@@ -49,10 +53,7 @@ const keys = []
 
 try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
-  call = async (route, init = {}) => {
-    const res = await fetch(`${API}${route}`, { ...init, headers: { authorization: `Bearer ${auth.accessToken}`, ...(init.body ? { 'content-type': 'application/json' } : {}) }, body: init.body ? JSON.stringify(init.body) : undefined })
-    return { status: res.status, data: (await res.json().catch(() => null))?.data }
-  }
+  call = apiAs(auth.accessToken)
   const made = await call('/workspaces', { method: 'POST', body: { name: TAG } })
   if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
   WS = made.data.id
