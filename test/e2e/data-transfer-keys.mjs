@@ -32,7 +32,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 6
+const EXPECTED_CHECKS = 7
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -145,8 +145,10 @@ try {
 
   // ══ 4–5. THE PAGES ═══════════════════════════════════════════════════════
   browser = await (await resolveChromium()).launch(launchOptions())
-  const pageAs = async (who, route, probe) => {
-    const ctx = await browser.newContext({ viewport: { width: 1400, height: 950 } })
+  // `holdPermissions` keeps the page's permission read unanswered while the
+  // probe looks; the service worker is blocked so the route sees that read.
+  const pageAs = async (who, route, probe, { holdPermissions = false } = {}) => {
+    const ctx = await browser.newContext({ viewport: { width: 1400, height: 950 }, serviceWorkers: 'block' })
     const page = await ctx.newPage()
     await page.goto(`${B}/login`, { waitUntil: 'domcontentloaded' })
     await page.fill('input[type=email]', who.email)
@@ -154,8 +156,17 @@ try {
     await page.click('button[type=submit]')
     await page.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS })
     await page.getByRole('button', { name: /^Accept$/ }).click({ timeout: 3000 }).catch(() => {})
+    let release = () => {}
+    if (holdPermissions) {
+      const held = new Promise((resolve) => (release = resolve))
+      await ctx.route('**/roles/me/permissions', async (r) => {
+        await held
+        await r.continue().catch(() => {})
+      })
+    }
     await page.goto(`${B}${route}`, { waitUntil: 'domcontentloaded' })
     const seen = await probe(page)
+    release()
     await ctx.close().catch(() => {})
     return seen
   }
@@ -198,6 +209,30 @@ try {
       && managerPage.sheet === 0 && managerPage.clickup === 0 && managerPage.notYours >= 1,
     'the import page offers the member granted workspace.import the spreadsheet and ClickUp imports — and tells the manager importing is not theirs, offering neither',
     `importer ${JSON.stringify(importerPage)}; manager ${JSON.stringify(managerPage)}`,
+  )
+
+  // While the page still waits for the member's permissions it says neither.
+  // It used to say "importing is not yours" until they answered: the check
+  // above, read under a full CI run's load, caught that wait (1 October).
+  // Holding the read makes the wait as long as it takes to look.
+  const whileAsking = await pageAs(importer, `/app/${WS}/import`, async (page) => {
+    await page.getByTestId('import-tabs').waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
+    const settled = await waitUntil(
+      async () => (await page.getByTestId('import-not-yours').count()) > 0
+        || (await page.getByTestId('import-asking').filter({ visible: true }).count()) > 0,
+      { timeoutMs: 6000 },
+    )
+    return {
+      settled,
+      asking: await page.getByTestId('import-asking').filter({ visible: true }).count(),
+      notYours: await page.getByTestId('import-not-yours').count(),
+      sheet: await page.getByTestId('import-sheet-file').count(),
+    }
+  }, { holdPermissions: true })
+  chk(
+    whileAsking.settled && whileAsking.asking === 1 && whileAsking.notYours === 0 && whileAsking.sheet === 0,
+    'while its permissions are still being asked, the import page waits: it tells the member granted workspace.import neither that importing is not theirs nor offers the import',
+    `with the permission read held: ${JSON.stringify(whileAsking)}`,
   )
 
   // ══ 6. THE SAMPLE-DATA CARD ══════════════════════════════════════════════
