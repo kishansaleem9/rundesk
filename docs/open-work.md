@@ -2945,13 +2945,39 @@ OWASP's ASVS 5.0, 7.4.1: when a session is terminated, "the application disallow
 
 *To close:* end a session's sockets when it ends: each socket joins a room named for its session (`sid`) at the handshake, and each way a session ends (a password change, a reset, "sign out other sessions", revoking one, signing out, the session cap) disconnects that room; or re-check each socket's session at an interval and on its presence ping. Check that a socket open on a session a password change ends is disconnected within seconds, and that the changer's own socket stays.
 
-### `found-30-sep/loading-states-reads-the-clip-page-loading` — open (suite, small; found in the regression for `found-30-sep/revoked-sessions-keep-their-access-tokens`)
+### `found-30-sep/loading-states-reads-the-clip-page-loading` — **closed** (suite, small; found in the regression for `found-30-sep/revoked-sessions-keep-their-access-tokens`)
 
 **`loading-states` fails at `7751d5a`: the clip page shows "Loading the clip…"**
 
 *Evidence, 30 September, lane 3:* in this work's regression `loading-states` answered 25/26: "no visible "Loading…" copy is wired to a surface (3 such strings exist, none referenced) — clipLink.loading="Loading the clip…"". The check reads the catalogs and the web source, and this work changes no web file (`git diff 7751d5a -- apps/web` is empty): `apps/web/src/pages/clip-link-page.tsx:96` renders `t('clipLink.loading')` since `de7ac24` (a clip's link). Either the page shows a skeleton, as the check's rule asks of every surface, or the check names the page as one that may say so.
 
 *To close:* decide which, and check `loading-states` green.
+
+*Closed, 1 October, rehearsing CI.* The page changes, not the check: the rule is the app's own, and every other waiting state keeps it (`components/loading-skeletons.tsx`). The clip page now waits with its title, player and meta line drawn as shimmer shapes, and says "Loading…" to screen readers only, as `PageSkeleton` does. `loading-states` 26/26 (before, 25/26), in a rehearsal of CI's Browser suites job from a checkout at the runner's path. CI runs this suite, so the job would have failed on it.
+
+### `found-1-oct/sweep-selfcheck-names-this-machines-checkout` — **closed** (CI, small; found by CI run 36859530618)
+
+**The sweep self-check ran `/home/user/rundesk/scripts/e2e-lanes/sweep.sh`, which a runner does not have**
+
+*Evidence, 1 October:* the first CI run the month's minutes allowed, on `7e21f3f`, failed Verify at step 57, "Two sweeps at once keep two records": both stand-in sweeps exited 127, `/home/user/rundesk/scripts/e2e-lanes/sweep.sh: No such file or directory`, 0 of 6. The runner's checkout is `/home/runner/work/rundesk/rundesk`. Steps 1 to 56 had passed; 58 to 76 were skipped.
+
+*Closed, 1 October.* The default is the `sweep.sh` beside the script, as `sweep.sh` finds `verify.sh`. 6/6 here, and in a rehearsal of the whole Verify job (71 of 71 steps) from a checkout at the runner's path with this one hidden.
+
+### `found-1-oct/calls-harness-counts-a-row-the-list-never-offers` — **closed** (harness, small; found rehearsing CI)
+
+**The calls harness counts a planted row as a captured piece, and the meetings list rightly never offers it**
+
+*Evidence, 1 October:* rehearsing CI's Postgres job against a fresh database, "Calls, against real Postgres" answered 94 of 95: "it offers 5 of 6". The tie check holds an uncommitted `call_recordings` row named `held`, which commits when released and is then counted as captured. Since `10a1317` the meetings list offers only keys under `calls/<workspace>/<call>/`, so a bare `held` is never offered. The harness is not run on the lanes, so nothing had run it since.
+
+*Closed, 1 October.* The row carries a key of the call, as the other upload's would. 95 of 95 against a fresh database.
+
+### `found-1-oct/planner-blocks-keyed-on-their-first-day` — **closed** (visible bug, small; found rehearsing CI)
+
+**Two planner spans that start on the same day share one fetch, so the longer one draws the days it never asked for as empty**
+
+*Evidence, 1 October:* rehearsing CI's Postgres job, `planner-views` answered 10 of 11: "a block late in the month is actually fetched and drawn — the month drew empty cells for days it never asked the server about". The blocks query was keyed `['planner-blocks', workspaceId, rangeFrom]`: the first day drawn, not the last. Day fetched 1 October alone; on the 1st, Month starts on the same day, was handed Day's answer and never asked for the rest, so the block on the 28th was not drawn. On any day, Day then 4 days drew the three days after the first empty. The lanes ran the suite in late September, when its block falls on the 1st and Month starts elsewhere.
+
+*Closed, 1 October.* The key carries both ends of the span. `planner-views` gains a check that holds on any date, "and a block two days on is fetched and drawn in it" (12 checks), and break patch `pv-5` puts the one-ended key back. On a private stack built from this tree: 12/12; with `pv-5`, 10/12, the new check and, today being the 1st, the late-month one.
 
 ### `found-30-sep/the-callers-session-is-named-by-its-refresh-token` — open (visible bug, small; found closing `found-30-sep/revoked-sessions-keep-their-access-tokens`)
 
