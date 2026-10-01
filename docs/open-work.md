@@ -2979,6 +2979,14 @@ OWASP's ASVS 5.0, 7.4.1: when a session is terminated, "the application disallow
 
 *Closed, 1 October.* The key carries both ends of the span. `planner-views` gains a check that holds on any date, "and a block two days on is fetched and drawn in it" (12 checks), and break patch `pv-5` puts the one-ended key back. On a private stack built from this tree: 12/12; with `pv-5`, 10/12, the new check and, today being the 1st, the late-month one.
 
+### `found-1-oct/import-page-says-not-yours-while-asking` — **closed** (visible bug, small; found rehearsing CI)
+
+**The import page tells a member who may import that importing is not theirs, until their permissions answer**
+
+*Evidence, 1 October:* rehearsing CI's Postgres job in its own order, `data-transfer-keys` answered 5 of 6: the member granted `workspace.import` saw "not yours" and no spreadsheet import (`{"sheet":0,"notYours":1,"clickup":1}`), and the ClickUp panel once its tab was pressed. The page read `can('workspace.import') === true`, and `can` answers `null` while the permissions are being asked, so the page said "not yours" until they answered. Under a full run's load that lasted long enough to read; alone, on a fresh stack, the suite passed.
+
+*Closed, 1 October.* While the permissions are being asked the page draws shapes and says neither. `data-transfer-keys` holds the permission read and checks the page waits (7 checks); `dtk-10` reads "asking" as "refused" again and reddens it, and `dtk-8`, re-aimed at the new line, still reddens its own. On private stacks built from this tree: 7/7; with `dtk-10`, 6/7; with `dtk-8`, 6/7.
+
 ### `found-30-sep/the-callers-session-is-named-by-its-refresh-token` — open (visible bug, small; found closing `found-30-sep/revoked-sessions-keep-their-access-tokens`)
 
 **The sessions list marks no device as this one after a reload, and a client that names no session is signed out by its own password change**
