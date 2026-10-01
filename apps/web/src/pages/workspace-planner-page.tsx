@@ -551,8 +551,14 @@ export function PlannerPage() {
   const rangeFrom = days[0] ?? weekStart
   const rangeTo = addDays(days[days.length - 1] ?? weekStart, 1)
 
+  /*
+   * BOTH ENDS IN THE KEY. Keyed on the start alone, two views that start on
+   * the same day shared one answer: Day then 4 days showed the next three days
+   * empty, and on the 1st of a month Day then Month drew the whole month from
+   * the one day Day had fetched (planner-views, rehearsed on 1 October).
+   */
   const { data: blocks = [] } = useQuery({
-    queryKey: ['planner-blocks', workspaceId, rangeFrom.toISOString()],
+    queryKey: ['planner-blocks', workspaceId, rangeFrom.toISOString(), rangeTo.toISOString()],
     queryFn: () =>
       api<Block[]>(
         `/planner/${workspaceId}/blocks?from=${rangeFrom.toISOString()}&to=${rangeTo.toISOString()}`,

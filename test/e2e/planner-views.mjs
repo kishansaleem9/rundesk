@@ -39,7 +39,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 11
+const EXPECTED_CHECKS = 12
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -110,13 +110,16 @@ try {
    */
   const me = await A('/users/me')
   const meId = me.data?.id
+  // Two days on, at ten: inside 4 days, outside Day, whatever today is.
+  const twoOn = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2, 10, 0, 0, 0)
   if (meId) {
     await sql`
       insert into task_time_blocks (workspace_id, user_id, task_id, title, starts_at, ends_at, is_all_day)
-      values (
-        ${workspaceId}, ${meId}, ${task.id}, ${`Late month ${TAG}`},
-        ${far.toISOString()}, ${farEnd.toISOString()}, false
-      )`
+      values
+        (${workspaceId}, ${meId}, ${task.id}, ${`Late month ${TAG}`},
+         ${far.toISOString()}, ${farEnd.toISOString()}, false),
+        (${workspaceId}, ${meId}, ${task.id}, ${`Two days on ${TAG}`},
+         ${twoOn.toISOString()}, ${new Date(twoOn.getTime() + 60 * 60 * 1000).toISOString()}, false)`
   }
 
   const ctx = await browser.newContext({ viewport: { width: 1500, height: 1000 } })
@@ -173,6 +176,25 @@ try {
     await waitUntil(async () => (await columns()) === 4, { timeoutMs: 10_000 }),
     '4 days draws four',
     `"4 days" drew ${await columns()} columns`,
+  )
+  /*
+   * AND THE DAYS IT ADDS ARE FETCHED. The blocks were keyed on the first day
+   * drawn alone, so a span starting where the last one did was answered from
+   * that one's fetch: after Day, 4 days drew Day's single day and read the
+   * three after it empty. Rehearsing CI on 1 October found it in Month, which
+   * starts on the day Day does on the 1st and drew the month from that day.
+   */
+  const twoOnBlocks = page.getByTestId('planner-block').filter({ hasText: `Two days on ${TAG}` })
+  chk(
+    !!meId &&
+      (await waitUntil(
+        async () => (await readText(twoOnBlocks.filter({ visible: true }).first(), { timeoutMs: 1_000 })).includes(`Two days on ${TAG}`),
+        { timeoutMs: 10_000 },
+      )),
+    'and a block two days on is fetched and drawn in it',
+    meId
+      ? 'the three days after the first read empty: 4 days drew what Day had fetched for its one day'
+      : `skipped: GET /users/me answered ${me.status} with no id, so no block was put two days on`,
   )
 
   await page.getByTestId('planner-view-month').click()
