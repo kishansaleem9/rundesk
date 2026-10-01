@@ -3490,7 +3490,7 @@ This replaces the builder's proposed `found-30-sep/public-domain-serves-the-whol
 
 *To close:* give every suite's browser a UTF-8 locale: `launchOptions()` passes `env`, or `lane_*_env` exports `LANG`. Then check Download all's zip saved under a title in Arabic.
 
-### `found-30-sep/task-cover-second-board-reads-early` — open (test tooling, small; found running `task-cover` in this work's regression)
+### `found-30-sep/task-cover-second-board-reads-early` — **closed** (test tooling, small; found running `task-cover` in this work's regression)
 
 **`task-cover`'s second board can be read before it has drawn the cover it is asked to take off**
 
@@ -3500,6 +3500,8 @@ This replaces the builder's proposed `found-30-sep/public-domain-serves-the-whol
 - The precondition, that the second board draws the cover, is read as the check itself rather than waited for, so a slow second board fails a check about removal. Read, not proven: the run left no trace of how long the board took.
 
 *To close:* wait for the second board's card to draw the cover, bounded, and fail on that precondition in its own words. Then check it under a full sweep's load.
+
+*Closed, 1 October.* The final CI rehearsal failed both board checks: the first board never showed the cover in 25 s while the second did, and the second check then blamed the list for an attachment the sheet had never removed. The Board tab was pressed with a 15 s click whose failure was swallowed, so under load the List could stay. Each board's tab is now pressed once it is drawn, the task's card waited for (30 s) before its cover, and a failure says which did not happen: no Board, the cover kind drawn instead, or no removal in the sheet. Three runs on fresh stacks under the rehearsal's load: 42/42 each.
 
 ### `found-30-sep/node-engines-below-zlib-crc32` — **closed** (deploy, small; found closing `found-30-sep/attachments-have-no-download-all`)
 
