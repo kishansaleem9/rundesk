@@ -27,6 +27,10 @@ bash scripts/ci-rehearsal/launch.sh postgres-harnesses 0,1 private-pg /home/runn
   self-check naming `/home/user/rundesk`, which the runner does not have.
 - **The steps.** Read from `ci.yml` itself: each `run:` with its job's and its
   own `env`, its `working-directory`, `bash -e`, as the runner runs them.
+- **Node.** The job's own `node-version`, from `/opt/node<version>`, first on
+  `PATH`. `/usr/local/bin` holds a Node 20, whose ICU prints local midnight
+  as "24:00", and a rehearsal that found it first failed a unit test the
+  runner's 22 passes.
 - **The database.** A Postgres 16 of the job's own, with `rundesk_calls` empty
   and the `en_US.utf8` collation of the service image: it sorts `a, A, b, B`
   where the lanes' `C.UTF-8` sorts `A, B, a, b`.

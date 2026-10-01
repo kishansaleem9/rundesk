@@ -60,9 +60,17 @@ def subst(value, env):
 temp = '/home/runner/work/_temp'
 os.makedirs(temp, exist_ok=True)
 os.makedirs(a.logdir, exist_ok=True)
+
+# THE NODE THE JOB SETS UP, FIRST ON PATH. /usr/local/bin holds another one
+# (20, here), and a rehearsal that found it first failed a unit test the
+# runner's 22 passes: Node 20's ICU prints local midnight as "24:00".
+want = next((str(s['with']['node-version']) for s in job['steps']
+             if 'setup-node' in str(s.get('uses', '')) and 'node-version' in (s.get('with') or {})), '22')
+node_dir = f'/opt/node{want}/bin'
+if not os.path.exists(os.path.join(node_dir, 'node')):
+    raise SystemExit(f'the job sets up Node {want}, and there is no {node_dir}/node here')
 base = {
-    'PATH': os.pathsep.join([os.path.dirname(sys.executable), '/opt/node22/bin', '/usr/local/sbin',
-                             '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin']),
+    'PATH': os.pathsep.join([node_dir, '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin']),
     'HOME': '/home/runner',
     'LANG': 'C.UTF-8',
     'CI': 'true',
