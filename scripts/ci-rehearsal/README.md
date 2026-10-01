@@ -1,12 +1,11 @@
 # CI rehearsal
 
 The repository is private, so every minute CI runs is billed, and a full run
-is about an hour and a quarter: Verify about fifteen minutes, Browser suites
-about five, and the Postgres harnesses the rest (their 256 suites took 101
-minutes on two CPUs here on 1 October, and the runner is about 2.4 times
-faster). This runs the same steps on this machine first, from what is
-committed, so a push goes out only once they all pass here, where a failure
-costs nothing.
+is one to two hours, by the runner: Verify 15 to 27 minutes, Browser suites 4
+to 6, and the Postgres harnesses 45 to 85. Runners differ: on 1 October one
+was 2.4 times faster than this machine and the next only 1.38. This runs the
+same steps on this machine first, from what is committed, so a push goes out
+only once they all pass here, where a failure costs nothing.
 
 ```bash
 bash scripts/ci-rehearsal/all.sh            # every job; about two hours here
@@ -43,8 +42,11 @@ bash scripts/ci-rehearsal/launch.sh postgres-harnesses 0,1 private-pg /home/runn
   the suites here use `/opt/pw-browsers`.
 - **The internet.** The runner can reach Google Fonts and the OAuth providers;
   nothing here can.
-- **Speed.** The runner is about 2.4 times faster, so a step that is close to
-  its cap there is flagged here, not timed out.
+- **Speed.** Every limit is checked against the slow runner (1.3 times this
+  machine): a step within a fifth of its cap, or a job within a fifth of its
+  `timeout-minutes`, fails the rehearsal. Verify's 25 minutes cut off the first
+  full run at step 72 of 76 with every step green; this check would have
+  caught it.
 
 Every step runs here even after a failure, to find them all at once; the
 workflow itself stops at its first, to save minutes.

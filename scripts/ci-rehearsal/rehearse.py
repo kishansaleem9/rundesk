@@ -22,9 +22,12 @@ LOGDIR/summary.json at the end.
 import argparse, json, os, re, signal, subprocess, sys, time
 import yaml
 
-# This machine against the runner, measured on 1 October from the same steps
-# (Verify's lint, typecheck and gates): the runner is about 2.4 times faster.
-RUNNER_SPEEDUP = 2.4
+# This machine against the runner, measured on 1 October from the same steps:
+# one runner was 2.4 times faster than here, the next only 1.38 (its Verify ran
+# out of its 25 minutes at step 72 of 76). Every limit is checked against the
+# slow one.
+RUNNER_FAST = 2.4
+RUNNER_SLOW = 1.3
 
 ap = argparse.ArgumentParser()
 ap.add_argument('job')
@@ -142,8 +145,10 @@ for i, st in enumerate(job['steps'], 1):
                 rec['status'] = 'timeout'
         rec['secs'] = round(time.time() - t0, 1)
         rec['log'] = log
-        if cap and rec['secs'] / RUNNER_SPEEDUP > int(cap) * 60 / 2:
-            # Over half its cap on the runner, estimated: too close to call safe.
+        if cap:
+            rec['ci_cap_min'] = int(cap)
+        if cap and rec['secs'] / RUNNER_SLOW > int(cap) * 60 * 0.8:
+            # Within a fifth of its cap on a slow runner: it may be cut off there.
             rec['near_cap'] = True
         if rec['status'] != 'pass':
             failed = True
@@ -155,18 +160,29 @@ for i, st in enumerate(job['steps'], 1):
     print(f"[{i:3d}] {rec['status']:<20} {rec['secs']:>7}s  {name}{near}", flush=True)
 
 ran = [r for r in results if r['status'] == 'pass' or r['status'].startswith('fail') or r['status'] == 'timeout']
+secs = sum(r['secs'] for r in ran)
+limit = job.get('timeout-minutes')
 summary = {
     'job': a.job,
     'minutes': round((time.time() - t_job) / 60, 1),
-    'runner_minutes_estimated': round(sum(r['secs'] for r in ran) / RUNNER_SPEEDUP / 60, 1),
-    'timeout_minutes': job.get('timeout-minutes'),
+    'runner_minutes_fast': round(secs / RUNNER_FAST / 60, 1),
+    'runner_minutes_slow': round(secs / RUNNER_SLOW / 60, 1),
+    'timeout_minutes': limit,
     'ran': len(ran),
     'passed': sum(1 for r in ran if r['status'] == 'pass'),
     'failed': [r for r in ran if r['status'] != 'pass'],
+    'near_cap': [r for r in ran if r.get('near_cap')],
 }
+# A job a slow runner would cut off is a failure here, as it would be there.
+summary['over_limit'] = bool(limit) and summary['runner_minutes_slow'] > int(limit) * 0.8
 json.dump(summary, open(os.path.join(a.logdir, 'summary.json'), 'w'), indent=1)
 print(f"\n{a.job}: {summary['passed']} of {summary['ran']} steps passed in {summary['minutes']} min here, "
-      f"about {summary['runner_minutes_estimated']} on the runner (limit {summary['timeout_minutes']})", flush=True)
+      f"{summary['runner_minutes_fast']} to {summary['runner_minutes_slow']} on the runner (limit {limit})", flush=True)
 for r in summary['failed']:
     print(f"  FAILED [{r['i']}] {r['name']} — {r['status']}, {r['secs']}s", flush=True)
-sys.exit(1 if summary['failed'] else 0)
+for r in summary['near_cap']:
+    print(f"  NEAR ITS CAP [{r['i']}] {r['name']} — {r['secs']}s here, {r.get('ci_cap_min') or '?'}-minute cap", flush=True)
+if summary['over_limit']:
+    print(f"  OVER THE JOB'S LIMIT: about {summary['runner_minutes_slow']} minutes on a slow runner, "
+          f"within a fifth of its {limit}", flush=True)
+sys.exit(1 if summary['failed'] or summary['near_cap'] or summary['over_limit'] else 0)

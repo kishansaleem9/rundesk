@@ -54,8 +54,8 @@ jobs:
   # thirty minutes; the cost of wrongly skipping is shipping untested code, and
   # those are not the same size of mistake.
   #
-  # `Verify Monorepo` is deliberately NOT gated. It is about four minutes of the
-  # thirty-three, and leaving it always-on means a docs push still reports a
+  # `Verify Monorepo` is deliberately NOT gated. It is 12 to 27 minutes by the
+  # runner, and leaving it always-on means a docs push still reports a
   # real check rather than an empty set that a branch protection rule might
   # read as nothing having run.
   changes:
@@ -99,7 +99,12 @@ jobs:
   verify:
     name: Verify Monorepo
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Measured, not guessed. On 1 October one runner took 12 minutes to step 57
+    # and another took 25 to step 72, where this limit, then 25, cancelled the
+    # run with every step so far green: the same steps, on a runner about 1.6
+    # times slower (API tests 1:55 and 3:28). The limit decides only whether a
+    # slow run may finish; GitHub bills the minutes run, not the limit.
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -642,16 +647,17 @@ jobs:
     # The long job. Skipped when the push was prose only.
     #
     # IT STOPS AT THE FIRST FAILURE, AND IT STARTS ONLY AFTER THE SHORT JOBS
-    # PASS. This repository is private, so every minute here is billed, and a
-    # full run is about an hour of it. Each step used to carry
-    # `if: '!cancelled()'` so that one failure named itself without hiding the
-    # rest — which also meant a failure in the first suite still paid for the
-    # other 250. Every failure is now found before a push, for free, by
-    # running these same steps locally from a checkout at this runner's path
-    # (1 October). So a failure here stops the job where it happened, each
-    # step is capped at 15 minutes (the made-sweep gate at 25) so a hang costs
-    # at most that, and the job waits for Verify and Browser suites, so a lint
-    # error or a broken page is never followed by two hours of suites.
+    # PASS. This repository is private, so every minute here is billed, and
+    # this job is 45 to 85 minutes of it, by the runner. Each step used to
+    # carry `if: '!cancelled()'` so that one failure named itself without
+    # hiding the rest — which also meant a failure in the first suite still
+    # paid for the other 250. Every failure is now found before a push, for
+    # free, by running these same steps locally from a checkout at this
+    # runner's path (1 October). So a failure here stops the job where it
+    # happened, each step is capped at 15 minutes (the made-sweep gate, about
+    # 17 on a slow runner, at 40) so a hang costs at most that, and the job
+    # waits for Verify and Browser suites, so a lint error or a broken page is
+    # never followed by an hour of suites.
     needs: [changes, verify, browser-suites]
     if: needs.changes.outputs.code == 'true'
     # THIS NUMBER GOES STALE EVERY TIME A SUITE IS ADDED, AND IT HAS TWICE.
@@ -774,7 +780,7 @@ jobs:
       # the sweep is broken in turn and a case must notice. Before the suites,
       # which all run through it.
       - name: A run's people go when it ends, a killed run's with the next
-        timeout-minutes: 25
+        timeout-minutes: 40
         run: node scripts/check-made-sweep.mjs --mutate
 
       # The harnesses import the compiled service, guards and controllers, so
