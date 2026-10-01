@@ -26,8 +26,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { getRouteApi } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { Button } from '@rundesk/ui'
-import { Loader2, Lock, Video } from 'lucide-react'
+import { Button, Skeleton } from '@rundesk/ui'
+import { Lock, Video } from 'lucide-react'
 import { api, ApiError, retryAfterSeconds } from '../lib/api'
 import { useRetryAfter } from '../lib/use-retry-after'
 import { PublicBusy } from '../components/public-busy'
@@ -89,11 +89,17 @@ export function ClipLinkPage() {
   const busyFor = view.data ? null : retryAfterSeconds(view.error)
   const busyLeft = useRetryAfter(busyFor, view.errorUpdatedAt, () => void view.refetch())
 
+  /* The shapes of the page about to replace them, as every waiting state in the
+     app draws them (components/loading-skeletons.tsx), not the words. */
   if (view.isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground gap-2">
-        <Loader2 className="h-5 w-5 animate-spin" />
-        {t('clipLink.loading')}
+      <div className="min-h-screen bg-background p-4 sm:p-8" aria-busy="true" aria-live="polite" data-testid="clip-link-loading">
+        <span className="sr-only">Loading…</span>
+        <div className="mx-auto max-w-4xl space-y-4">
+          <Skeleton className="h-8 w-2/3" />
+          <Skeleton className="w-full aspect-video rounded-lg" />
+          <Skeleton className="h-4 w-40" />
+        </div>
       </div>
     )
   }
