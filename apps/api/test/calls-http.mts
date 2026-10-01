@@ -760,10 +760,14 @@ async function main() {
     let release = () => {}
     const held = new Promise((r) => (release = r))
     const nextFree = Math.max(...positions) + 1
+    // A piece of this call, as the other upload would be: the meetings list
+    // offers only this call's own keys (10a1317), and a bare 'held' was
+    // counted below as captured and never offered.
+    const heldKey = `calls/${WS}/${id}/recording-held.webm`
     const holding = db
       .transaction(async (tx) => {
         await tx.execute(
-          `INSERT INTO call_recordings (call_id, storage_key, position) VALUES ('${id}', 'held', ${nextFree})`,
+          `INSERT INTO call_recordings (call_id, storage_key, position) VALUES ('${id}', '${heldKey}', ${nextFree})`,
         )
         await held
       })
