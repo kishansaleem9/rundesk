@@ -25,7 +25,7 @@ import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
-import { waitUntil } from './lib/wait.mjs'
+import { waitUntil, readText } from './lib/wait.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -495,7 +495,19 @@ try {
   await page.keyboard.press('Escape')
   await waitUntil(async () => (await page.locator('body').innerText().catch(() => '')).includes(TAG), { timeoutMs: 5_000 })
   const sheetText = await page.locator('body').innerText()
-  check(sheetText.includes(TAG), 'and the tag is visible on the task', sheetText.slice(0, 160))
+  // Said on failure: whether the Escape left the sheet open, and what its tag
+  // row drew. A rehearsal of CI on 1 October failed here once, with only the
+  // page's first words to go on, and passed on a fresh stack.
+  const tagRow = page.getByTestId('task-tags').filter({ visible: true }).first()
+  const tagRowOpen = await tagRow.isVisible().catch(() => false)
+  const tagRowText = tagRowOpen ? await readText(tagRow, { timeoutMs: 1_000 }) : ''
+  check(
+    sheetText.includes(TAG),
+    'and the tag is visible on the task',
+    tagRowOpen
+      ? `the sheet is open and its tag row reads ${JSON.stringify(tagRowText)}`
+      : `the sheet's tag row is not on the page: ${sheetText.slice(0, 160)}`,
+  )
 
   // Pressing Enter on a tag that already exists must attach it, not 500 on the
   // unique index — which is what happens the second time anybody tags with it.
