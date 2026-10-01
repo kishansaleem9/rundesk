@@ -1106,12 +1106,12 @@ try {
       /*
        * The member Download all's refusal was read by, and what signing up made
        * them: an organization of their own with a workspace in it — only one
-       * nobody else belongs to — then their memberships and the account, as
-       * `create-modal-templates` removes its member.
+       * nobody else belongs to, and that they own — then their memberships and
+       * the account, as `create-modal-templates` removes its member.
        */
       await sql`
         delete from organizations o
-        where o.id in (select organization_id from organization_members where user_id = ${memberId})
+        where o.id in (select organization_id from organization_members where user_id = ${memberId} and role = 'owner')
           and not exists (select 1 from organization_members m where m.organization_id = o.id and m.user_id <> ${memberId})`
         .catch((e) => console.log(`  cleanup left behind: the member's own organization (${e.message})`))
       await sql`delete from workspace_members where user_id = ${memberId}`

@@ -470,11 +470,12 @@ try {
     /*
      * What signing up made: an organization of this person's own with its
      * workspace (and so its space, list, task, channel and meeting) — only one
-     * nobody else belongs to — then their memberships and the account.
+     * nobody else belongs to, and that they own (the seeded one has no members
+     * on a fresh database) — then their memberships and the account.
      */
     await sql`
       delete from organizations o
-      where o.id in (select organization_id from organization_members where user_id = ${userId})
+      where o.id in (select organization_id from organization_members where user_id = ${userId} and role = 'owner')
         and not exists (select 1 from organization_members m where m.organization_id = o.id and m.user_id <> ${userId})`
       .catch((e) => console.log(`  cleanup left behind: the organization of ${userId} (${e.message})`))
     await sql`delete from workspace_members where user_id = ${userId}`

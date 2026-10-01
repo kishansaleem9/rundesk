@@ -1347,11 +1347,14 @@ try {
      * Registering made the member an organization of their own with a
      * personal workspace in it ("Member's Workspace"). Removing only the user
      * left that workspace behind with nobody in it (this suite's first run), so
-     * it goes too — and only an organization nobody else belongs to.
+     * it goes too — and only an organization nobody else belongs to, and
+     * that the member owns: on a fresh database the seeded one has no members,
+     * so a member who joined it was its only one, and it went with Main
+     * Workspace (rehearsing CI, 1 October).
      */
     await sql`
       delete from organizations o
-      where o.id in (select organization_id from organization_members where user_id = ${memberId})
+      where o.id in (select organization_id from organization_members where user_id = ${memberId} and role = 'owner')
         and not exists (select 1 from organization_members m where m.organization_id = o.id and m.user_id <> ${memberId})`
       .catch((e) => console.log(`  cleanup left behind: the member's own organization (${e.message})`))
     await sql`delete from workspace_members where user_id = ${memberId}`
