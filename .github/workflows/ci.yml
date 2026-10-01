@@ -643,7 +643,7 @@ jobs:
     #
     # IT STOPS AT THE FIRST FAILURE, AND IT STARTS ONLY AFTER THE SHORT JOBS
     # PASS. This repository is private, so every minute here is billed, and a
-    # full run is about two hours of it. Each step used to carry
+    # full run is about an hour of it. Each step used to carry
     # `if: '!cancelled()'` so that one failure named itself without hiding the
     # rest — which also meant a failure in the first suite still paid for the
     # other 250. Every failure is now found before a push, for free, by

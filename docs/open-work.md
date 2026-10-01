@@ -2987,6 +2987,16 @@ OWASP's ASVS 5.0, 7.4.1: when a session is terminated, "the application disallow
 
 *Closed, 1 October.* While the permissions are being asked the page draws shapes and says neither. `data-transfer-keys` holds the permission read and checks the page waits (7 checks); `dtk-10` reads "asking" as "refused" again and reddens it, and `dtk-8`, re-aimed at the new line, still reddens its own. On private stacks built from this tree: 7/7; with `dtk-10`, 6/7; with `dtk-8`, 6/7.
 
+### `found-1-oct/suite-cleanups-delete-the-seeded-organization` — **closed** (test tooling, large in effect; found rehearsing CI)
+
+**Three suites' cleanups delete the seeded organization, Main Workspace with it, on a fresh database**
+
+*Evidence, 1 October:* rehearsing CI's Postgres job in its own order, every suite from step 254 on stopped at its first line, "no workspace": 11 of the last 18. Rundesk HQ and Main Workspace were gone, with no audit row. `create-modal-templates`, `private-object-urls` and `task-attachments` end by deleting, by SQL, every organization their member belongs to that nobody else belongs to, meant for the one their sign-up made. The seed makes Rundesk HQ with no organization members at all, so on a fresh database a member who joined Main Workspace was its only one, and the first of these cleanups to run took the organization, Main Workspace and everything in it. On the lanes Rundesk HQ holds 150 to 200 members left by earlier runs (`lanes-hold-earlier-runs-leftovers`), so it never happened there. CI's database is fresh every run.
+
+*Closed, 1 October.* Each deletes only an organization its member owns. On private stacks, setup and then these three suites and `task-ai-bar`: before, `task-ai-bar` stopped at "no workspace"; after, 19/19.
+
+*Left:* nothing keeps a suite from deleting by membership again; `madeAccount` and the sweep already remove a member's own organization with the age and ownership rules these cleanups lack, so the three could give theirs up.
+
 ### `found-30-sep/the-callers-session-is-named-by-its-refresh-token` — open (visible bug, small; found closing `found-30-sep/revoked-sessions-keep-their-access-tokens`)
 
 **The sessions list marks no device as this one after a reload, and a client that names no session is signed out by its own password change**

@@ -1,13 +1,15 @@
 # CI rehearsal
 
 The repository is private, so every minute CI runs is billed, and a full run
-is about two and a half hours: Verify about fifteen minutes, Browser suites
-about five, and the Postgres harnesses the rest. This runs the same steps on
-this machine first, from what is committed, so a push goes out only once they
-all pass here, where a failure costs nothing.
+is about an hour and a quarter: Verify about fifteen minutes, Browser suites
+about five, and the Postgres harnesses the rest (their 256 suites took 101
+minutes on two CPUs here on 1 October, and the runner is about 2.4 times
+faster). This runs the same steps on this machine first, from what is
+committed, so a push goes out only once they all pass here, where a failure
+costs nothing.
 
 ```bash
-bash scripts/ci-rehearsal/all.sh            # every job; about six hours here
+bash scripts/ci-rehearsal/all.sh            # every job; about two hours here
 ```
 
 One job, or some of its steps:

@@ -4,10 +4,10 @@
 #   bash scripts/ci-rehearsal/all.sh [OUT]
 #
 # Verify and Postgres harnesses at once, on two CPUs each, then Browser suites.
-# About six hours here, for about two and a half on the runner. Each job's
-# steps are in OUT (default /home/runner/ci-rh/run-<time>), a line per step in
-# OUT/<job>.out, and the last lines say what failed. Exits 0 only when every
-# step of every job passed.
+# About two hours here, for about an hour and a quarter on the runner. Each
+# job's steps are in OUT (default /home/runner/ci-rh/run-<time>), a line per
+# step in OUT/<job>.out, and the last lines say what failed. Exits 0 only when
+# every step of every job passed.
 {
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
