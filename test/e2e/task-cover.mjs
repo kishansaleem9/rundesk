@@ -807,11 +807,26 @@ try {
     : { status: 0 }
   // `?view=` names a SAVED view, not a view type, so the Board is chosen the
   // way a person chooses it, and the sheet is opened from the card itself.
+  //
+  // The tab is pressed once it is drawn, and the Board is waited for before its
+  // card is read. Rehearsing CI on 1 October, under a full run's load, the first
+  // board never showed the cover in 25 s while the second did: the precondition
+  // of both checks below (`found-30-sep/task-cover-second-board-reads-early`).
+  const openBoard = async (p) => {
+    const tab = p.getByTestId('work-view-tab-type-board')
+    await tab.waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {})
+    await tab.click({ timeout: 15_000 }).catch(() => {})
+    return waitUntil(async () => (await p.locator(`[data-testid="board-task-card"][data-task-id="${task.id}"]`).count()) > 0, { timeoutMs: 30_000 })
+  }
+  // What the card drew instead, said when it is not the image.
+  const coverDrawn = async (p) =>
+    (await p.locator(`[data-testid="board-task-card"][data-task-id="${task.id}"] [data-testid="board-card-cover"]`).first().getAttribute('data-cover-kind', { timeout: 1000 }).catch(() => null)) ?? 'no cover'
   await page.goto(`${stack.base}/app/${workspaceId}/${spaceId}/${projectId}/${listId}`, { waitUntil: 'domcontentloaded' })
-  await page.getByTestId('work-view-tab-type-board').click({ timeout: 15_000 }).catch(() => {})
+  const boardOpen = await openBoard(page)
   const boardCard = page.locator(`[data-testid="board-task-card"][data-task-id="${task.id}"]`)
   const cardImage = boardCard.locator('[data-testid="board-card-cover"][data-cover-kind="image"] img')
-  const drawnBefore = await waitUntil(async () => (await cardImage.count()) > 0, { timeoutMs: 25_000 })
+  const drawnBefore = boardOpen && (await waitUntil(async () => (await cardImage.count()) > 0, { timeoutMs: 25_000 }))
+  const drawnInstead = drawnBefore ? null : await coverDrawn(page)
   /*
    * AND A SECOND BOARD, open at the same time, where nobody touches a sheet.
    * The first board also hears the TASK's event, through the sheet's own
@@ -826,11 +841,12 @@ try {
   await teammate.click('button[type=submit]')
   await teammate.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS }).catch(() => {})
   await teammate.goto(`${stack.base}/app/${workspaceId}/${spaceId}/${projectId}/${listId}`, { waitUntil: 'domcontentloaded' })
-  await teammate.getByTestId('work-view-tab-type-board').click({ timeout: 15_000 }).catch(() => {})
+  const teammateBoardOpen = await openBoard(teammate)
   const teammateImage = teammate.locator(
     `[data-testid="board-task-card"][data-task-id="${task.id}"] [data-testid="board-card-cover"][data-cover-kind="image"] img`,
   )
-  const teammateDrawnBefore = await waitUntil(async () => (await teammateImage.count()) > 0, { timeoutMs: 25_000 })
+  const teammateDrawnBefore = teammateBoardOpen && (await waitUntil(async () => (await teammateImage.count()) > 0, { timeoutMs: 25_000 }))
+  const teammateDrawnInstead = teammateDrawnBefore ? null : await coverDrawn(teammate)
   await boardCard.click({ timeout: 15_000 }).catch(() => {})
   await page.getByTestId('task-tab-attachments').click({ timeout: 15_000 }).catch(() => {})
   await page.locator(`[data-testid="attachment-more"][data-attachment-id="${shown.id}"]`).click({ timeout: 15_000 }).catch(() => {})
@@ -843,19 +859,25 @@ try {
   chk(
     shownPinned.ok && drawnBefore && removedInSheet && cardCleared,
     'removing that attachment in the sheet takes the cover off the board card behind it, with no reload',
-    !drawnBefore
-      ? `the board card never drew the cover (${shown.said}, cover set ${shownPinned.status}), so there was nothing to take off`
-      : !removedInSheet
-        ? 'the sheet never removed the attachment'
-        : 'the card still draws an image, and its URL is to an object that was deleted',
+    !boardOpen
+      ? `the Board never drew the task's card (${new URL(page.url()).pathname}), so there was nothing to take off`
+      : !drawnBefore
+        ? `the board card never drew the cover (${shown.said}, cover set ${shownPinned.status}; it drew ${drawnInstead}), so there was nothing to take off`
+        : !removedInSheet
+          ? 'the sheet never removed the attachment'
+          : 'the card still draws an image, and its URL is to an object that was deleted',
   )
   const teammateCleared = removedInSheet && (await waitUntil(async () => (await teammateImage.count()) === 0, { timeoutMs: 10_000 }))
   chk(
     teammateDrawnBefore && removedInSheet && teammateCleared,
     'and so does a second board open at the same time, where nobody touched the sheet',
-    !teammateDrawnBefore
-      ? 'the second board never drew the cover, so there was nothing to take off'
-      : 'the second board still draws the image: nothing told the list',
+    !teammateBoardOpen
+      ? "the second board never drew the task's card, so there was nothing to take off"
+      : !teammateDrawnBefore
+        ? `the second board never drew the cover (it drew ${teammateDrawnInstead}), so there was nothing to take off`
+        : !removedInSheet
+          ? 'the sheet never removed the attachment, so nothing was taken off'
+          : 'the second board still draws the image: nothing told the list',
   )
   await teammate.context().close().catch(() => {})
 
