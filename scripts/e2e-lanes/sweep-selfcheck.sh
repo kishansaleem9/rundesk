@@ -10,7 +10,8 @@
 # READ WHOLE BEFORE IT RUNS (`lane-scripts-read-as-they-run`).
 {
 set -u
-SWEEP="${1:-/home/user/rundesk/scripts/e2e-lanes/sweep.sh}"
+# Beside this script, wherever the checkout is: CI's is not /home/user/rundesk.
+SWEEP="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sweep.sh}"
 T=$(mktemp -d "${TMPDIR:-/tmp}/sweep-selfcheck.XXXXXX")
 cat > "$T/verify.sh" <<'STUB'
 #!/bin/bash
