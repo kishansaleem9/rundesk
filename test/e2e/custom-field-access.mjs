@@ -104,8 +104,7 @@ try {
   const hidden = await plant('hidden', 'private')
   const open = await plant('open')
   const gate = await M(`/tasks/list/${hidden.list}`)
-  // Refused as a list that is not there (404, `found-30-sep/private-task-reads-say-403`).
-  if (gate.status !== 404) throw new Error(`the member was not refused the hidden list (${said(gate)}), so nothing here would mean anything`)
+  if (gate.status !== 403) throw new Error(`the member was not refused the hidden list (${said(gate)}), so nothing here would mean anything`)
   const valueOf = async (task, field) =>
     (await sql`select value from custom_field_values where task_id = ${task} and field_id = ${field}`)[0]?.value ?? null
   const fieldNamed = async (id) => (await sql`select name from custom_field_definitions where id = ${id}`)[0]?.name ?? null

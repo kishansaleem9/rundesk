@@ -77,34 +77,6 @@ export function fromDateTimeInput(value: string): string | null {
 }
 
 /**
- * DOES A TASK SO DATED START AFTER IT IS DUE — two `<input type="datetime-local">`
- * values, as the person typed them, in their own zone
- * (`found-30-sep/a-task-starts-after-it-is-due`). The server refuses such a task
- * (400); the create modal asks first, so it can say so beside the dates and not
- * send a create it knows will be refused. Either box empty is never out of
- * order; nor is the same moment.
- */
-export function datesOutOfOrder(start: string, due: string): boolean {
-  if (!start || !due) return false
-  const s = new Date(start).getTime()
-  const d = new Date(due).getTime()
-  return Number.isFinite(s) && Number.isFinite(d) && s > d
-}
-
-/**
- * The latest a start may be picked, as a `datetime-local` `max`: the due
- * moment, or the END of a due day that has no time on it — a task due "the
- * 5th" may start at 09:00 on the 5th. The task sheet's start box carries it, so
- * its picker offers no day after the due date.
- */
-export function startMaxFor(dueIso: string | null | undefined): string | undefined {
-  if (!dueIso) return undefined
-  const d = new Date(dueIso)
-  if (Number.isNaN(d.getTime())) return undefined
-  return isDateOnly(d) ? `${toDateInput(dueIso)}T23:59` : toDateTimeInput(dueIso)
-}
-
-/**
  * Move a date to a new day and leave its time of day where it was.
  *
  * For the pickers that are still date-only on purpose — a due date nudged from

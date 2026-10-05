@@ -3105,22 +3105,12 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
       .limit(1)
     if (!row) return refuseAssign('unknown_task')
 
-    /*
-     * A TASK ITS ASKER MAY NOT OPEN IS A TASK THAT IS NOT THERE: `unknown_task`,
-     * the answer for an id naming nothing, and asked FIRST — the task routes'
-     * read rule, which a member refused its private list failed and was
-     * answered anyway (`ai-task-paths-skip-the-read-rule`). It answered
-     * `no_permission` ("You do not have permission to assign that task"), and
-     * so did the role check before it for a user of any other organisation:
-     * the route names no workspace, so no guard stands in front of it, and any
-     * id said whether it was somebody's task
-     * (`found-30-sep/private-task-reads-say-403`, review).
-     */
-    if (!(await readableTask(this.db, row.workspaceId, taskId, { id: actorId }))) return refuseAssign('unknown_task')
-    // A guest may open a task shared with them and still hands nobody work —
-    // the refusal they may know about.
     const actorRole = await this.memberRole(row.workspaceId, actorId)
     if (!actorRole || actorRole === 'guest') return refuseAssign('no_permission')
+    // Nor for a task its asker may not open: the task routes' read rule, which
+    // a member refused its private list failed and was answered anyway
+    // (`ai-task-paths-skip-the-read-rule`).
+    if (!(await readableTask(this.db, row.workspaceId, taskId, { id: actorId }))) return refuseAssign('no_permission')
     // Every count below is of the tasks the ASKER may open, as the workload
     // panel's are: a colleague's load in a space the asker is refused is not
     // theirs to read, as a number or otherwise.
@@ -3284,12 +3274,8 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
   async assertTaskReadable(taskId: string, reader: { id: string; role?: string | null }): Promise<string> {
     const workspaceId = isUuid(taskId) ? await this.resolveTaskWorkspaceId(taskId) : null
     if (!workspaceId) throw new NotFoundException('Task not found')
-    // Refused as the id that names nothing is, in its words: this said 403 "You
-    // do not have access to this task", so Summarize, Draft a reply and the
-    // dock told anybody holding a task's id that it was there
-    // (`found-30-sep/private-task-reads-say-403`).
     if (!(await readableTask(this.db, workspaceId, taskId, reader))) {
-      throw new NotFoundException('Task not found')
+      throw new ForbiddenException('You do not have access to this task')
     }
     // The task's workspace, for a caller that also names one: a turn about a
     // task is answered inside that task's workspace or not at all.

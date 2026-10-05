@@ -8,20 +8,13 @@
  * component in isolation would have passed the whole time it was unreachable.
  *
  * So it drives the real thing end to end: a real member who is not a manager,
- * a real private task, the real refusal out of the resource guard, the real
- * button, and then the owner's inbox to see whether anybody was actually told.
- *
- * THE REFUSAL IS THE 404 AN ID NAMING NOTHING GETS (`found-30-sep/private-task-reads-say-403`).
- * It was a 403 "This task is private", and the card was drawn on the 403 alone,
- * so the card itself said the task was there. Now the private task and a task
- * that does not exist are answered alike, the card is offered on both in words
- * that say neither, and the ask about nothing reaches nobody — which is what
- * sections 3 and 8–9 below hold it to.
+ * a real private task, the real 403 out of the resource guard, the real button,
+ * and then the owner's inbox to see whether anybody was actually told.
  *
  * The member has to be created. Every seeded account is a workspace_admin, and
- * a manager can see private items by design — run as one of those and the
- * refusal never happens, the card never renders, and the suite reports a dead
- * end that is not there.
+ * a manager can see private items by design — run as one of those and the 403
+ * never happens, the card never renders, and the suite reports a dead end that
+ * is not there.
  *
  *   node test/e2e/request-access.mjs --api 3011 --dist apps/web/dist
  */
@@ -42,7 +35,7 @@ const argOf = (name, fallback) => {
  * How many checks a complete run performs. "0 failed" is not "it ran": a
  * selector that matched nothing reports a clean sweep of whatever it reached.
  */
-const EXPECTED_CHECKS = 10
+const EXPECTED_CHECKS = 9
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -191,22 +184,14 @@ try {
     `create ${created.status}, visibility now ${JSON.stringify(madePrivate.data?.visibility)}`,
   )
 
-  // ── The refusal itself ────────────────────────────────────────────────────
-  console.log('\n▶ §G10 — a private task is refused as a missing one is, and the refusal still offers the ask')
+  // ── The 403 itself ────────────────────────────────────────────────────────
+  console.log('\n▶ §G10 — a private object is not a missing one')
   const asMember = apiAs(signup.data.accessToken)
-  /*
-   * Ids that name nothing, minted fresh each run: an ask about one is recorded,
-   * and a run that broke the fan-out would leave a notification about a fixed id
-   * in the admin's inbox for every later run to find (`FRESH_NOTHING` below).
-   */
-  const unique12 = String(stamp).slice(-12).padStart(12, '0')
-  const NOTHING = `00000000-0000-4000-8000-${unique12}`
   const denied = await asMember(`/tasks/${taskId}`)
-  const missing = await asMember(`/tasks/${NOTHING}`)
   chk(
-    denied.status === 404 && missing.status === 404 && denied.message === missing.message && denied.message !== '',
-    'the member is refused the private task with the 404 an id naming nothing gets, in the same words — the refusal says nothing about whether it is there',
-    `GET /tasks/<the private task> answered ${denied.status} ${JSON.stringify(denied.message)}; GET /tasks/<nothing> answered ${missing.status} ${JSON.stringify(missing.message)}`,
+    denied.status === 403,
+    'the member is refused with 403, not 404 — it exists, they cannot see it',
+    `GET /tasks/:id returned ${denied.status}`,
   )
 
   // ── The screen ────────────────────────────────────────────────────────────
@@ -295,63 +280,26 @@ try {
   )
 
   /*
-   * A TASK THAT DOES NOT EXIST GETS THE SAME CARD, IN THE SAME WORDS.
+   * A task that does not exist gets no card.
    *
-   * It used to get none: the card was drawn on the 403 a private task got and
-   * not on the 404 a missing one got, so the card was the proof the task was
-   * there. Both are the one 404 now, and the card, drawn on it, must read the
-   * same for both — or the page says what the API no longer does. Its words
-   * are read against the private task's, so a card that said "It exists" on
-   * one and not the other fails here.
+   * The guard answers 404 there, and offering to "request access" would confirm
+   * the existence of something the caller was never told about — the exact
+   * thing private is for. Checked because the first version of the card keyed
+   * off "any error at all" and this run never exercised a 404, so nothing
+   * caught it.
    */
-  const cardWords = async () => (await page.getByTestId('request-access-card').filter({ visible: true }).innerText({ timeout: 5_000 }).catch(() => '')).replace(/\s+/g, ' ').trim()
-  await page.goto(`${origin}/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=${taskId}`, { waitUntil: 'domcontentloaded' })
-  await page.getByTestId('request-access-card').waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {})
-  const onPrivate = await cardWords()
-  await page.goto(`${origin}/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=${NOTHING}`, { waitUntil: 'domcontentloaded' })
-  await page.getByTestId('request-access-card').waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {})
-  const onNothing = await cardWords()
-  chk(
-    onNothing !== '' && onNothing === onPrivate && !/\bexists\b/i.test(onNothing),
-    'and a task that does not exist offers the same card in the same words, so the card says nothing about which it is',
-    `on the private task: ${JSON.stringify(onPrivate)}; on an id naming nothing: ${JSON.stringify(onNothing)}`,
+  await page.goto(
+    `${origin}/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=00000000-0000-4000-8000-000000000000`,
+    { waitUntil: 'domcontentloaded' },
   )
-
-  /*
-   * ASKING ABOUT NOTHING IS ANSWERED AS ASKING ABOUT A PRIVATE TASK, AND TELLS NOBODY.
-   *
-   * The card is on every "not found" now, so the ask must not become the
-   * oracle the refusal stopped being: a second private task, never asked about,
-   * and a fresh id naming nothing are each asked for once, straight to the
-   * route, and must be answered alike. Then the admin must hold a notification
-   * about the private task and none about either id that names nothing — the
-   * one pressed on the page above, or this one — since there is nothing to
-   * give. It told every admin "… asked for access to this task" about any id.
-   */
-  await page.getByTestId('request-access-button').click({ timeout: 10_000 }).catch(() => {})
-  await page.getByTestId('request-access-sent').waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
-  const second = await A('/tasks', { method: 'POST', body: { listId, title: `Another private plan ${stamp}` } })
-  const secondId = second.data?.id
-  if (secondId) await A(`/tasks/${secondId}`, { method: 'PATCH', body: { visibility: 'private' } })
-  const FRESH_NOTHING = `00000000-0000-4000-9000-${unique12}`
-  const askedReal = secondId ? await asMember(`/shares/task/${secondId}/request`, { method: 'POST', body: { workspaceId } }) : { status: 0, data: null }
-  const askedNothing = await asMember(`/shares/task/${FRESH_NOTHING}/request`, { method: 'POST', body: { workspaceId } })
-  let toldReal = []
-  let toldNothing = []
-  await waitUntil(async () => {
-    const rows = (await A('/notifications?types=access_requested&limit=100')).data ?? []
-    const about = (id) => rows.filter((n) => n.type === 'access_requested' && (n.target?.entityId ?? n.entityId) === id)
-    toldReal = about(secondId)
-    toldNothing = [...about(FRESH_NOTHING), ...about(NOTHING)]
-    return toldReal.length > 0
-  }, { timeoutMs: 15_000, stepMs: 300 })
+  // Read once the sheet has answered for this task — its "not found" line, which
+  // it draws in the same place as the card — so an absence is not read before
+  // anything could have been drawn.
+  await page.getByText('Task not found.').first().waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {})
   chk(
-    !!secondId && askedReal.ok && askedNothing.ok && askedReal.status === askedNothing.status
-      && JSON.stringify(askedReal.data) === JSON.stringify(askedNothing.data)
-      && toldReal.length > 0 && toldNothing.length === 0,
-    'asking for access to an id that names nothing is answered as asking for a private task, word for word — and tells nobody, where the private task’s ask reaches the admin',
-    `the private task's ask answered ${askedReal.status} ${JSON.stringify(askedReal.data)}; nothing's ${askedNothing.status} ${JSON.stringify(askedNothing.data)}; ` +
-      `the admin was told about the private task ${toldReal.length} time(s), about ids naming nothing ${toldNothing.length}`,
+    !(await page.getByTestId('request-access-card').isVisible().catch(() => false)),
+    'but a task that does not exist offers nothing to ask for',
+    'the card renders on a 404, confirming objects the caller was never told about',
   )
   void ownerId
 

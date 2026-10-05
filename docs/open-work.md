@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 464 items: 34 open · 3 partly fixed · 380 closed, and 47 features, decisions and deploy settings not counted as defects, counted from this file's headings on 5 October, after the triage (`docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 469 items: 35 open · 3 partly fixed · 377 closed, and 54 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 5 October, after the revert and the triage (`docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -2104,114 +2104,6 @@ Checks:
 
 Found while building it: `found-30-sep/create-modal-cuts-off-create` (closed with it), `found-30-sep/a-task-starts-after-it-is-due`, `found-30-sep/task-estimate-below-zero`, `found-30-sep/refused-create-leaves-tags` and `found-30-sep/load-template-takes-every-attribute`.
 
-### `found-30-sep/a-task-starts-after-it-is-due` — **closed** (visible bug, small; found closing `found-30-sep/template-submit-ignores-the-form`)
-
-**A task can start after it is due, and nothing says so**
-
-*Evidence, 30 September, measured on lane 2 by the agent:* nothing refuses a start date after the due date.
-- `POST /tasks` starting 10 October and due 3 October answered 201.
-- `PATCH /tasks/:id` with the same dates answered 200.
-- A template's start date lands beside a typed due date too. A template starting in 9 days, made with a due date typed 3 days out, answered 201, and the task starts six days after it is due.
-
-*To close:* research what ClickUp does with a start after the due date (refuse it, move one of the two, or warn). Then do the same on every write that sets both, the template's merge among them, and check it with a suite.
-
-
-*Closed, 30 September* (built by an agent on lane 5). ClickUp keeps the rule, read through search excerpts (its help
-centre, feedback board and developer site are blocked here): its feedback board's "Improve the Start/Due date and
-time setting experience in Task view" says that when you set a start date after the due date, ClickUp "deletes the
-due date", and asks instead for "a warning" that does "not let you save", because the deleted date is lost. OWASP's
-Input Validation Cheat Sheet names the case as semantic validation: "start date is before end date". So a task
-never starts after it is due, and a write that would make it so is refused with the reason, not answered by deleting
-a date the caller named.
-
-Measured first on lane 5 at `6f8e02c`, a probe three times: `POST /tasks` starting in ten days and due in three
-answered 201; `PATCH` the same, 200, and so did a start moved past the due date held and a due date moved before the
-start held; the bulk editor changed the task (`failed []`); a template starting in nine days beside a due date typed
-three days out, 201, starting six days after it was due; two dates typed the wrong way round beside a template, 201;
-a duplicate of such a task, 201.
-
-- One rule (`task-values.ts`), asked by `createTask` and `updateTask`, so by `POST /tasks`, `PATCH`, the bulk
-  editor, a template's task, a duplicate and the next occurrence of a recurring task: 400, "A task cannot start
-  after it is due: the start date is after the due date.", before anything is written. `PATCH` asks it of the dates
-  the task would hold, and only when a date is written, so a task made before the rule can still be renamed or
-  closed.
-- A day with no time (stored as UTC midnight, shown as that day) beside a moment is compared as days, the moment
-  read as the day it falls on where its writer is: the web names the browser's zone on every write (`X-Time-Zone`).
-  A task due "the 4th" may start at 15:00 on the 4th; one starting at 09:00 on the 5th in Karachi is refused from
-  Karachi and taken from Los Angeles, where that instant is the evening of the 4th. A caller naming no zone is
-  refused only what every reader would see out of order. (A review found the first build asked the exact question
-  only in the create modal, so from the sheet, a list row, the calendar drop and the bulk bar a start up to a day
-  and a half past a due day was taken without a word; measured in a browser in Karachi: 200, no toast.)
-- The bulk editor refuses two dates the wrong way round, whole; one date moved past a task's other fails that task
-  under `failed`, with the reason, and the rest change. The list page's bulk bar now says how many were not changed
-  and why; it read nothing of the answer.
-- A template's date gives way to one the person typed that it contradicts, as ClickUp's picker keeps the date just
-  set; two typed the wrong way round are refused. A template whose own start is after its due date is refused (400).
-  Save as template turns a task's dates into days from now in the order the task holds them: rounded each alone, a
-  task due "the 4th" and starting at noon that day came out starting a day after it was due, and the save was
-  refused (400) at any hour (found by the review; before this work it was saved, the wrong way round).
-  The next occurrence of a recurring task keeps its start at the old distance before the due date where its rule
-  would put it after (a monthly rule puts both on one day).
-- The create modal says, beside the dates and before Create, "The start date is after the due date. A task cannot
-  start after it is due." and Create waits (four locales). The task sheet's start box stops its picker at the due
-  date and its due box at the start; a refused change is said in the server's words. The list page's row edits,
-  calendar drop and Gantt shift said nothing when refused and now say it. The timeline's right handle stops at the
-  start itself, not the midnight of its day.
-
-Checks:
-- `task-values` is new (21 checks, registered in ci.yml). Before: 3/16 three times at `6f8e02c` (the 13 new checks
-  red). After: 16/16 three times in a row there, and again at `bac7eae`. The review added five (C17–C21): 16/21 three
-  times on the build before its fixes, 21/21 three times in a row after.
-- `task-values-1..12`, `-17..19` and `-21` are new, each reddening the check it claims on lane 5; 1 also reddens the
-  template's and the duplicate's refusals and the Karachi create (all reach `createTask`), 3 the bulk editor's, the
-  sheet's and the Karachi PATCH and sheet (all reach `updateTask`), 19 the Karachi sheet.
-- `twr-1..3`, `twr-9..11`, `twr-14..16`, `twr-18..21`, `twr-23`, `twr-25`, `twr-26` are unit claims, each reddening
-  its test in `task-values.test.ts`, `task-writes.test.ts`, `task-templates.service.test.ts` or
-  `lib/task-dates.test.ts`.
-- `create-modal-templates-22` was anchored on the merge's due date, which moved; re-anchored, it reddens its claim.
-
-Found while closing it: `found-30-sep/spreadsheet-import-skips-task-rules`,
-`found-30-sep/timeline-drags-refused-silently` and `found-30-sep/sheet-dates-write-as-typed`.
-- Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `create-modal-templates` 45, `task-values` 21, `task-creation-access` 6, `time-estimate` 13, `task-depth` 92.
-
-### `found-30-sep/task-estimate-below-zero` — **closed** (small; found closing `found-30-sep/template-submit-ignores-the-form`)
-
-**`POST /tasks` and `PATCH /tasks/:id` take an estimate below zero**
-
-*Evidence, 30 September, measured on lane 2 by the agent:*
-- `POST /tasks` with `timeEstimate: -3600` answered 201 and stored -3600.
-- `PATCH /tasks/:id` with -60 answered 200.
-- `CreateTaskDto` has `@IsInt()` alone, and the PATCH handler asks only that it is a number.
-- A template clamps its estimate to zero (`normalisePayload`), and the template route's body now refuses one below zero (400).
-
-*To close:* refuse an estimate below zero on both routes, as the template route does, and check each with a suite.
-
-
-*Closed, 30 September* (built by an agent on lane 5). ClickUp's API says of a time estimate that it "must be a
-non-negative integer" (search excerpt of "Replace task time estimates"). Measured first on lane 5 at `6f8e02c`, a
-probe three times: `POST /tasks` with `timeEstimate: -3600` answered 201 and stored it, `PATCH` -60 200, and the
-bulk editor -120 200; the template's route refused -60 (400). Past what the column holds, and in parts of a second,
-Postgres refused the write in its own words.
-
-- An estimate is none, or a whole number of seconds from 0 to 2147483647 (`assertEstimate`), asked by `createTask`,
-  `updateTask` and the bulk editor (the whole request); `CreateTaskDto` has `@Min(0)` and `@Max`, as the template's
-  body now has the same `@Max`. Every refusal names the rule.
-- A duplicate and each of its subtasks, a template's subtasks, and the next occurrence of a recurring task carry no
-  estimate the rule refuses (one below nought from before the rule, or past the column) rather than failing. A
-  review found the subtasks missed: a duplicate whose subtask held -60 made the copy, its checklists and values,
-  then was refused (400) at the subtask, leaving a half-made copy each try (measured: 400 twice, two copies left,
-  neither with its subtask nor recorded; before this work it was copied, -60 and all). Now it is copied whole, the
-  subtask with no estimate. The web's estimate box already refused a sign.
-
-Checks:
-- `task-values` (new): POST, PATCH and the bulk editor each refuse one below nought and write nothing; an estimate of
-  nought is taken by all three; and (the review's) a task whose subtask holds -60 is duplicated whole. Before: the
-  three red, three times, and the duplicate red three times on the build before the review's fixes; after: green,
-  three times.
-- `task-values-13..16` and `-20` are new, each reddening the check it claims (14 also C15, which reads the estimate 14
-  lets through). `twr-4`, `twr-7`, `twr-17`, `twr-22` and `twr-24` are unit claims, each reddening its test.
-- Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `create-modal-templates` 45, `task-values` 21, `task-creation-access` 6, `time-estimate` 13, `task-depth` 92.
-
 ### `found-30-sep/refused-create-leaves-tags` — **closed** (small; found closing `found-30-sep/template-submit-ignores-the-form`)
 
 **A refused create leaves the tags it made behind**
@@ -2247,9 +2139,9 @@ Checks:
   claim.
 - Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `create-modal-templates` 45, `task-values` 21, `task-creation-access` 6, `time-estimate` 13, `task-depth` 92.
 
-### `found-30-sep/spreadsheet-import-skips-task-rules` — open (visible bug, small; found closing `found-30-sep/a-task-starts-after-it-is-due`)
+### `found-30-sep/spreadsheet-import-skips-task-rules` — open (visible bug, small; found closing `found-30-sep/a-task-starts-after-it-is-due`) · reproduced 5 October
 
-**The spreadsheet import writes a task that starts after it is due, and a second tag that differs only in case**
+**The spreadsheet import makes a second tag that differs only in case**
 
 *Evidence, 30 September, measured on lane 5 at `bac7eae` with this work's build (`probe-import.mjs`):* a sheet row
 "Start Date 2026-10-10, Due Date 2026-10-03, Tags urgent-X", imported into a workspace that holds the tag "Urgent-X",
@@ -2259,37 +2151,48 @@ insert and the "merge" update), not through `TasksService.createTask`, so it ask
 `ensureLabel` finds a tag by its exact name, where `POST /workspaces/:ws/labels` and a create's `labelsByName` find
 one whatever its case.
 
-*To close:* research what ClickUp's CSV import does with a start after the due date (a rejected row, or the start
-left out), then ask each imported row `assertDatesInOrder` and say the outcome in the job's per-row results; find a
-tag by name whatever its case, as the tags route does. Check it with the `imports` suite, by SQL.
+*5 October:* since the owner's decision of 1 October every route takes a start after the due date again
+(`found-30-sep/a-task-starts-after-it-is-due`, reverted), so the import's dates now match the product; only the tag
+half stands.
 
-### `found-30-sep/timeline-drags-refused-silently` — open (visible bug, small; found closing `found-30-sep/a-task-starts-after-it-is-due`)
+*To close:* find a tag by name whatever its case (`ensureLabel`), as the tags route and `labelsByName` do, and check
+it with the `imports` suite, by SQL.
+
+*Triage, 5 October, after the revert:* partly reproduced on a lane. The spreadsheet import, and the ClickUp CSV import, still make a second tag that differs only in case ('urgent-X' beside 'Urgent-X') where the tags route finds the existing one. Its start-after-due write is no longer a defect, since every route now takes one. The ClickUp CSV import makes the same second tag (its `ensureLabel` matches exact case too). The skeptic reproduced the tag half by the merge path, and found two more defects in the same code, now counted: `found-5-oct/import-writes-into-another-workspace` and `found-5-oct/import-merge-resets-fields-the-file-lacks`. Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/timeline-drags-refused-silently` — open (visible bug, small; found closing `found-30-sep/a-task-starts-after-it-is-due`) · reproduced 5 October
 
 **A timeline drag the server refuses snaps back and says nothing**
 
 *Evidence, 30 September (read, not run):* `workspace-timeline-page.tsx`'s `persistDates` mutation has an
 `onSettled` that refetches and no `onError`, so a refused PATCH — a reader without edit, or any other refusal — puts
-the bar back without a word. This work made its drags keep the dates in order (the right handle stopped at the
-midnight of a timed start's day, hours before the start, which the server now refuses; it now stops at the start),
-so the new rule is not reached from here; the silence is older than it. The list page's row edits, calendar drop,
-Gantt shift and bulk bar had the same silence and now toast the server's words (this work).
+the bar back without a word. The right handle again stops at the midnight of a timed start's day: the 30 September
+change was reverted with the rule on 5 October, at the owner's request, and a due date dragged there is taken. The
+silence is older than either. The list page's row edits, calendar drop, Gantt shift and bulk bar had the same silence
+and now toast the server's words (30 September; kept by the owner's decision; `task-values` checks the sheet, a
+Table-view row edit and the bulk bar).
 
 *To close:* toast the server's words on a refused drag, as the list page now does, and check it with
 `gantt-controls` or a timeline suite (a member at view level dragging a bar).
 
-### `found-30-sep/sheet-dates-write-as-typed` — open (visible bug, small; found closing `found-30-sep/a-task-starts-after-it-is-due`)
+*Triage, 5 October, after the revert:* reproduced on a lane. A timeline drag the server refuses snaps back, or the bar vanishes, with no toast; the reason reaches only the console as an unhandled rejection. Measured for a view-level reader (403) and for a task binned after the page loaded (409). The timeline also offers its drag and both handles to a view-only reader: the bar moves under the mouse and is then refused, where the list page no longer offers a refused edit. Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/sheet-dates-write-as-typed` — open (visible bug, small; found closing `found-30-sep/a-task-starts-after-it-is-due`) · reproduced 5 October
 
 **The task sheet writes a date on every change of its box, and is closed while each write is out**
 
 *Evidence, 30 September (read, not run):* the sheet's start and due boxes are `datetime-local` inputs whose
 `onChange` sends `PATCH /tasks/:id` at once (`task-detail-sheet.tsx`), and both are `disabled` while
 `patchTask.isPending`. A date typed field by field (the day "2" then "5") is sent at each whole value, "the 2nd"
-first, and what is typed while a write is out is dropped by a disabled box. Now that a start after the due date is
-refused (400, with a toast), a half-typed value can bring the refusal's toast for a date the person never meant.
+first, and what is typed while a write is out is dropped by a disabled box. Each whole value typed is written and
+recorded as an activity entry. (Between 30 September and 5 October a half-typed start after the due date also
+brought a refusal's toast; a start after the due date is taken again since the revert.)
 
 *To close:* measure it (Playwright `pressSequentially` into the box, counting the PATCHes), then write the date on
 blur or Enter, and keep the box enabled; check it with `task-values` or
 `task-depth`.
+
+*Triage, 5 October, after the revert:* reproduced on a lane. On lane 4's database and bundle, typing "25" into the task sheet's due day saved the 2nd at the first key: the box was disabled for the save and lost focus, so the "5" was dropped. Typing a year saved year 0002 at the first digit. Reproducing it found `found-5-oct/years-below-100-read-back-wrong`: a year typed digit by digit is saved as 0002 and read back as 10 February 2006. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `found-30-sep/create-modal-cuts-off-create` — **closed** (visible bug, small; found closing `found-30-sep/template-submit-ignores-the-form`)
 
@@ -3166,139 +3069,7 @@ Found while building it: `found-30-sep/private-task-reads-say-403`, `found-30-se
 `found-30-sep/two-zip-writers`.
 - Merged here and run again on lanes 5 and 7, with a CRC of its own where Node has none (`found-30-sep/node-engines-below-zlib-crc32`, below): `task-attachments` 32/32, `attach-on-create` 14, `object-key-boundaries` 23, `clip-created-card` 26, `task-cover` 42, `comment-recording` 33 and `list-export` 30, all green, 200 checks.
 
-### `found-30-sep/private-task-reads-say-403` — **closed** (security, small; found closing `found-30-sep/attachments-have-no-download-all`)
-
-**A task's own reads tell a member refused it that it exists; the service reads answer as if it did not**
-
-*Evidence, 30 September, lane 7:* a member of the workspace, refused a private task, gets 403 from
-`GET /tasks/:id` ("This task is private", `ResourceMemberGuard`), and the guard answers 403 for a private list,
-space or project too, while an id that names nothing is 404. The service reads of such a task answer 404:
-duplicating, saving as a template, reminders, custom fields, calendar sync, and now Download all
-(`readableTask`, "refused as a task that is not there, as every read of a task its reader may not open is").
-So the task's own route says whether an id is a task.
-
-*To close:* decide one answer for a task the caller may not open, and give it to the guard and the services
-alike; check it on a private task, list and space.
-
-
-*Closed, 30 September* (by an agent on lane 2). For a task, list, project or space the caller may not open, the
-answer is now exactly what an id naming nothing gets on that route: 404, in the same words.
-
-The grounds:
-- RFC 9110 §15.5.4: a server that "wishes to "hide" the current existence of a forbidden target resource MAY instead
-  respond with a status code of 404".
-- OWASP's IDOR cheat sheet: where existence is sensitive, "map both cases to the same public response, such as a
-  404".
-- ClickUp's API gives one refusal, "Team not authorized", both for a task its token may not reach and for an id that
-  is not a task ("most of the time this is due to whatever is coming in not actually being a ClickUp task ID", read
-  through search excerpts).
-- ClickUp's app keeps a door, Request access on a link to a private item, and so does this change: the task sheet's
-  card is offered on the 404, for a refused task and a missing one alike, in words that say neither.
-
-Measured first on lane 2, three runs alike: 23 of 30 refusal/miss pairs answered differently.
-- `GET /tasks/:id` answered 403 "This task is private", "This list is private", "This space or project is private",
-  a guest "This is not shared with you", and another organisation's user "You are not a member of this workspace",
-  each against 404 "Resource not found".
-- The same for a list, project and space by id.
-- The same for a dependency on a private task, Draft a reply, a client portal, and Duplicate's words.
-- A member moved their own task into another's private list (201) and lost it there.
-
-The fix:
-- `ResourceMemberGuard`: every refusal of a space, project, list, task, view, goal, sprint or label it found is
-  `NotFoundException('Resource not found')`, the miss's own. A route naming the WORKSPACE keeps 403 "You are not a
-  member of this workspace": the workspace is not looked up, so the answer is the same for any id.
-- The task read rule (`assertTaskReadAccess`) answers every refusal "Task not found". Before, it said "Workspace not
-  found" to a stranger and 403 with the wall's name to a member. A task another task points at is refused in the
-  reference's own words ("Related task not found", "Parent task not found", and a merge's target "The task to merge
-  into was not found").
-- The task WRITE rule (`assertTaskWritable`, the first check of every task write route without a guard: a change, a
-  move, a merge, the bin, assignees, labels, files, recurrence, each id of the bulk editor) tells a stranger "Task
-  not found" (was "Workspace not found"), and says a task is in the bin (409) only to somebody who may open it; to
-  anybody else a binned task is "Task not found" too.
-- A merge asks the read rule of its source, and the reference rule of its target, before the merge rule: a private
-  target, or a private subtask, was "Task not found" or "Subtasks only nest one level deep" (400) where nothing was
-  "The task to merge into was not found", and a binned source was "A task in the bin cannot be merged" (400) to
-  people who may not open it. A target in another workspace is now "not found" as well, as a parent's and a
-  dependency's are; the merge picker only ever offered the workspace's own tasks.
-- Assign with AI (`GET /ai/assignee-suggestion`, which names no workspace and so has no guard in front of it) answers
-  a task its asker may not open `unknown_task`, word for word as an id naming nothing (was `no_permission`, to a
-  member refused it and to a user of any other organisation).
-- The move's target is read by `readableList` (the container AND the private-list rule) before the create gate. A
-  list the mover may not open is "Target list not found", like a missing one. The private-list rule was never
-  checked before.
-- Draft a reply, Summarize, a deadline: 404 "Task not found" (was 403 "You do not have access to this task").
-- Duplicate and Save as template say "Task not found in this workspace" for all three misses.
-- Client portals: a project the caller may not open is "Project not found", a portal of it "Portal not found".
-  Guests who may open the project are still refused, with the reason.
-- Request access: the card is drawn on the 404 (`offersRequestAccess`) and reads "You can't open this — It may have
-  been deleted, or it hasn't been shared with you. If it's there, we can ask whoever can grant access." (four
-  locales). The ask answers `{status}` only, records an ask about any id, and delivers one that names nothing in the
-  workspace to nobody. An id that cannot be one is 400.
-- What stays 403: a write the caller's level does not allow on something they may open (a view-only PATCH still says
-  "View only"), and every permission-key refusal.
-
-Checks:
-- A new suite, `refused-as-missing` (17 checks, API only, in CI). It covers a private task, a private list (and its
-  task and listing), a private space (its project, list, task), a guest, and another organisation's user; each
-  refused ask is paired with an id naming nothing and must read equal. It also covers the task's own routes and
-  service reads (files, following, Download all, Duplicate, a reminder, fields, calendar push), a dependency, Draft a
-  reply, the move into a private list and a private space's list (the task stays), and a portal; and, from the
-  review, a stranger's writes (change, move, bin, restore, archive, take on, repeat, the bulk editor's reasons), a
-  binned task refused to those who may not open it (the member's own still 409), and a merge's target and source.
-  Three checks must not change: the view-only write stays 403 with its reason, what may be opened still opens, and
-  the workspace-named route stays 403.
-- `ai-task-reads` check 4 (Assign with AI) pairs the private list's task, and this workspace's task asked by a user
-  of another organisation, each with an id naming nothing, word for word; it had pinned `no_permission`.
-- `request-access`, 9 → 10 checks: the refusal is the miss's 404 in the same words; the card on a task that does not
-  exist reads as on the private one and never says "exists"; an ask about nothing is answered word for word as one
-  about a private task and reaches nobody.
-- BEFORE, three runs each at `f532edc` and again at `6f8e02c` with the final suites: `refused-as-missing` 3/13 (its
-  three controls), `request-access` 7/10; the probe 23/30 pairs apart. AFTER, three runs each, three times over:
-  13/13, 10/10, 0/30 apart. The review's four checks and Assign with AI, three runs each: on the build as the review
-  found it `refused-as-missing` 13/17 and `ai-task-reads` 3/4, its probe 21/21 pairs apart; after, 17/17, 4/4, 0/21.
-- Unit tests: `resource-member.guard.test.ts` (one test re-aimed, four new), `tasks-security.test.ts` (two re-aimed,
-  one tightened), `tasks-refused-reads.test.ts` (7, new), `ai/task-readable.test.ts` (4, new),
-  `common/permissions/task-write.test.ts` (3, new), `task-templates.service.test.ts` (1 new),
-  `client-portal.service.test.ts` (2 new), `request-access.test.ts` (ids made uuids, 2 new),
-  `external-links.test.ts` (a stranger's "workspace not found" re-aimed to the miss), web
-  `request-access-offer.test.ts` (3, new).
-- Suites updated on purpose, each a refusal of something the caller may not open at all:
-  - `ai-task-reads` (3 checks, 403 → 404);
-  - `guest-space-level` (a guest's list, comment, and the task beside theirs, 403 → 404);
-  - `task-boundaries` (a move into a private project's list: 404, in the words a foreign list gets);
-  - `time-tracking-readers` (a guest's timer on a task not shared with them, 403 → 404);
-  - nine fixture gates that asserted the refusal before measuring anything (`ai-read-access`,
-    `custom-field-access`, `knowledge-read-access`, `lookup-read-access`, `meeting-access`, `private-list-reach`,
-    `report-read-access`, `task-creation-access`, `workspace-read-access`).
-
-Break patches:
-- New, each shown to redden what it names: `ram-1..17` (one per new check), `request-access-4-a-private-task-says-it-is-there`,
-  `request-access-5..7`, `atr-7`, and unit `rmg-1..5`, `tsr-1..2`, `trr-1..6`, `ait-1..3`, `tw-1..2`, `ttm-1`,
-  `cpa-1..2`, `rac-1..2`, `rao-1..2`.
-- Re-aimed: `dla-8` (now the service's own refusal, since the guard's answer is the miss) and `request-access-1` (to
-  the web unit test, since the e2e check it claimed was inverted).
-- Retired: `request-access-4-private-is-not-found-again`. It broke the old decision by doing what is now the
-  decision.
-- Re-anchored and shown to redden: `ddr-1`, `hpa-11`, `tb-9`, `tb-11`, `tb-15`.
-- Re-claimed to re-worded sentences: `atr-1..6` and `ttr-1`/`ttr-3` (all shown to redden except `atr-5`, which needs
-  a model lane); `atr-6` re-anchored too.
-- Every patch on a changed file still applies: 466 at both trees, 47 only on the changed one, 0 moved.
-
-Regression on lane 2, one suite at a time, 115 suites: 1515 checks passed and 3 failed.
-- Two failures were this change itself (`guest-space-level`, `time-tracking-readers`: a guest refused something not
-  shared now gets 404). Both suites were updated and re-run green.
-- One was `list-export`'s UI download capture under load. It re-ran 30/30 twice and touches no route of this change.
-- API unit 1892/1892, web unit 34 files, `tsc` in both apps.
-
-Regression after the review: 38 suites, 497 passed and 1 failed (`task-depth`'s read of the sheet's text after Escape, at
-load 8–9; re-ran 92/92 twice). API unit 1900/1900.
-
-Found closing it: `found-30-sep/access-asks-from-outside-the-workspace`, `found-30-sep/move-targets-say-what-they-refuse`,
-`found-30-sep/chat-refusals-say-the-channel-is-there`; and reviewing it, `found-30-sep/ai-actions-say-what-they-refuse`
-and `found-30-sep/linked-docs-say-where-a-doc-lives`.
-- Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `refused-as-missing` 17, `request-access` 10, `task-boundaries` 45, `guest-space-level` 5, `time-tracking-readers` 4, `workspace-read-access` 30, `private-list-reach` 13, `lookup-read-access` 8.
-
-### `found-30-sep/access-asks-from-outside-the-workspace` — open (security, small; found closing `found-30-sep/private-task-reads-say-403`)
+### `found-30-sep/access-asks-from-outside-the-workspace` — open (security, small; found closing `found-30-sep/private-task-reads-say-403`) · reproduced 5 October
 
 **Any account asks any workspace's admins for access, by the workspace's id**
 
@@ -3316,81 +3087,7 @@ nothing checks the asker at all, and a workspace's id reaches whoever holds any 
 - If not, answer a non-member 403, in the same words for every workspace id (as the guard's named-workspace answer).
 - Check it with an outsider beside a member.
 
-### `found-30-sep/move-targets-say-what-they-refuse` — open (security, small; found closing `found-30-sep/private-task-reads-say-403`)
-
-**Moving a list, project or folder says why the target is refused, where a missing one is "not found"**
-
-*Evidence, 30 September:*
-- Measured on lane 2: `space-default-permission`'s "nor into a private project they are not in" is 403 for
-  `POST /lists/:id/move {projectId: <a private project>}`, where a project id naming nothing is 404 "Target project
-  not found".
-- Read, not measured: `lists.service.ts` `moveList` answers a project in another workspace with 400 "A list can only
-  be moved within its own workspace", and an archived one with 400 "Cannot move into a deleted project".
-  `projects.service.ts` `moveProject` does the same for spaces ("A project can only be moved within its own
-  workspace", "Cannot move into a deleted space").
-
-So each target id reveals whether it names a container and where. Since this closure, the task move answers all of
-these as "Target list not found".
-
-*To close:*
-- Check the target's read rule first (`readableProject`, and the space's).
-- Answer a refused, foreign or archived target in the words of a missing one.
-- Then apply the create gate (403, since the mover may open the target).
-- Update `space-default-permission`'s two private-target checks to the 404 and pair each with an id naming nothing.
-
-### `found-30-sep/chat-refusals-say-the-channel-is-there` — open (security, small; found closing `found-30-sep/private-task-reads-say-403`)
-
-**A chat channel the reader may not open is 403 with the reason; one that is not there is 404**
-
-*Evidence, 30 September, lane 2 (a probe, `probe-chat.mjs`):* `GET /chat/channels/:id/messages` answers:
-- a member refused a private channel: 403 "Channel membership required";
-- a channel of a private space: 403 "Space membership required";
-- a user of another organisation: 403 "Workspace membership required";
-- an id naming nothing: 404 "Channel not found".
-
-So a channel's id reveals whether it is one, what kind, and, to a stranger, that it belongs to somebody. This is the
-same split this closure removed from tasks, lists, projects and spaces. `chat.service.ts` holds a fourth refusal,
-"This channel is not shared with you", for a guest.
-
-*To close:*
-- Give one answer for a channel the reader may not open: the 404 an id naming nothing gets, in its words. Apply it
-  across the channel's reads (messages, members, join, search hits).
-- Keep the 403s a reader may know about ("You have view-only access to this channel", the creator-only edits).
-- Pair each refusal in `chat-realtime-access` and `guest-chat-scope` with an id naming nothing.
-
-### `found-30-sep/ai-actions-say-what-they-refuse` — open (security, small; found reviewing `found-30-sep/private-task-reads-say-403`)
-
-**The AI command executor answers an id of another workspace in other words than an id naming nothing**
-
-*Evidence, 30 September, lane 2, the review's build (`review/probe-executor.mjs`, `review/probe-executor-1.log`):* a
-member of workspace W1, in no part of W2, sends `POST /ai/command/execute {workspaceId: W1, actions: [...]}` naming
-W2's ids. The route's guard reads only the body's workspace; each action reads its own ids.
-- `assign_task` on W2's task, assigning themselves: skipped "Assignee is not a workspace member"; on an id naming
-  nothing: "Task not found". The executor's own check (`resolveTaskWorkspaceId`, then the assignee's membership there)
-  runs before the write rule, so the answer says the id is a task, in a workspace the assignee is not in.
-- `create_task` in W2's list: "no_permission"; in an id naming nothing: "List not found".
-- `create_list` in W2's space: "no_permission"; in an id naming nothing: "unknown_space" (the same split
-  `ai-create-containers` pins as "creating there is refused as `no_permission`").
-- Alike already, since this closure: `set_task_status` and `assign_task` with an assignee in W2 ("Task not found"
-  both).
-
-*To close:*
-- Ask the task's write rule before the assignee check in `assign_task`, and the list's and space's read rules first
-  in `create_task` and `createContainer`, answering a refusal as the miss (`List not found`, `unknown_space`).
-- Keep `no_permission` for what the actor may open and not change (a guest, a view-only space).
-- Pair each refusal with an id naming nothing, in `ai-create-containers` (re-aiming its trespass check) and a check
-  for `assign_task`.
-
-### `found-30-sep/linked-docs-say-where-a-doc-lives` — open (security, small; found reviewing `found-30-sep/private-task-reads-say-403`)
-
-**Linking a doc of another workspace to a task says it is one**
-
-*Evidence, read, not measured:* `TasksService.linkDoc` (after the task's write rule, which the caller passes on their
-own task) answers a doc id of another workspace 400 "Doc belongs to a different workspace", and an id naming nothing
-404 "Doc not found". So a member of any workspace learns whether an id names a doc elsewhere.
-
-*To close:* answer a doc of another workspace, and one the caller may not open, as "Doc not found"; pair it in
-`linked-docs-access` with an id naming nothing.
+*Triage, 5 October, after the revert:* reproduced on a lane. Any signed-in account outside a workspace still gets 201 for an access ask there: the ask is recorded and every admin is notified (lane 1). Whether outsiders may ask at all is still the owner's decision. Whether someone outside the workspace may ask at all is still the owner's decision; the defect counted is that nothing checks the asker, so any account notifies every admin about any id, and the answer tells whether a workspace id is real. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `found-30-sep/list-export-saved-as-list-csv` — **closed** (visible bug, small; found closing `found-30-sep/attachments-have-no-download-all`)
 
@@ -8294,11 +7991,12 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October — 7, each reproduced
+## Found by the triage, 5 October — 12, each reproduced
 
-Each was reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a feature or
-a decision; each is a defect beside that item, and counts. Their full evidence is in `docs/triage-2026-10-05.md`
-under the item they were found beside.
+The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
+feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
+the items found closing the three reverted changes, after the revert. Their full evidence is in
+`docs/triage-2026-10-05.md` under the item they were found beside.
 
 ### `found-5-oct/guests-read-and-delete-every-clip` — open (security, small; found by the triage beside `found-30-sep/guests-may-ask-for-clip-links`) · reproduced 5 October
 
@@ -8382,6 +8080,54 @@ The cause: `mention-text.tsx` takes its plain path whenever the text has no bloc
 The cause: `calendar-sync.service.ts` `pushTask` loops over every connection and `resolveTaskContext` asks nothing of `connectedById`; `upsertGoogleEvent` sends the title and description; `fireCalendarPush` runs on every task write; `removeMember` leaves the member's connections. The iCal feed was fixed for exactly this (it applies the container rule and resolves only while its owner is a member); the Google and Outlook push does neither. A real Google write could not be made here.
 
 *To close:* push a task only into connections whose owner may read it now, and stop a connection when its owner leaves the workspace; check both in a suite with the store-and-stub harness (no real calendar). Which lists push at all is the Automations feature, `ledger-rows/row-1962`.
+
+### `found-5-oct/import-writes-into-another-workspace` — open (security, HIGH; found by the triage beside `found-30-sep/spreadsheet-import-skips-task-rules`) · reproduced 5 October
+
+**A spreadsheet import writes a project, a list and tasks into another workspace's space**
+
+*Evidence, reproduced 5 October against lane 6's database by the triage's skeptic:* `admin@` made a workspace W2 and a space S2 in it. `org-admin`, who is not a member of W2 (`GET /spaces/workspace/W2` and `GET /projects/space/S2` answered 403 "You are not a member of this workspace"), sent `POST /workspaces/W1/import/spreadsheet {targetSpaceId: S2}` from a workspace of their own, W1: 201, and the job completed with 1 created and no errors. By SQL, S2 (in W2) then held a new project, a list "Imported Tasks" and a task created by `org-admin`, and `admin@`'s `GET /projects/space/S2` listed the injected project.
+
+The cause: `spreadsheet-import.service.ts` takes `dto.targetSpaceId` as given and inserts the project into it; the controller guards only `:workspaceId`. `clickup-import.service.ts` has the same pattern (read, not run).
+
+*To close:* research where ClickUp's importers may put what they import (a space of the workspace being imported into, where the importer may create). Before anything is written, refuse a target space of another workspace, and one the importer may not create in (`assertCanCreateInSpace`), in both importers; check it in the `imports` suite by SQL (nothing written).
+
+### `found-5-oct/import-merge-resets-fields-the-file-lacks` — open (visible bug, small; found by the triage beside `found-30-sep/spreadsheet-import-skips-task-rules`) · reproduced 5 October
+
+**An import's Merge sets a matched task's status and priority to their defaults when the file has neither column**
+
+*Evidence, reproduced 5 October against lane 6's database by the triage's skeptic:* a task "two", In progress and High; a merge import from a sheet with no Status and no Priority column (201, 1 updated) left it To do and Normal. The page's own help says Merge will "Update the matching task's fields from the imported row".
+
+The cause: the merge writes `.set({status: r.status, priority: r.priority})` (`spreadsheet-import.service.ts`), where `mapStatus(undefined)` is "todo" and `normalizePriority(undefined)` is "normal".
+
+*To close:* research what ClickUp's import does to a matched task's fields the file does not carry; write only the fields the file maps, and check by SQL that a merge without those columns leaves them.
+
+### `found-5-oct/years-below-100-read-back-wrong` — open (visible bug, small; found by the triage reproducing `found-30-sep/sheet-dates-write-as-typed`) · reproduced 5 October
+
+**A date with a year below 100 is stored as typed and read back as another date**
+
+*Evidence, reproduced 5 October against lane 4's database by the triage:* `PATCH /tasks/:id` with `startDate` "0002-10-06T09:00:00.000Z" answered 200, and Postgres holds `0002-10-06 09:00:00+00`; the PATCH's answer and `GET /tasks/:id` both say "2006-02-10T09:00:00.000Z". "0099-10-06" comes back as 1999-10-06; "0202" comes back right. The task sheet reaches this from the first digit typed into a year: it saves year 0002 and then shows 10 February 2006.
+
+The cause: drizzle-orm 0.43.1's timestamp column reads the value back with `new Date(value)` (`pg-core/columns/timestamp.js`), and Node reads Postgres's text `0002-10-06 09:00:00+00` as 2006-02-10.
+
+*To close:* research which years ClickUp takes on a date; refuse a date the app cannot show on every date route (or read it back as stored), and check both a write and a read back in a suite.
+
+### `found-5-oct/super-admin-cannot-write-a-task-it-reads` — open (behaviour, small; found by the triage, reported by the revert of `found-30-sep/private-task-reads-say-403`) · reproduced 5 October
+
+**A super_admin who is a plain member reads a task in a private list or space and every edit of it answers 404 "Task not found"**
+
+*Evidence, reproduced 5 October on lane 1 by the triage:* a super_admin account, a plain member of the workspace, moved its task into another member's private list (201) and read it (200); moving it back answered 404 "Task not found", and so did a `PATCH` of its title, while the list's maker and the workspace's admin each changed it (200). By the other route: a task made straight in a private space's list (201), read (200), commented on (201), and its `PATCH` 404. Measured again after this day's fix to the move (below in the revert): still 404.
+
+The cause: the task write rule (`common/permissions/task-write.ts`) hands `readableTask` the workspace role, and `read-access.ts` lets a role of "super_admin" through, which a workspace role never is; the guard, `GET /tasks/:id` and the create gate ask the account role. Committed code has it too.
+
+*To close:* ask the task write rule with the account role, as the read rule and the create gate do, and check it in a unit test and a suite (a super_admin member edits what they may open).
+
+### `found-5-oct/lane-scripts-build-the-main-checkout` — open (test tooling, small; found by the revert builders, reproduced by the triage) · reproduced 5 October
+
+**Run from a worktree, `build-api.sh`, `verify.sh` and `refresh-dists.sh` build, check and run the main checkout**
+
+*Evidence, reproduced 5 October on a scratch worktree by the triage, with no-op shims so nothing was built:* `build-api.sh` and `verify.sh` begin with `cd /home/user/rundesk`, and so does `refresh-dists.sh`; `fleet-sync.sh` and `fleet-up.sh` set the root to it. The worktree's `build-api.sh` built the main checkout and touched its build stamp. The worktree's `verify.sh` ran the main checkout's copy of the suite, so a suite that exists only in the worktree read as a failed suite ("Cannot find module '/home/user/rundesk/test/e2e/…'"). With a lane served from the worktree, as the worktree's own `fleet-restart.sh` leaves it, `verify.sh` refused (exit 8) and advised `build-api.sh`, which builds the main checkout and moves the lane back onto it. `fleet-restart.sh` alone takes its root from its own location. Both revert builders of 5 October ran into it and worked from path-rewritten copies.
+
+*To close:* take the root from each script's own location, as `fleet-restart.sh` does; let `verify.sh` accept a lane served from its own tree; and add a self-check that a worktree's `verify.sh` runs the worktree's suite against its own build.
 
 ## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
 
@@ -8773,6 +8519,468 @@ The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the fi
 *To close:* Add a sync button in the planner header that calls pullEvents for the user's connections, and either add a scheduled pull or correct the comment.
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The planner still has no 'Sync now' control and nothing schedules a pull. The stale comment that claimed a scheduler has already been corrected. Evidence: `docs/triage-2026-10-05.md`.
+
+#### Settled by the owner: reverted or superseded, 5 October — 7
+
+The owner decided on 1 October that three changes made as judgement calls go back to how they worked before.
+They were reverted on 5 October; the four items below them asked to carry the reverted 404 rule further.
+
+### `found-30-sep/a-task-starts-after-it-is-due` — settled by the owner: reverted, not counted (5 October; decision of 1 October; was: **closed** (visible bug, small; found closing `found-30-sep/template-submit-ignores-the-form`))
+
+**A task can start after it is due, and nothing says so**
+
+*(Reverted 5 October, at the owner's request: see the end of this entry. Of what the closure below names:
+`task-values-1..12`, `-17..19`, `-21` and the unit claims `twr-1..3`, `twr-9..11`, `twr-14..16`, `twr-18..21`,
+`twr-23`, `twr-25`, `twr-26` are removed; `task-values` has 16 checks, rewritten.)*
+
+*Evidence, 30 September, measured on lane 2 by the agent:* nothing refuses a start date after the due date.
+- `POST /tasks` starting 10 October and due 3 October answered 201.
+- `PATCH /tasks/:id` with the same dates answered 200.
+- A template's start date lands beside a typed due date too. A template starting in 9 days, made with a due date typed 3 days out, answered 201, and the task starts six days after it is due.
+
+*To close:* research what ClickUp does with a start after the due date (refuse it, move one of the two, or warn). Then do the same on every write that sets both, the template's merge among them, and check it with a suite.
+
+
+*Closed, 30 September* (built by an agent on lane 5). ClickUp keeps the rule, read through search excerpts (its help
+centre, feedback board and developer site are blocked here): its feedback board's "Improve the Start/Due date and
+time setting experience in Task view" says that when you set a start date after the due date, ClickUp "deletes the
+due date", and asks instead for "a warning" that does "not let you save", because the deleted date is lost. OWASP's
+Input Validation Cheat Sheet names the case as semantic validation: "start date is before end date". So a task
+never starts after it is due, and a write that would make it so is refused with the reason, not answered by deleting
+a date the caller named.
+
+Measured first on lane 5 at `6f8e02c`, a probe three times: `POST /tasks` starting in ten days and due in three
+answered 201; `PATCH` the same, 200, and so did a start moved past the due date held and a due date moved before the
+start held; the bulk editor changed the task (`failed []`); a template starting in nine days beside a due date typed
+three days out, 201, starting six days after it was due; two dates typed the wrong way round beside a template, 201;
+a duplicate of such a task, 201.
+
+- One rule (`task-values.ts`), asked by `createTask` and `updateTask`, so by `POST /tasks`, `PATCH`, the bulk
+  editor, a template's task, a duplicate and the next occurrence of a recurring task: 400, "A task cannot start
+  after it is due: the start date is after the due date.", before anything is written. `PATCH` asks it of the dates
+  the task would hold, and only when a date is written, so a task made before the rule can still be renamed or
+  closed.
+- A day with no time (stored as UTC midnight, shown as that day) beside a moment is compared as days, the moment
+  read as the day it falls on where its writer is: the web names the browser's zone on every write (`X-Time-Zone`).
+  A task due "the 4th" may start at 15:00 on the 4th; one starting at 09:00 on the 5th in Karachi is refused from
+  Karachi and taken from Los Angeles, where that instant is the evening of the 4th. A caller naming no zone is
+  refused only what every reader would see out of order. (A review found the first build asked the exact question
+  only in the create modal, so from the sheet, a list row, the calendar drop and the bulk bar a start up to a day
+  and a half past a due day was taken without a word; measured in a browser in Karachi: 200, no toast.)
+- The bulk editor refuses two dates the wrong way round, whole; one date moved past a task's other fails that task
+  under `failed`, with the reason, and the rest change. The list page's bulk bar now says how many were not changed
+  and why; it read nothing of the answer.
+- A template's date gives way to one the person typed that it contradicts, as ClickUp's picker keeps the date just
+  set; two typed the wrong way round are refused. A template whose own start is after its due date is refused (400).
+  Save as template turns a task's dates into days from now in the order the task holds them: rounded each alone, a
+  task due "the 4th" and starting at noon that day came out starting a day after it was due, and the save was
+  refused (400) at any hour (found by the review; before this work it was saved, the wrong way round).
+  The next occurrence of a recurring task keeps its start at the old distance before the due date where its rule
+  would put it after (a monthly rule puts both on one day).
+- The create modal says, beside the dates and before Create, "The start date is after the due date. A task cannot
+  start after it is due." and Create waits (four locales). The task sheet's start box stops its picker at the due
+  date and its due box at the start; a refused change is said in the server's words. The list page's row edits,
+  calendar drop and Gantt shift said nothing when refused and now say it. The timeline's right handle stops at the
+  start itself, not the midnight of its day.
+
+Checks:
+- `task-values` is new (21 checks, registered in ci.yml). Before: 3/16 three times at `6f8e02c` (the 13 new checks
+  red). After: 16/16 three times in a row there, and again at `bac7eae`. The review added five (C17–C21): 16/21 three
+  times on the build before its fixes, 21/21 three times in a row after.
+- `task-values-1..12`, `-17..19` and `-21` are new, each reddening the check it claims on lane 5; 1 also reddens the
+  template's and the duplicate's refusals and the Karachi create (all reach `createTask`), 3 the bulk editor's, the
+  sheet's and the Karachi PATCH and sheet (all reach `updateTask`), 19 the Karachi sheet.
+- `twr-1..3`, `twr-9..11`, `twr-14..16`, `twr-18..21`, `twr-23`, `twr-25`, `twr-26` are unit claims, each reddening
+  its test in `task-values.test.ts`, `task-writes.test.ts`, `task-templates.service.test.ts` or
+  `lib/task-dates.test.ts`.
+- `create-modal-templates-22` was anchored on the merge's due date, which moved; re-anchored, it reddens its claim.
+
+Found while closing it: `found-30-sep/spreadsheet-import-skips-task-rules`,
+`found-30-sep/timeline-drags-refused-silently` and `found-30-sep/sheet-dates-write-as-typed`.
+- Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `create-modal-templates` 45, `task-values` 21, `task-creation-access` 6, `time-estimate` 13, `task-depth` 92.
+
+*Reverted, 5 October (lane 5), at the owner's request* (the handoff's §3, "Decided by the owner, 1 October"). A
+task may start after it is due again, as before 30 September. Changed back: the rule in `task-values.ts`
+(`startsAfterDue`, `assertDatesInOrder`, `writerZone`) and every place it was asked — `createTask`, `updateTask`, the
+bulk editor, a template's task (the template's date giving way, the zone), the template payload's refusal, a
+duplicate, and the next occurrence of a recurring task (the start-distance adjustment); the `X-Time-Zone` header on
+every web write and on the four routes that read it; the create modal's note beside the dates and its Create hold
+(`quickCreate.startAfterDue`, four locales); the task sheet's pickers bounded by the other date; `datesOutOfOrder`;
+the timeline right handle's floor; and Save as template's `offsetsFromTask`, whose only reason was the template
+rule's refusal and which needed the rule's day-beside-a-moment comparison, so a template again rounds each date on its
+own.
+
+What stayed, as the owner said: the list page's row edits, calendar drop and Gantt shift say a refusal in the
+server's words; the bulk bar says how many tasks were not changed and why; the task sheet's refusal toast (older than
+this item); and all of `found-30-sep/refused-create-leaves-tags`.
+
+Measured on lane 5, a probe run three times. Before: `POST` starting in ten days and due in three, 400; `PATCH` with
+either date moved past the other, 400; bulk, 200 with one failed, and two dates the wrong way round 400; a template's
+start beside a typed due date left out; two typed the wrong way round 400; a template payload starting on the 9th and
+due on the 3rd, 400; a duplicate of a late task 400; a start in Karachi on the day after a due day 400; a monthly
+recurrence's next start held 15 days before its due. After: 201; 200 and 200; bulk 200 with none failed and one
+updated; the template's start kept; 201, 201, 201, 201; and the next occurrence on the 1st starting at 14:00 after
+its 09:00 due.
+
+Checks: `task-values` is rewritten to the restored behaviour and to the refusal messages that stay — 21 checks
+before (21/21), 16 now, 16/16 four times on lane 5, still registered in CI under "A task's dates and estimate are
+taken as sent, and a refused change is said". The review added the two checks for the messages the owner kept: the
+task sheet and a Table-view row edit (`patchTaskSaying`, which the calendar drop and the Gantt shift also use) each
+say a refused change (a task binned while shown, 409) in the server's words, with the row unchanged by SQL; before
+the review the rewrite had turned the sheet's check into "no toast". New patches `task-values-22..28` and `-33..39`
+and the unit claims `tvs-1`, `tvs-3`, `tvs-4`, `tvs-5`, `tvs-7`, each shown to redden only what it names on lane 5
+(`task-values-36..39`: 15/16, their check alone). `create-modal-templates-22` is re-aimed to its anchor from before
+30 September (45/45). The break runner on the committed tree is owed.
+
+### `found-30-sep/task-estimate-below-zero` — settled by the owner: reverted, not counted (5 October; decision of 1 October; was: **closed** (small; found closing `found-30-sep/template-submit-ignores-the-form`))
+
+**`POST /tasks` and `PATCH /tasks/:id` take an estimate below zero**
+
+*(Reverted 5 October, at the owner's request: see the end of this entry. Of what the closure below names:
+`task-values-13..16`, `-20` and the unit claims `twr-4`, `twr-7`, `twr-17`, `twr-22`, `twr-24` are removed.)*
+
+*Evidence, 30 September, measured on lane 2 by the agent:*
+- `POST /tasks` with `timeEstimate: -3600` answered 201 and stored -3600.
+- `PATCH /tasks/:id` with -60 answered 200.
+- `CreateTaskDto` has `@IsInt()` alone, and the PATCH handler asks only that it is a number.
+- A template clamps its estimate to zero (`normalisePayload`), and the template route's body now refuses one below zero (400).
+
+*To close:* refuse an estimate below zero on both routes, as the template route does, and check each with a suite.
+
+
+*Closed, 30 September* (built by an agent on lane 5). ClickUp's API says of a time estimate that it "must be a
+non-negative integer" (search excerpt of "Replace task time estimates"). Measured first on lane 5 at `6f8e02c`, a
+probe three times: `POST /tasks` with `timeEstimate: -3600` answered 201 and stored it, `PATCH` -60 200, and the
+bulk editor -120 200; the template's route refused -60 (400). Past what the column holds, and in parts of a second,
+Postgres refused the write in its own words.
+
+- An estimate is none, or a whole number of seconds from 0 to 2147483647 (`assertEstimate`), asked by `createTask`,
+  `updateTask` and the bulk editor (the whole request); `CreateTaskDto` has `@Min(0)` and `@Max`, as the template's
+  body now has the same `@Max`. Every refusal names the rule.
+- A duplicate and each of its subtasks, a template's subtasks, and the next occurrence of a recurring task carry no
+  estimate the rule refuses (one below nought from before the rule, or past the column) rather than failing. A
+  review found the subtasks missed: a duplicate whose subtask held -60 made the copy, its checklists and values,
+  then was refused (400) at the subtask, leaving a half-made copy each try (measured: 400 twice, two copies left,
+  neither with its subtask nor recorded; before this work it was copied, -60 and all). Now it is copied whole, the
+  subtask with no estimate. The web's estimate box already refused a sign.
+
+Checks:
+- `task-values` (new): POST, PATCH and the bulk editor each refuse one below nought and write nothing; an estimate of
+  nought is taken by all three; and (the review's) a task whose subtask holds -60 is duplicated whole. Before: the
+  three red, three times, and the duplicate red three times on the build before the review's fixes; after: green,
+  three times.
+- `task-values-13..16` and `-20` are new, each reddening the check it claims (14 also C15, which reads the estimate 14
+  lets through). `twr-4`, `twr-7`, `twr-17`, `twr-22` and `twr-24` are unit claims, each reddening its test.
+- Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `create-modal-templates` 45, `task-values` 21, `task-creation-access` 6, `time-estimate` 13, `task-depth` 92.
+
+*Reverted, 5 October (lane 5), at the owner's request* (the handoff's §3, "Decided by the owner, 1 October"). A
+negative estimate is taken again on create, edit and bulk edit, as before 30 September. Changed back:
+`assertEstimate`, `ESTIMATE_RULE`, `ESTIMATE_MAX_SECONDS` and `carriedEstimate`; the estimate checks of `createTask`,
+`updateTask` and the bulk editor; `CreateTaskDto`'s `@Min(0)` and `@Max`; the `@Max` 30 September added to
+`InstantiateTemplateDto`; and the clamping on a duplicate, its subtasks, a template's subtasks and the next
+occurrence, each of which now carries the estimate it holds. What stayed: the template route's `@Min(0)` and the
+template payload's clamp to 0, both older than this item, so the template route alone still refuses -60.
+
+Measured on lane 5, a probe run three times. Before: `POST` with -3600 answered 400 and stored nothing; `PATCH` -60
+400, 5400 kept; bulk -120 400; instantiate -60 400; a duplicate whose subtask held -60 copied it as none. After:
+`POST` 201, -3600 stored; `PATCH` 200, -60; bulk 200, -120; instantiate -60 still 400; the duplicate's subtask holds
+-60.
+
+Checks: `task-values`' four estimate checks are rewritten to the restored behaviour (POST takes -3600 while the
+template's route still refuses -60, PATCH takes -60, bulk takes -120, a duplicate copies a subtask's -60). New patches
+`task-values-29..32` and the unit claims `tvs-2`, `tvs-6`, `tvs-8`, each shown to redden what it names on lane 5.
+
+### `found-30-sep/private-task-reads-say-403` — settled by the owner: reverted, not counted (5 October; decision of 1 October; was: **closed** (security, small; found closing `found-30-sep/attachments-have-no-download-all`))
+
+**A task's own reads tell a member refused it that it exists; the service reads answer as if it did not**
+
+*(Reverted 5 October, at the owner's request: see the end of this entry. Of what the closure below names:
+`refused-as-missing` is now `refused-as-forbidden`; `ram-1..17`, `request-access-4-a-private-task-says-it-is-there`,
+`request-access-5..7`, `atr-7` and the unit claims `rmg-1..4`, `tsr-1..2`, `trr-1..6` (dependency, move, merge),
+`ait-1..3`, `tw-1..2`, `ttm-1`, `cpa-1..2` (portal), `rac-1..2` and `rao-1..2` are removed;
+`tasks-refused-reads.test.ts`, `ai/task-readable.test.ts`, `common/permissions/task-write.test.ts` and the web's
+`request-access-offer.test.ts` are deleted; `request-access-4-private-is-not-found-again` is restored.)*
+
+*Evidence, 30 September, lane 7:* a member of the workspace, refused a private task, gets 403 from
+`GET /tasks/:id` ("This task is private", `ResourceMemberGuard`), and the guard answers 403 for a private list,
+space or project too, while an id that names nothing is 404. The service reads of such a task answer 404:
+duplicating, saving as a template, reminders, custom fields, calendar sync, and now Download all
+(`readableTask`, "refused as a task that is not there, as every read of a task its reader may not open is").
+So the task's own route says whether an id is a task.
+
+*To close:* decide one answer for a task the caller may not open, and give it to the guard and the services
+alike; check it on a private task, list and space.
+
+
+*Closed, 30 September* (by an agent on lane 2). For a task, list, project or space the caller may not open, the
+answer is now exactly what an id naming nothing gets on that route: 404, in the same words.
+
+The grounds:
+- RFC 9110 §15.5.4: a server that "wishes to "hide" the current existence of a forbidden target resource MAY instead
+  respond with a status code of 404".
+- OWASP's IDOR cheat sheet: where existence is sensitive, "map both cases to the same public response, such as a
+  404".
+- ClickUp's API gives one refusal, "Team not authorized", both for a task its token may not reach and for an id that
+  is not a task ("most of the time this is due to whatever is coming in not actually being a ClickUp task ID", read
+  through search excerpts).
+- ClickUp's app keeps a door, Request access on a link to a private item, and so does this change: the task sheet's
+  card is offered on the 404, for a refused task and a missing one alike, in words that say neither.
+
+Measured first on lane 2, three runs alike: 23 of 30 refusal/miss pairs answered differently.
+- `GET /tasks/:id` answered 403 "This task is private", "This list is private", "This space or project is private",
+  a guest "This is not shared with you", and another organisation's user "You are not a member of this workspace",
+  each against 404 "Resource not found".
+- The same for a list, project and space by id.
+- The same for a dependency on a private task, Draft a reply, a client portal, and Duplicate's words.
+- A member moved their own task into another's private list (201) and lost it there.
+
+The fix:
+- `ResourceMemberGuard`: every refusal of a space, project, list, task, view, goal, sprint or label it found is
+  `NotFoundException('Resource not found')`, the miss's own. A route naming the WORKSPACE keeps 403 "You are not a
+  member of this workspace": the workspace is not looked up, so the answer is the same for any id.
+- The task read rule (`assertTaskReadAccess`) answers every refusal "Task not found". Before, it said "Workspace not
+  found" to a stranger and 403 with the wall's name to a member. A task another task points at is refused in the
+  reference's own words ("Related task not found", "Parent task not found", and a merge's target "The task to merge
+  into was not found").
+- The task WRITE rule (`assertTaskWritable`, the first check of every task write route without a guard: a change, a
+  move, a merge, the bin, assignees, labels, files, recurrence, each id of the bulk editor) tells a stranger "Task
+  not found" (was "Workspace not found"), and says a task is in the bin (409) only to somebody who may open it; to
+  anybody else a binned task is "Task not found" too.
+- A merge asks the read rule of its source, and the reference rule of its target, before the merge rule: a private
+  target, or a private subtask, was "Task not found" or "Subtasks only nest one level deep" (400) where nothing was
+  "The task to merge into was not found", and a binned source was "A task in the bin cannot be merged" (400) to
+  people who may not open it. A target in another workspace is now "not found" as well, as a parent's and a
+  dependency's are; the merge picker only ever offered the workspace's own tasks.
+- Assign with AI (`GET /ai/assignee-suggestion`, which names no workspace and so has no guard in front of it) answers
+  a task its asker may not open `unknown_task`, word for word as an id naming nothing (was `no_permission`, to a
+  member refused it and to a user of any other organisation).
+- The move's target is read by `readableList` (the container AND the private-list rule) before the create gate. A
+  list the mover may not open is "Target list not found", like a missing one. The private-list rule was never
+  checked before.
+- Draft a reply, Summarize, a deadline: 404 "Task not found" (was 403 "You do not have access to this task").
+- Duplicate and Save as template say "Task not found in this workspace" for all three misses.
+- Client portals: a project the caller may not open is "Project not found", a portal of it "Portal not found".
+  Guests who may open the project are still refused, with the reason.
+- Request access: the card is drawn on the 404 (`offersRequestAccess`) and reads "You can't open this — It may have
+  been deleted, or it hasn't been shared with you. If it's there, we can ask whoever can grant access." (four
+  locales). The ask answers `{status}` only, records an ask about any id, and delivers one that names nothing in the
+  workspace to nobody. An id that cannot be one is 400.
+- What stays 403: a write the caller's level does not allow on something they may open (a view-only PATCH still says
+  "View only"), and every permission-key refusal.
+
+Checks:
+- A new suite, `refused-as-missing` (17 checks, API only, in CI). It covers a private task, a private list (and its
+  task and listing), a private space (its project, list, task), a guest, and another organisation's user; each
+  refused ask is paired with an id naming nothing and must read equal. It also covers the task's own routes and
+  service reads (files, following, Download all, Duplicate, a reminder, fields, calendar push), a dependency, Draft a
+  reply, the move into a private list and a private space's list (the task stays), and a portal; and, from the
+  review, a stranger's writes (change, move, bin, restore, archive, take on, repeat, the bulk editor's reasons), a
+  binned task refused to those who may not open it (the member's own still 409), and a merge's target and source.
+  Three checks must not change: the view-only write stays 403 with its reason, what may be opened still opens, and
+  the workspace-named route stays 403.
+- `ai-task-reads` check 4 (Assign with AI) pairs the private list's task, and this workspace's task asked by a user
+  of another organisation, each with an id naming nothing, word for word; it had pinned `no_permission`.
+- `request-access`, 9 → 10 checks: the refusal is the miss's 404 in the same words; the card on a task that does not
+  exist reads as on the private one and never says "exists"; an ask about nothing is answered word for word as one
+  about a private task and reaches nobody.
+- BEFORE, three runs each at `f532edc` and again at `6f8e02c` with the final suites: `refused-as-missing` 3/13 (its
+  three controls), `request-access` 7/10; the probe 23/30 pairs apart. AFTER, three runs each, three times over:
+  13/13, 10/10, 0/30 apart. The review's four checks and Assign with AI, three runs each: on the build as the review
+  found it `refused-as-missing` 13/17 and `ai-task-reads` 3/4, its probe 21/21 pairs apart; after, 17/17, 4/4, 0/21.
+- Unit tests: `resource-member.guard.test.ts` (one test re-aimed, four new), `tasks-security.test.ts` (two re-aimed,
+  one tightened), `tasks-refused-reads.test.ts` (7, new), `ai/task-readable.test.ts` (4, new),
+  `common/permissions/task-write.test.ts` (3, new), `task-templates.service.test.ts` (1 new),
+  `client-portal.service.test.ts` (2 new), `request-access.test.ts` (ids made uuids, 2 new),
+  `external-links.test.ts` (a stranger's "workspace not found" re-aimed to the miss), web
+  `request-access-offer.test.ts` (3, new).
+- Suites updated on purpose, each a refusal of something the caller may not open at all:
+  - `ai-task-reads` (3 checks, 403 → 404);
+  - `guest-space-level` (a guest's list, comment, and the task beside theirs, 403 → 404);
+  - `task-boundaries` (a move into a private project's list: 404, in the words a foreign list gets);
+  - `time-tracking-readers` (a guest's timer on a task not shared with them, 403 → 404);
+  - nine fixture gates that asserted the refusal before measuring anything (`ai-read-access`,
+    `custom-field-access`, `knowledge-read-access`, `lookup-read-access`, `meeting-access`, `private-list-reach`,
+    `report-read-access`, `task-creation-access`, `workspace-read-access`).
+
+Break patches:
+- New, each shown to redden what it names: `ram-1..17` (one per new check), `request-access-4-a-private-task-says-it-is-there`,
+  `request-access-5..7`, `atr-7`, and unit `rmg-1..5`, `tsr-1..2`, `trr-1..6`, `ait-1..3`, `tw-1..2`, `ttm-1`,
+  `cpa-1..2`, `rac-1..2`, `rao-1..2`.
+- Re-aimed: `dla-8` (now the service's own refusal, since the guard's answer is the miss) and `request-access-1` (to
+  the web unit test, since the e2e check it claimed was inverted).
+- Retired: `request-access-4-private-is-not-found-again`. It broke the old decision by doing what is now the
+  decision.
+- Re-anchored and shown to redden: `ddr-1`, `hpa-11`, `tb-9`, `tb-11`, `tb-15`.
+- Re-claimed to re-worded sentences: `atr-1..6` and `ttr-1`/`ttr-3` (all shown to redden except `atr-5`, which needs
+  a model lane); `atr-6` re-anchored too.
+- Every patch on a changed file still applies: 466 at both trees, 47 only on the changed one, 0 moved.
+
+Regression on lane 2, one suite at a time, 115 suites: 1515 checks passed and 3 failed.
+- Two failures were this change itself (`guest-space-level`, `time-tracking-readers`: a guest refused something not
+  shared now gets 404). Both suites were updated and re-run green.
+- One was `list-export`'s UI download capture under load. It re-ran 30/30 twice and touches no route of this change.
+- API unit 1892/1892, web unit 34 files, `tsc` in both apps.
+
+Regression after the review: 38 suites, 497 passed and 1 failed (`task-depth`'s read of the sheet's text after Escape, at
+load 8–9; re-ran 92/92 twice). API unit 1900/1900.
+
+Found closing it: `found-30-sep/access-asks-from-outside-the-workspace`, `found-30-sep/move-targets-say-what-they-refuse`,
+`found-30-sep/chat-refusals-say-the-channel-is-there`; and reviewing it, `found-30-sep/ai-actions-say-what-they-refuse`
+and `found-30-sep/linked-docs-say-where-a-doc-lives`.
+- Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `refused-as-missing` 17, `request-access` 10, `task-boundaries` 45, `guest-space-level` 5, `time-tracking-readers` 4, `workspace-read-access` 30, `private-list-reach` 13, `lookup-read-access` 8.
+
+*Reverted, 5 October (lane 2), at the owner's request* (the handoff's §3, "Decided by the owner, 1 October").
+Everything 30 September's closure (2d38c0e) did for this item is back to how it was before. A task, list, project or
+space the caller may not open answers 403 in its own words again: "This task is private", "This list is private",
+"This space or project is private", a guest "This is not shared with you", a user of another organisation "You are
+not a member of this workspace". An id naming nothing is still 404.
+
+What went back:
+- The guard and the task read rule: 403 with the wall's name; the read rule says "Workspace not found" to a stranger.
+- A dependency on a private task: 403 "This task is private".
+- Draft a reply, Summarize, a deadline: 403 "You do not have access to this task". Assign with AI: `no_permission`.
+- Client portals: 403 "This space or project is private".
+- Duplicate and Save as template: "Task not found" for a missing id.
+- The task write rule: "Workspace not found" to a stranger, and the bin's 409 asked first.
+- Merge: the merge rule, then write access to both.
+- Request access: the card only on the 403, in its old words (four locales). The ask answers `{status, notified}` and
+  tells the admins about any id, as before 30 September (see `found-30-sep/access-asks-from-outside-the-workspace`).
+
+What stayed: a member moving their own task into another member's private list in an open space was taken (201), and
+the task was lost there. That move is still refused, answered as the guard answers the list: 403 "This list is
+private", and the task stays. A super_admin, whom the guard lets open any private list, is not refused (the review
+found that refusal, and it was fixed before the merge), nor refused a list of a private space or project they are not
+in: the triage found that one on the merged build (403, where the guard gave 200 and a create there 201), and it was
+fixed before the commit (`task-move-target.test.ts` 5/5, claim `tmt-5`; measured again on lane 1, 201). A list in a private space keeps 403 "You do not have access
+to that list"; a missing list is 404. The service reads that answered 404 before 30 September still do (Download all,
+Duplicate of a refused task, reminders, fields, calendar push), so the split this item described is back, by the
+owner's decision.
+
+Measured on lane 2, one probe of 25 refused asks each paired with an id naming nothing, plus the moves:
+- Before: 25/25 alike, 0 refusals 403, both moves 404 "Target list not found".
+- After: 24/25 apart, 19 refusals 403 in their words. The odd pair is Request access, answered alike again (201
+  `{"status":"sent","notified":1}`), as before 30 September.
+- Moves after: another member's private list 403 "This list is private"; a private space's list 403 "You do not have
+  access to that list"; the task stays both times; a missing list 404. A super_admin member: before the review's fix
+  403 while the guard gave 200; after, 201.
+
+Checks:
+- `refused-as-missing` is renamed `refused-as-forbidden` and rewritten, 17 → 12 checks, registered in CI: each
+  private, guest or stranger refusal is 403 with its words beside a 404 for nothing; a dependency, Draft a reply, the
+  move (the kept fix), a portal, a view-only write, what may be opened, and the workspace-named route. Removed, as
+  they existed only for the 404 rule: the task's other routes agreeing, a stranger's writes, the binned task, a
+  merge's target and source. HEAD's suite against the reverted build: 3/17.
+- `request-access` is back to 9 checks; `ai-task-reads` check 4 back to `no_permission`; `task-boundaries`' private
+  project move back to 403; the nine fixture gates, `guest-space-level` and `time-tracking-readers` back to 403.
+- Unit tests: `resource-member.guard.test.ts` restored with four more pinning the 403 words and the maker's access;
+  `tasks-security.test.ts`, `external-links.test.ts`, `request-access.test.ts`, `client-portal.service.test.ts`
+  restored; `task-move-target.test.ts` new (4: another's private list, a private space's list, the mover's own
+  private list, a super_admin).
+- Break patches restored to their text before 30 September: `request-access-1`,
+  `request-access-4-private-is-not-found-again`, `atr-1..6`, `ttr-1`, `ttr-3`, `dla-8`, `ddr-1`, `hpa-11`, `tb-9`,
+  `tb-11`, `tb-15`. New: `raf-1..12` and the unit claims `rmg-6..9`, `tmt-1..4`. Each was shown to redden what it
+  names on lane 2, applied to the worktree alone (`raf-3` and `raf-5` two checks each); `atr-5` needs a model lane.
+  The break runner on the committed tree is owed.
+- Merged onto the triage commit with the dates-and-estimate revert, and run again on the merged build (below, in the
+  commit's message).
+
+### `found-30-sep/move-targets-say-what-they-refuse` — settled by the owner: superseded, not counted (5 October; decision of 1 October; was: open (security, small; found closing `found-30-sep/private-task-reads-say-403`))
+
+**Moving a list, project or folder says why the target is refused, where a missing one is "not found"**
+
+*Evidence, 30 September:*
+- Measured on lane 2: `space-default-permission`'s "nor into a private project they are not in" is 403 for
+  `POST /lists/:id/move {projectId: <a private project>}`, where a project id naming nothing is 404 "Target project
+  not found".
+- Read, not measured: `lists.service.ts` `moveList` answers a project in another workspace with 400 "A list can only
+  be moved within its own workspace", and an archived one with 400 "Cannot move into a deleted project".
+  `projects.service.ts` `moveProject` does the same for spaces ("A project can only be moved within its own
+  workspace", "Cannot move into a deleted space").
+
+So each target id reveals whether it names a container and where. Since the revert of
+`found-30-sep/private-task-reads-say-403` (5 October), the task move answers the same way: another member's private
+list 403 "This list is private", a list in a private space or project 403 "You do not have access to that list", and
+a missing list or one in another workspace 404 "Target list not found" (measured on lane 2).
+
+*To close:*
+- Check the target's read rule first (`readableProject`, and the space's).
+- Answer a refused, foreign or archived target in the words of a missing one.
+- Then apply the create gate (403, since the mover may open the target).
+- Update `space-default-permission`'s two private-target checks to the 404 and pair each with an id naming nothing.
+
+*Settled, 5 October, by the owner's decision of 1 October:* what a caller may not open answers 403 with its
+reason (`found-30-sep/private-task-reads-say-403`, reverted). This item asked to extend the 404 rule that was reverted,
+so it no longer describes a defect, and it is not counted.
+
+### `found-30-sep/chat-refusals-say-the-channel-is-there` — settled by the owner: superseded, not counted (5 October; decision of 1 October; was: open (security, small; found closing `found-30-sep/private-task-reads-say-403`))
+
+**A chat channel the reader may not open is 403 with the reason; one that is not there is 404**
+
+*Evidence, 30 September, lane 2 (a probe, `probe-chat.mjs`):* `GET /chat/channels/:id/messages` answers:
+- a member refused a private channel: 403 "Channel membership required";
+- a channel of a private space: 403 "Space membership required";
+- a user of another organisation: 403 "Workspace membership required";
+- an id naming nothing: 404 "Channel not found".
+
+So a channel's id reveals whether it is one, what kind, and, to a stranger, that it belongs to somebody. This is the
+same split this closure removed from tasks, lists, projects and spaces. `chat.service.ts` holds a fourth refusal,
+"This channel is not shared with you", for a guest.
+
+*To close:*
+- Give one answer for a channel the reader may not open: the 404 an id naming nothing gets, in its words. Apply it
+  across the channel's reads (messages, members, join, search hits).
+- Keep the 403s a reader may know about ("You have view-only access to this channel", the creator-only edits).
+- Pair each refusal in `chat-realtime-access` and `guest-chat-scope` with an id naming nothing.
+
+*Settled, 5 October, by the owner's decision of 1 October:* what a caller may not open answers 403 with its
+reason (`found-30-sep/private-task-reads-say-403`, reverted). This item asked to extend the 404 rule that was reverted,
+so it no longer describes a defect, and it is not counted. Its sentence about "the same
+split this closure removed from tasks, lists, projects and spaces" is stale: the revert put that split back on purpose.
+
+### `found-30-sep/ai-actions-say-what-they-refuse` — settled by the owner: superseded, not counted (5 October; decision of 1 October; was: open (security, small; found reviewing `found-30-sep/private-task-reads-say-403`))
+
+**The AI command executor answers an id of another workspace in other words than an id naming nothing**
+
+*Evidence, 30 September, lane 2, the review's build (`review/probe-executor.mjs`, `review/probe-executor-1.log`):* a
+member of workspace W1, in no part of W2, sends `POST /ai/command/execute {workspaceId: W1, actions: [...]}` naming
+W2's ids. The route's guard reads only the body's workspace; each action reads its own ids.
+- `assign_task` on W2's task, assigning themselves: skipped "Assignee is not a workspace member"; on an id naming
+  nothing: "Task not found". The executor's own check (`resolveTaskWorkspaceId`, then the assignee's membership there)
+  runs before the write rule, so the answer says the id is a task, in a workspace the assignee is not in.
+- `create_task` in W2's list: "no_permission"; in an id naming nothing: "List not found".
+- `create_list` in W2's space: "no_permission"; in an id naming nothing: "unknown_space" (the same split
+  `ai-create-containers` pins as "creating there is refused as `no_permission`").
+- Since the revert of `found-30-sep/private-task-reads-say-403` (5 October, measured on lane 2), these answer apart
+  too: `set_task_status`, and `assign_task` with an assignee in W2, naming W2's task are skipped "Workspace not found",
+  against "Task not found" for an id naming nothing.
+
+*To close:*
+- Ask the task's write rule before the assignee check in `assign_task`, and the list's and space's read rules first
+  in `create_task` and `createContainer`, answering a refusal as the miss (`List not found`, `unknown_space`).
+- Keep `no_permission` for what the actor may open and not change (a guest, a view-only space).
+- Pair each refusal with an id naming nothing, in `ai-create-containers` (re-aiming its trespass check) and a check
+  for `assign_task`.
+
+*Settled, 5 October, by the owner's decision of 1 October:* what a caller may not open answers 403 with its
+reason (`found-30-sep/private-task-reads-say-403`, reverted). This item asked to extend the 404 rule that was reverted,
+so it no longer describes a defect, and it is not counted. `no_permission` for a refusal and
+`unknown_*` for a miss is the intended split.
+
+### `found-30-sep/linked-docs-say-where-a-doc-lives` — settled by the owner: superseded, not counted (5 October; decision of 1 October; was: open (security, small; found reviewing `found-30-sep/private-task-reads-say-403`))
+
+**Linking a doc of another workspace to a task says it is one**
+
+*Evidence, read, not measured:* `TasksService.linkDoc` (after the task's write rule, which the caller passes on their
+own task) answers a doc id of another workspace 400 "Doc belongs to a different workspace", and an id naming nothing
+404 "Doc not found". So a member of any workspace learns whether an id names a doc elsewhere.
+
+*To close:* answer a doc of another workspace, and one the caller may not open, as "Doc not found"; pair it in
+`linked-docs-access` with an id naming nothing.
+
+*Settled, 5 October, by the owner's decision of 1 October:* what a caller may not open answers 403 with its
+reason (`found-30-sep/private-task-reads-say-403`, reverted). This item asked to extend the 404 rule that was reverted,
+so it no longer describes a defect, and it is not counted. The 400 "Doc belongs to a
+different workspace" could still be reviewed as a tenant-boundary matter of its own.
 
 #### Decisions for the owner — 10
 

@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
-import { BadRequestException } from '@nestjs/common'
 import { labels, taskLabelAssignments, tasks } from '@rundesk/db'
 import { TasksService } from './tasks.service'
 
@@ -8,14 +7,14 @@ import { TasksService } from './tasks.service'
  * THE WRITES THAT SET A TASK'S DATES, ESTIMATE AND TAGS, asked of the service
  * itself with its database stood in for:
  *
- *   · `found-30-sep/a-task-starts-after-it-is-due` — nothing refused a start
- *     after the due date on create, patch or the bulk editor;
- *   · `found-30-sep/task-estimate-below-zero` — nor an estimate below nought;
- *   · `found-30-sep/refused-create-leaves-tags` — and a tag named for a task
- *     was made before the create was asked about, so a refused create left it.
- *
- * Every refusal is asked twice: that it is refused, and that nothing was
- * written — the database's inserts and updates are counted.
+ *   · a task's two dates and its estimate are written as they are sent, on
+ *     create, patch, the bulk editor and the next occurrence of a recurring
+ *     task — a start after the due date and an estimate below nought among
+ *     them (the owner's decision of 1 October);
+ *   · `found-30-sep/refused-create-leaves-tags` — a tag named for a task was
+ *     made before the create was asked about, so a refused create left it.
+ *     Asked twice: that it is refused, and that nothing was written — the
+ *     database's inserts are counted.
  */
 
 const noop = () => undefined
@@ -78,7 +77,7 @@ function recordingDb(selects: unknown[][]) {
   const db: any = {
     select: mock.fn(select),
     insert: mock.fn(insertOn(false)),
-    update: mock.fn(() => ({ set: (v: any) => { updates.push(v); const w: any = { where: () => w, returning: async () => [] }; return w } })),
+    update: mock.fn(() => ({ set: (v: any) => { updates.push(v); const w: any = { where: () => w, returning: async () => [{ id: 't', listId: 'l', ...v }] }; return w } })),
     transaction: mock.fn(async (fn: (tx: any) => Promise<unknown>) => {
       transactions += 1
       return fn({ select: mock.fn(select), insert: mock.fn(insertOn(true)) })
@@ -89,20 +88,15 @@ function recordingDb(selects: unknown[][]) {
 
 const day = (n: number) => new Date(Date.UTC(2026, 9, n, 12))
 
-describe('TasksService.createTask — dates, estimate and tags asked before anything is written', () => {
-  it('refuses a task that starts after it is due, or an estimate below nought, and writes nothing', async () => {
-    const { db, written, transactions } = recordingDb([])
-    const svc = service(db)
-    await assert.rejects(
-      svc.createTask({ listId: 'l', title: 'Late', startDate: day(10), dueDate: day(3), createdById: 'u' }),
-      (e: unknown) => e instanceof BadRequestException && /cannot start after it is due/.test((e as Error).message),
-    )
-    await assert.rejects(
-      svc.createTask({ listId: 'l', title: 'Negative', timeEstimate: -3600, createdById: 'u' }),
-      BadRequestException,
-    )
-    assert.equal(written.length, 0)
-    assert.equal(transactions(), 0)
+describe('TasksService.createTask — dates and estimate as sent, tags asked before anything is written', () => {
+  it('makes a task that starts after it is due, with an estimate below nought, writing both as sent', async () => {
+    const { db, written } = recordingDb([])
+    await service(db).createTask({ listId: 'l', title: 'Late', startDate: day(10), dueDate: day(3), timeEstimate: -3600, createdById: 'u' })
+    const task = written.find((w) => w.table === tasks)
+    assert.ok(task, `no task was written: ${JSON.stringify(written.map((w) => w.values))}`)
+    assert.equal(task.values.startDate.getTime(), day(10).getTime())
+    assert.equal(task.values.dueDate.getTime(), day(3).getTime())
+    assert.equal(task.values.timeEstimate, -3600)
   })
 
   it('makes a tag named for the task only after the task, in its transaction — and a create refused after the names are read makes none', async () => {
@@ -133,86 +127,50 @@ describe('TasksService.createTask — dates, estimate and tags asked before anyt
   })
 })
 
-describe('TasksService.updateTask — the dates it would hold, and its estimate', () => {
-  it('refuses one date moved past the other it holds, both sent the wrong way round, and an estimate below nought — and changes nothing', async () => {
+describe('TasksService.updateTask — the dates and the estimate as sent', () => {
+  it('writes a start moved past the due date it holds, a due date moved before its start, both the wrong way round, and an estimate below nought', async () => {
     const before = { id: 't', listId: 'l', startDate: day(1), dueDate: day(3), status: 'todo', statusCategory: 'open' }
-    // The start moved past the due it holds; the due moved before the start it holds; both the wrong way round; below nought.
     for (const patch of [{ startDate: day(10) }, { dueDate: new Date(Date.UTC(2026, 8, 20, 12)) }, { startDate: day(10), dueDate: day(3) }, { timeEstimate: -60 }]) {
       const { db, updates } = recordingDb([[before]])
-      await assert.rejects(service(db).updateTask('t', 'u', patch), BadRequestException, `refuses ${JSON.stringify(patch)}`)
-      assert.equal(updates.length, 0, `changed nothing for ${JSON.stringify(patch)}`)
+      await service(db).updateTask('t', 'u', patch)
+      assert.equal(updates.length, 1, `changed the task once for ${JSON.stringify(patch)}`)
+      for (const [field, value] of Object.entries(patch)) {
+        assert.deepEqual(updates[0][field], value, `wrote ${field} as sent for ${JSON.stringify(patch)}`)
+      }
     }
   })
 })
 
-describe('TasksService.bulkUpdateTasks — what is wrong whatever the task is refused for the whole request', () => {
-  it('refuses an estimate below nought, or two dates the wrong way round, before any task is changed', async () => {
+describe('TasksService.bulkUpdateTasks — the dates and the estimate handed to each task as sent', () => {
+  it('hands two dates the wrong way round, and an estimate below nought, to each task, changing every one', async () => {
     const { db } = recordingDb([])
     const svc = service(db)
-    svc.updateTask = mock.fn(async () => ({}))
-    await assert.rejects(svc.bulkUpdateTasks(['a', 'b'], 'u', { timeEstimate: -120 }), BadRequestException)
-    await assert.rejects(svc.bulkUpdateTasks(['a', 'b'], 'u', { startDate: day(10), dueDate: day(3) }), BadRequestException)
-    assert.equal(svc.updateTask.mock.callCount(), 0)
+    svc.updateTask = mock.fn(async (id: string) => ({ id }))
+    const dates = await svc.bulkUpdateTasks(['a', 'b'], 'u', { startDate: day(10), dueDate: day(3) })
+    const estimate = await svc.bulkUpdateTasks(['a', 'b'], 'u', { timeEstimate: -120 })
+    assert.equal(dates.updatedCount, 2)
+    assert.equal(estimate.updatedCount, 2)
+    const sent = svc.updateTask.mock.calls.map((c: any) => c.arguments[2])
+    assert.deepEqual(sent.slice(0, 2).map((p: any) => [p.startDate.getTime(), p.dueDate.getTime()]), [[day(10).getTime(), day(3).getTime()], [day(10).getTime(), day(3).getTime()]])
+    assert.deepEqual(sent.slice(2).map((p: any) => p.timeEstimate), [-120, -120])
   })
 })
 
-/*
- * A review of this work: a due day with no time beside a start typed at 09:00
- * on the next day in Karachi (04:00Z) was taken from the sheet, a list row and
- * the calendar — the server, knowing no zone, refuses only what every zone
- * sees out of order. The web now names its zone on every write, and each write
- * asks the order there.
- */
-describe('TasksService — a day beside a moment, ordered where its writer is', () => {
-  const dueThe4th = new Date('2026-10-04T00:00:00Z')
-  const nineInKarachiOnThe5th = new Date('2026-10-05T04:00:00Z')
-  it('refuses it on create, patch and the bulk editor in the writer’s zone, writing nothing, and hands the bulk editor’s zone to each task', async () => {
-    const made = recordingDb([])
-    await assert.rejects(
-      service(made.db).createTask({ listId: 'l', title: 'Karachi', startDate: nineInKarachiOnThe5th, dueDate: dueThe4th, createdById: 'u', writerZone: 'Asia/Karachi' }),
-      (e: unknown) => e instanceof BadRequestException && /cannot start after it is due/.test((e as Error).message),
-    )
-    assert.equal(made.written.length, 0)
-
-    const patched = recordingDb([[{ id: 't', listId: 'l', startDate: null, dueDate: dueThe4th, status: 'todo', statusCategory: 'open' }]])
-    await assert.rejects(
-      service(patched.db).updateTask('t', 'u', { startDate: nineInKarachiOnThe5th }, { writerZone: 'Asia/Karachi' }),
-      BadRequestException,
-    )
-    assert.equal(patched.updates.length, 0)
-
-    const bulk = recordingDb([])
-    const svc = service(bulk.db)
-    svc.updateTask = mock.fn(async () => ({ id: 'a' }))
-    await assert.rejects(
-      svc.bulkUpdateTasks(['a'], 'u', { startDate: nineInKarachiOnThe5th, dueDate: dueThe4th }, { writerZone: 'Asia/Karachi' }),
-      BadRequestException,
-    )
-    assert.equal(svc.updateTask.mock.callCount(), 0)
-    // Where it is on the due day (Los Angeles), the bulk editor sends it on, with the zone, to each task.
-    const answer = await svc.bulkUpdateTasks(['a'], 'u', { startDate: nineInKarachiOnThe5th, dueDate: dueThe4th }, { writerZone: 'America/Los_Angeles' })
-    assert.equal(answer.updatedCount, 1)
-    assert.deepEqual(svc.updateTask.mock.calls[0].arguments[3], { writerZone: 'America/Los_Angeles' })
-  })
-})
-
-describe('TasksService.createNextRecurringOccurrence — the next one starts no later than it is due', () => {
-  it('keeps the start its old distance before the due date where the rule would put it after, and none for a task already inverted', async () => {
+describe('TasksService.createNextRecurringOccurrence — each date moved by the rule on its own', () => {
+  it('moves the start and the due date each by the rule, a start after the due among them, and carries the estimate as it is', async () => {
     const { db } = recordingDb([])
     const svc = service(db)
     const source = {
       id: 't', listId: 'l', title: 'Monthly', description: null, priority: 'normal', status: 'todo', statusCategory: 'open',
-      startDate: new Date(2026, 9, 5, 14), dueDate: new Date(2026, 9, 20, 9), timeEstimate: null, assignees: [], parentTaskId: null,
+      startDate: new Date(2026, 9, 5, 14), dueDate: new Date(2026, 9, 20, 9), timeEstimate: -60, assignees: [], parentTaskId: null,
     }
     svc.getTask = mock.fn(async () => source)
     svc.createTask = mock.fn(async () => ({ id: 'next' }))
     await svc.createNextRecurringOccurrence('t', 'u', null, { mode: 'monthly', dayOfMonth: 1 })
     const next = svc.createTask.mock.calls[0].arguments[0]
+    // A monthly rule puts both on the 1st, each keeping its time: the start at 14:00, the due at 09:00.
+    assert.equal(next.startDate.getTime(), new Date(2026, 10, 1, 14).getTime())
     assert.equal(next.dueDate.getTime(), new Date(2026, 10, 1, 9).getTime())
-    assert.equal(next.dueDate.getTime() - next.startDate.getTime(), source.dueDate.getTime() - source.startDate.getTime())
-
-    svc.getTask = mock.fn(async () => ({ ...source, startDate: new Date(2026, 9, 25, 14) }))
-    await svc.createNextRecurringOccurrence('t', 'u', null, { mode: 'monthly', dayOfMonth: 1 })
-    assert.equal(svc.createTask.mock.calls[1].arguments[0].startDate, undefined)
+    assert.equal(next.timeEstimate, -60)
   })
 })

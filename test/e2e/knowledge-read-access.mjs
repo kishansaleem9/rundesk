@@ -86,8 +86,7 @@ try {
   if (!comment.ok) throw new Error(`could not comment on the private task: ${said(comment)}`)
   await make('/tasks', { listId: openList, title: `${TAG} quokka open task` }, 'the open task')
   const gates = await Promise.all([M(`/tasks/list/${privateList}`), M(`/tasks/${privateTask}`)])
-  // Refused as ids that name nothing are (404, `found-30-sep/private-task-reads-say-403`).
-  if (!gates.every((g) => g.status === 404)) throw new Error(`the member was not refused the private list and task (${gates.map((g) => g.status).join(', ')})`)
+  if (!gates.every((g) => g.status === 403)) throw new Error(`the member was not refused the private list and task (${gates.map((g) => g.status).join(', ')})`)
   const reindexed = await A(`/workspaces/${WS}/knowledge/reindex`, { method: 'POST' })
   if (!reindexed.ok) throw new Error(`could not reindex: ${said(reindexed)}`)
 

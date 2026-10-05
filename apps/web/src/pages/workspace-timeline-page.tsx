@@ -1095,21 +1095,14 @@ function TaskBar({
             const baseStart = startOfDay(barStartMs)
             const baseEnd = startOfDay(barEndMs)
             let finalDiffDays = 0
-            /*
-             * No earlier than the START ITSELF, not the midnight of its day: a
-             * task starting at 09:00 dragged down to its start day was saved
-             * due at 00:00, nine hours before it started — which the server
-             * now refuses (`found-30-sep/a-task-starts-after-it-is-due`).
-             */
-            const floorMs = start != null ? Math.max(baseStart, start) : baseStart
             const move = (evt: MouseEvent) => {
               const diffDays = Math.round((evt.clientX - startX) / dayPx)
               finalDiffDays = diffDays
-              const nextEndMs = Math.max(baseEnd + diffDays * 86400_000, floorMs)
+              const nextEndMs = Math.max(baseEnd + diffDays * 86400_000, baseStart)
               onPatchDates({ startDate: task.startDate, dueDate: new Date(nextEndMs).toISOString() })
             }
             const up = () => {
-              const finalEndMs = Math.max(baseEnd + finalDiffDays * 86400_000, floorMs)
+              const finalEndMs = Math.max(baseEnd + finalDiffDays * 86400_000, baseStart)
               onPersistDates({ startDate: task.startDate, dueDate: new Date(finalEndMs).toISOString() })
               setIsDragging(false)
               window.removeEventListener('mousemove', move)

@@ -2393,15 +2393,14 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
-      # A task, list, project or space the reader may not open was 403 with the
-      # reason ("This task is private", "You are not a member of this
-      # workspace"), where an id naming nothing was 404, so any id said whether
-      # it named something; the service reads answered 404. One answer now: the
-      # miss the route itself makes. And a move into another's private list,
-      # which was taken, is refused.
-      - name: What a reader may not open is answered as what is not there
+      # A task, list, project or space the reader may not open is 403 with the
+      # reason ("This task is private", "This list is private", "This space or
+      # project is private", "This is not shared with you", "You are not a
+      # member of this workspace"), and an id naming nothing is 404. And a move
+      # into another's private list, which was taken, is refused.
+      - name: What a reader may not open is refused with its reason
         timeout-minutes: 15
-        run: node test/e2e/refused-as-missing.mjs --api 3011
+        run: node test/e2e/refused-as-forbidden.mjs --api 3011
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
@@ -3337,11 +3336,15 @@ jobs:
           E2E_PASSWORD: Admin@123!
 
       # What a task's dates and estimate may be, on every write that sets them:
-      # no task starts after it is due (create, patch, bulk edit, a template's
-      # merge, a duplicate), no estimate is below nought, and the task sheet
-      # and the create modal say so (found-30-sep/a-task-starts-after-it-is-due,
-      # found-30-sep/task-estimate-below-zero). Each row read back by SQL.
-      - name: A task never starts after it is due, nor is estimated below nought
+      # each is taken as sent — a start after the due date (create, patch, bulk
+      # edit, a template's task, a duplicate, the next occurrence) and an
+      # estimate below nought (create, patch, bulk edit, a duplicate), as the
+      # owner decided on 1 October — and the task sheet and the create modal let
+      # them be typed so (found-30-sep/a-task-starts-after-it-is-due,
+      # found-30-sep/task-estimate-below-zero). And a refusal is said: the
+      # list's bulk bar says what it did not change and why, and the task sheet
+      # and a row edit give the server's words. Each row read back by SQL.
+      - name: A task's dates and estimate are taken as sent, and a refused change is said
         timeout-minutes: 15
         run: node test/e2e/task-values.mjs --api 3011 --dist apps/web/dist
         env:

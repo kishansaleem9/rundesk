@@ -91,7 +91,7 @@ import {
 } from '../../common/permissions/item-visibility'
 import { PUBLIC_USER_COLUMNS, PUBLIC_USER_WITH } from '../../common/permissions/public-user'
 import { canReadDoc, hiddenDocIds } from '../../common/permissions/doc-access'
-import { readableList, readableTask, readableTaskIds } from '../../common/permissions/read-access'
+import { readableTask, readableTaskIds } from '../../common/permissions/read-access'
 import { listVisibilityFilter } from '../../common/permissions/item-visibility'
 import { safeFetch } from '../../common/http/safe-fetch'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
@@ -111,19 +111,11 @@ import { assertManagerTaskScope, taskRestorable } from '../../common/permissions
 import { assertCanCreateTaskIn, canCreateTaskIn } from '../../common/permissions/task-create'
 import { assertMayShapeStatuses } from '../../common/permissions/status-access'
 import { assertMayDefineFields } from '../../common/permissions/field-access'
-import { containerRefusal, containerVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
+import { checkContainerAccess, containerRefusal, containerVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
 import { attachmentKind, isLinkAttachmentKey, isTaskOwnObjectKey, isTaskUploadKey } from './task-object-keys'
 import { isWorkspaceClipKey } from '../clips/clip-keys'
 import { pickUpdatable } from './task-update-fields'
-import {
-  assertDatesInOrder,
-  assertEstimate,
-  carriedEstimate,
-  planLabelsByName,
-  startsAfterDue,
-  uniqueLabelNames,
-  type LabelByName,
-} from './task-values'
+import { planLabelsByName, uniqueLabelNames, type LabelByName } from './task-values'
 import { CustomFieldsService } from '../custom-fields/custom-fields.service'
 import { guestMayRead } from '../../common/permissions/guest-reach'
 import { likeContaining } from '../../common/sql/like'
@@ -733,13 +725,6 @@ export class TasksService {
    * cross-workspace / non-member callers and outsiders to a private space or
    * project. Used by read paths that hand back sensitive data (e.g. signed R2
    * attachment URLs) as a service-layer defense-in-depth behind the route guard.
-   *
-   * EVERY REFUSAL IS THE MISS: "Task not found", 404, as for an id that names
-   * no task (`found-30-sep/private-task-reads-say-403`, the guard's rule). It
-   * said "Workspace not found" to a stranger, and 403 "This space is private",
-   * "This list is private", "This task is private" or "not shared with you" to
-   * a member — so a task another task points at (a dependency, a parent) said
-   * what kind of wall stood in front of it.
    */
   private async assertTaskReadAccess(taskId: string, actorId: string, opts: { asAssignee?: boolean } = {}) {
     const [ctx] = await this.db
@@ -762,13 +747,11 @@ export class TasksService {
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
       .where(eq(tasks.id, taskId))
       .limit(1)
-    const notThere = () => new NotFoundException('Task not found')
-    if (!ctx) throw notThere()
-    const access = await this.containerReadAccess(ctx, actorId)
-    if (!access) throw notThere()
+    if (!ctx) throw new NotFoundException('Task not found')
+    const access = await this.assertContainerReadAccess(ctx, actorId)
     // A guest reads only the tasks in their reach (`guest-reach.ts`), assigned or not.
     if (access.workspaceRole === 'guest' && !(await guestMayRead(this.db, actorId, 'task', taskId))) {
-      throw notThere()
+      throw new ForbiddenException('This task is not shared with you')
     }
     /*
      * PER-ITEM PRIVACY, as `ResourceMemberGuard` enforces it on the routes that
@@ -781,7 +764,7 @@ export class TasksService {
     if (ctx.listVisibility === 'private' || ctx.taskVisibility === 'private') {
       const isManager = isManagerRole(access.workspaceRole)
       if (!canSeePrivateItem({ visibility: ctx.listVisibility, createdById: ctx.listCreatedById }, { userId: actorId, isManager })) {
-        throw notThere()
+        throw new ForbiddenException('This list is private')
       }
       if (ctx.taskVisibility === 'private') {
         // `asAssignee`: the question is whether they could see it ONCE
@@ -799,7 +782,7 @@ export class TasksService {
             { userId: actorId, isManager, isAssignee: Boolean(assigned) },
           )
         ) {
-          throw notThere()
+          throw new ForbiddenException('This task is private')
         }
       }
     }
@@ -808,14 +791,11 @@ export class TasksService {
 
   /**
    * Whether `actorId` may read what sits in this container — the workspace, a
-   * private space, folder or project — with their role there, or null. Split
-   * out of `assertTaskReadAccess` so the same rule answers for a task that does
-   * not exist YET: `createTask` checks its assignees against the list before
-   * it writes anything. A refusal is null, not a sentence naming the container
-   * that refused: each caller answers it as its own miss
-   * (`found-30-sep/private-task-reads-say-403`).
+   * private space, a private project. Split out of `assertTaskReadAccess` so
+   * the same rule answers for a task that does not exist YET: `createTask`
+   * checks its assignees against the list before it writes anything.
    */
-  private async containerReadAccess<
+  private async assertContainerReadAccess<
     C extends {
       workspaceId: string
       spaceId: string
@@ -823,17 +803,24 @@ export class TasksService {
       projectId: string | null
       projectVisibility: string | null
     },
-  >(ctx: C, actorId: string): Promise<(C & { workspaceRole: string }) | null> {
+  >(ctx: C, actorId: string): Promise<C & { workspaceRole: string }> {
     const [membership] = await this.db
       .select({ role: workspaceMembers.role })
       .from(workspaceMembers)
       .where(and(eq(workspaceMembers.workspaceId, ctx.workspaceId), eq(workspaceMembers.userId, actorId)))
       .limit(1)
-    if (!membership) return null
-    // The shared rule (`containerRefusal`); managers pass it.
+    if (!membership) throw new NotFoundException('Workspace not found')
+
+    // The shared rule (`containerRefusal`), answered in the words of whichever
+    // container refused; managers pass it. This restated the rule to keep its
+    // messages, and missed a private folder the day the rule learnt one.
+    const withRole = { ...ctx, workspaceRole: membership.role as string }
     const refusal = await containerRefusal(this.db, ctx, { userId: actorId, workspaceRole: membership.role as string })
-    if (refusal) return null
-    return { ...ctx, workspaceRole: membership.role as string }
+    if (refusal === 'space') throw new ForbiddenException('This space is private')
+    if (refusal === 'folder') throw new ForbiddenException('This folder is private')
+    if (refusal === 'project') throw new ForbiddenException('This project is private')
+
+    return withRole
   }
 
   /**
@@ -884,12 +871,7 @@ export class TasksService {
       .where(eq(tasks.id, otherTaskId))
       .limit(1)
     if (!other || other.workspaceId !== workspaceId) throw new NotFoundException(notFound)
-    // A task the caller may not open is the same miss, in the same words: a
-    // dependency on a private task said "This task is private" where one on an
-    // id naming nothing said "Related task not found" (`found-30-sep/private-task-reads-say-403`).
-    await this.assertTaskReadAccess(otherTaskId, actorId).catch((err) => {
-      throw err instanceof NotFoundException ? new NotFoundException(notFound) : err
-    })
+    await this.assertTaskReadAccess(otherTaskId, actorId)
   }
 
   /**
@@ -948,13 +930,14 @@ export class TasksService {
       // A private list is its creator's and the managers' — the list half of
       // the item rule in `assertTaskReadAccess`. The task's own privacy does
       // not apply: somebody it is born assigned to is one of its assignees.
-      const access = await this.containerReadAccess(ctx, userId)
-      const visible =
-        !!access &&
-        canSeePrivateItem(
-          { visibility: ctx.listVisibility, createdById: ctx.listCreatedById },
-          { userId, isManager: isManagerRole(access.workspaceRole) },
-        )
+      const visible = await this.assertContainerReadAccess(ctx, userId).then(
+        (access) =>
+          canSeePrivateItem(
+            { visibility: ctx.listVisibility, createdById: ctx.listCreatedById },
+            { userId, isManager: isManagerRole(access.workspaceRole) },
+          ),
+        () => false,
+      )
       if (!visible) throw new BadRequestException(PERSON_CANNOT_SEE[as])
     }
   }
@@ -1986,19 +1969,8 @@ export class TasksService {
     isMilestone?: boolean
     taskTypeId?: string | null
     createdById: string
-    /**
-     * The zone its writer reads a day in (`writerZone`, from the `X-Time-Zone`
-     * the web sends): a day beside a moment is ordered as they see it. None
-     * for a duplicate or a recurrence, whose dates nobody typed just now.
-     */
-    writerZone?: string
   }) {
     await this.assertCanCreateTaskIn(data.listId, data.createdById)
-    // What its estimate and dates may be (`task-values.ts`), asked of every
-    // way a task is made — the route, a template, a duplicate, a recurrence —
-    // before anything is written.
-    assertEstimate(data.timeEstimate)
-    assertDatesInOrder(data.startDate, data.dueDate, data.writerZone)
     // Cap nesting at two levels (parent → subtask). A subtask cannot itself have
     // subtasks, so reject a parent that is already a subtask (Plan §4).
     if (data.parentTaskId) {
@@ -3715,8 +3687,6 @@ export class TasksService {
       visibility: 'public' | 'private'
       parentTaskId: string | null
     }>,
-    /** The zone its writer reads a day in (`createTask`'s `writerZone`). */
-    { writerZone }: { writerZone?: string } = {},
   ) {
     // FIRST, before anything reads it: only fields this update may write. The
     // parameter's type is a promise the runtime never kept — both the route and
@@ -3761,25 +3731,8 @@ export class TasksService {
     if (patch.coverStorageKey != null && !isTaskOwnObjectKey(patch.coverStorageKey, taskId, access.workspaceId)) {
       throw new BadRequestException('A cover image must be one of this task’s own attachments')
     }
-    // `found-30-sep/task-estimate-below-zero` — none, or whole seconds from nought.
-    if ('timeEstimate' in patch) assertEstimate(patch.timeEstimate)
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
-    /*
-     * `found-30-sep/a-task-starts-after-it-is-due` — the dates the task WOULD
-     * hold: what this write names, and what it keeps of the row for the other.
-     * Moving one date past the other is refused as sending both so is; clearing
-     * either, or moving both in order, is taken. Asked only when a date is
-     * written, so a task that already holds them the wrong way round (made
-     * before this rule) can still be renamed, closed or given a start that fits.
-     */
-    if ('startDate' in patch || 'dueDate' in patch) {
-      assertDatesInOrder(
-        'startDate' in patch ? patch.startDate : before.startDate,
-        'dueDate' in patch ? patch.dueDate : before.dueDate,
-        writerZone,
-      )
-    }
 
     // Re-parenting: null promotes a subtask to a task of its own. Anything else
     // has to keep the one-level rule that createTask enforces, and must not
@@ -4028,8 +3981,6 @@ export class TasksService {
         type: DependencyType
       }>
     }>,
-    /** The zone its writer reads a day in (`createTask`'s `writerZone`), asked of every task. */
-    { writerZone }: { writerZone?: string } = {},
   ) {
     const uniqueTaskIds = [...new Set(taskIds)].filter(Boolean)
     if (uniqueTaskIds.length === 0) {
@@ -4041,17 +3992,6 @@ export class TasksService {
     if (Object.keys(patch).length === 0) {
       throw new BadRequestException('patch is required')
     }
-    /*
-     * WHAT IS WRONG WHATEVER THE TASK, REFUSED FOR THE WHOLE REQUEST, before any
-     * task is changed: an estimate below nought
-     * (`found-30-sep/task-estimate-below-zero`) and two dates in the wrong order
-     * (`found-30-sep/a-task-starts-after-it-is-due`). One date moved past the
-     * other a task holds depends on that task, and `updateTask` refuses it task
-     * by task: that task is reported under `failed` with the reason, and the
-     * rest are changed.
-     */
-    if ('timeEstimate' in patch) assertEstimate(patch.timeEstimate)
-    if ('startDate' in patch && 'dueDate' in patch) assertDatesInOrder(patch.startDate, patch.dueDate, writerZone)
 
     const fieldPatch: Partial<{
       priority: TaskPriority
@@ -4109,7 +4049,7 @@ export class TasksService {
       try {
         let next = null
         if (Object.keys(fieldPatch).length > 0) {
-          next = await this.updateTask(taskId, actorId, fieldPatch, { writerZone })
+          next = await this.updateTask(taskId, actorId, fieldPatch)
         } else {
           await this.assertTaskWriteAccess(taskId, actorId)
         }
@@ -4253,26 +4193,6 @@ export class TasksService {
       assigneeIds = (source.assignees ?? []).map((assignee) => assignee.userId)
     }
 
-    /*
-     * THE NEXT ONE STARTS NO LATER THAN IT IS DUE
-     * (`found-30-sep/a-task-starts-after-it-is-due`). A rule moves each date on
-     * its own, and a monthly one puts both on the same day, each keeping its
-     * time: a task starting at 14:00 and due at 09:00 a fortnight later would
-     * come round starting five hours after it was due, and `createTask` now
-     * refuses that — which, on completion, would stop the task recurring
-     * without a word. Where that happens the start keeps its old distance
-     * before the due date; a task that already started after it was due (made
-     * before the rule) comes round with no start.
-     */
-    let nextStart = shift(source.startDate)
-    const nextDue = shift(source.dueDate)
-    if (nextStart && nextDue && startsAfterDue(nextStart, nextDue)) {
-      const span = source.startDate && source.dueDate
-        ? new Date(source.dueDate).getTime() - new Date(source.startDate).getTime()
-        : -1
-      nextStart = span >= 0 ? new Date(nextDue.getTime() - span) : undefined
-    }
-
     const created = await this.createTask({
       listId: source.listId,
       title: source.title,
@@ -4285,11 +4205,9 @@ export class TasksService {
         (source.statusCategory as StatusCategory) === 'closed'
           ? undefined
           : source.status,
-      startDate: nextStart,
-      dueDate: nextDue,
-      // A task made before the estimate rule may hold one below nought; the
-      // next occurrence carries none rather than failing to come round.
-      timeEstimate: carriedEstimate(source.timeEstimate),
+      startDate: shift(source.startDate),
+      dueDate: shift(source.dueDate),
+      timeEstimate: source.timeEstimate ?? undefined,
       createdById: actorId,
       assigneeIds,
       parentTaskId: source.parentTaskId ?? undefined,
@@ -4507,27 +4425,60 @@ export class TasksService {
    *   · the SAME workspace — a list elsewhere answers NOT FOUND rather than
    *     "different workspace", which would confirm a guessed id exists;
    *   · the space's create gate — `edit` or above, like any new task there;
-   *   · the list's read rule (`readableList`): the container rule and the
-   *     private-list rule. A list the caller may not open is not a
-   *     destination they can name, and is answered as one that is not there
-   *     (`found-30-sep/private-task-reads-say-403`). This asked the container
-   *     rule alone, so a member moved their own task into another's private
-   *     list in an open space (201, measured on lane 2) and lost it there; and
-   *     a list in a private space was 403 "You do not have access to that
-   *     list" where a missing one was 404. Asked BEFORE the create gate, whose
-   *     403 would otherwise say that a list the caller may not open is there.
+   *   · private-container visibility — a list in a private space or project
+   *     the caller cannot see is not a destination they can name;
+   *   · the private-list rule — a private list is its creator's, the
+   *     managers' and a super_admin's, and is refused as the route guard
+   *     refuses it, 403 "This list is private". Only the container rule was
+   *     asked, so a member moved their own task into another's private list
+   *     in an open space (201, measured on lane 2) and lost it there
+   *     (`found-30-sep/private-task-reads-say-403`).
    */
   async moveTask(taskId: string, actorId: string, targetListId: string, position: number) {
     if (typeof targetListId !== 'string' || !targetListId) {
       throw new BadRequestException('listId is required')
     }
     const access = await this.assertTaskWriteAccess(taskId, actorId)
-    const [account] = await this.db.select({ role: users.role }).from(users).where(eq(users.id, actorId)).limit(1)
-    const target = isUuid(targetListId)
-      ? await readableList(this.db, access.workspaceId, targetListId, { id: actorId, role: account?.role ?? null })
-      : null
-    if (!target) throw new NotFoundException('Target list not found')
+    const [target] = await this.db
+      .select({
+        workspaceId: spaces.workspaceId,
+        spaceId: spaces.id,
+        spaceVisibility: spaces.visibility,
+        projectId: projects.id,
+        projectVisibility: projects.visibility,
+        listVisibility: lists.visibility,
+        listCreatedById: lists.createdById,
+      })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(lists.id, targetListId))
+      .limit(1)
+    if (!target || target.workspaceId !== access.workspaceId) {
+      throw new NotFoundException('Target list not found')
+    }
     await assertCanCreateInSpace(this.db, { spaceId: target.spaceId, actorId, kind: 'task' })
+    const [membership] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, target.workspaceId), eq(workspaceMembers.userId, actorId)))
+      .limit(1)
+    // A super_admin opens every private space, project and list, as the guard
+    // lets them, whatever their role in this workspace; so they may move a task
+    // into any of them, as they may make one there.
+    const [account] = await this.db.select({ role: users.role }).from(users).where(eq(users.id, actorId)).limit(1)
+    const superAdmin = account?.role === 'super_admin'
+    if (!superAdmin && !(await checkContainerAccess(this.db, target, { userId: actorId, workspaceRole: membership?.role }))) {
+      throw new ForbiddenException('You do not have access to that list')
+    }
+    if (
+      !canSeePrivateItem(
+        { visibility: target.listVisibility, createdById: target.listCreatedById },
+        { userId: actorId, isManager: superAdmin || isManagerRole(membership?.role) },
+      )
+    ) {
+      throw new ForbiddenException('This list is private')
+    }
 
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
@@ -4956,26 +4907,6 @@ export class TasksService {
     const sourceChildren = source
       ? await this.db.select({ id: tasks.id }).from(tasks).where(eq(tasks.parentTaskId, taskId))
       : []
-
-    /*
-     * WHAT THE MERGER MAY NOT OPEN IS NOT THERE, in the words of what is not
-     * (`found-30-sep/private-task-reads-say-403`, review) — asked before the
-     * merge rule, whose refusals describe the two tasks. The target is a task
-     * this one points at, so it obeys the reference rule dependencies and
-     * parents obey (`assertTaskReference`): in the source's workspace, one the
-     * merger may open, and otherwise "The task to merge into was not found",
-     * as for an id naming nothing. It was asked only through the write rule,
-     * after the merge rule: a private target said "Task not found" where
-     * nothing said "The task to merge into was not found"; a private subtask
-     * said "Subtasks only nest one level deep" (400); a binned source said
-     * "A task in the bin cannot be merged" (400) to somebody who may not open
-     * it; and a user of another organisation merging any real task into
-     * nothing was told the TARGET was missing.
-     */
-    if (!source) throw new NotFoundException(MERGE_REFUSAL_MESSAGE['source-missing'])
-    const { workspaceId } = await this.assertTaskReadAccess(taskId, actorId)
-    await this.assertTaskReference(targetTaskId, workspaceId, actorId, MERGE_REFUSAL_MESSAGE['target-missing'])
-
     const refusal = mergeRefusal(
       source ?? null,
       target ?? null,
@@ -4988,8 +4919,7 @@ export class TasksService {
 
     // Both tasks must be somewhere this person may write. Checked for the
     // target too: merging is a write to it, and a task you cannot edit is not a
-    // task you may pour another one into. Both are readable by now, so what
-    // these refuse is the merger's to know about.
+    // task you may pour another one into.
     await this.assertTaskWriteAccess(taskId, actorId)
     await this.assertTaskWriteAccess(targetTaskId, actorId)
 

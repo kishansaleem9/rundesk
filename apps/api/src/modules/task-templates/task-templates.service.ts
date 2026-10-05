@@ -23,7 +23,7 @@ import { TasksService } from '../tasks/tasks.service'
 import { SecurityService } from '../security/security.service'
 import { CustomFieldsService, fieldIsOnList, fieldIsOnTask } from '../custom-fields/custom-fields.service'
 import { readableTask } from '../../common/permissions/read-access'
-import { DEFAULT_LABEL_COLOR, carriedEstimate, startsAfterDue, type LabelByName } from '../tasks/task-values'
+import { DEFAULT_LABEL_COLOR, type LabelByName } from '../tasks/task-values'
 
 const NAME_MAX = 120
 const DESCRIPTION_MAX = 1000
@@ -208,16 +208,6 @@ export interface TemplateFormValues {
  *     them or makes them only once the task is made
  *     (`found-30-sep/refused-create-leaves-tags`): they were made here first,
  *     so a create refused for its type or its people left them behind.
- *   · A DATE SET WINS OVER A TEMPLATE DATE IT CONTRADICTS
- *     (`found-30-sep/a-task-starts-after-it-is-due`): the template's start date
- *     landed beside a typed due date, and a task starting in nine days was made
- *     due in three. The date typed stands and the template's is left out, as
- *     ClickUp's picker keeps the date just set and deletes the other; two
- *     typed the wrong way round are refused by `createTask`, as `POST /tasks`
- *     refuses them. A template holding its own two the wrong way round (saved
- *     before templates were checked) gives its due date and no start. Asked
- *     where the person is (`zone`, as `createTask` asks it), so what is kept
- *     here is never what `createTask` then refuses.
  *
  * Checklists, subtasks and custom-field values have no place in the form and
  * come from the template, as they did (`instantiate`).
@@ -226,7 +216,6 @@ export function templateWithForm(
   payload: Pick<TaskTemplatePayload, 'description' | 'priority' | 'timeEstimate' | 'startDateOffsetDays' | 'dueDateOffsetDays' | 'labels'>,
   form: TemplateFormValues,
   now: Date,
-  zone?: string,
 ) {
   const typed = (form.description ?? '').trim()
   const own = (payload.description ?? '').trim()
@@ -237,21 +226,13 @@ export function templateWithForm(
     ...(form.labelsByName ?? []),
   ]
   const assigneeIds = [...new Set(form.assigneeIds ?? [])]
-  const typedStart = form.startDate ? new Date(form.startDate) : undefined
-  const typedDue = form.dueDate ? new Date(form.dueDate) : undefined
-  let startDate = typedStart ?? offsetToDate(now, payload.startDateOffsetDays) ?? undefined
-  let dueDate = typedDue ?? offsetToDate(now, payload.dueDateOffsetDays) ?? undefined
-  if (startsAfterDue(startDate, dueDate, zone)) {
-    if (!typedStart) startDate = undefined
-    else if (!typedDue) dueDate = undefined
-  }
   return {
     description,
     priority: form.priority ?? payload.priority,
     taskTypeId: form.taskTypeId || undefined,
     timeEstimate: form.timeEstimate ?? payload.timeEstimate ?? undefined,
-    startDate,
-    dueDate,
+    startDate: form.startDate ? new Date(form.startDate) : offsetToDate(now, payload.startDateOffsetDays) ?? undefined,
+    dueDate: form.dueDate ? new Date(form.dueDate) : offsetToDate(now, payload.dueDateOffsetDays) ?? undefined,
     labelIds: labelIds.length ? labelIds : undefined,
     labelsByName: labelsByName.length ? labelsByName : undefined,
     assigneeIds: assigneeIds.length ? assigneeIds : undefined,
@@ -441,9 +422,7 @@ export class TaskTemplatesService {
     dto: { name: string; description?: string | null; icon?: string | null },
   ): Promise<TaskTemplateView> {
     const ctx = await this.resolveTaskContext(taskId)
-    // One sentence for the three misses — no task, another workspace's, one the
-    // caller may not open (`found-30-sep/private-task-reads-say-403`).
-    if (!ctx) throw new NotFoundException('Task not found in this workspace')
+    if (!ctx) throw new NotFoundException('Task not found')
     if (ctx.workspaceId !== workspaceId) throw new NotFoundException('Task not found in this workspace')
     await this.assertTaskOpenTo(workspaceId, taskId, actor)
 
@@ -479,8 +458,6 @@ export class TaskTemplatesService {
     templateId: string,
     actor: { id: string; email?: string },
     dto: { listId: string; titleOverride?: string } & TemplateFormValues,
-    /** The zone the person reads a day in (`writerZone`), for the dates typed beside the template. */
-    { writerZone }: { writerZone?: string } = {},
   ) {
     const template = await this.requireTemplate(workspaceId, templateId)
     const listCtx = await this.resolveListContext(dto.listId)
@@ -500,9 +477,8 @@ export class TaskTemplatesService {
     const task = await this.tasksService.createTask({
       listId: dto.listId,
       title: dto.titleOverride?.trim() || payload.title || template.name,
-      ...templateWithForm(payload, dto, now, writerZone),
+      ...templateWithForm(payload, dto, now),
       createdById: actor.id,
-      writerZone,
     })
     if (!task) throw new Error('Task creation returned no row')
 
@@ -557,10 +533,7 @@ export class TaskTemplatesService {
    */
   async duplicateTask(workspaceId: string, taskId: string, actor: { id: string; email?: string; role?: string | null }) {
     const ctx = await this.resolveTaskContext(taskId)
-    // One sentence for the three misses — no task, another workspace's, one the
-    // caller may not open. "Task not found" for the first said the other two
-    // named a task (`found-30-sep/private-task-reads-say-403`).
-    if (!ctx) throw new NotFoundException('Task not found in this workspace')
+    if (!ctx) throw new NotFoundException('Task not found')
     if (ctx.workspaceId !== workspaceId) throw new NotFoundException('Task not found in this workspace')
     await this.assertTaskOpenTo(workspaceId, taskId, actor)
 
@@ -594,12 +567,7 @@ export class TaskTemplatesService {
       title: `${payload.title || 'Task'} (copy)`,
       description: payload.description ?? undefined,
       priority: payload.priority,
-      // A task made before estimates were checked may hold one below nought
-      // (`found-30-sep/task-estimate-below-zero`); its copy holds none, and so
-      // does each subtask's copy (`materialiseSubtasks`). Its dates are copied
-      // as they are, and a pair the wrong way round is refused with the
-      // reason, to be put right on the original — before anything is made.
-      timeEstimate: carriedEstimate(payload.timeEstimate),
+      timeEstimate: payload.timeEstimate ?? undefined,
       startDate: src?.startDate ?? undefined,
       dueDate: src?.dueDate ?? undefined,
       labelIds: labelIds.length ? labelIds : undefined,
@@ -747,7 +715,8 @@ export class TaskTemplatesService {
       description: task.description,
       priority: task.priority as TaskPriority,
       timeEstimate: task.timeEstimate ?? null,
-      ...offsetsFromTask(now, task.startDate, task.dueDate),
+      startDateOffsetDays: dateToOffsetDays(now, task.startDate),
+      dueDateOffsetDays: dateToOffsetDays(now, task.dueDate),
       labels: labelRows.map((l) => l.name),
       checklists: checklistRows.map((c) => ({
         title: c.title,
@@ -891,11 +860,7 @@ export class TaskTemplatesService {
         title: st.title,
         description: st.description ?? undefined,
         priority: st.priority,
-        // One the rule refuses — a duplicated subtask's below nought, written
-        // before estimates were checked; a template's past what the column
-        // holds — is none on the copy, rather than refusing this subtask
-        // after the parent, its checklists and its values are made.
-        timeEstimate: carriedEstimate(st.timeEstimate),
+        timeEstimate: st.timeEstimate ?? undefined,
         dueDate: offsetToDate(now, st.dueDateOffsetDays) ?? undefined,
         createdById: actorId,
       })
@@ -964,17 +929,6 @@ export class TaskTemplatesService {
    */
   private normalisePayload(raw: Partial<TaskTemplatePayload>): TaskTemplatePayload {
     const priority = clampPriority(raw.priority)
-    const startDateOffsetDays = clampNumber(raw.startDateOffsetDays, -3650, 3650)
-    const dueDateOffsetDays = clampNumber(raw.dueDateOffsetDays, -3650, 3650)
-    /*
-     * A TEMPLATE THAT STARTS AFTER IT IS DUE IS REFUSED
-     * (`found-30-sep/a-task-starts-after-it-is-due`), as a task that does is:
-     * every task made from it would start after it was due. Whole days from the
-     * day it is used, so compared as days.
-     */
-    if (startDateOffsetDays !== null && dueDateOffsetDays !== null && startDateOffsetDays > dueDateOffsetDays) {
-      throw new BadRequestException('A template cannot start after it is due: its start date is after its due date.')
-    }
     return {
       title: String(raw.title ?? '').slice(0, 500),
       description:
@@ -983,8 +937,8 @@ export class TaskTemplatesService {
           : String(raw.description).slice(0, 10_000),
       priority,
       timeEstimate: clampNumber(raw.timeEstimate, 0),
-      startDateOffsetDays,
-      dueDateOffsetDays,
+      startDateOffsetDays: clampNumber(raw.startDateOffsetDays, -3650, 3650),
+      dueDateOffsetDays: clampNumber(raw.dueDateOffsetDays, -3650, 3650),
       labels: (raw.labels ?? [])
         .filter((s): s is string => typeof s === 'string')
         .map((s) => s.trim())
@@ -1064,31 +1018,4 @@ function dateToOffsetDays(now: Date, value: Date | null): number | null {
   const ms = value.getTime() - now.getTime()
   if (!Number.isFinite(ms)) return null
   return Math.round(ms / (24 * 60 * 60 * 1000))
-}
-
-/**
- * A TASK'S TWO DATES AS A TEMPLATE'S DAYS FROM NOW, IN THE ORDER THE TASK HOLDS
- * THEM (`found-30-sep/a-task-starts-after-it-is-due`, found by a review of
- * this work). Each date is rounded to whole days on its own, so two in order
- * can round apart: due "the 4th" with no time (UTC midnight) and a start at
- * 15:00 that day, saved at 14:00 UTC on the 30th, are 3.4 and 4.0 days away,
- * and came out due in 3 and starting in 4 — which a template may not hold, so
- * Save as template was refused (400) for a task every write takes, depending
- * on the time of day it was saved. Where the task's own dates are in order
- * (`startsAfterDue`, asked as of any reader) the start is kept no later than
- * the due: the same day. A task that itself starts after it is due, made
- * before the rule, is left as it is and refused with the reason, as its
- * duplicate is.
- */
-export function offsetsFromTask(
-  now: Date,
-  start: Date | null,
-  due: Date | null,
-): { startDateOffsetDays: number | null; dueDateOffsetDays: number | null } {
-  const startDateOffsetDays = dateToOffsetDays(now, start)
-  const dueDateOffsetDays = dateToOffsetDays(now, due)
-  if (startDateOffsetDays !== null && dueDateOffsetDays !== null && startDateOffsetDays > dueDateOffsetDays && !startsAfterDue(start, due)) {
-    return { startDateOffsetDays: dueDateOffsetDays, dueDateOffsetDays }
-  }
-  return { startDateOffsetDays, dueDateOffsetDays }
 }

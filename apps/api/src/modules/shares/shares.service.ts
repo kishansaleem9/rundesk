@@ -7,7 +7,6 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
-import { isUuid } from '../../common/validation/uuid'
 import { SecurityService } from '../security/security.service'
 import { EmailService } from '../email/email.service'
 import { ConfigService } from '@nestjs/config'
@@ -686,8 +685,6 @@ export class SharesService {
     requester: { id: string; name?: string | null; email?: string | null },
   ): Promise<{ status: 'sent' | 'already_asked' | 'no_owners'; notified: number }> {
     if (!SHARE_TYPES.includes(type)) throw new BadRequestException('unknown object type')
-    // An id that cannot be one names nothing, and would fail the uuid column below.
-    if (!isUuid(objectId)) throw new BadRequestException('Malformed object id')
 
     /*
      * Who can actually grant it: whoever holds admin on the object itself, plus
@@ -749,19 +746,8 @@ export class SharesService {
       .values({ workspaceId, objectType: type, objectId, requesterId: requester.id })
       .catch(() => undefined)
 
-    /*
-     * AN ID THAT NAMES NOTHING HERE IS ASKED ABOUT, AND CARRIED TO NOBODY
-     * (`found-30-sep/private-task-reads-say-403`). The task sheet offers the ask
-     * on its "not found", which is now the answer for a task the reader may not
-     * open AND for one that is not there — so the ask is recorded and answered
-     * alike for both, and only one that names an object of this kind in this
-     * workspace reaches the people who could grant it. Without this a link to a
-     * deleted task sent every admin "… asked for access to this task", with no
-     * task to give.
-     */
     const meta = (await this.resolveSharedBatch(workspaceId, type, [objectId])).get(objectId)
-    if (!meta) return { status: 'sent', notified: 0 }
-    const what = meta.name
+    const what = meta?.name ?? `this ${type}`
     const who = requester.name?.trim() || requester.email || 'Someone'
 
     let notified = 0
@@ -773,7 +759,7 @@ export class SharesService {
         type: 'access_requested',
         title: `${who} asked for access to ${what}`,
         body: `${who} tried to open ${what} and could not. You can give them access from its Share panel.`,
-        target: { entityType: type, entityId: objectId, url: meta.url },
+        target: { entityType: type, entityId: objectId, url: meta?.url ?? `/app/${workspaceId}` },
       })
       // Delivery, not the row — see the de-dup note above. Somebody who took
       // the email and not the bell was told.

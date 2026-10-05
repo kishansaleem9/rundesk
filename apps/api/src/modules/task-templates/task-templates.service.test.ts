@@ -5,9 +5,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { plainToInstance } from 'class-transformer'
 import { validate } from 'class-validator'
-import { TaskTemplatesService, fitTemplateValue, offsetsFromTask, templateWithForm } from './task-templates.service'
+import { TaskTemplatesService, fitTemplateValue, templateWithForm } from './task-templates.service'
 import { CreateTaskDto } from '../tasks/dto/task.dto'
-import { assertEstimate } from '../tasks/task-values'
 
 /**
  * The service has two clearly testable surfaces:
@@ -493,22 +492,6 @@ describe('TaskTemplatesService — a task its caller may not open is not copied 
     assert.equal(inserted.length, 0)
   })
 
-  /*
-   * `found-30-sep/private-task-reads-say-403`: the three misses read alike — a
-   * task in no workspace said "Task not found", where one found and refused
-   * said "Task not found in this workspace", so the words told a caller that
-   * the id named a task.
-   */
-  it('answers a task that is not there in the words it answers one its caller may not open', async () => {
-    const refused = await new TaskTemplatesService(
-      recordingDb([[{ workspaceId: WORKSPACE_ID, spaceId: 's', projectId: 'p', listId: 'l' }], []]).db, { createTask: mock.fn() } as any, securityStub,
-    ).duplicateTask(WORKSPACE_ID, T1, ACTOR).then(() => null, (e: Error) => e)
-    const missing = await new TaskTemplatesService(recordingDb([[]]).db, { createTask: mock.fn() } as any, securityStub)
-      .duplicateTask(WORKSPACE_ID, T1, ACTOR).then(() => null, (e: Error) => e)
-    assert.ok(refused instanceof NotFoundException && missing instanceof NotFoundException, `refused ${refused?.message}, missing ${missing?.message}`)
-    assert.equal(missing.message, refused.message)
-  })
-
   it('refuses to save such a task as a template, and saves nothing', async () => {
     const { db, inserted } = recordingDb([[{ workspaceId: WORKSPACE_ID, spaceId: 's', projectId: 'p', listId: 'l' }], []])
     await assert.rejects(
@@ -832,7 +815,7 @@ describe('TaskTemplatesService.instantiate — a refused create makes no tag (fo
   })
 
   it('duplicates a task with its own tags by id, and hands createTask no tag to make', async () => {
-    const task = { title: 'Tagged', description: null, priority: 'normal', timeEstimate: -60, startDate: null, dueDate: null }
+    const task = { title: 'Tagged', description: null, priority: 'normal', timeEstimate: null, startDate: null, dueDate: null }
     // The task's place, the read rule, its dates, assignees and tags (by id); the task, its label names, checklists, subtasks and values.
     const { db, inserted } = recordingDb([
       [{ workspaceId: WORKSPACE_ID, spaceId: 's', projectId: 'p', listId: 'l' }],
@@ -845,61 +828,39 @@ describe('TaskTemplatesService.instantiate — a refused create makes no tag (fo
     const asked = createTask.mock.calls[0]?.arguments[0]
     assert.deepEqual(asked?.labelIds, ['label-a', 'label-b'])
     assert.equal(asked?.labelsByName, undefined)
-    // An estimate below nought on the original (made before estimates were checked) is none on the copy.
-    assert.equal(asked?.timeEstimate, undefined)
     assert.equal(inserted.length, 0)
   })
 })
 
 /*
- * `found-30-sep/a-task-starts-after-it-is-due` — the template's start date landed
- * beside a typed due date, and the task started six days after it was due. The
- * date typed stands; the template's that it contradicts is left out.
+ * EACH DATE IS THE FORM'S WHERE IT WAS SET AND THE TEMPLATE'S WHERE IT WAS NOT,
+ * whichever way round the two then fall (the owner's decision of 1 October on
+ * `found-30-sep/a-task-starts-after-it-is-due`).
  */
-describe('templateWithForm — a date set wins over a template date it contradicts (found-30-sep/a-task-starts-after-it-is-due)', () => {
+describe('templateWithForm — a date set wins over the template’s, and the other date is the template’s', () => {
   const NOW = new Date('2026-09-30T12:00:00.000Z')
   const base = { description: null, priority: 'normal' as const, timeEstimate: null, labels: [] as string[] }
-  it('leaves out the template’s start after a typed due date, and its due date before a typed start', () => {
+  it('keeps the template’s start beside a typed due date before it, and its due date beside a typed start after it, and passes two typed dates on as typed', () => {
     const late = templateWithForm({ ...base, startDateOffsetDays: 9, dueDateOffsetDays: null }, { dueDate: '2026-10-03T12:00:00.000Z' }, NOW)
-    assert.equal(late.startDate, undefined)
+    assert.equal(late.startDate?.toISOString(), '2026-10-09T12:00:00.000Z')
     assert.equal(late.dueDate?.toISOString(), '2026-10-03T12:00:00.000Z')
     const early = templateWithForm({ ...base, startDateOffsetDays: null, dueDateOffsetDays: 2 }, { startDate: '2026-10-09T12:00:00.000Z' }, NOW)
     assert.equal(early.startDate?.toISOString(), '2026-10-09T12:00:00.000Z')
-    assert.equal(early.dueDate, undefined)
-  })
-
-  /*
-   * Asked where the person is, as `createTask` asks it: kept here and refused
-   * there would refuse a create for a date the person did not type.
-   */
-  it('asks where the person is whether a template’s start fits beside a typed due day with no time', () => {
-    const dueThe4th = { dueDate: '2026-10-04' }
-    // Four days from noon UTC: 12:00Z on the 4th — 02:00 on the 5th at UTC+14, 05:00 on the 4th in Los Angeles.
-    const tpl = { ...base, startDateOffsetDays: 4, dueDateOffsetDays: null }
-    assert.equal(templateWithForm(tpl, dueThe4th, NOW, 'Pacific/Kiritimati').startDate, undefined)
-    assert.equal(templateWithForm(tpl, dueThe4th, NOW, 'America/Los_Angeles').startDate?.toISOString(), '2026-10-04T12:00:00.000Z')
-    assert.equal(templateWithForm(tpl, dueThe4th, NOW).startDate?.toISOString(), '2026-10-04T12:00:00.000Z')
-  })
-
-  it('keeps the template’s date where it fits beside the typed one, and passes two typed dates on as typed', () => {
-    const fits = templateWithForm({ ...base, startDateOffsetDays: 1, dueDateOffsetDays: null }, { dueDate: '2026-10-03T12:00:00.000Z' }, NOW)
-    assert.equal(fits.startDate?.toISOString(), '2026-10-01T12:00:00.000Z')
+    assert.equal(early.dueDate?.toISOString(), '2026-10-02T12:00:00.000Z')
     const typed = templateWithForm({ ...base, startDateOffsetDays: null, dueDateOffsetDays: null }, { startDate: '2026-10-10T12:00:00.000Z', dueDate: '2026-10-03T12:00:00.000Z' }, NOW)
-    // Both typed the wrong way round are the caller's to be told of: `createTask` refuses them.
     assert.equal(typed.startDate?.toISOString(), '2026-10-10T12:00:00.000Z')
     assert.equal(typed.dueDate?.toISOString(), '2026-10-03T12:00:00.000Z')
   })
 })
 
 /*
- * Found by a review of this work. `createTask` refuses an estimate below
- * nought, and a duplicate's subtasks were handed theirs as stored: a subtask
- * holding -60 (written before the rule) was refused after the copy, its
- * checklists and its values were made — a half-made copy, one more each try.
+ * A DUPLICATE COPIES EACH ESTIMATE AS IT IS HELD, the task's and each subtask's,
+ * one below nought among them (the owner's decision of 1 October on
+ * `found-30-sep/task-estimate-below-zero`).
  */
-describe('TaskTemplatesService.duplicateTask — a subtask’s estimate below nought (found-30-sep/task-estimate-below-zero)', () => {
-  it('makes the whole copy — its subtask with no estimate — where the subtask holds one below nought, and records the duplicate', async () => {
-    const task = { title: 'Launch', description: null, priority: 'normal', timeEstimate: 600, startDate: null, dueDate: null }
+describe('TaskTemplatesService.duplicateTask — each estimate copied as it is held', () => {
+  it('copies the task’s estimate and its subtask’s as they are held, below nought among them, and records the duplicate', async () => {
+    const task = { title: 'Launch', description: null, priority: 'normal', timeEstimate: -600, startDate: null, dueDate: null }
     const sub = { title: 'Sub', description: null, priority: 'normal', timeEstimate: -60, dueDate: null }
     // The task's place, the read rule, its dates, assignees and tags; the task, its label names, checklists, subtasks and values.
     const { db } = recordingDb([
@@ -908,62 +869,29 @@ describe('TaskTemplatesService.duplicateTask — a subtask’s estimate below no
       [{ startDate: null, dueDate: null }], [], [],
       [task], [], [], [sub], [],
     ])
-    // `createTask` as it is: an estimate the rule refuses is a 400.
-    const createTask = mock.fn(async (arg: any) => {
-      assertEstimate(arg.timeEstimate)
-      return { id: arg.parentTaskId ? 'copy-sub' : 'copy-1' }
-    })
+    const createTask = mock.fn(async (arg: any) => ({ id: arg.parentTaskId ? 'copy-sub' : 'copy-1' }))
     const audit = mock.fn(async () => undefined)
     const answer = await new TaskTemplatesService(db, { createTask } as any, { logAuditEvent: audit } as any).duplicateTask(WORKSPACE_ID, T1, ACTOR)
     assert.equal(answer.taskId, 'copy-1')
     const asked = createTask.mock.calls.map((c) => c.arguments[0])
-    assert.deepEqual(asked.map((a) => [a.title, a.parentTaskId, a.timeEstimate]), [['Launch (copy)', undefined, 600], ['Sub', 'copy-1', undefined]])
+    assert.deepEqual(asked.map((a) => [a.title, a.parentTaskId, a.timeEstimate]), [['Launch (copy)', undefined, -600], ['Sub', 'copy-1', -60]])
     assert.equal(audit.mock.callCount(), 1)
   })
 })
 
 /*
- * Found by a review of this work. Save as template turns each date into whole
- * days from now on its own, so two in order could round apart and the new
- * template check refused the save (400) — due "the 4th" with no time and a
- * start at 15:00 that day, saved at 14:00 UTC, came out 3 and 4.
+ * A TEMPLATE MAY START AFTER IT IS DUE, made so or changed so, as a task may
+ * (the owner's decision of 1 October on `found-30-sep/a-task-starts-after-it-is-due`).
  */
-describe('offsetsFromTask — a task’s dates as a template’s days, in the order it holds them (found-30-sep/a-task-starts-after-it-is-due)', () => {
-  it('keeps a start no later than the due where the task’s own dates are in order, and leaves a task that starts after it is due as it is', () => {
-    const at = (iso: string) => new Date(iso)
-    const savedAt2pm = at('2026-09-30T14:00:00Z')
-    // Due the 4th, no time (3.4 days away); a start at 15:00 that day (4.0 days away).
-    assert.deepEqual(offsetsFromTask(savedAt2pm, at('2026-10-04T15:00:00Z'), at('2026-10-04T00:00:00Z')), { startDateOffsetDays: 3, dueDateOffsetDays: 3 })
-    // A start at noon that day splits them whatever the hour it is saved.
-    for (const hour of [0, 6, 11, 13, 18, 23]) {
-      const saved = at(`2026-09-30T${String(hour).padStart(2, '0')}:30:00Z`)
-      const got = offsetsFromTask(saved, at('2026-10-04T12:00:00Z'), at('2026-10-04T00:00:00Z'))
-      assert.ok(got.startDateOffsetDays! <= got.dueDateOffsetDays!, `saved at ${hour}:30 gave ${JSON.stringify(got)}`)
-    }
-    // In order and apart, as they were; one date alone, as it was.
-    assert.deepEqual(offsetsFromTask(savedAt2pm, at('2026-10-01T14:00:00Z'), at('2026-10-06T14:00:00Z')), { startDateOffsetDays: 1, dueDateOffsetDays: 6 })
-    assert.deepEqual(offsetsFromTask(savedAt2pm, at('2026-10-09T14:00:00Z'), null), { startDateOffsetDays: 9, dueDateOffsetDays: null })
-    // A task starting ten days out and due in three (made before the rule) keeps its order, to be refused with the reason.
-    assert.deepEqual(offsetsFromTask(savedAt2pm, at('2026-10-10T14:00:00Z'), at('2026-10-03T14:00:00Z')), { startDateOffsetDays: 10, dueDateOffsetDays: 3 })
-  })
-})
-
-describe('TaskTemplatesService — a template that starts after it is due is refused (found-30-sep/a-task-starts-after-it-is-due)', () => {
-  it('refuses to make or change a template whose start date is after its due date, and saves nothing', async () => {
-    const { db, inserted } = recordingDb([[{ id: 'tpl-1', workspaceId: WORKSPACE_ID, name: 'T', payload: { ...EMPTY } }]])
+describe('TaskTemplatesService — a template whose start is after its due date is kept', () => {
+  it('makes and changes a template whose start date is after its due date, keeping both offsets', async () => {
+    const { db, inserted, set } = recordingDb([[{ id: 'tpl-1', workspaceId: WORKSPACE_ID, name: 'T', payload: { ...EMPTY } }]])
     const svc = new TaskTemplatesService(db, tasksServiceStub, securityStub)
-    await assert.rejects(
-      svc.create(WORKSPACE_ID, ACTOR, { name: 'Late', payload: { startDateOffsetDays: 9, dueDateOffsetDays: 3 } }),
-      (e) => e instanceof BadRequestException && /cannot start after it is due/.test(e.message),
-    )
-    await assert.rejects(
-      svc.update(WORKSPACE_ID, 'tpl-1', ACTOR, { payload: { startDateOffsetDays: 4, dueDateOffsetDays: 1 } }),
-      (e) => e instanceof BadRequestException,
-    )
-    assert.equal(inserted.length, 0)
-    // The same day, or a start with no due date, is kept.
-    const ok = await svc.create(WORKSPACE_ID, ACTOR, { name: 'Same day', payload: { startDateOffsetDays: 3, dueDateOffsetDays: 3 } })
-    assert.equal(ok.payload.startDateOffsetDays, 3)
+    const made = await svc.create(WORKSPACE_ID, ACTOR, { name: 'Late', payload: { startDateOffsetDays: 9, dueDateOffsetDays: 3 } })
+    assert.deepEqual([made.payload.startDateOffsetDays, made.payload.dueDateOffsetDays], [9, 3])
+    assert.deepEqual([inserted[0]?.payload?.startDateOffsetDays, inserted[0]?.payload?.dueDateOffsetDays], [9, 3])
+    await svc.update(WORKSPACE_ID, 'tpl-1', ACTOR, { payload: { startDateOffsetDays: 4, dueDateOffsetDays: 1 } })
+    assert.deepEqual([set[0]?.payload?.startDateOffsetDays, set[0]?.payload?.dueDateOffsetDays], [4, 1])
   })
 })
 
@@ -1007,25 +935,24 @@ describe('POST …/task-templates/:id/instantiate — the body is checked as POS
       assert.deepEqual(await refused(body, sent), [field], `instantiate (body ${bodyType}) refuses ${field} ${JSON.stringify(value)}`)
       assert.deepEqual(await refused(CreateTaskDto, sent), [field], `POST /tasks refuses ${field} ${JSON.stringify(value)} too`)
     }
-    // Below nothing, an estimate is no estimate here.
+    // Below nothing, an estimate is no estimate here (POST /tasks takes one).
     assert.deepEqual(await refused(body, { ...GOOD, timeEstimate: -60 }), ['timeEstimate'])
   })
 
   /*
-   * `found-30-sep/task-estimate-below-zero` — `POST /tasks` took an estimate below
-   * nought (`@IsInt()` alone) where the template's route refused it; and past
-   * what the column holds, Postgres refused it in its own words. And
+   * An estimate on `POST /tasks` is any whole number of seconds, one below nought
+   * among them, where the template's route takes none below nought (the owner's
+   * decision of 1 October on `found-30-sep/task-estimate-below-zero`). And
    * `found-30-sep/refused-create-leaves-tags` — tags by name, on both routes.
    */
-  it('refuses an estimate below nought, or past what the column holds, on both routes, and takes tags by name on both', async () => {
+  it('takes any whole estimate on POST /tasks, below nought among them, where the template’s route refuses one below nought, and takes tags by name on both', async () => {
     const dtos: Record<string, new () => object> = await import('./dto/instantiate-template.dto').catch(() => ({}))
     const body = bodyType ? dtos[bodyType] : undefined
-    for (const timeEstimate of [-60, -1, 2_147_483_648]) {
-      assert.deepEqual(await refused(CreateTaskDto, { ...GOOD, timeEstimate }), ['timeEstimate'], `POST /tasks refuses ${timeEstimate}`)
-      assert.deepEqual(await refused(body, { ...GOOD, timeEstimate }), ['timeEstimate'], `instantiate refuses ${timeEstimate}`)
-    }
-    for (const timeEstimate of [0, 2_147_483_647]) {
+    for (const timeEstimate of [-60, -1, 0, 5400]) {
       assert.deepEqual(await refused(CreateTaskDto, { ...GOOD, timeEstimate }), [], `POST /tasks takes ${timeEstimate}`)
+    }
+    for (const timeEstimate of [-60, -1]) {
+      assert.deepEqual(await refused(body, { ...GOOD, timeEstimate }), ['timeEstimate'], `instantiate refuses ${timeEstimate}`)
     }
     const named = { ...GOOD, labelsByName: [{ name: 'Design', color: '#ff0000' }, { name: 'Later' }] }
     assert.deepEqual(await refused(CreateTaskDto, named), [])

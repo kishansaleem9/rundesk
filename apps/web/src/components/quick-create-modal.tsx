@@ -27,7 +27,6 @@ import { useCreatable } from '../hooks/use-creatable'
 import { usePermissions } from '../hooks/use-permissions'
 import { daysFromToday, localDateTimeValue } from '../lib/local-date'
 import { parseEstimate } from '../lib/estimate'
-import { datesOutOfOrder } from '../lib/task-dates'
 import { CREATE_TYPES, createTypeOf, type CreateKind } from '../lib/create-types'
 
 type Space = { id: string; name: string }
@@ -1489,16 +1488,7 @@ function TaskForm({
 
   // Both halves of Create Task ▾ ask this: a title, a list, nothing in flight
   // (a Create instantly from template is a create too).
-  /*
-   * A START TYPED AFTER THE DUE DATE (`found-30-sep/a-task-starts-after-it-is-due`)
-   * is said beside the dates, and Create waits until it is not: the server
-   * refuses such a task (400). ClickUp's own picker deletes the due date when
-   * a start after it is set, and its users asked on its feedback board for "a
-   * warning" that does "not let you save" instead; this is that warning, and
-   * neither date the person typed is thrown away.
-   */
-  const datesBackwards = datesOutOfOrder(startDate, dueDate)
-  const canCreate = Boolean(title.trim() && listId) && !create.isPending && !instant.isPending && !datesBackwards
+  const canCreate = Boolean(title.trim() && listId) && !create.isPending && !instant.isPending
 
   /*
    * The template chosen under Use Template, and the one-value fields set here
@@ -1923,14 +1913,9 @@ function TaskForm({
           <input
             type="datetime-local"
             value={startDate}
-            max={dueDate || undefined}
             onChange={(e) => setStartDate(e.target.value)}
             data-testid="quick-create-start"
-            aria-invalid={datesBackwards || undefined}
-            className={cn(
-              'h-8 rounded-md border bg-card px-1.5 text-[12px] text-foreground',
-              datesBackwards ? 'border-destructive' : 'border-border',
-            )}
+            className="h-8 rounded-md border border-border bg-card px-1.5 text-[12px] text-foreground"
           />
         </label>
         <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
@@ -1938,14 +1923,9 @@ function TaskForm({
           <input
             type="datetime-local"
             value={dueDate}
-            min={startDate || undefined}
             onChange={(e) => setDueDate(e.target.value)}
             data-testid="quick-create-due"
-            aria-invalid={datesBackwards || undefined}
-            className={cn(
-              'h-8 rounded-md border bg-card px-1.5 text-[12px] text-foreground',
-              datesBackwards ? 'border-destructive' : 'border-border',
-            )}
+            className="h-8 rounded-md border border-border bg-card px-1.5 text-[12px] text-foreground"
           />
         </label>
         <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
@@ -1977,11 +1957,6 @@ function TaskForm({
           />
         </label>
       </div>
-      {datesBackwards && (
-        <p role="alert" data-testid="quick-create-dates-order" className="-mt-1 text-[11px] text-destructive">
-          {t('quickCreate.startAfterDue')}
-        </p>
-      )}
 
       {/* [22:55] "ASSIGN pe main khud ko assign kar sakti hoon ya kisi aur ko" —
           assignment is a create-time decision, not an afterthought. */}

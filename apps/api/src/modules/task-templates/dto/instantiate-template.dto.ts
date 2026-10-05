@@ -8,13 +8,11 @@ import {
   IsOptional,
   IsString,
   IsUUID,
-  Max,
   Min,
   ValidateNested,
 } from 'class-validator'
 import { Type } from 'class-transformer'
 import { LabelByNameDto } from '../../tasks/dto/task.dto'
-import { ESTIMATE_MAX_SECONDS } from '../../tasks/task-values'
 
 const PRIORITIES = ['urgent', 'high', 'normal', 'low'] as const
 
@@ -66,7 +64,6 @@ export class InstantiateTemplateDto {
   @IsOptional()
   @IsInt()
   @Min(0)
-  @Max(ESTIMATE_MAX_SECONDS)
   timeEstimate?: number
 
   @IsOptional()

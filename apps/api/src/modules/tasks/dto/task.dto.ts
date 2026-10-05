@@ -8,13 +8,10 @@ import {
   IsOptional,
   IsString,
   IsUUID,
-  Max,
   MaxLength,
-  Min,
   ValidateNested,
 } from 'class-validator'
 import { Type } from 'class-transformer'
-import { ESTIMATE_MAX_SECONDS } from '../task-values'
 
 /**
  * A tag named for a task being made (`found-30-sep/refused-create-leaves-tags`):
@@ -75,16 +72,8 @@ export class CreateTaskDto {
   @IsDateString()
   dueDate?: string
 
-  /**
-   * Whole seconds, nought or more (`found-30-sep/task-estimate-below-zero`):
-   * `@IsInt()` alone took -3600 and stored it. The template's route refuses one
-   * below nought (`InstantiateTemplateDto`), and so does `createTask` for every
-   * other way a task is made (`assertEstimate`).
-   */
   @IsOptional()
   @IsInt()
-  @Min(0)
-  @Max(ESTIMATE_MAX_SECONDS)
   timeEstimate?: number
 
   @IsOptional()

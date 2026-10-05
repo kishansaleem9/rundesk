@@ -34,12 +34,6 @@ import { assertSpaceLevel, resolveSpaceLevel, spaceLevelReaches, type WithinStep
  * 409 rather than 404: the task is really there and the caller may well be
  * entitled to it. What is wrong is its state, and "restore it first" is a
  * thing they can actually do.
- *
- * ONLY TO SOMEBODY WHO MAY OPEN IT. `assertTaskWritable` asks this after the
- * read rule, never before: asked first, a binned task answered 409 to a
- * stranger and to a member refused its private list, where an id naming
- * nothing answered 404 — so the 409 said that the id was a task, and that it
- * was in the bin (`found-30-sep/private-task-reads-say-403`, review).
  */
 export function assertTaskNotInBin(isArchived: boolean | null | undefined) {
   if (isArchived) {
@@ -88,31 +82,16 @@ export async function assertTaskWritable(
     .innerJoin(spaces, eq(spaces.id, projects.spaceId))
     .where(eq(tasks.id, taskId))
     .limit(1)
-  /*
-   * EVERY REFUSAL OF A TASK ITS CALLER MAY NOT OPEN IS THE MISS: "Task not
-   * found", 404, as for an id that names no task — the read rule's answer
-   * (`assertTaskReadAccess`, `found-30-sep/private-task-reads-say-403`). This
-   * rule is the first check of every task write route with no route guard in
-   * front of it (a change, a move, a merge, the bin, assignees, labels, files,
-   * recurrence, and each id of the bulk editor, whose `failed[].reason` is this
-   * message). It told a user of another organisation "Workspace not found" for
-   * a real task and "Task not found" for none, and answered a binned task 409
-   * before asking whether its caller may open it — so any id said whether it
-   * was somebody's task, and whether it was in the bin.
-   */
-  const notThere = () => new NotFoundException('Task not found')
-  if (!ctx) throw notThere()
+  if (!ctx) throw new NotFoundException('Task not found')
+  if (!opts.allowArchived) assertTaskNotInBin(ctx.isArchived)
 
   const [membership] = await db
     .select({ role: workspaceMembers.role })
     .from(workspaceMembers)
     .where(and(eq(workspaceMembers.workspaceId, ctx.workspaceId), eq(workspaceMembers.userId, actorId)))
     .limit(1)
-  if (!membership) throw notThere()
+  if (!membership) throw new NotFoundException('Workspace not found')
 
-  // A manager opens every task in their workspace, so the bin is theirs to be
-  // told about here; everybody else is told only once the read rule passes.
-  if (isManagerRole(membership.role) && !opts.allowArchived) assertTaskNotInBin(ctx.isArchived)
   if (isManagerRole(membership.role)) return ctx
   /*
    * A GUEST CHANGES WHAT IS SHARED WITH THEM, AT ITS LEVEL — by the same rule,
@@ -140,9 +119,8 @@ export async function assertTaskWritable(
    * space's level is no leave to change what they cannot see.
    */
   if (!(await readableTask(db, ctx.workspaceId, taskId, { id: actorId, role: membership.role }))) {
-    throw notThere()
+    throw new NotFoundException('Task not found')
   }
-  if (!opts.allowArchived) assertTaskNotInBin(ctx.isArchived)
   const [assignee] = await db
     .select({ userId: taskAssignees.userId })
     .from(taskAssignees)

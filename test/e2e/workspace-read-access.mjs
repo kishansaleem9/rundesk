@@ -133,8 +133,7 @@ try {
   await sql`update tasks set visibility = 'private' where id = ${PRIVATE}`
 
   const refused = await M(`/tasks/list/${PRIVATE_LIST}`)
-  // Refused as a list that is not there (404, `found-30-sep/private-task-reads-say-403`).
-  if (refused.status !== 404) throw new Error(`the member was not refused the private list (${said(refused)}), so nothing here would mean anything`)
+  if (refused.status !== 403) throw new Error(`the member was not refused the private list (${said(refused)}), so nothing here would mean anything`)
 
   const ids = (res) => (res.data ?? []).map((t) => t.id)
   const shown = (res) => JSON.stringify((res.data ?? []).map((t) => `${t.title}${t.spaceName ? ` [${t.spaceName}]` : ''}`)).slice(0, 220)

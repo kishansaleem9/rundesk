@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Lock, Check } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
-import { offersRequestAccess } from './request-access-offer'
 
 /** The object kinds the sharing API can grant access to. */
 export type RequestableType =
@@ -17,13 +16,10 @@ export type RequestableType =
  * called them. Hitting a private object was still a dead end that said
  * "not found" and stopped.
  *
- * Rendered on the 404 (`offersRequestAccess`), in words that do not say
- * whether anything is there. It was rendered only on a 403, back when the
- * resource guard answered 403 for an object that existed and 404 for one that
- * did not — so the card was itself the confirmation that the id named
- * something. Both are 404 now (`found-30-sep/private-task-reads-say-403`), and
- * the ask is recorded alike for both; only one about an object that is there
- * reaches anybody.
+ * Rendered ONLY on a 403. That distinction is doing real work: the resource
+ * guard throws 403 for an object that exists and 404 for one that does not, so
+ * a request button on a 404 would confirm the existence of things the caller
+ * was never told about — the reverse of what the private flag is for.
  */
 export function RequestAccessCard({
   workspaceId,
@@ -34,7 +30,7 @@ export function RequestAccessCard({
   workspaceId: string | undefined
   type: RequestableType
   objectId: string | undefined
-  /** The failure that produced this screen. Anything but a 404 renders nothing. */
+  /** The failure that produced this screen. Anything but a 403 renders nothing. */
   error: unknown
 }) {
   const { t } = useTranslation()
@@ -57,7 +53,8 @@ export function RequestAccessCard({
     onSettled: () => setAsked(true),
   })
 
-  if (!offersRequestAccess(error, workspaceId, objectId)) return null
+  if (!(error instanceof ApiError) || error.status !== 403) return null
+  if (!workspaceId || !objectId) return null
 
   return (
     <div

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 import { getTableName } from 'drizzle-orm'
 import { PgDialect } from 'drizzle-orm/pg-core'
-import { NotFoundException } from '@nestjs/common'
 import { TasksService } from './tasks.service'
 
 /**
@@ -102,37 +101,28 @@ describe('TasksService.listAttachments — read-access gate (IDOR)', () => {
     assert.equal(out[0].url, 'workspaces/w1/tasks/t1/attachments/1-secret.pdf')
   })
 
-  /*
-   * Refused as the missing task is, in its words (`found-30-sep/private-task-reads-say-403`):
-   * this said "Workspace not found" to a stranger and 403 "This space is
-   * private" to a member, so a task one side of a dependency or a parent said
-   * whether it was there and what stood in front of it.
-   */
-  const isTheMiss = (err: unknown) =>
-    err instanceof NotFoundException && err.getStatus() === 404 && err.message === 'Task not found'
-
-  it('refuses a non-member (no workspace membership row) as the task that is not there', async () => {
+  it('rejects a non-member (no workspace membership row)', async () => {
     const { db } = makeDb([CTX(), []])
     const svc = makeService(db)
-    await assert.rejects(() => svc.listAttachments('t1', 'outsider'), isTheMiss)
+    await assert.rejects(() => svc.listAttachments('t1', 'outsider'), /workspace not found/i)
     // The attachment query is never reached.
     assert.equal(db.select.mock.callCount(), 2)
   })
 
-  it('refuses a workspace member who is not a member of the task\'s private space as the task that is not there', async () => {
+  it('rejects a workspace member who is not a member of the task\'s private space', async () => {
     const { db } = makeDb([
       CTX({ spaceVisibility: 'private' }),
       [{ role: 'member' }],
       [], // space-membership lookup empty
     ])
     const svc = makeService(db)
-    await assert.rejects(() => svc.listAttachments('t1', 'ws-member'), isTheMiss)
+    await assert.rejects(() => svc.listAttachments('t1', 'ws-member'), /private/i)
   })
 
   it('404s for a missing task before any membership work', async () => {
     const { db } = makeDb([[]]) // ctx lookup empty
     const svc = makeService(db)
-    await assert.rejects(() => svc.listAttachments('missing', 'u1'), isTheMiss)
+    await assert.rejects(() => svc.listAttachments('missing', 'u1'), /task not found/i)
   })
 })
 

@@ -113,8 +113,7 @@ try {
   const VIEW = await place(A, WS, 'view only', { defaultPermission: 'view' })
   const COMMENT = await place(A, WS, 'comment', { defaultPermission: 'comment' })
   const gates = await Promise.all([M(`/tasks/list/${first.id}`), M(`/tasks/list/${PRIVATE}`)])
-  // Refused as ids that name nothing are (404, `found-30-sep/private-task-reads-say-403`).
-  if (!gates.every((g) => g.status === 404)) throw new Error(`the member was not refused the two private lists (${gates.map((g) => g.status).join(', ')})`)
+  if (!gates.every((g) => g.status === 403)) throw new Error(`the member was not refused the two private lists (${gates.map((g) => g.status).join(', ')})`)
   const channel = await make(A, `/workspaces/${WS}/chat/channels`, { name: `${TAG}-talk` }, 'the channel')
   // A guest reads a public channel only when it is shared with them
   // (`found-24-sep/guests-read-every-open-channel`): the guest's message below

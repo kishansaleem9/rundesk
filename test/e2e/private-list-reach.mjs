@@ -105,8 +105,7 @@ try {
                                 values (${WS}, ${`${TAG} the workspace's sprint`}, 'active', now() - interval '1 day', now() + interval '6 days') returning id`
   await sql`insert into sprint_tasks (sprint_id, task_id) values (${sprintRow.id}, ${PT}), (${sprintRow.id}, ${OT})`
   const gates = await Promise.all([M(`/tasks/list/${PL}`), M(`/tasks/${PT}`), M(`/tasks/${PA}`)])
-  // Refused as ids that name nothing are (404, `found-30-sep/private-task-reads-say-403`).
-  if (gates[0].status !== 404 || gates[1].status !== 404 || gates[2].status !== 200) {
+  if (gates[0].status !== 403 || gates[1].status !== 403 || gates[2].status !== 200) {
     throw new Error(`the fixture is not what it claims: the member's private list ${gates[0].status}, its task ${gates[1].status}, the private task assigned to them ${gates[2].status}`)
   }
   const names = (res) => res.text.includes(WORD)

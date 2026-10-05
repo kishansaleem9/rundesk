@@ -83,18 +83,6 @@ function readCookie(name: string): string | null {
   return match ? decodeURIComponent(match[1]) : null
 }
 
-/** The header the API reads a writer's zone from (`writerZone`, `task-values.ts`). */
-const TIME_ZONE_HEADER = 'X-Time-Zone'
-
-/** This browser's IANA zone, or null where the runtime will not say. */
-function browserTimeZone(): string | null {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || null
-  } catch {
-    return null
-  }
-}
-
 // Single in-flight refresh promise so a burst of 401s doesn't trigger N refreshes.
 let refreshInFlight: Promise<string | null> | null = null
 
@@ -158,14 +146,6 @@ async function fetchWithAuth(path: string, init: RequestInit, token: string | nu
   if (UNSAFE_METHODS.has(method) && !headers.has('X-CSRF-Token')) {
     const csrf = readCookie(CSRF_COOKIE)
     if (csrf) headers.set('X-CSRF-Token', csrf)
-  }
-  // Every write says the zone its dates were read in, which is this browser's:
-  // the app shows every date in it (`task-dates.ts`), and the server orders a
-  // day with no time beside a moment as the writer sees them
-  // (`found-30-sep/a-task-starts-after-it-is-due`, `startsAfterDue`).
-  if (UNSAFE_METHODS.has(method) && !headers.has(TIME_ZONE_HEADER)) {
-    const zone = browserTimeZone()
-    if (zone) headers.set(TIME_ZONE_HEADER, zone)
   }
 
   return fetch(`${API_BASE}${path}`, {

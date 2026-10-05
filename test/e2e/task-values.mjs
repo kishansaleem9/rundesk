@@ -1,57 +1,29 @@
 /**
- * WHAT A TASK'S DATES AND ESTIMATE MAY BE — every write that sets them.
+ * WHAT A TASK'S DATES AND ESTIMATE MAY BE — every write that sets them takes
+ * them as they are sent.
  *
- * NOT A FRAME ROW: two ledger items found closing
- * `found-30-sep/template-submit-ignores-the-form`.
+ * NOT A FRAME ROW: the owner's decision of 1 October on two ledger items found
+ * closing `found-30-sep/template-submit-ignores-the-form`.
  *
- * `found-30-sep/a-task-starts-after-it-is-due`. Nothing refused a start after
- * the due date. Measured on lane 5, three runs: `POST /tasks` starting in ten
- * days and due in three answered 201; `PATCH` the same dates 200, and so did a
- * start moved past the due date the task held, and a due date moved before its
- * start; the bulk editor changed the task; a template starting in nine days
- * made beside a due date typed three days out gave a task starting six days
- * after it was due; two typed the wrong way round beside a template, 201; and
- * a duplicate of such a task, 201.
+ * `found-30-sep/a-task-starts-after-it-is-due`. A task may start after it is
+ * due: `POST /tasks`, `PATCH`, the bulk editor, a template's task, a duplicate
+ * and the next occurrence of a recurring task each take the two dates as they
+ * are sent, and the task sheet and the create modal let the person type them
+ * so. A template's date stands beside a typed one; each date that is not typed
+ * is the template's.
  *
- * ClickUp keeps the rule. Its feedback board ("Improve the Start/Due date and
- * time setting experience in Task view", read through search excerpts, the
- * board being blocked here) says that "when you set a start date that is after
- * a due date, it deletes the due date", and its users ask for "a warning" that
- * does "not let you save" instead. OWASP's Input Validation Cheat Sheet names
- * the case: semantic validation "should enforce correctness of their values in
- * the specific business context (e.g. start date is before end date …)". So a
- * write that would leave a task starting after it is due is REFUSED, with the
- * reason, and nothing is written — no date the caller named is deleted. A
- * template's date that contradicts one the person typed gives way to it, as
- * ClickUp's picker keeps the date just set. The task sheet and the create
- * modal say it: the sheet's refused change in the server's words, the modal
- * beside its dates, before Create.
+ * `found-30-sep/task-estimate-below-zero`. An estimate below nought is taken by
+ * `POST /tasks`, `PATCH` and the bulk editor, and a duplicate copies one as it
+ * is held. The template's route (`InstantiateTemplateDto`) refuses one below
+ * nought, as it always has.
  *
- * `found-30-sep/task-estimate-below-zero`. `POST /tasks` stored -3600 (201),
- * `PATCH` -60 (200) and the bulk editor -120 (200), where the template's route
- * refused one below nought (400). ClickUp's API says of a time estimate that
- * the time "must be a non-negative integer" (search excerpt of "Replace task
- * time estimates", developer.clickup.com).
+ * AND WHAT A REFUSAL SAYS, whatever refused it: the list's bulk bar says how
+ * many of the selected tasks the server did not change, and why; the task sheet
+ * and a row edit on the list page (`patchTaskSaying`, which the calendar drop
+ * and the Gantt shift send through too) say a refused change in the server's
+ * words.
  *
- * AND THREE A REVIEW OF THIS WORK FOUND, each measured on lane 5 three times:
- *   · A DAY BESIDE A MOMENT was ordered only where every zone agreed, so a
- *     start at 09:00 in Karachi on the 5th beside a due day of the 4th was taken
- *     from the sheet (200, no toast), a list row, the calendar drop and the bulk
- *     editor; the web sent no zone. Each write now names its writer's zone
- *     (`x-time-zone`) and is ordered there: refused from Karachi, taken from Los
- *     Angeles, where that instant is the evening of the 4th.
- *   · A DUPLICATE whose subtask held an estimate below nought (written before
- *     the rule) was refused (400) after the copy, its checklists and values were
- *     made — a half-made copy, one more at each try. The subtask's copy now
- *     carries none, as the parent's did.
- *   · SAVE AS TEMPLATE of a task due on a day with no time and starting later
- *     that day rounded the two apart (3 and 4 days out) and was refused (400)
- *     by the new template rule, depending on the hour it was saved.
- *
- * EVERY REFUSAL IS READ TWICE, by status and by the row; every refusal has a
- * twin that is taken — a date on the day it is due, both dates moved at once,
- * an estimate of nought, the same instant from another zone — so a fix that
- * refuses everything reddens too.
+ * EVERY WRITE IS READ BACK FROM THE ROW, not from the answer alone.
  *
  *   node test/e2e/task-values.mjs --api 3011 --dist apps/web/dist
  */
@@ -69,7 +41,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 21
+const EXPECTED_CHECKS = 16
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -86,8 +58,6 @@ const chk = (cond, good, bad) => {
 }
 
 const said = (res) => `${res.status} ${JSON.stringify(res.error?.message ?? null)}`
-/** The reason a refused write gives, as the API words it. */
-const REASON = /cannot start after it is due/i
 
 const stamp = Date.now()
 const TAG = `tvl${stamp}`
@@ -107,9 +77,6 @@ try {
   if (!sql) throw new Error('no DATABASE_URL — every write is read back from the row')
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
-  /* The same person writing from Karachi (UTC+5) and from Los Angeles, naming the zone as the web does on every write. */
-  const inKarachi = apiAsAt(API, { headers: { 'x-time-zone': 'Asia/Karachi' } })(auth.accessToken)
-  const inLosAngeles = apiAsAt(API, { headers: { 'x-time-zone': 'America/Los_Angeles' } })(auth.accessToken)
   /* A refused write stops the suite, naming what could not be staged. */
   const must = (what, res) => {
     if (!res.ok) throw new Error(`could not ${what}: ${said(res)}`)
@@ -128,246 +95,182 @@ try {
     d.setUTCHours(hour, 0, 0, 0)
     return d.toISOString()
   }
-  /** UTC midnight `n` days from today — a day with no time on it, as the date-only pickers write one. */
-  const dayOnly = (n) => day(n, 0)
-  /** 09:00 in Karachi `n` days from today: 04:00 UTC — 21:00 the day before in Los Angeles. */
-  const nineInKarachi = (n) => day(n, 4)
   const ms = (v) => (v ? new Date(v).getTime() : null)
+  /*
+   * A task starting ten days out and due in three, its dates put by SQL: the
+   * checks of a duplicate and of Save as template read what those routes do
+   * with such a task, whatever POST /tasks (checked on its own above) does.
+   */
+  const lateTask = async (title) => {
+    const id = must(`make the task ${title}`, await A('/tasks', { method: 'POST', body: { listId: LIST, title } }))?.id
+    await sql`update tasks set start_date = ${day(10)}, due_date = ${day(3)} where id = ${id}`
+    return id
+  }
+  /** Whole days from now to a stored date, as a template's offset counts them. */
+  const daysOut = (v) => (v ? Math.round((new Date(v).getTime() - Date.now()) / 86_400_000) : null)
   const rowOf = async (id) =>
-    (await sql`select start_date, due_date, time_estimate from tasks where id = ${id}`)[0] ?? null
-  const madeCount = async (title) =>
-    Number((await sql`select count(*)::int as n from tasks where list_id = ${LIST} and title = ${title}`)[0]?.n ?? -1)
+    (await sql`select start_date, due_date, time_estimate, priority from tasks where id = ${id}`)[0] ?? null
+  const rowsTitled = (title) => sql`select id, start_date, due_date, time_estimate from tasks where list_id = ${LIST} and title = ${title}`
   /** A task made through the API with these fields, its id. */
   const makeTask = async (title, fields = {}) =>
     must(`make the task ${title}`, await A('/tasks', { method: 'POST', body: { listId: LIST, title, ...fields } }))?.id
 
   // ══ 1. A TASK THAT STARTS AFTER IT IS DUE, THROUGH THE API ═══════════════
-  console.log('\n▶ found-30-sep/a-task-starts-after-it-is-due — the API')
+  console.log('\n▶ found-30-sep/a-task-starts-after-it-is-due — a start after the due date is taken')
   const LATE = `Late ${TAG}`
   const late = await A('/tasks', { method: 'POST', body: { listId: LIST, title: LATE, startDate: day(10), dueDate: day(3) } })
-  const lateMade = await madeCount(LATE)
+  const lateRows = await rowsTitled(LATE)
   chk(
-    late.status === 400 && REASON.test(late.error?.message ?? '') && lateMade === 0,
-    'POST /tasks refuses a task that starts after it is due (400, saying so) and makes nothing (read by SQL)',
-    `it answered ${said(late)}; ${lateMade} task(s) so titled were made`,
-  )
-
-  // Two moments in order; and a start on the due day, with its time, beside a due day with none.
-  const IN_ORDER = `In order ${TAG}`
-  const SAME_DAY = `Same day ${TAG}`
-  const inOrder = await A('/tasks', { method: 'POST', body: { listId: LIST, title: IN_ORDER, startDate: day(1), dueDate: day(3) } })
-  const sameDay = await A('/tasks', { method: 'POST', body: { listId: LIST, title: SAME_DAY, startDate: day(4, 15), dueDate: dayOnly(4) } })
-  const sameDayRow = sameDay.data?.id ? await rowOf(sameDay.data.id) : null
-  chk(
-    inOrder.status === 201 && sameDay.status === 201 && ms(sameDayRow?.start_date) === ms(day(4, 15)) && ms(sameDayRow?.due_date) === ms(dayOnly(4)),
-    'while a task starting before it is due is made, and so is one starting at 15:00 on a day it is due with no time given — the day holds the moment',
-    `in order it answered ${said(inOrder)}; the same day ${said(sameDay)}, stored ${JSON.stringify(sameDayRow)}`,
+    late.status === 201 && lateRows.length === 1 && ms(lateRows[0].start_date) === ms(day(10)) && ms(lateRows[0].due_date) === ms(day(3)),
+    'POST /tasks makes a task that starts after it is due, holding both dates as sent (read by SQL)',
+    `it answered ${said(late)}; ${lateRows.length} task(s) so titled, holding ${JSON.stringify(lateRows[0] ?? null)}`,
   )
 
   // PATCH: the start moved past the due it holds; the due moved before the start it holds; both the wrong way round.
-  const P = await makeTask(`Patched ${TAG}`, { startDate: day(1), dueDate: day(3) })
   const patchAnswers = []
-  for (const body of [{ startDate: day(10) }, { dueDate: day(-2) }, { startDate: day(10), dueDate: day(3) }]) {
+  for (const body of [{ startDate: day(10) }, { dueDate: day(-2) }, { startDate: day(12), dueDate: day(4) }]) {
+    const P = await makeTask(`Patched ${Object.keys(body).join('+')} ${TAG}`, { startDate: day(1), dueDate: day(3) })
     const r = await A(`/tasks/${P}`, { method: 'PATCH', body })
-    patchAnswers.push({ sent: Object.keys(body).join('+'), status: r.status, said: REASON.test(r.error?.message ?? '') })
+    const held = await rowOf(P)
+    const want = { start: ms(body.startDate ?? day(1)), due: ms(body.dueDate ?? day(3)) }
+    patchAnswers.push({ sent: Object.keys(body).join('+'), status: r.status, kept: ms(held?.start_date) === want.start && ms(held?.due_date) === want.due })
   }
-  const patchedRow = await rowOf(P)
   chk(
-    patchAnswers.every((a) => a.status === 400 && a.said) && ms(patchedRow?.start_date) === ms(day(1)) && ms(patchedRow?.due_date) === ms(day(3)),
-    'PATCH /tasks/:id refuses a start moved past the due date the task holds, a due date moved before its start, and both sent the wrong way round (400 each, saying so), and the task keeps its dates (read by SQL)',
-    `answered ${JSON.stringify(patchAnswers)}; the task holds ${JSON.stringify(patchedRow)}`,
+    patchAnswers.every((a) => a.status === 200 && a.kept),
+    'PATCH /tasks/:id takes a start moved past the due date the task holds, a due date moved before its start, and both sent the wrong way round (200 each), holding each as sent (read by SQL)',
+    `answered ${JSON.stringify(patchAnswers)}`,
   )
 
-  // Both moved at once, each past the other's old value; then the due date cleared.
-  const moved = await A(`/tasks/${P}`, { method: 'PATCH', body: { startDate: day(10), dueDate: day(12) } })
-  const movedRow = await rowOf(P)
-  const cleared = await A(`/tasks/${P}`, { method: 'PATCH', body: { dueDate: null } })
-  const clearedRow = await rowOf(P)
-  chk(
-    moved.status === 200 && ms(movedRow?.start_date) === ms(day(10)) && ms(movedRow?.due_date) === ms(day(12))
-      && cleared.status === 200 && clearedRow?.due_date === null && ms(clearedRow?.start_date) === ms(day(10)),
-    'and PATCH takes both dates moved at once past the old ones, in order, and a due date cleared (read by SQL)',
-    `moving both answered ${said(moved)}, stored ${JSON.stringify(movedRow)}; clearing the due date ${said(cleared)}, stored ${JSON.stringify(clearedRow)}`,
-  )
-
-  // The bulk editor: a start set on two tasks, one due before it, one after.
+  // The bulk editor: a start set on two tasks, one due before it, one after; then both dates the wrong way round.
   const EARLY = await makeTask(`Bulk due early ${TAG}`, { dueDate: day(3) })
   const LATER = await makeTask(`Bulk due later ${TAG}`, { dueDate: day(20) })
   const bulk = await A('/tasks/bulk/update', { method: 'PATCH', body: { taskIds: [EARLY, LATER], patch: { startDate: day(10) } } })
   const earlyRow = await rowOf(EARLY)
   const laterRow = await rowOf(LATER)
-  const failedEarly = (bulk.data?.failed ?? []).find((f) => f.taskId === EARLY)
-  chk(
-    bulk.status === 200 && bulk.data?.updatedCount === 1 && bulk.data?.failedCount === 1 && REASON.test(failedEarly?.reason ?? '')
-      && earlyRow?.start_date === null && ms(laterRow?.start_date) === ms(day(10)),
-    'the bulk editor changes no task it would leave starting after its due date — that one is answered under failed, with the reason — and changes the rest (read by SQL)',
-    `it answered ${said(bulk)} with ${JSON.stringify({ updated: bulk.data?.updatedCount, failed: bulk.data?.failed })}; the early task holds ${JSON.stringify(earlyRow)}, the later ${JSON.stringify(laterRow)}`,
-  )
   const bulkBoth = await A('/tasks/bulk/update', { method: 'PATCH', body: { taskIds: [EARLY, LATER], patch: { startDate: day(15), dueDate: day(5) } } })
-  const laterAfter = await rowOf(LATER)
+  const bothRows = [await rowOf(EARLY), await rowOf(LATER)]
   chk(
-    bulkBoth.status === 400 && REASON.test(bulkBoth.error?.message ?? '') && ms(laterAfter?.start_date) === ms(day(10)) && ms(laterAfter?.due_date) === ms(day(20)),
-    'and a bulk edit whose own two dates are the wrong way round is refused whole (400, saying so), changing no task',
-    `it answered ${said(bulkBoth)}; the later task holds ${JSON.stringify(laterAfter)}`,
+    bulk.status === 200 && bulk.data?.updatedCount === 2 && bulk.data?.failedCount === 0
+      && ms(earlyRow?.start_date) === ms(day(10)) && ms(laterRow?.start_date) === ms(day(10))
+      && bulkBoth.status === 200 && bulkBoth.data?.updatedCount === 2
+      && bothRows.every((r) => ms(r?.start_date) === ms(day(15)) && ms(r?.due_date) === ms(day(5))),
+    'the bulk editor changes every task it sets a start after its due date for, and every task it sends two dates the wrong way round, failing none (read by SQL)',
+    `the start answered ${said(bulk)} with ${JSON.stringify({ updated: bulk.data?.updatedCount, failed: bulk.data?.failed })}, storing ${JSON.stringify([earlyRow, laterRow])}; ` +
+      `both dates ${said(bulkBoth)} with ${JSON.stringify({ updated: bulkBoth.data?.updatedCount, failed: bulkBoth.data?.failed })}, storing ${JSON.stringify(bothRows)}`,
   )
 
-  // A template starting nine days out; a due date typed three days out beside it.
+  // A template starting nine days out; a due date typed three days out beside it; then both typed the wrong way round.
   const TPL = must('make the template', await A(`/workspaces/${WS}/task-templates`, {
     method: 'POST', body: { name: `Starts late ${TAG}`, payload: { title: `From the template ${TAG}`, startDateOffsetDays: 9 } },
   }))?.id
-  const FROM_TPL = `Typed due ${TAG}`
-  const fromTpl = await A(`/workspaces/${WS}/task-templates/${TPL}/instantiate`, { method: 'POST', body: { listId: LIST, titleOverride: FROM_TPL, dueDate: day(3) } })
+  const fromTpl = await A(`/workspaces/${WS}/task-templates/${TPL}/instantiate`, { method: 'POST', body: { listId: LIST, titleOverride: `Typed due ${TAG}`, dueDate: day(3) } })
   const fromTplRow = fromTpl.data?.taskId ? await rowOf(fromTpl.data.taskId) : null
-  chk(
-    fromTpl.status === 201 && ms(fromTplRow?.due_date) === ms(day(3)) && fromTplRow?.start_date === null,
-    'a task made from a template starting nine days out, with a due date typed three days out, is due when typed and has no start: the template’s start date gives way to it (read by SQL)',
-    `it answered ${said(fromTpl)}; the task holds ${JSON.stringify(fromTplRow)}`,
-  )
   const BOTH_TYPED = `Both typed ${TAG}`
   const bothTyped = await A(`/workspaces/${WS}/task-templates/${TPL}/instantiate`, {
     method: 'POST', body: { listId: LIST, titleOverride: BOTH_TYPED, startDate: day(10), dueDate: day(3) },
   })
-  const bothTypedMade = await madeCount(BOTH_TYPED)
+  const bothTypedRows = await rowsTitled(BOTH_TYPED)
   chk(
-    bothTyped.status === 400 && REASON.test(bothTyped.error?.message ?? '') && bothTypedMade === 0,
-    'and with both dates typed the wrong way round beside a template, its route refuses them as POST /tasks does (400, saying so) and makes nothing',
-    `it answered ${said(bothTyped)}; ${bothTypedMade} task(s) so titled were made`,
+    fromTpl.status === 201 && ms(fromTplRow?.due_date) === ms(day(3)) && daysOut(fromTplRow?.start_date) === 9
+      && bothTyped.status === 201 && bothTypedRows.length === 1
+      && ms(bothTypedRows[0].start_date) === ms(day(10)) && ms(bothTypedRows[0].due_date) === ms(day(3)),
+    'a task made from a template starting nine days out, with a due date typed three days out, is due when typed and starts when the template says; with both typed the wrong way round, it holds both as typed (read by SQL)',
+    `the typed due date answered ${said(fromTpl)}, the task holding ${JSON.stringify(fromTplRow)}; both typed ${said(bothTyped)}, ${bothTypedRows.length} so titled, holding ${JSON.stringify(bothTypedRows[0] ?? null)}`,
   )
+
+  // A template made starting after it is due; and one saved from a task that does.
   const INVERTED_TPL = `Inverted ${TAG}`
   const invertedTpl = await A(`/workspaces/${WS}/task-templates`, {
     method: 'POST', body: { name: INVERTED_TPL, payload: { title: INVERTED_TPL, startDateOffsetDays: 9, dueDateOffsetDays: 3 } },
   })
-  const invertedSaved = (await sql`select count(*)::int as n from task_templates where workspace_id = ${WS} and name = ${INVERTED_TPL}`)[0]?.n ?? -1
-  chk(
-    invertedTpl.status === 400 && /cannot start after it is due/i.test(invertedTpl.error?.message ?? '') && invertedSaved === 0,
-    'a template whose own start date is after its due date is refused when made (400, saying so), and none is saved (read by SQL)',
-    `it answered ${said(invertedTpl)}; ${invertedSaved} template(s) so named`,
-  )
-
-  // A task made before the rule, starting after it is due (put so by SQL), duplicated.
-  const OLD = `Made before ${TAG}`
-  const OLD_ID = await makeTask(OLD)
-  await sql`update tasks set start_date = ${day(10)}, due_date = ${day(3)} where id = ${OLD_ID}`
-  const dup = await A(`/workspaces/${WS}/task-templates/duplicate/${OLD_ID}`, { method: 'POST', body: {} })
-  const copies = await madeCount(`${OLD} (copy)`)
-  chk(
-    dup.status === 400 && REASON.test(dup.error?.message ?? '') && copies === 0,
-    'duplicating a task that starts after it is due is refused with the reason (400), and no copy is made',
-    `it answered ${said(dup)}; ${copies} cop${copies === 1 ? 'y' : 'ies'} made`,
-  )
-
-  // Save as template: a task due on a day with no time, starting at noon that day; then the task made before the rule.
-  const SAVE_SRC = await makeTask(`Save me ${TAG}`, { startDate: day(4, 12), dueDate: dayOnly(4) })
-  const SAVED = `Saved ${TAG}`
-  const saved = await A(`/workspaces/${WS}/task-templates/from-task/${SAVE_SRC}`, { method: 'POST', body: { name: SAVED } })
-  const savedRow = (await sql`select payload->'startDateOffsetDays' as s, payload->'dueDateOffsetDays' as d from task_templates where workspace_id = ${WS} and name = ${SAVED}`)[0] ?? null
+  const invertedSaved = (await sql`select payload->'startDateOffsetDays' as s, payload->'dueDateOffsetDays' as d from task_templates where workspace_id = ${WS} and name = ${INVERTED_TPL}`)[0] ?? null
+  const LATE_SRC = await lateTask(`Save me late ${TAG}`)
   const SAVED_LATE = `Saved late ${TAG}`
-  const savedLate = await A(`/workspaces/${WS}/task-templates/from-task/${OLD_ID}`, { method: 'POST', body: { name: SAVED_LATE } })
-  const savedLateCount = (await sql`select count(*)::int as n from task_templates where workspace_id = ${WS} and name = ${SAVED_LATE}`)[0]?.n ?? -1
+  const savedLate = await A(`/workspaces/${WS}/task-templates/from-task/${LATE_SRC}`, { method: 'POST', body: { name: SAVED_LATE } })
+  const savedLateRow = (await sql`select payload->'startDateOffsetDays' as s, payload->'dueDateOffsetDays' as d from task_templates where workspace_id = ${WS} and name = ${SAVED_LATE}`)[0] ?? null
   chk(
-    saved.status === 201 && savedRow !== null && Number.isInteger(savedRow.s) && Number.isInteger(savedRow.d) && savedRow.s <= savedRow.d
-      && savedLate.status === 400 && /cannot start after it is due/i.test(savedLate.error?.message ?? '') && savedLateCount === 0,
-    'Save as template takes a task due on a day with no time and starting at noon that day, whatever the hour it is saved, as a template starting no later than it is due (read by SQL); while a task that starts after it is due is refused as one, saying so, and none is saved',
-    `saving answered ${said(saved)}, holding offsets ${JSON.stringify(savedRow)}; the late task ${said(savedLate)}, ${savedLateCount} so named`,
+    invertedTpl.status === 201 && invertedSaved?.s === 9 && invertedSaved?.d === 3
+      && savedLate.status === 201 && savedLateRow?.s === 10 && savedLateRow?.d === 3,
+    'a template whose own start date is after its due date is saved, whether made so or saved from a task that starts after it is due (read by SQL)',
+    `making it answered ${said(invertedTpl)}, holding ${JSON.stringify(invertedSaved)}; saving it from the task ${said(savedLate)}, holding ${JSON.stringify(savedLateRow)}`,
   )
 
-  // A day beside a moment, where its writer is: due the 4th with no time; a start at 09:00 on the 5th in Karachi.
-  console.log('\n▶ found-30-sep/a-task-starts-after-it-is-due — a day beside a moment, ordered where its writer is')
-  const K_MADE = `Made in Karachi ${TAG}`
-  const LA_MADE = `Made in Los Angeles ${TAG}`
-  const kMade = await inKarachi('/tasks', { method: 'POST', body: { listId: LIST, title: K_MADE, startDate: nineInKarachi(5), dueDate: dayOnly(4) } })
-  const laMade = await inLosAngeles('/tasks', { method: 'POST', body: { listId: LIST, title: LA_MADE, startDate: nineInKarachi(5), dueDate: dayOnly(4) } })
-  const kMadeCount = await madeCount(K_MADE)
-  const laMadeRow = laMade.data?.id ? await rowOf(laMade.data.id) : null
+  // A task that starts after it is due, duplicated.
+  const DUP_LATE = `Duplicated late ${TAG}`
+  const DUP_LATE_ID = await lateTask(DUP_LATE)
+  const dupLate = await A(`/workspaces/${WS}/task-templates/duplicate/${DUP_LATE_ID}`, { method: 'POST', body: {} })
+  const dupLateRows = await rowsTitled(`${DUP_LATE} (copy)`)
   chk(
-    kMade.status === 400 && REASON.test(kMade.error?.message ?? '') && kMadeCount === 0
-      && laMade.status === 201 && ms(laMadeRow?.start_date) === ms(nineInKarachi(5)) && ms(laMadeRow?.due_date) === ms(dayOnly(4)),
-    'POST /tasks from a writer in Karachi refuses a task due on a day with no time and starting at 09:00 there the next day (400, saying so) and makes nothing; from Los Angeles, where that instant is the evening of the day it is due, it is made (read by SQL)',
-    `from Karachi it answered ${said(kMade)}, ${kMadeCount} so titled; from Los Angeles ${said(laMade)}, stored ${JSON.stringify(laMadeRow)}`,
+    dupLate.status === 201 && dupLateRows.length === 1 && ms(dupLateRows[0].start_date) === ms(day(10)) && ms(dupLateRows[0].due_date) === ms(day(3)),
+    'duplicating a task that starts after it is due makes a copy holding both dates (read by SQL)',
+    `it answered ${said(dupLate)}; ${dupLateRows.length} cop${dupLateRows.length === 1 ? 'y' : 'ies'}, holding ${JSON.stringify(dupLateRows[0] ?? null)}`,
   )
-  const KP = await makeTask(`Karachi start ${TAG}`, { dueDate: dayOnly(4) })
-  const KD = await makeTask(`Karachi drop ${TAG}`, { startDate: nineInKarachi(5) })
-  const kStart = await inKarachi(`/tasks/${KP}`, { method: 'PATCH', body: { startDate: nineInKarachi(5) } })
-  // The calendar's drop sends the day it was dropped on, with no time.
-  const kDrop = await inKarachi(`/tasks/${KD}`, { method: 'PATCH', body: { dueDate: dayOnly(4).slice(0, 10) } })
-  const kBulk = await inKarachi('/tasks/bulk/update', { method: 'PATCH', body: { taskIds: [KP], patch: { startDate: nineInKarachi(5) } } })
-  const kBulkFailed = (kBulk.data?.failed ?? []).find((f) => f.taskId === KP)
-  const kpHeld = await rowOf(KP)
-  const kdHeld = await rowOf(KD)
-  const laStart = await inLosAngeles(`/tasks/${KP}`, { method: 'PATCH', body: { startDate: nineInKarachi(5) } })
-  const laDrop = await inLosAngeles(`/tasks/${KD}`, { method: 'PATCH', body: { dueDate: dayOnly(4).slice(0, 10) } })
-  const kpRow = await rowOf(KP)
-  const kdRow = await rowOf(KD)
+
+  // A monthly task starting at 14:00 on the 5th of the coming month and due at 09:00 on the 20th; its next occurrence.
+  // Wall-clock hours, as the rule moves them (`shiftByRecurrenceRule`, in the API's zone, which is this machine's).
+  const RECURRING = `Monthly ${TAG}`
+  const now = new Date()
+  const recStart = new Date(now.getFullYear(), now.getMonth() + 1, 5, 14)
+  const recDue = new Date(now.getFullYear(), now.getMonth() + 1, 20, 9)
+  const REC = await makeTask(RECURRING, { startDate: recStart.toISOString(), dueDate: recDue.toISOString() })
+  const next = await A(`/tasks/${REC}/recurring/next`, { method: 'POST', body: { recurrenceRule: { mode: 'monthly', dayOfMonth: 1 } } })
+  const nextRows = (await rowsTitled(RECURRING)).filter((r) => r.id !== REC)
+  const nextStart = new Date(now.getFullYear(), now.getMonth() + 2, 1, 14)
+  const nextDue = new Date(now.getFullYear(), now.getMonth() + 2, 1, 9)
   chk(
-    kStart.status === 400 && REASON.test(kStart.error?.message ?? '') && kDrop.status === 400 && REASON.test(kDrop.error?.message ?? '')
-      && kBulk.status === 200 && kBulk.data?.updatedCount === 0 && REASON.test(kBulkFailed?.reason ?? '')
-      && kpHeld?.start_date === null && kdHeld?.due_date === null
-      && laStart.status === 200 && laDrop.status === 200 && ms(kpRow?.start_date) === ms(nineInKarachi(5)) && ms(kdRow?.due_date) === ms(dayOnly(4)),
-    'PATCH /tasks/:id from Karachi refuses a start at 09:00 on the day after the due day the task holds, and a due day with no time, as the calendar drop sends one, before the start it holds (400 each, saying so), and the bulk editor fails that task with the reason, each task keeping its dates; while from Los Angeles both are taken (read by SQL)',
-    `from Karachi the start answered ${said(kStart)}, the drop ${said(kDrop)}, the bulk editor ${said(kBulk)} with ${JSON.stringify(kBulk.data?.failed ?? null)}; ` +
-      `they held ${JSON.stringify(kpHeld)} and ${JSON.stringify(kdHeld)}; from Los Angeles ${said(laStart)} and ${said(laDrop)}, storing ${JSON.stringify(kpRow)} and ${JSON.stringify(kdRow)}`,
+    next.status === 201 && nextRows.length === 1 && ms(nextRows[0].start_date) === nextStart.getTime() && ms(nextRows[0].due_date) === nextDue.getTime(),
+    'the next occurrence of a monthly task moves each date by its rule: both on the 1st, the start at its own hour after the due at its own (read by SQL)',
+    `it answered ${said(next)}; ${nextRows.length} next occurrence(s), holding ${JSON.stringify(nextRows[0] ?? null)}; wanted ${nextStart.toISOString()} and ${nextDue.toISOString()}`,
   )
 
   // ══ 2. AN ESTIMATE BELOW NOUGHT ══════════════════════════════════════════
-  console.log('\n▶ found-30-sep/task-estimate-below-zero')
+  console.log('\n▶ found-30-sep/task-estimate-below-zero — an estimate below nought is taken')
   const NEG = `Below nought ${TAG}`
   const neg = await A('/tasks', { method: 'POST', body: { listId: LIST, title: NEG, timeEstimate: -3600 } })
-  const negTpl = await A(`/workspaces/${WS}/task-templates/${TPL}/instantiate`, { method: 'POST', body: { listId: LIST, titleOverride: NEG, timeEstimate: -3600 } })
-  const negMade = await madeCount(NEG)
+  const negRows = await rowsTitled(NEG)
+  const NEG_TPL = `Below nought from the template ${TAG}`
+  const negTpl = await A(`/workspaces/${WS}/task-templates/${TPL}/instantiate`, { method: 'POST', body: { listId: LIST, titleOverride: NEG_TPL, timeEstimate: -3600 } })
+  const negTplRows = await rowsTitled(NEG_TPL)
   chk(
-    neg.status === 400 && negTpl.status === 400 && negMade === 0,
-    'POST /tasks refuses an estimate below nought (400), as the template’s route does, and makes nothing (read by SQL)',
-    `POST /tasks answered ${said(neg)}; the template’s route ${said(negTpl)}; ${negMade} task(s) so titled`,
+    neg.status === 201 && negRows.length === 1 && negRows[0].time_estimate === -3600 && negTpl.status === 400 && negTplRows.length === 0,
+    'POST /tasks makes a task estimated below nought and stores it, while the template’s route refuses one below nought (400), as it always has (read by SQL)',
+    `POST /tasks answered ${said(neg)}, storing ${JSON.stringify(negRows.map((r) => r.time_estimate))}; the template’s route ${said(negTpl)}, ${negTplRows.length} task(s) so titled`,
   )
   const E = await makeTask(`Estimated ${TAG}`, { timeEstimate: 5400 })
   const negPatch = await A(`/tasks/${E}`, { method: 'PATCH', body: { timeEstimate: -60 } })
   const ePatched = await rowOf(E)
   chk(
-    negPatch.status === 400 && ePatched?.time_estimate === 5400,
-    'PATCH /tasks/:id refuses an estimate below nought (400), and the task keeps its estimate (read by SQL)',
+    negPatch.status === 200 && ePatched?.time_estimate === -60,
+    'PATCH /tasks/:id takes an estimate below nought and stores it (read by SQL)',
     `it answered ${said(negPatch)}; the task holds ${ePatched?.time_estimate ?? null}`,
   )
   const negBulk = await A('/tasks/bulk/update', { method: 'PATCH', body: { taskIds: [E, LATER], patch: { timeEstimate: -120 } } })
   const eBulk = await rowOf(E)
   const laterBulk = await rowOf(LATER)
   chk(
-    negBulk.status === 400 && eBulk?.time_estimate === 5400 && laterBulk?.time_estimate === null,
-    'the bulk editor refuses an estimate below nought (400) and changes no task (read by SQL)',
-    `it answered ${said(negBulk)}; the tasks hold ${eBulk?.time_estimate ?? null} and ${laterBulk?.time_estimate ?? null}`,
-  )
-  const ZERO = `Nought ${TAG}`
-  const zeroMade = await A('/tasks', { method: 'POST', body: { listId: LIST, title: ZERO, timeEstimate: 0 } })
-  const zeroRow = zeroMade.data?.id ? await rowOf(zeroMade.data.id) : null
-  const zeroPatch = await A(`/tasks/${E}`, { method: 'PATCH', body: { timeEstimate: 0 } })
-  const zeroBulk = await A('/tasks/bulk/update', { method: 'PATCH', body: { taskIds: [LATER], patch: { timeEstimate: 0 } } })
-  const zeroE = await rowOf(E)
-  const zeroLater = await rowOf(LATER)
-  chk(
-    zeroMade.status === 201 && zeroRow?.time_estimate === 0 && zeroPatch.status === 200 && zeroE?.time_estimate === 0
-      && zeroBulk.status === 200 && zeroBulk.data?.updatedCount === 1 && zeroLater?.time_estimate === 0,
-    'while an estimate of nought is taken by POST /tasks, PATCH and the bulk editor, and stored as 0 (read by SQL)',
-    `POST answered ${said(zeroMade)} storing ${zeroRow?.time_estimate ?? null}; PATCH ${said(zeroPatch)} storing ${zeroE?.time_estimate ?? null}; ` +
-      `bulk ${said(zeroBulk)} storing ${zeroLater?.time_estimate ?? null}`,
+    negBulk.status === 200 && negBulk.data?.updatedCount === 2 && eBulk?.time_estimate === -120 && laterBulk?.time_estimate === -120,
+    'the bulk editor sets an estimate below nought on every task it is given (read by SQL)',
+    `it answered ${said(negBulk)} with ${JSON.stringify({ updated: negBulk.data?.updatedCount, failed: negBulk.data?.failed })}; the tasks hold ${eBulk?.time_estimate ?? null} and ${laterBulk?.time_estimate ?? null}`,
   )
 
-  // A task whose subtask holds an estimate below nought (put so by SQL, as a row written before the rule), duplicated.
+  // A task whose subtask is estimated below nought (put so by SQL, whatever POST /tasks does), duplicated.
   const DUP = `Subtask below nought ${TAG}`
   const DUP_ID = await makeTask(DUP, { timeEstimate: 600 })
   const DUP_SUB = await makeTask(`Its subtask ${TAG}`, { parentTaskId: DUP_ID, timeEstimate: 300 })
   await sql`update tasks set time_estimate = -60 where id = ${DUP_SUB}`
   const dupSub = await A(`/workspaces/${WS}/task-templates/duplicate/${DUP_ID}`, { method: 'POST', body: {} })
-  const dupCopies = await sql`select id, time_estimate from tasks where list_id = ${LIST} and title = ${`${DUP} (copy)`}`
+  const dupCopies = await rowsTitled(`${DUP} (copy)`)
   const dupSubs = dupCopies.length === 1 ? await sql`select time_estimate from tasks where parent_task_id = ${dupCopies[0].id}` : []
   const dupAudit = (await sql`select count(*)::int as n from audit_logs where action = 'task.duplicated' and metadata->>'sourceTaskId' = ${DUP_ID}`)[0]?.n ?? -1
   chk(
-    dupSub.status === 201 && dupCopies.length === 1 && dupCopies[0].time_estimate === 600 && dupSubs.length === 1 && dupSubs[0].time_estimate === null && dupAudit === 1,
-    'duplicating a task whose subtask holds an estimate below nought, from before the rule, makes one whole copy — its subtask copied with no estimate — and records it (201, read by SQL)',
+    dupSub.status === 201 && dupCopies.length === 1 && dupCopies[0].time_estimate === 600 && dupSubs.length === 1 && dupSubs[0].time_estimate === -60 && dupAudit === 1,
+    'duplicating a task whose subtask is estimated below nought copies it whole, the subtask with its estimate, and records it (201, read by SQL)',
     `it answered ${said(dupSub)}; ${dupCopies.length} cop${dupCopies.length === 1 ? 'y' : 'ies'} holding ${JSON.stringify(dupCopies.map((c) => c.time_estimate))}, ` +
       `with subtasks ${JSON.stringify(dupSubs)}; ${dupAudit} duplicate(s) recorded`,
   )
 
-  // ══ 3. THE TASK SHEET AND THE CREATE MODAL SAY IT ════════════════════════
-  console.log('\n▶ the task sheet and the create modal say that a task cannot start after it is due')
+  // ══ 3. THE TASK SHEET, THE CREATE MODAL AND THE BULK BAR ══════════════════
+  console.log('\n▶ the task sheet and the create modal take a start after the due date; the bulk bar says what it could not change')
   browser = await (await resolveChromium()).launch(launchOptions())
   const ctx = await browser.newContext({ viewport: { width: 1500, height: 1100 }, serviceWorkers: 'block' })
   const page = await ctx.newPage()
@@ -392,20 +295,26 @@ try {
   const S = await makeTask(`Sheet ${TAG}`, { startDate: new Date(SHEET_START).toISOString(), dueDate: new Date(SHEET_DUE).toISOString() })
   await page.goto(`${B}/app/${WS}/${SPACE}/${PROJECT}/${LIST}?task=${S}`, { waitUntil: 'domcontentloaded' })
   const startBox = page.getByTestId('task-start-date')
+  const dueBox = page.getByTestId('task-due-date')
   const sheetReady = await waitUntil(async () => (await startBox.inputValue({ timeout: 1000 }).catch(() => '')) === SHEET_START, { timeoutMs: 20_000 })
+  const bounds = {
+    startMax: await startBox.getAttribute('max', { timeout: 1000 }).catch(() => 'unread'),
+    dueMin: await dueBox.getAttribute('min', { timeout: 1000 }).catch(() => 'unread'),
+  }
   const patched = page.waitForResponse((r) => r.request().method() === 'PATCH' && new URL(r.url()).pathname.endsWith(`/tasks/${S}`), { timeout: 15_000 }).catch(() => null)
   await startBox.fill(dayAt(10, 9), { timeout: 5000 }).catch(() => {})
   const sheetAnswer = (await patched)?.status() ?? null
-  let sheetToast = ''
-  await waitUntil(async () => (sheetToast = (await toasts()).find((s) => REASON.test(s)) ?? '').length > 0, { timeoutMs: 10_000 })
-  const sheetRow = await rowOf(S)
+  let sheetRow = null
+  await waitUntil(async () => ms((sheetRow = await rowOf(S))?.start_date) === ms(new Date(dayAt(10, 9)).toISOString()), { timeoutMs: 10_000 })
+  const sheetToasts = (await toasts()).filter((s) => /start|due|refused|cannot/i.test(s))
   chk(
-    sheetReady && sheetAnswer === 400 && sheetToast.length > 0 && ms(sheetRow?.start_date) === ms(new Date(SHEET_START).toISOString()),
-    'in the task sheet, a start date typed after the due date is refused and said — the toast gives the reason — and the task keeps its start (read by SQL)',
-    `the sheet showed the start ${sheetReady}; the PATCH answered ${sheetAnswer ?? 'nothing'}; the toast read ${JSON.stringify(sheetToast || (await toasts()))}; the task holds ${JSON.stringify(sheetRow)}`,
+    sheetReady && bounds.startMax === null && bounds.dueMin === null && sheetAnswer === 200 && sheetToasts.length === 0
+      && ms(sheetRow?.start_date) === ms(new Date(dayAt(10, 9)).toISOString()) && ms(sheetRow?.due_date) === ms(new Date(SHEET_DUE).toISOString()),
+    'the task sheet takes a start date typed after the due date — the PATCH answers 200, the task holds it, and nothing is said against it — and neither date box is bounded by the other (read by SQL)',
+    `the sheet showed the start ${sheetReady}; the boxes' bounds ${JSON.stringify(bounds)}; the PATCH answered ${sheetAnswer ?? 'nothing'}; toasts ${JSON.stringify(sheetToasts)}; the task holds ${JSON.stringify(sheetRow)}`,
   )
 
-  // The create modal: a start typed ten days out and a due date three days out, then the start put right.
+  // The create modal: a start typed ten days out and a due date three days out.
   await page.goto(`${B}/app/${WS}`, { waitUntil: 'domcontentloaded' })
   await page.getByTestId('quick-create-open').click({ timeout: 25_000 }).catch(() => {})
   await page.getByTestId('create-tab-task').click({ timeout: 10_000 }).catch(() => {})
@@ -417,58 +326,99 @@ try {
   await page.getByTestId('quick-create-task-title').fill(MODAL, { timeout: 5000 }).catch(() => {})
   await page.getByTestId('quick-create-start').fill(dayAt(10, 9), { timeout: 5000 }).catch(() => {})
   await page.getByTestId('quick-create-due').fill(dayAt(3, 17), { timeout: 5000 }).catch(() => {})
-  const note = page.getByTestId('quick-create-dates-order')
   const submit = page.getByTestId('quick-create-submit')
-  const noteShown = await waitUntil(() => note.isVisible().catch(() => false), { timeoutMs: 5000 })
-  const noteText = noteShown ? await note.innerText({ timeout: 1000 }).catch(() => '') : ''
-  const heldBack = !(await submit.isEnabled({ timeout: 1000 }).catch(() => true))
-  const madeWhileWrong = await madeCount(MODAL)
-  await page.getByTestId('quick-create-start').fill(dayAt(1, 9), { timeout: 5000 }).catch(() => {})
-  const noteGone = await waitUntil(async () => !(await note.isVisible().catch(() => false)), { timeoutMs: 5000 })
-  await waitUntil(() => submit.isEnabled().catch(() => false), { timeoutMs: 5000 })
+  const offered = await waitUntil(() => submit.isEnabled().catch(() => false), { timeoutMs: 5000 })
+  const alerts = (await page.getByRole('alert').filter({ visible: true }).allInnerTexts().catch(() => [])).filter((s) => /start|due/i.test(s))
   await submit.click({ timeout: 5000 }).catch(() => {})
   let modalRows = []
-  await waitUntil(async () => (modalRows = await sql`select start_date, due_date from tasks where list_id = ${LIST} and title = ${MODAL}`).length > 0, { timeoutMs: 15_000 })
+  await waitUntil(async () => (modalRows = await rowsTitled(MODAL)).length > 0, { timeoutMs: 15_000 })
   chk(
-    noteShown && REASON.test(noteText) && heldBack && madeWhileWrong === 0 && noteGone && modalRows.length === 1
-      && ms(modalRows[0].start_date) === ms(new Date(dayAt(1, 9)).toISOString()) && ms(modalRows[0].due_date) === ms(new Date(dayAt(3, 17)).toISOString()),
-    'the create modal says, beside the dates and before Create, that the start is after the due date, and makes nothing until it is not — then Create makes the task with both dates (read by SQL)',
-    `the note showed ${noteShown} reading ${JSON.stringify(noteText)}; Create held back ${heldBack}; ${madeWhileWrong} task(s) made meanwhile; ` +
-      `the note went ${noteGone}; then ${modalRows.length} task(s) so titled, holding ${JSON.stringify(modalRows[0] ?? null)}`,
+    offered && alerts.length === 0 && modalRows.length === 1
+      && ms(modalRows[0].start_date) === ms(new Date(dayAt(10, 9)).toISOString()) && ms(modalRows[0].due_date) === ms(new Date(dayAt(3, 17)).toISOString()),
+    'the create modal makes a task whose start is typed after its due date: nothing is said beside the dates, Create is offered, and the task holds both (read by SQL)',
+    `Create was offered ${offered}; alerts beside the dates ${JSON.stringify(alerts)}; ${modalRows.length} task(s) so titled, holding ${JSON.stringify(modalRows[0] ?? null)}`,
   )
 
-  // The sheet in Karachi: due the 4th with no time; a start typed at 09:00 on the 5th, then at 09:00 on the 4th.
-  const KS = await makeTask(`Sheet in Karachi ${TAG}`, { dueDate: dayOnly(4) })
-  const kctx = await browser.newContext({ viewport: { width: 1500, height: 1100 }, serviceWorkers: 'block', timezoneId: 'Asia/Karachi', storageState: await ctx.storageState() })
-  const kpage = await kctx.newPage()
-  const zonesSent = []
-  /** A request (or a response's request) that is the sheet's write of this task. */
-  const isSheetPatch = (r) => r.method() === 'PATCH' && new URL(r.url()).pathname.endsWith(`/tasks/${KS}`)
-  const answersSheetPatch = (res) => isSheetPatch(res.request())
-  kpage.on('request', (r) => { if (isSheetPatch(r)) zonesSent.push(r.headers()['x-time-zone'] ?? null) })
-  const ktoasts = () => kpage.locator('[data-sonner-toast]').filter({ visible: true }).allInnerTexts().catch(() => [])
-  await kpage.goto(`${B}/app/${WS}/${SPACE}/${PROJECT}/${LIST}?task=${KS}`, { waitUntil: 'domcontentloaded' })
-  const kStartBox = kpage.getByTestId('task-start-date')
-  const kDueBox = kpage.getByTestId('task-due-date')
-  const kReady = await waitUntil(async () => (await kDueBox.inputValue({ timeout: 1000 }).catch(() => '')) === `${dayOnly(4).slice(0, 10)}T00:00`, { timeoutMs: 20_000 })
-  const kLate = kpage.waitForResponse(answersSheetPatch, { timeout: 15_000 }).catch(() => null)
-  await kStartBox.fill(`${dayOnly(5).slice(0, 10)}T09:00`, { timeout: 5000 }).catch(() => {})
-  const kLateAnswer = (await kLate)?.status() ?? null
-  let kToast = ''
-  await waitUntil(async () => (kToast = (await ktoasts()).find((t) => REASON.test(t)) ?? '').length > 0, { timeoutMs: 10_000 })
-  const kLateRow = await rowOf(KS)
-  const kFits = kpage.waitForResponse(answersSheetPatch, { timeout: 15_000 }).catch(() => null)
-  await kStartBox.fill(`${dayOnly(4).slice(0, 10)}T09:00`, { timeout: 5000 }).catch(() => {})
-  const kFitsAnswer = (await kFits)?.status() ?? null
-  let kFitsRow = null
-  await waitUntil(async () => ms((kFitsRow = await rowOf(KS))?.start_date) === ms(nineInKarachi(4)), { timeoutMs: 10_000 })
-  await kctx.close().catch(() => {})
+  // The bulk bar: two tasks selected, one of them put in the bin meanwhile, then a priority set on both.
+  const KEPT = await makeTask(`Bulk bar kept ${TAG}`)
+  const BINNED = await makeTask(`Bulk bar binned ${TAG}`)
+  await page.goto(`${B}/app/${WS}/${SPACE}/${PROJECT}/${LIST}`, { waitUntil: 'domcontentloaded' })
+  const rowBox = (id) => page.locator(`[data-testid="list-task-row"][data-task-id="${id}"] input[type=checkbox]`)
+  const rowsShown = await waitUntil(async () => (await rowBox(KEPT).isVisible().catch(() => false)) && (await rowBox(BINNED).isVisible().catch(() => false)), { timeoutMs: 20_000 })
+  await rowBox(KEPT).check({ timeout: 5000 }).catch(() => {})
+  await rowBox(BINNED).check({ timeout: 5000 }).catch(() => {})
+  const binned = await A(`/tasks/${BINNED}`, { method: 'DELETE' })
+  const prioritySelect = page.getByLabel('Set priority', { exact: true })
+  const barShown = await waitUntil(() => prioritySelect.isVisible().catch(() => false), { timeoutMs: 10_000 })
+  const bulked = page.waitForResponse((r) => r.request().method() === 'PATCH' && new URL(r.url()).pathname.endsWith('/tasks/bulk/update'), { timeout: 15_000 }).catch(() => null)
+  await prioritySelect.selectOption('high', { timeout: 5000 }).catch(() => {})
+  const bulkAnswer = (await bulked)?.status() ?? null
+  let barToast = ''
+  await waitUntil(async () => (barToast = (await toasts()).find((s) => /1 task was not changed/.test(s)) ?? '').length > 0, { timeoutMs: 10_000 })
+  const keptRow = await rowOf(KEPT)
+  const binnedRow = await rowOf(BINNED)
   chk(
-    kReady && kLateAnswer === 400 && kToast.length > 0 && kLateRow?.start_date === null
-      && kFitsAnswer === 200 && ms(kFitsRow?.start_date) === ms(nineInKarachi(4)) && zonesSent.length === 2 && zonesSent.every((z) => z === 'Asia/Karachi'),
-    'in the task sheet in Karachi, a start typed at 09:00 on the day after a due day with no time is refused and said — the toast gives the reason — and the task keeps no start, while 09:00 on the due day itself is taken; each write names the zone (read by SQL)',
-    `the sheet showed the due day ${kReady}; the late start answered ${kLateAnswer ?? 'nothing'}, the toast read ${JSON.stringify(kToast || (await ktoasts().catch(() => [])))}, the task held ${JSON.stringify(kLateRow)}; ` +
-      `the start on the day answered ${kFitsAnswer ?? 'nothing'}, storing ${JSON.stringify(kFitsRow)}; the zones sent ${JSON.stringify(zonesSent)}`,
+    rowsShown && barShown && [200, 204].includes(binned.status) && bulkAnswer === 200
+      && /in the bin/i.test(barToast) && keptRow?.priority === 'high' && binnedRow?.priority !== 'high',
+    'the list’s bulk bar says how many of the selected tasks the server did not change, and why, and the rest are changed (read by SQL)',
+    `the rows showed ${rowsShown}, the bar ${barShown}; binning answered ${said(binned)}; the bulk edit ${bulkAnswer ?? 'nothing'}; the toast read ${JSON.stringify(barToast || (await toasts()))}; ` +
+      `the kept task holds ${keptRow?.priority ?? null}, the binned ${binnedRow?.priority ?? null}`,
+  )
+
+  // ══ 4. A REFUSED CHANGE IS SAID IN THE SERVER'S WORDS ═════════════════════
+  console.log('\n▶ the task sheet and a row edit say a refused change in the server’s words')
+  /*
+   * Each task is put in the bin BY SQL while the page shows it, as binning does
+   * it (`deleteTask`) but with no event: the list page redraws on a bin's event
+   * and the row would be gone before it is changed. What is checked is what the
+   * page says when the server refuses a change; the bin is only the refusal.
+   */
+  const binBySql = (id) => sql`update tasks set is_archived = true, archived_at = now() where id = ${id}`
+  /** The PATCH of this task the page sends next, and the server's sentence in its answer. */
+  const nextPatchOf = (id) => page.waitForResponse((r) => r.request().method() === 'PATCH' && new URL(r.url()).pathname.endsWith(`/tasks/${id}`), { timeout: 15_000 })
+    .then(async (r) => {
+      const body = await r.json().catch(() => null)
+      return { status: r.status(), words: String(body?.message ?? body?.error?.message ?? '') }
+    })
+    .catch(() => ({ status: null, words: '' }))
+
+  // The sheet: a task binned while its sheet is open, then a start typed.
+  const SB_START = dayAt(1, 9)
+  const SB = await makeTask(`Sheet refused ${TAG}`, { startDate: new Date(SB_START).toISOString(), dueDate: new Date(SHEET_DUE).toISOString() })
+  await page.goto(`${B}/app/${WS}/${SPACE}/${PROJECT}/${LIST}?task=${SB}`, { waitUntil: 'domcontentloaded' })
+  const sbReady = await waitUntil(async () => (await startBox.inputValue({ timeout: 1000 }).catch(() => '')) === SB_START, { timeoutMs: 20_000 })
+  await binBySql(SB)
+  const sbPatch = nextPatchOf(SB)
+  await startBox.fill(dayAt(2, 9), { timeout: 5000 }).catch(() => {})
+  const sbAnswer = await sbPatch
+  let sbToast = ''
+  await waitUntil(async () => (sbToast = (sbAnswer.words && (await toasts()).find((s) => s.includes(sbAnswer.words))) || '').length > 0, { timeoutMs: 10_000 })
+  const sbRow = await rowOf(SB)
+  chk(
+    sbReady && sbAnswer.status === 409 && sbAnswer.words.length > 0 && sbToast.length > 0 && ms(sbRow?.start_date) === ms(new Date(SB_START).toISOString()),
+    'the task sheet says a refused change in the server’s words: a start typed on a task put in the bin meanwhile is refused (409), the toast carries the server’s sentence, and the task keeps its start (read by SQL)',
+    `the sheet showed the start ${sbReady}; the PATCH answered ${sbAnswer.status ?? 'nothing'} saying ${JSON.stringify(sbAnswer.words)}; the toasts read ${JSON.stringify(await toasts())}; the task holds ${JSON.stringify(sbRow)}`,
+  )
+
+  // A row edit in the Table view: a priority picked on a task binned while its menu is open.
+  const RB = await makeTask(`Row refused ${TAG}`, { priority: 'normal' })
+  await page.goto(`${B}/app/${WS}/${SPACE}/${PROJECT}/${LIST}`, { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('work-view-tab-type-table').click({ timeout: 20_000 }).catch(() => {})
+  const tableRow = page.locator(`[data-testid="list-table-row"][data-task-id="${RB}"]`).first()
+  const rbShown = await waitUntil(() => tableRow.isVisible().catch(() => false), { timeoutMs: 20_000 })
+  await tableRow.getByTestId('list-table-priority-button').click({ timeout: 5000 }).catch(() => {})
+  const rbMenu = await waitUntil(() => tableRow.getByRole('button', { name: /^high$/i }).first().isVisible().catch(() => false), { timeoutMs: 5000 })
+  await binBySql(RB)
+  const rbPatch = nextPatchOf(RB)
+  await tableRow.getByRole('button', { name: /^high$/i }).first().click({ timeout: 5000 }).catch(() => {})
+  const rbAnswer = await rbPatch
+  let rbToast = ''
+  await waitUntil(async () => (rbToast = (rbAnswer.words && (await toasts()).find((s) => s.includes(rbAnswer.words))) || '').length > 0, { timeoutMs: 10_000 })
+  const rbRow = await rowOf(RB)
+  chk(
+    rbShown && rbMenu && rbAnswer.status === 409 && rbAnswer.words.length > 0 && rbToast.length > 0 && rbRow?.priority === 'normal',
+    'a row edit on the list page says a refused change in the server’s words: a priority picked in the Table view on a task put in the bin meanwhile is refused (409), the toast carries the server’s sentence, and the task keeps its priority (read by SQL)',
+    `the row showed ${rbShown}, its menu ${rbMenu}; the PATCH answered ${rbAnswer.status ?? 'nothing'} saying ${JSON.stringify(rbAnswer.words)}; the toasts read ${JSON.stringify(await toasts())}; the task holds ${rbRow?.priority ?? null}`,
   )
 } catch (err) {
   failed += 1

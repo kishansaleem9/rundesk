@@ -10,8 +10,8 @@ s = io.open(p, encoding='utf-8').read()
 for a, b in [
     ("    priority: form.priority ?? payload.priority,\n",
      "    priority: payload.priority ?? form.priority,\n"),
-    ("  let dueDate = typedDue ?? offsetToDate(now, payload.dueDateOffsetDays) ?? undefined\n",
-     "  let dueDate = offsetToDate(now, payload.dueDateOffsetDays) ?? typedDue ?? undefined\n"),
+    ("    dueDate: form.dueDate ? new Date(form.dueDate) : offsetToDate(now, payload.dueDateOffsetDays) ?? undefined,\n",
+     "    dueDate: offsetToDate(now, payload.dueDateOffsetDays) ?? (form.dueDate ? new Date(form.dueDate) : undefined),\n"),
 ]:
     assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
     s = s.replace(a, b)

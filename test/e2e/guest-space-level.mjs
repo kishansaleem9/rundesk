@@ -110,10 +110,8 @@ try {
     await listsNamed(`${TAG} the guest's list where shared`),
   ]
   chk(
-    // 404: nothing in that space is theirs to open, so its project is answered
-    // as one that is not there (`found-30-sep/private-task-reads-say-403`).
-    gList.status === 404 && gN === 0 && mList.status === 201 && mN === 1 && gShared.status === 201 && gSharedN === 1,
-    'a guest makes no list in an open space not shared with them (404, as for a project that is not there; none made) — a member does, and so does the guest where the space is shared with them with Full edit',
+    gList.status === 403 && gN === 0 && mList.status === 201 && mN === 1 && gShared.status === 201 && gSharedN === 1,
+    'a guest makes no list in an open space not shared with them (403, none made) — a member does, and so does the guest where the space is shared with them with Full edit',
     `the guest ${said(gList)}, lists made ${gN}; the member ${said(mList)}, ${mN}; the guest where shared ${said(gShared)}, ${gSharedN}`,
   )
 
@@ -129,10 +127,8 @@ try {
     await commentsSaying(`${TAG} the guest says where shared`),
   ]
   chk(
-    // 404: a task of a space shared with them in no part is not theirs to open,
-    // so it is answered as one that is not there (`found-30-sep/private-task-reads-say-403`).
-    gSay.status === 404 && gC === 0 && mSay.status === 201 && mC === 1 && gSharedSay.status === 201 && gSharedC === 1,
-    'a guest comments on no task of an open space not shared with them (404, as for a task that is not there; none written) — a member does, and so does the guest where the space is shared with them to comment',
+    gSay.status === 403 && gC === 0 && mSay.status === 201 && mC === 1 && gSharedSay.status === 201 && gSharedC === 1,
+    'a guest comments on no task of an open space not shared with them (403, none written) — a member does, and so does the guest where the space is shared with them to comment',
     `the guest ${said(gSay)}, written ${gC}; the member ${said(mSay)}, ${mC}; the guest where shared ${said(gSharedSay)}, ${gSharedC}`,
   )
 
@@ -173,8 +169,7 @@ try {
   ]
   chk(
     onTask.status === 201 && onTaskC === 1 && onList.status === 201 && onListC === 1 && inProject.status === 201 && inProjectN === 1
-      // The task beside theirs is not theirs to open: not there (404), as an id naming nothing.
-      && beside.status === 404 && besideC === 0,
+      && beside.status === 403 && besideC === 0,
     'where only an item is shared with a guest, its level is theirs there — they comment on the shared task and in the shared list, and make a list in the shared project — and not on the task beside them',
     `the shared task ${said(onTask)}, ${onTaskC}; the shared list's task ${said(onList)}, ${onListC}; a list in the shared project ${said(inProject)}, ${inProjectN}; the task beside them ${said(beside)}, ${besideC}`,
   )

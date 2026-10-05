@@ -2578,9 +2578,8 @@ function ListDetail() {
    * A ROW'S CHANGE, AND THE SERVER'S WORDS WHEN IT IS REFUSED. The row edits,
    * the calendar drop and the Gantt drag sent their PATCH and threw on a
    * refusal into nothing (their callers do not wait), so a refused change said
-   * nothing and left the row as drawn. A due date moved before the start the
-   * task holds is now refused (400, `found-30-sep/a-task-starts-after-it-is-due`),
-   * and that, like any refusal, is said; the rows are read again either way.
+   * nothing and left the row as drawn. Any refusal is said now, in the
+   * server's words; the rows are read again either way.
    */
   const patchTaskSaying = async (taskId: string, patch: Record<string, unknown>) => {
     try {
@@ -6792,11 +6791,9 @@ function BulkActionBar({
 
   /*
    * THE TASKS THE SERVER DID NOT CHANGE, AND WHY. The route changes what it may
-   * and answers the rest under `failed`, each with its reason — a task left
-   * starting after its due date among them
-   * (`found-30-sep/a-task-starts-after-it-is-due`) — and a refusal of the
-   * whole request is a 400. Both were read by nothing: the bar cleared as if
-   * every task had changed.
+   * and answers the rest under `failed`, each with its reason, and a refusal of
+   * the whole request is a 4xx. Both were read by nothing: the bar cleared as
+   * if every task had changed.
    */
   const apply = async (patch: Record<string, unknown>) => {
     setBusy(true)

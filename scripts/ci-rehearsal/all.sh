@@ -4,7 +4,7 @@
 #   bash scripts/ci-rehearsal/all.sh [OUT]
 #
 # Verify and Postgres harnesses at once, on two CPUs each, then Browser suites.
-# About two hours here, for one to two hours on the runner. Each
+# About two hours here; the run that passed on 1 October took 141 minutes. Each
 # job's steps are in OUT (default /home/runner/ci-rh/run-<time>), a line per
 # step in OUT/<job>.out, and the last lines say what failed. Exits 0 only when
 # every step of every job passed.

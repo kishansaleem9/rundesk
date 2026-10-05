@@ -1,5 +1,5 @@
 # THE STREAMED SUMMARY ASKS NOTHING OF THE TASK: it is built for whoever names it.
-# Reddens: ai-task-reads: "a streamed summary is refused as the summary is — to the guest and to the member refused the private list (404 each, nothing sent) — and streamed for the member who reads the task"
+# Reddens: ai-task-reads: "a streamed summary is refused as the summary is — to the guest and to the member refused the private list (403 each, nothing sent) — and streamed for the member who reads the task"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/ai/ai.controller.ts'
 a = "    // Before the model's availability, as the summary asks it: a task named by\n    // id is summarised only for someone who may open it.\n    if (body.taskId) await this.ai.assertTaskReadable(body.taskId, { id: user.id, role: user.role })\n"

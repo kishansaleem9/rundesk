@@ -11,7 +11,6 @@ import {
   Ip,
   UseGuards,
   Header,
-  Headers,
   StreamableFile,
   BadRequestException, Res } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
@@ -25,7 +24,6 @@ import type { PlanFeature } from '../plans/plans.constants'
 import { EmailToTaskService } from '../email-to-task/email-to-task.service'
 import { CreateTaskDto, AddAttachmentDto, AttachClipDto } from './dto/task.dto'
 import { unknownUpdateFields } from './task-update-fields'
-import { WRITER_ZONE_HEADER, writerZone } from './task-values'
 import type { CurrentUserPayload } from './types'
 import { downloadName } from '../../common/export/download-name'
 
@@ -311,7 +309,6 @@ export class TasksController {
   async create(
     @CurrentUser() user: CurrentUserPayload,
     @Body() body: CreateTaskDto,
-    @Headers(WRITER_ZONE_HEADER) zone?: string,
   ) {
     return this.tasks.createTask({
       listId: body.listId,
@@ -335,9 +332,6 @@ export class TasksController {
       // has never once applied.
       taskTypeId: body.taskTypeId,
       createdById: user.id,
-      // The zone its writer reads a day in, which orders a day beside a
-      // moment as they see it (`startsAfterDue`); the web sends it on every write.
-      writerZone: writerZone(zone),
     })
   }
 
@@ -367,7 +361,6 @@ export class TasksController {
       visibility: 'public' | 'private'
       parentTaskId: string | null
     }>,
-    @Headers(WRITER_ZONE_HEADER) zone?: string,
   ) {
     /*
      * REFUSED BY NAME, not dropped. The type above is erased at runtime and this
@@ -410,7 +403,7 @@ export class TasksController {
     const patch: Record<string, unknown> = { ...body }
     if ('startDate' in body) patch.startDate = toDate('startDate', body.startDate)
     if ('dueDate'   in body) patch.dueDate   = toDate('dueDate', body.dueDate)
-    return this.tasks.updateTask(taskId, user.id, patch, { writerZone: writerZone(zone) })
+    return this.tasks.updateTask(taskId, user.id, patch)
   }
 
   @Patch('bulk/update')
@@ -442,7 +435,6 @@ export class TasksController {
         }>
       }>
     },
-    @Headers(WRITER_ZONE_HEADER) zone?: string,
   ) {
     if (!Array.isArray(body?.taskIds) || body.taskIds.length === 0) {
       throw new BadRequestException('taskIds must be a non-empty array')
@@ -453,7 +445,7 @@ export class TasksController {
     const patch: Record<string, unknown> = { ...body.patch }
     if ('startDate' in body.patch) patch.startDate = body.patch.startDate ? new Date(body.patch.startDate) : null
     if ('dueDate' in body.patch) patch.dueDate = body.patch.dueDate ? new Date(body.patch.dueDate) : null
-    return this.tasks.bulkUpdateTasks(body.taskIds, user.id, patch, { writerZone: writerZone(zone) })
+    return this.tasks.bulkUpdateTasks(body.taskIds, user.id, patch)
   }
 
   @Post(':taskId/recurring/next')
@@ -525,10 +517,9 @@ export class TasksController {
    *
    * `:taskId` is the task being merged AWAY and `targetTaskId` the survivor:
    * "merge this into that", which is the direction the menu item reads in.
-   * No route guard: the service asks the read rule of both ids first (the
-   * target by the reference rule, so either one the merger may not open is
-   * answered as an id naming nothing), then the merge rule, then write access
-   * to both. Merging is a write to the target as much as to the source.
+   * No route guard: the service asks the merge rule of the two tasks, then
+   * the task write rule of both (`assertTaskWriteAccess`). Merging is a write
+   * to the target as much as to the source.
    */
   @Post(':taskId/merge')
   merge(
@@ -726,11 +717,10 @@ export class TasksController {
    * files as one zip, streamed from the store as it is read, named after the
    * task. See `TasksService.attachmentsZip`.
    *
-   * The service asks the task's read rule (`readableTask`) and answers 404 for
-   * a task this person may not open, as for one that does not exist — the
-   * answer `ResourceMemberGuard` gives too since `found-30-sep/private-task-reads-say-403`
-   * (it said 403 then, which said the task was there). Not cached: it is
-   * somebody's files.
+   * NOT BEHIND `ResourceMemberGuard`, which refuses a task in a private list or
+   * space with 403 and so says that it is there. The service asks the same
+   * rule (`readableTask`) and answers 404 for a task this person may not open,
+   * as for one that does not exist. Not cached: it is somebody's files.
    */
   @Get(':taskId/attachments/zip')
   @Header('Cache-Control', 'private, no-store')

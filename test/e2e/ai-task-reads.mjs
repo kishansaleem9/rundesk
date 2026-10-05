@@ -78,10 +78,6 @@ try {
   const guest = await person('guest', 'guest')
   const member = await person('member', 'member')
   const busy = await person('busy', 'member')
-  // A user of another organisation: in no part of this workspace.
-  const strangerSigned = await signUpApi(API, { fullName: `Stranger ${TAG}`, email: `${TAG}-stranger@rundesk.invalid`, password: 'AiTaskReads@12345!', organizationName: `stranger ${stamp}`, organizationSlug: `stranger-${stamp}` })
-  const stranger = { as: apiAs(strangerSigned.accessToken) }
-  const NONE = '00000000-0000-4000-8000-0000000000ab'
 
   const listIn = async (name) => {
     const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${name}` } })
@@ -127,10 +123,10 @@ try {
   const memberSumsHidden = await promptsOf(() => member.as('/ai/summarize', { method: 'POST', body: { taskId: hidden, type: 'task' } }))
   const memberSums = await promptsOf(() => member.as('/ai/summarize', { method: 'POST', body: { taskId: open, type: 'task' } }))
   chk(
-    guestSums.res.status === 404 && memberSumsHidden.res.status === 404 && served(memberSums.res)
+    guestSums.res.status === 403 && memberSumsHidden.res.status === 403 && served(memberSums.res)
       && guestSums.stubRead && !guestSums.text.includes(OPEN_WORD) && !memberSumsHidden.text.includes(PRIVATE_WORD)
       && (!modelOn || memberSums.text.includes(OPEN_WORD)),
-    'a task is summarised for nobody who may not open it — a guest it is not shared with, a member refused its private list (404 each, as for a task that is not there; nothing of it sent to a model) — and for a member who reads it, it is',
+    'a task is summarised for nobody who may not open it — a guest it is not shared with, a member refused its private list (403 each, nothing of it sent to a model) — and for a member who reads it, it is',
     `guest ${said(guestSums.res)}${guestSums.text.includes(OPEN_WORD) ? ', its words SENT' : ''}; member, private list ${said(memberSumsHidden.res)}${memberSumsHidden.text.includes(PRIVATE_WORD) ? ', its words SENT' : ''}; member, open list ${said(memberSums.res)}${modelOn && !memberSums.text.includes(OPEN_WORD) ? ', its words not sent' : ''}; ${why}`,
   )
 
@@ -140,10 +136,10 @@ try {
   const memberStreamsHidden = await promptsOf(() => member.as('/ai/summarize/stream', { method: 'POST', body: { taskId: hidden, type: 'task' } }))
   const memberStreams = await promptsOf(() => member.as('/ai/summarize/stream', { method: 'POST', body: { taskId: open, type: 'task' } }))
   chk(
-    guestStreams.res.status === 404 && memberStreamsHidden.res.status === 404 && served(memberStreams.res)
+    guestStreams.res.status === 403 && memberStreamsHidden.res.status === 403 && served(memberStreams.res)
       && !guestStreams.text.includes(OPEN_WORD) && !memberStreamsHidden.text.includes(PRIVATE_WORD)
       && (!modelOn || memberStreams.text.includes(OPEN_WORD)),
-    'a streamed summary is refused as the summary is — to the guest and to the member refused the private list (404 each, nothing sent) — and streamed for the member who reads the task',
+    'a streamed summary is refused as the summary is — to the guest and to the member refused the private list (403 each, nothing sent) — and streamed for the member who reads the task',
     `guest ${said(guestStreams.res)}; member, private list ${said(memberStreamsHidden.res)}; member, open list ${said(memberStreams.res)}; ${why}`,
   )
 
@@ -155,31 +151,21 @@ try {
   const adminDeadline = await promptsOf(() => A('/ai/task/deadline', { method: 'POST', body: { title: 'when?', taskId: busyOpen } }))
   const load = (p) => Number(new RegExp(`${busy.name}: (\\d+) open task`).exec(p.text)?.[1] ?? NaN)
   chk(
-    guestDeadline.res.status === 404 && memberDeadlineHidden.res.status === 404 && served(memberDeadline.res) && served(adminDeadline.res)
+    guestDeadline.res.status === 403 && memberDeadlineHidden.res.status === 403 && served(memberDeadline.res) && served(adminDeadline.res)
       && (!modelOn || (load(memberDeadline) === 1 && load(adminDeadline) === 3)),
-    'a deadline is suggested for no task its asker may not open (404 each, as for a task that is not there) — and the workload it weighs counts, for a member, only the tasks they may open: one of the busy member’s three, where the admin’s counts all three',
+    'a deadline is suggested for no task its asker may not open (403 each) — and the workload it weighs counts, for a member, only the tasks they may open: one of the busy member’s three, where the admin’s counts all three',
     `guest ${said(guestDeadline.res)}; member, private list ${said(memberDeadlineHidden.res)}; member ${said(memberDeadline.res)}, counted ${load(memberDeadline)}; admin ${said(adminDeadline.res)}, counted ${load(adminDeadline)}; ${why}`,
   )
 
   // ══ 4. AN ASSIGNEE ═══════════════════════════════════════════════════════
-  // Each refusal beside the same ask of an id naming nothing, by the same asker:
-  // `found-30-sep/private-task-reads-say-403` (review) measured "no_permission"
-  // for a task the asker may not open and "unknown_task" for none — to a user of
-  // any other organisation too, since the route names no workspace.
-  console.log('\n▶ an assignee suggested for a task: by the member, in the private list and in the open one; by a user of another organisation; each beside an id naming nothing')
-  const suggest = (who, id) => who.as(`/ai/assignee-suggestion?taskId=${id}`)
-  const answer = (res) => JSON.stringify({ status: res.status, ok: res.data?.ok, reason: res.data?.reason, message: res.data?.message, pick: res.data?.pick ?? null })
-  const pickHidden = await suggest(member, hidden)
-  const pickNone = await suggest(member, NONE)
-  const pickStranger = await suggest(stranger, open)
-  const pickStrangerNone = await suggest(stranger, NONE)
-  const pickOpen = await suggest(member, open)
+  console.log('\n▶ an assignee suggested for a task, by the member, in the private list and in the open one')
+  const pickHidden = await member.as(`/ai/assignee-suggestion?taskId=${hidden}`)
+  const pickOpen = await member.as(`/ai/assignee-suggestion?taskId=${open}`)
   chk(
-    pickNone.status === 200 && pickNone.data?.ok === false && pickNone.data?.reason === 'unknown_task'
-      && answer(pickHidden) === answer(pickNone) && answer(pickStranger) === answer(pickStrangerNone)
+    pickHidden.status === 200 && pickHidden.data?.ok === false && pickHidden.data?.reason === 'no_permission' && !pickHidden.data?.pick
       && pickOpen.status === 200 && pickOpen.data?.ok === true,
-    'an assignee is suggested for no task the asker may not open — the private list’s, and this workspace’s task asked by a user of another organisation, are answered word for word as an id naming nothing, with no pick — and for one they read, it is',
-    `private list ${answer(pickHidden).slice(0, 200)} / nothing ${answer(pickNone).slice(0, 200)}; stranger ${answer(pickStranger).slice(0, 200)} / nothing ${answer(pickStrangerNone).slice(0, 200)}; open list ${pickOpen.status} ok=${pickOpen.data?.ok}`,
+    'an assignee is suggested for no task the asker may not open — the private list’s answers that they may not, with no pick — and for one they read, it is',
+    `private list ${pickHidden.status} ${JSON.stringify(pickHidden.data ?? pickHidden.error ?? null).slice(0, 160)}; open list ${pickOpen.status} ok=${pickOpen.data?.ok}`,
   )
 } catch (err) {
   failed += 1
