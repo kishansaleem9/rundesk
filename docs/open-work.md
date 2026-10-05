@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 395 items, 56 open, 8 partly fixed, 331 closed, counted from this file's headings on 30 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 464 items: 34 open · 3 partly fixed · 380 closed, and 47 features, decisions and deploy settings not counted as defects, counted from this file's headings on 5 October, after the triage (`docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1698,7 +1698,7 @@ Found while closing it: `found-30-sep/status-floor-placeholders-by-name`.
 - Merged here onto `bac7eae`. The gate then named one guard the dropdown batch had added since (`menu-reopen:478`, a channel made for the run), rewritten the same way; over the merged tree it names none, and 71 of 71 mutations bite.
 - Regression on lanes 1 and 3, 38 of the 116 suites (the nine grant guards, `data-transfer-keys`, and a spread of the rest): all green, 409 checks. The other 78 were not run here; each rewritten guard is the same test as before on any answer that came.
 
-### `found-30-sep/status-floor-placeholders-by-name` — open (test tooling, small; found closing `found-30-sep/status-zero-slips-setup-guards`)
+### `found-30-sep/status-floor-placeholders-by-name` — open (test tooling, small; found closing `found-30-sep/status-zero-slips-setup-guards`) · reproduced 5 October
 
 **The gate reads a placeholder by name, file-wide, so it names the wrong reason, and could miss one passed under another name**
 
@@ -1713,6 +1713,8 @@ none exists today (every root of the 187 guards left as "cannot be 0" was traced
 
 *To close:* resolve a root to the binding in scope at the comparison (the nearest enclosing declaration, and a
 parameter to its callers' arguments), with a planted case each way and mutations that bite.
+
+*Triage, 5 October:* reproduced on a lane. The status-floor gate still decides a placeholder by name across the whole file: on crafted suites it blames a throw-bound `res` for another `res`'s `{ status: 0 }`, and it misses a placeholder passed to a helper parameter under another name. No real suite is affected now. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `found-30-sep/status-floor-blind-to-other-names` — **closed** (test tooling, small; found closing `found-30-sep/status-zero-passes-status-only-checks`)
 
@@ -1957,14 +1959,6 @@ Checks:
 - `template-center-17`'s anchor went with `group by lower(t)`. It is re-aimed at the word column and still reddens its check.
 - `ptt-17` and `ptt-18` are unit claims, each reddening its test in `project-templates.service.test.ts` (7 tests new).
 
-### `found-30-sep/no-save-list-or-folder-as-template` — open (feature, medium; found closing `ledger-rows/row-1874`)
-
-**A Folder or a List cannot be saved as a template from the sidebar**
-
-*Evidence, 30 September:* ClickUp saves a Folder or a List as a template from the sidebar (⋯ › Templates › Save as Template, with tags). Rundesk's only save dialog is the Template Center's "Save project as template". It never sends `targetType: 'list'`, though the API makes a list template of a one-list project when asked, so a list template can only be made through the API.
-
-*To close:* research ClickUp's sidebar save, then offer Save as Template on a folder's and a list's menu, with tags, and check that each makes a template of the right kind.
-
 ### `found-30-sep/killed-suites-leave-members-behind` — **closed** (test tooling, small; found closing `ledger-rows/row-1874`)
 
 **A suite killed mid-run leaves the people it joined to the shared workspace**
@@ -1980,7 +1974,7 @@ Checks:
 - After, four times (the last on `bac7eae` with the final library): killed the same way, the run's journal named its 2 accounts and 10 templates. The next run removed them with their organizations and workspaces, then its own. From before the kill to after it, no account, organization, workspace, member of Main or template was added. `check-made-sweep.mjs` does the same with a probe process on every CI run.
 - Merged here onto `2d38c0e` (one clash: `request-access` had moved onto `signUpApi` in the batch before, which now registers each person, so that side was kept). The gate names none over the 262 suites, and 19 of 19 mutations bite; it and its cases run in preflight too. Run again on lanes 2, 4, 5 and 7: the 25 suites this changed and `sign-in-and-password`, all green, 456 checks, and the four named suites it changed through `signUpApi` alone (`project-template-key`, `like-literal`, `role-permissions-web`, `space-default-permission`) 5, 5, 5 and 36, all green. `check-made-sweep.mjs` against lane 6: 24 cases hold, and 21 of 21 mutations bite (a first run cut off by a 15-minute limit of mine left one mutant file beside its subject, removed).
 
-### `found-30-sep/suite-cleanup-leaves-stored-objects` — open (test tooling, small; found closing `found-30-sep/suite-runs-leave-accounts-behind`)
+### `found-30-sep/suite-cleanup-leaves-stored-objects` — open (test tooling, small; found closing `found-30-sep/suite-runs-leave-accounts-behind`) · reproduced 5 October
 
 **What a suite uploads stays in the lane's store after the sweep deletes its rows**
 
@@ -1988,7 +1982,9 @@ Checks:
 
 *To close:* have the sweeper remove the objects a swept workspace or account names (the prefixes `storedKeysOf` lists, and `avatars/<userId>-`) through the stub's S3 API, and check by listing that a run that uploads leaves no object.
 
-### `found-30-sep/lanes-hold-earlier-runs-leftovers` — open (test tooling, small; found closing `found-30-sep/suite-runs-leave-accounts-behind`)
+*Triage, 5 October:* reproduced on a lane. A suite's uploads stay in the lane's object store after the sweep deletes their rows: stable-images on lane 1 left an avatar and a workspace logo whose user and workspace no longer exist. Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/lanes-hold-earlier-runs-leftovers` — open (test tooling, small; found closing `found-30-sep/suite-runs-leave-accounts-behind`) · reproduced 5 October
 
 **The cleanup removes what runs make from now on; every lane still holds what runs made before it**
 
@@ -1996,13 +1992,17 @@ Checks:
 
 *To close:* once per lane, remove `@rundesk.invalid` accounts with the organizations only they own (the sweeper's rule), and the archived workspaces, spaces and lists suites made (by their stamped names); count before and after by SQL, lane by lane.
 
-### `found-30-sep/suite-leftovers-unmeasured` — open (test tooling, medium; found closing `found-30-sep/suite-runs-leave-accounts-behind`)
+*Triage, 5 October:* reproduced on a lane. Lane 1 still holds what runs made before the sweep landed (3175 @rundesk.invalid accounts, 1195 archived workspaces, 364 of 388 Main spaces archived), and nothing removes it. The archived-lists part is 0 on this lane. Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/suite-leftovers-unmeasured` — open (test tooling, medium; found closing `found-30-sep/suite-runs-leave-accounts-behind`) · reproduced 5 October
 
 **What a run leaves was measured for 36 of 259 suites**
 
 *Evidence, 30 September:* the six named suites, the 21 converted and nine more were run with every table counted before and after, and nine of them turned out to leave rows the first cleanup did not see (a form, invitations, lists, docs, tasks, time blocks, notifications, an account made through a page; all fixed). The library covers accounts from `signUpApi` or a registered route, and workspaces, spaces, lists and invitations made through `apiAs`. It does not see what is made through the page or by other routes (an account made so is at least named at the run's end): Main held archived spaces named `Folders e2e-fd-…`, `AI e2e-cma-…`, `treefind-*-…`, `Views swv-…`, `Attach e2e-aoc-…`, `Control capg-…`, and live `Space-list check …`, `Space e2e-hdrstatus-…`, `Space e2e-fieldcreate-…`; 26 suites insert rows by SQL.
 
 *To close:* run every suite once on a lane with every table counted before and after (the scratch `run.sh`/`content.sh` do it), register what each leaves (`madeRow`), and add a check that a run adds no row outside the admin's sessions, rate-limit counters and Main's audit trail.
+
+*Triage, 5 October:* reproduced on a lane. Suites still leave rows the cleanup library never sees (task-provenance leaves a form and three tasks in Main on every run), and nothing counts every table to catch it. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `found-30-sep/legacy-break-patches-directory` — **closed** (test tooling, small; found closing `ledger-rows/row-1874`)
 
@@ -2291,14 +2291,6 @@ refused (400, with a toast), a half-typed value can bring the refusal's toast fo
 blur or Enter, and keep the box enabled; check it with `task-values` or
 `task-depth`.
 
-### `found-30-sep/load-template-takes-every-attribute` — open (parity, medium; found closing `found-30-sep/template-submit-ignores-the-form`)
-
-**Use Template brings everything the template holds, where ClickUp lets you choose**
-
-*Evidence, 30 September:* a search summary of ClickUp's "Use task templates" reads "When you load a Template, you can choose which attributes you'd like to inherit". Here, a template chosen in the create modal brings everything: its checklists, subtasks and custom-field values, and its one values wherever the form left them alone. Only the form can win over it.
-
-*To close:* research ClickUp's attribute choice (which attributes, and where it is offered), then offer the same under Use Template, and check it with a suite.
-
 ### `found-30-sep/create-modal-cuts-off-create` — **closed** (visible bug, small; found closing `found-30-sep/template-submit-ignores-the-form`)
 
 **The create modal cannot scroll: in a window under about 900 high, Create task is below the edge and cannot be pressed**
@@ -2422,7 +2414,7 @@ Found while closing it: `found-30-sep/comment-says-a-leaving-menu-keeps-its-esca
 - The two comments that still said a leaving menu takes the next Escape are reworded (`found-30-sep/comment-says-a-leaving-menu-keeps-its-escape`, below).
 - Merged here with the wait and zip changes below and run again on lane 6: `menu-reopen` 26/26 three runs in a row, and `list-export` 30, `comment-slash-commands` 10, `task-menu` 37, `folder-dialog` 29, `chat-message-actions` 73, `assign-to-priorities` 30, `create-modal-templates` 33, `task-header-status` 15 and `video1-fast-items` 92, all green, 427 checks.
 
-### `found-30-sep/a-double-click-on-a-dialog-row-shuts-the-dialog` — open (visible bug, small; found closing `found-30-sep/menu-items-take-a-press-while-closing`)
+### `found-30-sep/a-double-click-on-a-dialog-row-shuts-the-dialog` — open (visible bug, small; found closing `found-30-sep/menu-items-take-a-press-while-closing`) · reproduced 5 October
 
 **A double-click on a menu row that opens a dialog opens it and shuts it again**
 
@@ -2430,13 +2422,17 @@ Found while closing it: `found-30-sep/comment-says-a-leaving-menu-keeps-its-esca
 
 *To close:* research what ClickUp does with a double-click on a row that opens a dialog. Then decide what the second press does. Either nothing: the dialog refuses an outside press that follows its opening press within a double-click's interval, or it opens once the menu has gone, as the comment "+" menu's creators do. Or what it does now. Check a double-click on Merge leaves the dialog open.
 
-### `found-30-sep/favorite-toggle-races-itself` — open (behaviour, small; found closing `found-30-sep/menu-items-take-a-press-while-closing`)
+*Triage, 5 October:* reproduced on a lane. A person-paced double-click on the task menu's Merge or Convert row still opens the dialog and shuts it again (7/7 rounds on lane 7); what the second press should do is still the owner's call after ClickUp research. Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/favorite-toggle-races-itself` — open (behaviour, small; found closing `found-30-sep/menu-items-take-a-press-while-closing`) · reproduced 5 October
 
 **Two favourite toggles sent together can both pin**
 
 *Evidence, 30 September:* `FavoritesService.toggle` reads the row, then deletes it or inserts one (`onConflictDoNothing`), with no lock or transaction. Two toggles in flight together can both read "not pinned" and both answer `favorited: true`. Seen once on lane 6 (`7751d5a`'s API): under `menu-reopen-10`, which runs the chat header row's `onClick` on both presses of a double-click, the channel ended pinned, where two toggles taken in turn unpin it. `menu-reopen` now reads the wire as well as the server for that reason. Nothing in the app sends two at once now (the star is disabled while one is pending, and the menu rows run once), so it shows only across two tabs or clients.
 
 *To close:* make the toggle one statement or one serialised transaction, and check that two toggles sent together leave the entity as it was.
+
+*Triage, 5 October:* reproduced on a lane. Two favourite toggles sent together both answer favorited:true and leave the item pinned in 25 of 30 rounds on lane 7, because toggle is a read then a write with no transaction. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `found-30-sep/comment-says-a-leaving-menu-keeps-its-escape` — **closed** (stale doc, small; found closing `found-30-sep/leaving-menu-takes-the-next-escape`)
 
@@ -2468,14 +2464,6 @@ Checks: `link-worktree-selfcheck.sh --mutate`, in preflight and CI's verify job,
 - and a helper that points `@rundesk/*` at the main checkout's packages is caught.
 
 *Measured again, 30 September, by the agent closing the attachments items:* a bundle built at 04:52 from its worktree at `f499cf6` carried `getAttribute("data-state")==="closed"`, from `cb21d14`'s `dropdown-menu.tsx`, which neither the worktree's `apps/web` nor its `packages/ui` held. So a BEFORE bundle can carry the main tree's work in progress, as well as an AFTER one missing the worktree's.
-
-### `found-30-sep/save-as-template-asks-no-description` — open (feature, small; found closing `ledger-rows/row-1060`)
-
-**Save as template in the create modal takes no description, and Update's picker has no search**
-
-*Evidence, 30 September:* ClickUp's save offers an optional description, which the API accepts as `description`, and its update picker is searched. The frame shows neither, and the brief asked for the name only.
-
-*To close:* add the optional description and a search over the templates, as ClickUp does, and check both.
 
 ### `found-30-sep/public-doc-page-reads-the-envelope` — **closed** (visible bug, small; found closing `resume-defects/resume-7`)
 
@@ -2885,13 +2873,15 @@ Checks:
 Found while building it: `found-30-sep/an-open-socket-outlives-its-session`, `found-30-sep/the-callers-session-is-named-by-its-refresh-token` and `found-30-sep/loading-states-reads-the-clip-page-loading`.
 - Merged here onto `6f8e02c` and run again on lane 3: `sign-in-and-password` 29, `session-in-the-browser` 3, `auth-route-limits` 22, `password-hash-time` 4, the socket handshake's `chat-realtime-access` 6, `call-realtime-access` 2, `workspace-read-access` 30 and `guest-chat-scope` 7, `credential-reads` 11, `guest-invitations` 2, `settings-depth` 62 and `menu-reopen` 26, all green, 204 checks; `loading-states` 25/26, its known failure (`found-30-sep/loading-states-reads-the-clip-page-loading`).
 
-### `found-30-sep/email-lookups-read-the-whole-table` — open (performance, small; found closing `found-30-sep/sign-in-reads-the-email-as-typed`)
+### `found-30-sep/email-lookups-read-the-whole-table` — open (performance, small; found closing `found-30-sep/sign-in-reads-the-email-as-typed`) · reproduced 5 October
 
 **Every lookup by email reads the whole `users` table**
 
 *Evidence, 30 September, measured:* every lookup of a person by email now compares `lower(email)` (`common/sql/same-email.ts`), and the only index on the column is `users_email_unique`, on the text as stored. On `rundesk_v3` (2,602 accounts) EXPLAIN ANALYZE took 2.2 ms for the sign-in lookup (a sequential scan, 2,601 rows removed by the filter) and 0.15 ms for an exact email by the index. It grows with the accounts, on every sign-in, sign-up, reset request, invitation and inbound mail.
 
 *To close:* an index on `lower(email)`, declared in the schema with its migration (`check-schema-declares-migrations`); a unique one once the accounts that differ only in case are folded. `rundesk_v3` holds twelve such pairs, every one made by a probe, a BEFORE run or a break patch (below); production's count is unknown and is the first thing to read.
+
+*Triage, 5 October:* reproduced on a lane. Every sign-in still does a full sequential scan of `users` (seq_scan +1 per login on lane 1, 4.6 ms against 0.28 ms through the index), because no index on lower(email) exists. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `found-30-sep/an-accepted-invitation-sets-no-cookies` — **closed** (visible bug, small; found closing `found-30-sep/password-change-unthrottled`)
 
@@ -2919,7 +2909,7 @@ Checks:
 - Regression on lane 3, with the other two items': the invitation suites among the 45 (`assignee-picker`, `credential-reads`, which claims a legacy invitation, `guest-invitations`, `list-empty-states`, `no-dead-ends`, `settings-tabs-by-key`, `video-regression`) all green; 44 of 45 in all, 743 of 744 checks.
 - Merged here onto `6f8e02c` and run again on lane 3: `sign-in-and-password` 29, `session-in-the-browser` 3, `auth-route-limits` 22, `password-hash-time` 4, the socket handshake's `chat-realtime-access` 6, `call-realtime-access` 2, `workspace-read-access` 30 and `guest-chat-scope` 7, `credential-reads` 11, `guest-invitations` 2, `settings-depth` 62 and `menu-reopen` 26, all green, 204 checks; `loading-states` 25/26, its known failure (`found-30-sep/loading-states-reads-the-clip-page-loading`).
 
-### `found-30-sep/a-burst-is-compared-before-the-lock` — open (security, small; found closing `found-30-sep/password-change-guesses-600-an-hour`)
+### `found-30-sep/a-burst-is-compared-before-the-lock` — open (security, small; found closing `found-30-sep/password-change-guesses-600-an-hour`) · reproduced 5 October
 
 **Wrong passwords sent at once are all compared before the lockout locks the account, and a right one among them signs in**
 
@@ -2932,7 +2922,9 @@ OWASP's ASVS 2.2.1: "no more than 100 failed attempts per hour is possible on a 
 
 *To close:* take the attempt before the compare, in one statement: count it (or refuse it when the account is locked or the count has reached the threshold) as it begins, and give it back when the password is right, so attempts that overlap past the threshold are refused without a compare; keep sign-in's refusal in one hash's time (`password-hash-time`). Check that of twenty wrong passwords and the right one sent at once, the right one is refused once five have been counted.
 
-### `found-30-sep/an-open-socket-outlives-its-session` — open (security, small; found closing `found-30-sep/revoked-sessions-keep-their-access-tokens`)
+*Triage, 5 October:* reproduced on a lane. Twenty wrong passwords and the right one sent together still sign in (200, a session) although the burst locks the account, because the lock is read before the compare (2 of 2 runs on lane 1). Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/an-open-socket-outlives-its-session` — open (security, small; found closing `found-30-sep/revoked-sessions-keep-their-access-tokens`) · reproduced 5 October
 
 **A realtime socket opened before its session ended stays connected, and hears its rooms**
 
@@ -2944,6 +2936,8 @@ OWASP's ASVS 2.2.1: "no more than 100 failed attempts per hour is possible on a 
 OWASP's ASVS 5.0, 7.4.1: when a session is terminated, "the application disallows any further use of the session".
 
 *To close:* end a session's sockets when it ends: each socket joins a room named for its session (`sid`) at the handshake, and each way a session ends (a password change, a reset, "sign out other sessions", revoking one, signing out, the session cap) disconnects that room; or re-check each socket's session at an interval and on its presence ping. Check that a socket open on a session a password change ends is disconnected within seconds, and that the changer's own socket stays.
+
+*Triage, 5 October:* reproduced on a lane. A socket opened before its session was signed out stays connected and keeps receiving room events (it heard a task.created after the revoke); only new handshakes are refused. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `found-30-sep/loading-states-reads-the-clip-page-loading` — **closed** (suite, small; found in the regression for `found-30-sep/revoked-sessions-keep-their-access-tokens`)
 
@@ -2997,7 +2991,7 @@ OWASP's ASVS 5.0, 7.4.1: when a session is terminated, "the application disallow
 
 *Left:* nothing keeps a suite from deleting by membership again; `madeAccount` and the sweep already remove a member's own organization with the age and ownership rules these cleanups lack, so the three could give theirs up.
 
-### `found-30-sep/the-callers-session-is-named-by-its-refresh-token` — open (visible bug, small; found closing `found-30-sep/revoked-sessions-keep-their-access-tokens`)
+### `found-30-sep/the-callers-session-is-named-by-its-refresh-token` — open (visible bug, small; found closing `found-30-sep/revoked-sessions-keep-their-access-tokens`) · reproduced 5 October
 
 **The sessions list marks no device as this one after a reload, and a client that names no session is signed out by its own password change**
 
@@ -3008,7 +3002,9 @@ OWASP's ASVS 5.0, 7.4.1: when a session is terminated, "the application disallow
 
 *To close:* name the caller's session by the access token's `sid` in the sessions list (`isCurrent`), "Sign out other sessions" and the password change, the refresh token in the body or cookie as well where one is given; check that a reloaded profile page marks its own session and keeps it through "Sign out other sessions", and that a Bearer client's change keeps its own session.
 
-### `found-30-sep/sw-api-cache-reads-the-menu-box-once` — open (suite, small; found closing `found-30-sep/password-hash-holds-the-event-loop`)
+*Triage, 5 October:* reproduced on a lane. On lane 7 the sessions list marks no session current unless the page passes its refresh token (so none after a reload), and a Bearer client that changes its password without naming its session is signed out (201 revoked:3, then 401 on read and refresh). Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/sw-api-cache-reads-the-menu-box-once` — open (suite, small; found closing `found-30-sep/password-hash-holds-the-event-loop`) · reproduced 5 October
 
 **`sw-api-cache` reads the account menu's box once, as it appears**
 
@@ -3018,6 +3014,8 @@ OWASP's ASVS 5.0, 7.4.1: when a session is terminated, "the application disallow
 - The check evaluates `document.querySelector('[role=menu]').getBoundingClientRect().bottom <= window.innerHeight` once, as soon as `menu-sign-out` is attached. A menu still being placed, or still opening, reads as not fitting.
 
 *To close:* wait for the menu's box to be stable (two equal reads a frame apart), and check it with the menu placed past the window's foot.
+
+*Triage, 5 October:* reproduced on a lane. The menu check is timing-dependent as the entry says, but the other way round: mid-animation reads fit and the settled menu always ends at 900.5px in a 900px window, so the proposed 'wait until stable' fix would turn the check red on every run. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `found-30-sep/comment-files-unordered` — **closed** (visible bug, small; found closing `found-30-sep/attachments-unordered`)
 
@@ -3105,14 +3103,6 @@ Checks:
 *Closed, 30 September.* `makeDriftCheck` asks `git diff --name-only <sha> -- <paths>`: the recorded commit against the working copy, staged or not. A file among the paths that did not exist then, untracked now, is named as changed too. So a batch that grows a suite reads that suite's logs as drifted before it is committed, as they read after, and the planner and the reddened checker agree on it either way.
 - `check-log-tree.mjs` has two new cases: an edit not yet committed is named, as it will be once it is; and so is a file that did not exist when the run was made. 17 of 17 mutations bite, two new: the diff taken against HEAD again, and untracked files left out.
 - Before, the preflight of the templates batch (`f335b89`) failed "the plan asks for what is unmeasured" on the 12 logs of `task-attachments`' and `create-modal-templates`' proven patches, read as too short because their suites had grown and were not yet committed. Committed, the same step passed.
-
-### `found-30-sep/task-labels-left-in-production` — open (schema, small; found closing `found-30-sep/comment-file-index-only-in-a-migration`)
-
-**A table that migration 0001 made is still in production, and nothing reads it**
-
-*Evidence, 30 September, read, not measured on production:* 0001 creates `task_labels` (id, task_id, name, color), with a foreign key to tasks. The schema replaced it with `labels` and `task_label_assignments`, and no migration drops it or moves its rows. Nothing in the API, the web, the scripts or the suites names it. A migrated database has the table; a pushed one does not. The schema gate lets it be, by name, and gives this item as the reason.
-
-*To close:* find out whether production's `task_labels` holds rows. If it is empty, drop it in a migration and take it off the gate's list. If it holds rows, decide first whether they move to `task_label_assignments`.
 
 ### `found-30-sep/attachment-card-draws-no-date` — **closed** (parity, small; found closing `found-30-sep/attachment-card-names-uploader-by-id`)
 
@@ -3440,32 +3430,7 @@ Found while closing it:
 - `found-30-sep/task-cover-second-board-reads-early`
 - Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `private-object-urls` 13, `list-export` 33, `file-exports` 9, `task-attachments` 33, `attach-on-create` 14.
 
-### `found-30-sep/domain-left-on-the-private-bucket` — open (security, deploy; found in review of `found-30-sep/public-cdn-url-makes-every-object-public`)
-
-This replaces the builder's proposed `found-30-sep/public-domain-serves-the-whole-bucket`, whose "To close" the review did.
-
-**A deployment whose `R2_PUBLIC_URL` domain is connected to `R2_BUCKET_NAME` serves every private object by its key until the domain is disconnected. Code can refuse to use it and say so, and does.**
-
-*Evidence, 30 September:*
-- Cloudflare: "When you connect a Custom Domain, your R2 bucket becomes publicly accessible."
-- Measured after the fix, with the domain on the private bucket:
-  - the domain still served a task's file unsigned by its key (lane 4's API, 3 runs; `confirm-finding.mjs`, 3 runs);
-  - the API sent nobody there;
-  - it logged at boot "ERROR [R2Service] R2_PUBLIC_URL (…) serves the objects of R2_BUCKET_NAME (…) to anybody, unsigned … Disconnect that domain from …".
-- Not known: whether any deployment sets `R2_PUBLIC_URL`. `deploy/env.production.template` leaves it empty, and the ledger says the default deployment signs.
-- The API checks the domain it is given, and nothing else: an r2.dev URL or a second domain on `R2_BUCKET_NAME` is outside what it can see.
-
-*To close:*
-1. For each deployment, read `R2_PUBLIC_URL` and the API's boot log.
-2. Where the error is there:
-   1. create the pictures' bucket, with the private bucket's CORS rule;
-   2. set `R2_PUBLIC_BUCKET_NAME`;
-   3. connect the domain to that bucket, and disconnect it, and any r2.dev URL, from `R2_BUCKET_NAME`;
-   4. restart. The pictures move on boot.
-3. Read the log again for "Avatars and workspace logos are served from R2_PUBLIC_URL …; it serves no object of R2_BUCKET_NAME".
-4. Where no deployment sets `R2_PUBLIC_URL`, close this as not applicable.
-
-### `found-30-sep/export-names-worked-out-twice` — open (visible bug, small; found closing `found-30-sep/list-export-saved-as-list-csv`)
+### `found-30-sep/export-names-worked-out-twice` — open (visible bug, small; found closing `found-30-sep/list-export-saved-as-list-csv`) · reproduced 5 October
 
 **The workspace, members, tasks and report exports are still saved under names the page works out, which differ from the server's**
 
@@ -3478,7 +3443,9 @@ This replaces the builder's proposed `found-30-sep/public-domain-serves-the-whol
 
 *To close:* name each file once, on the server, with `downloadName`, and save under the header, as the list and doc exports now do. Where the page must add something the server cannot know, such as the reader's local date, say so in the code. Then check the saved names.
 
-### `found-30-sep/lanes-save-downloads-in-ascii` — open (test tooling, small; found closing `found-30-sep/list-export-saved-as-list-csv`)
+*Triage, 5 October:* reproduced on a lane. The JSON, tasks CSV, members CSV and report-builder PDF exports are still saved under names the page works out, which differ from the server's header names (measured on lane 7); the audit export's dated name differs by design. Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/lanes-save-downloads-in-ascii` — open (test tooling, small; found closing `found-30-sep/list-export-saved-as-list-csv`) · reproduced 5 October
 
 **On the lanes, Chromium saves any download named outside ASCII as "download", so no suite can see a name in another script unless it asks for a UTF-8 locale**
 
@@ -3489,6 +3456,8 @@ This replaces the builder's proposed `found-30-sep/public-domain-serves-the-whol
 - `list-export` and `file-exports` now launch with `utf8LocaleEnv()`. `task-attachments` names its zip in ASCII, and every other suite's browser still runs in the POSIX locale.
 
 *To close:* give every suite's browser a UTF-8 locale: `launchOptions()` passes `env`, or `lane_*_env` exports `LANG`. Then check Download all's zip saved under a title in Arabic.
+
+*Triage, 5 October:* reproduced on a lane. On the lanes, Chromium still saves any non-ASCII download name as "download" unless the suite passes utf8LocaleEnv(), and only two suites do. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `found-30-sep/task-cover-second-board-reads-early` — **closed** (test tooling, small; found running `task-cover` in this work's regression)
 
@@ -3702,22 +3671,6 @@ Checks:
 - `task-templates.service.test.ts` has two new tests, one a route: each refuses a task the read rule does not find for its caller and makes nothing. The two tests that duplicate and save a task are scripted with the read rule's two reads. 29/29.
 - `ddr-1` (Duplicate asks no read rule), `ddr-2` (Save as template asks none) and `ddr-3` (the rule refuses everyone) are aimed at the three checks. The break runner measured them at `f335b89` (lane 1): each reddens its own, 25/26 against 26/26. `ddr-4` and `ddr-5` are their unit claims.
 
-### `found-30-sep/duplicate-copies-no-attachments` — open (parity, small; found closing `found-30-sep/duplicate-copies-votes-and-files`)
-
-**Duplicate copies none of a task's attachments, and offers no choice of what to copy**
-
-*Evidence, 30 September:* ClickUp's duplicate asks you to "choose what you want to include in the new task" ("Duplicate a task", through search excerpts), a checklist "with pre-selected boxes of what to keep" (feedback board). Rundesk's Duplicate is one button that copies fields, checklists, subtasks, assignees and labels, and no attachments, so a Files value is not carried to the copy either.
-
-*To close:* find which items ClickUp's dialog offers, offer them, and copy attachments as objects of the copy's own (as `attachClip` copies a clip), carrying a Files value over to the copies; check it.
-
-### `found-30-sep/template-leaves-values-out-silently` — open (decision, small; found closing `found-30-sep/template-values-written-unchecked`)
-
-**A template applied where a field refuses its value leaves that field unset, and nothing says so**
-
-*Evidence, 30 September:* `instantiate` now writes only what each field's route would take and leaves out the rest (words into a Number field, an option a Dropdown lacks). Its answer does not say which were left out, and the create modal's toast says only that the task was made. ClickUp's help centre has nothing on a template's value that its target field refuses.
-
-*To close:* the owner decides whether the person is told. If so, the answer names the fields left out and the modal says so, in four locales; check it with a template applied where a field refuses its value.
-
 ### `found-30-sep/template-values-find-fields-by-name-alone` — **closed** (visible bug, small; found closing `found-30-sep/template-values-written-unchecked`)
 
 **A template's or a duplicate's value goes to whichever field of that name the project's query returns last**
@@ -3762,7 +3715,7 @@ Checks:
 - Regression on lane 7: 17 suites and 401 checks, all green; after the review fix, `custom-field-progress` ×3 and six more suites once, all green. The API's unit tests: 1907/1907.
 - Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `custom-field-access` 6, `custom-field-types` 33, `create-modal-templates` 45, `template-center` 81, `ai-read-access` 5, `ai-task-reads` 4.
 
-### `found-30-sep/field-definition-takes-a-foreign-list` — open (security, small; found closing `found-30-sep/field-route-takes-another-projects-field`)
+### `found-30-sep/field-definition-takes-a-foreign-list` — open (security, small; found closing `found-30-sep/field-route-takes-another-projects-field`) · reproduced 5 October
 
 **A field is defined with a list of another project, and a share on that list decides who may define it**
 
@@ -3773,7 +3726,9 @@ Checks:
 
 *To close:* refuse a `listId` that is not a list of the project (as a list that is not there), in `createDefinition` and in the rule's `within`. Check the member's two answers (403 both) and the admin's refusal, and that a field scoped to the project's own list is still made.
 
-### `found-30-sep/merge-moves-values-onto-fields-the-target-lacks` — open (visible bug, small; found closing `found-30-sep/field-route-takes-another-projects-field`)
+*Triage, 5 October:* reproduced on a lane. Reproduced on lane 3. An admin defines a field in one project scoped to another project's list (201, stored). A member in a view-only space is refused a field there (403) but defines one by naming a list of another space that is shared with them at edit (201). Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/merge-moves-values-onto-fields-the-target-lacks` — open (visible bug, small; found closing `found-30-sep/field-route-takes-another-projects-field`) · reproduced 5 October
 
 **Merging a task into one of another list or project moves its values onto fields the survivor does not have**
 
@@ -3786,7 +3741,9 @@ Checks:
 
 *Since the review fix,* such rows no longer reach a duplicate of the target or a template saved from it, since the snapshot takes only the fields the task has. They are still stored, and search still finds them (next item).
 
-### `found-30-sep/search-finds-tasks-by-values-they-no-longer-show` — open (visible bug, small; found closing the review of `found-30-sep/template-values-find-fields-by-name-alone`)
+*Triage, 5 October:* reproduced on a lane. Reproduced on lane 3. A merge from another list, or from another project, answers 201 and moves the value onto a field the survivor does not have: the row is stored on the target and its fields do not show it. Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/search-finds-tasks-by-values-they-no-longer-show` — open (visible bug, small; found closing the review of `found-30-sep/template-values-find-fields-by-name-alone`) · reproduced 5 October
 
 **Search's custom-field filter finds a task by a value it holds for a field it no longer has**
 
@@ -3797,7 +3754,9 @@ Checks:
 
 *To close:* measure it first (a task moved out of a field's list, and one moved in from another project, each searched by the hidden value). Then join the filter's rows to the task's list and the field's project and list, by the rule `fieldIsOnTask` states, and check both cases and a task that does have the field. Whether a move should drop, keep or offer to carry such values, as ClickUp may, is a separate question for the move's own item.
 
-### `found-30-sep/fields-picker-counts-hidden-columns` — open (visible bug, small; found closing `found-30-sep/field-route-takes-another-projects-field`)
+*Triage, 5 October:* reproduced on a lane. Reproduced on lane 3. Search's custom-field filter finds a task moved out of a field's list, a task moved in from another project, and a merge target, each by a value it holds for a field it no longer shows. Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/fields-picker-counts-hidden-columns` — open (visible bug, small; found closing `found-30-sep/field-route-takes-another-projects-field`) · reproduced 5 October
 
 **The list page's Fields button counts hidden built-in columns as hidden fields**
 
@@ -3808,15 +3767,7 @@ Checks:
 
 *To close:* count the fields shown (`projectFields.filter((f) => !hiddenFields.has(f.id)).length`). Check it with a built-in column hidden.
 
-### `found-30-sep/ai-page-fields-checked-only-by-a-unit` — open (test tooling, small; found closing `found-30-sep/field-route-takes-another-projects-field`)
-
-**The AI page's field boxes are checked by no suite**
-
-*Evidence, 30 September:*
-- The AI page's "Generate task" now offers only the chosen list's fields (`fieldsOfList`).
-- Its field boxes appear only after a model has answered, and no suite drives that page to them. The filter is covered by `field-scope.test.ts` alone.
-
-*To close:* on a model lane, generate a task for a list whose project has a field scoped to another list, and check that no box is offered for it and that saving writes no refused value.
+*Triage, 5 October:* reproduced on a lane. Reproduced on lane 3. Hiding Due makes the toolbar's Fields chip read 1/2 while both fields still show, and hiding every built-in column makes it negative: -1/2 on List, -3/2 on Table. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `found-30-sep/field-route-takes-another-projects-field` — **closed** (visible bug, small; found closing `found-30-sep/template-values-written-unchecked`)
 
@@ -3841,24 +3792,15 @@ Checks:
 - `frt-1..4` redden their checks, one or both of `custom-field-access`'s and `custom-field-types`' grid check (5/6, 4/6, 5/6, 32/33). `frt-5..11` redden the unit tests they name.
 - Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `custom-field-access` 6, `custom-field-types` 33, `create-modal-templates` 45, `template-center` 81, `ai-read-access` 5, `ai-task-reads` 4.
 
-### `found-30-sep/template-tags-keep-their-case` — open (decision, small; found closing `found-30-sep/template-tags-spelled-by-collation`)
-
-**ClickUp forces a tag to lower case; Rundesk keeps each template's own spelling, so the Tags facet has to choose one**
-
-*Evidence, 30 September:*
-- ClickUp's feedback board ("Allow Tags to use capital letters", read through search excerpts): tags "are currently forced to be lowercase, no matter what you write or rename it to". Template Center tags are the Space's tags.
-- Rundesk keeps the case typed on each template (`ledger-rows/row-1874`), and the facet now shows the most-used spelling.
-- A card and the facet can show the same word in two cases.
-
-*To close:* the owner decides whether template tags keep their case, as now, or are stored lower-cased as ClickUp's are. If they are lower-cased, migrate the stored tags, and check that the facet and the cards agree.
-
-### `found-30-sep/save-as-template-words-promise-every-field` — open (copy, small; found closing `found-30-sep/templates-null-array-field-values`)
+### `found-30-sep/save-as-template-words-promise-every-field` — open (copy, small; found closing `found-30-sep/templates-null-array-field-values`) · reproduced 5 October
 
 **The task sheet's Save as template says it captures "custom-field values", and a Voting or Files field's is left out**
 
 *Evidence, 30 September:* `taskTemplates.saveDescription` reads "Capture this task — title, description, priority, checklists, subtasks, labels, and custom-field values". A template now keeps every custom-field value but votes and files (`NOT_FROM_TEMPLATES`), and never did keep a Formula or Progress (Auto) value, which are worked out on read.
 
 *To close:* say which fields are not captured, in the four locales, and check the words on the sheet.
+
+*Triage, 5 October:* reproduced on a lane. Reproduced. The task sheet's Save as template dialog says it captures "custom-field values" with no exception, but a Voting value is dropped from the saved template on the lane. By the code, Files, Formula and Progress (Auto) values are dropped too. The wording is the same in all four locales. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `found-30-sep/public-cdn-url-makes-every-object-public` — **closed** (security, small; found closing `resume-defects/resume-7`)
 
@@ -3924,22 +3866,6 @@ What remains is the operator's: a domain already connected to `R2_BUCKET_NAME` s
 Found while closing it:
 - `found-30-sep/domain-left-on-the-private-bucket`.
 - Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `private-object-urls` 13, `list-export` 33, `file-exports` 9, `task-attachments` 33, `attach-on-create` 14.
-
-### `found-30-sep/guests-may-ask-for-clip-links` — open (decision, small; found closing `resume-defects/resume-7`)
-
-**A guest may ask for a clip's link, as a guest could sign one before**
-
-*Evidence, 30 September:* the library's routes admit any workspace member, guests included. ClickUp's sources say nothing about guests and Clip links. Rundesk's public doc links are not a guest's to make ("guests never share publicly").
-
-*To close:* the owner decides. If guests may not make public links of any kind, refuse them the link route, as doc links refuse them, and check it.
-
-### `found-30-sep/comment-clips-have-no-copy-link` — open (feature, small; found closing `resume-defects/resume-7`)
-
-**A clip in a comment has no Copy link**
-
-*Evidence, 30 September:* ClickUp's share icon on an expanded comment clip copies its URL. A comment clip is the task's own attachment, not a library clip, so a link to it needs the task's read rule on the route rather than the library's.
-
-*To close:* give comment clips a link under the task's read rule, and check that it opens for those who may read the task and nobody else.
 
 ### `found-30-sep/public-routes-unthrottled` — **closed** (security, small; found closing `resume-defects/resume-7`)
 
@@ -4888,25 +4814,6 @@ Regression on lanes 2 to 5: the 24 suites that use the AI routes, and the new su
 
 In CI (196).
 
-### `found-25-sep/view-only-individual-permissions` — open, feature, medium (found closing `guest-guard-reads-the-account-role`)
-
-**ClickUp's four individual permissions for view-only members and guests are not built**
-
-ClickUp (help centre, "Manage individual permissions for view only users", search snippets): view-only members and guests have four individual permissions.
-- On by default: time estimates and time tracking.
-- Off by default: adding or removing tags, and creating views.
-- An owner or admin turns each on or off per person, on the Unlimited plan and above.
-
-Here:
-- Time tracking follows reading, with no switch.
-- A time estimate asks the task's write rule, so a view-only member cannot set one where ClickUp's default lets them.
-- Tags ask the write rule, which matches ClickUp's default.
-- Making views is not measured.
-
-*To close:*
-- Measure time estimates and views for a view-only member and a guest.
-- Build the four switches per person, with ClickUp's defaults, on the member's row of the workspace's people settings.
-
 ### `found-25-sep/inbound-email-comments-skip-the-comment-rule` — **closed** (security, HIGH once measured; found closing `task-rows-changed-by-id-anywhere`)
 
 **A comment sent by mail to a task's address skipped the comment rule, and the address itself**
@@ -5498,26 +5405,6 @@ The new suite `private-list-reach`, 13 checks: one private list, made by the adm
 *Found by:* `tb-41` reddened nothing on lanes 3 and 4. It removes the dependency query's own workspace condition, and for any reader the reader rule (`readableTaskIds`, in the task's own workspace) leaves a foreign task out by itself. Looking for a route that reads a task with no reader, to aim it at, found this one.
 
 *Closed:* the re-read passes its caller (`{ id: actorId }`), as every other write's answer does. `related-task-access`, 4/4 after (3/3 before, the new check red). `rta-4` puts the readerless re-read back, and reddened on lane 2. `tb-41` now claims a unit test, `tasks-security.test.ts` "reads a task’s dependencies from its own workspace only, with no reader as with one": the condition is the only rule a readerless caller has, and no route can show it once every route reads with a reader. It reddens that test (`check-unit-claims`, 25 of 25). `tb-46` takes both rules, the condition and the reader rule, so `task-boundaries`' foreign-dependency check is shown to see a foreign task at all; it reddened on lane 2. `rta-4`, `tb-41` and `tb-46`, each compiled. API unit tests pass. No suite drives the list page's bulk bar in a browser; the route is measured directly. Regression on lane 1, 10/10: `related-task-access`, `task-boundaries`, `dependency-read-access`, `task-depth`, `workspace-read-access` (whose no-model branch has its own sentence now, with `found-24-sep/model-patches-measured-without-a-model`), `private-list-reach`, `private-folder-reach`, `ui-sweep`, `video1-acceptance` and `video-regression`.
-
-### `found-24-sep/planner-default-list-read-by-nothing` — partly-fixed, small (dead control; found fixing the block prefix)
-
-**The planner's Time blocking "Default list" saves, and nothing reads it**
-
-*Evidence, read not run:* `planner-settings-dialog.tsx` draws a Default list picker (`planner-default-list`). Its comment calls it "the answer to the question video 1 left open: where a task made from a message, from /task, or by the AI should land". It writes `defaultListId` into the person's planner settings, and the server checks the list exists. A search of `apps/web/src` and `apps/api/src` finds no other reader. A task made from a chat message, from `/task` or by the AI lands wherever those flows put it, and the picker changes nothing. `planner-settings` checks only that the picker offers the workspace's lists.
-
-*The frame answers what it governs:* `14:20`, Time blocking, "**Default list for new tasks** — *Defaults to your personal list*" (`video2-frame-observations.md`). The gap audit reads it as the answer to video 1's open question: where a task made by `/task`, from a message, or by the AI lands. That is the person's Personal List unless they choose another.
-
-*To close:* have each of those flows read the setting when no list is named: `/task`, a message turned into a task, and the AI's task-making. Add a check per flow that the task lands in the chosen list, and in the personal list when none is chosen.
-
-*Partly fixed, 24 September.* A chosen list now decides where all three land. `defaultListFor` (tasks.service), which `/task` and the AI's "Create task from this" already asked, reads the person's chosen list first. It uses it when the list is in this workspace and they may add to it (`canCreateTaskIn`), and otherwise takes the oldest list they can add to, as before. The chat page chose the first list of the first project of the first space itself and always named it. It names none now, and `create-task` from a message asks `defaultListFor`, as `/task` does. Three strings for the page's own lookup went with it.
-
-The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the first four): `/task`, a message and an AI answer each landed in the oldest list with a list chosen, and the twin (none chosen: the oldest) passed. After, 6/6, with two more for the guards on the chosen list:
-- a list chosen in another workspace is not used here (a message's words would have crossed into the other workspace);
-- a member's chosen list in a private space they are not in is passed over, not refused.
-
-`pdl-1..4` (the choice ignored, the page picking the list, any workspace, no create rule), each compiled, 4 of 4 reddened on lane 2.
-
-*What is left:* the frame's default, "your personal list". This product's personal tasks are a separate table, not a list, so there is no personal list to default to. The empty choice was labelled "My personal list" over a behaviour that is the oldest list the person can add to. It says so now ("The first list I can add to", in the four locales). A personal list per person, as ClickUp has, is unbuilt. Regression on lane 1, 12/12: `planner-default-list`, `chat-message-actions`, `chat-history`, `replies-inline-thread`, `task-creation-access`, `lookup-read-access`, `ai-answer-rendering`, `planner-settings`, `task-mentions`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
 
 ### `found-24-sep/guest-makes-lists-where-nothing-is-shared` — **closed** (security, medium; found closing `custom-role-permissions-unread-by-web`)
 
@@ -6341,7 +6228,7 @@ Break verdicts at `6a31a5f`, through `wt-break.sh`, which gave the lanes the stu
 
 *Closed:* one reading for a lane argument, `lane_list` (lane-env.sh): "3" is lane three, "9 10" is lanes nine and ten, and anything but a lane from 1 to 10 is refused with exit 2. `fleet-up.sh` and `fleet-restart.sh` both read their lanes through it; `fleet-restart.sh` had its own copy of the rule. Found closing it: `sweep-until-clean.sh` heals its down lanes with `fleet-up.sh "${down[*]}"`. With one lane down, say 3, that was a count: lanes 1 to 3 dropped and restored, including lane 1. The README's `fleet-up.sh 4` is `fleet-up.sh "1 2 3 4"`. The new `check-lane-lists.sh` holds the readings and the two scripts' wiring, and catches 5 of 5 mutations. Against the scripts before the change it failed on every one. In preflight and CI.
 
-### `commit-log/log-a5b6b69-1` — partly-fixed, small
+### `commit-log/log-a5b6b69-1` — partly-fixed, small · reproduced 5 October
 
 **The long CI e2e job is still not split, and the suite count in its comment is stale**
 
@@ -6350,6 +6237,8 @@ Break verdicts at `6a31a5f`, through `wt-break.sh`, which gave the lanes the stu
 *To close:* When CI can run again (1 October), split the job and validate it. Until then, correct the count and delete the leftover paragraph.
 
 *Partly fixed, 24 September:* the count is kept with each suite added (160 in the long job, `grep` over it agrees). The leftover paragraph arguing for 120 is gone, as is a second copy of the paragraph on splitting. The limit is 210. The split waits for a working pipeline.
+
+*Triage, 5 October:* partly reproduced on a lane. The long CI job is still unsplit, but it passed in 108 of its 300 minutes; what remains wrong is its comment, which says 253 suites (there are 256) and gives three different durations, none of them the measured 108 minutes. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `commit-log/log-c592545-1` — **closed**
 
@@ -7378,13 +7267,15 @@ Found while closing it: `found-30-sep/status-zero-passes-status-only-checks`.
 - `docs/e2e-shared-state-audit.md` §3 and its table, and `docs/video2-resume.md` §3, carry the measured split instead of 292.
 - The 133 suites on lane 6 at the agent's tree: each `N passed, 0 failed` at its `EXPECTED_CHECKS`. At this tree, with the text-read and stale-doc changes merged in, on lanes 1, 3, 5 and 7 at once: 137 of 138 (the changed suites and `a39-dm-tabs`, whose fixture changed). `doc-level-controls` read its editor before the doc's capabilities had answered under that load; it now waits for them (see `doc-editor-open-to-readers`), then 7/7.
 
-### `commit-log/log-944e47f-1` — partly-fixed, medium
+### `commit-log/log-944e47f-1` — partly-fixed, medium · reproduced 5 October
 
 **Shared-database hazards in the e2e suites are only partly fixed**
 
 *Evidence:* Commit 944e47f found 46 of 66 suites picking a workspace by index. Now 57 of 115 suites contain workspaces[0], and 26 use pickWorkspace. comment-recording.mjs:353 still switches the shared admin account to Urdu, restoring it only in a finally (:667). apiClient never throws on an HTTP status (fixture.mjs:28-46), and inert .catch(() => {}) calls on it remain, for example addressability-live.mjs:329 and ai-answer-rendering.mjs:856-859. The '292' in resume §3 #3 cannot be re-derived: there are now 778 .catch(() => {}) across 109 files, most of them intended bounds on Playwright calls.
 
 *To close:* Re-measure the catches that follow an apiClient call, then replace them with status assertions. Move the remaining suites to pickWorkspace or a tagged workspace. Give comment-recording its own account.
+
+*Triage, 5 October:* partly reproduced on a lane. Of the shared-database hazards, only one still reproduces: a killed comment-recording run leaves the shared admin in Urdu for every later suite. Picking workspaces[0] is now deterministic, and the inert catches are gone behind a gate. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `resume-defects/resume-3` — **closed** (test tooling, medium)
 
@@ -7652,55 +7543,7 @@ counted skips (91 of 94 — the remainder is A3.9's unbalanced `else`, which is
 the notification not arranged, from "91 of 94 checks ran" to 94 of 94 with three
 FAILs. video-regression 94/94.
 
-### `found-23-sep/connected-search-per-person` — open, medium (unbuilt; found closing federated search)
-
-**Each member should search their OWN mail and files; today one person's connection is the workspace's only one**
-
-*Evidence:* `workspace_integration_connections` is unique on (workspace, provider), so a second member connecting Google replaces the first's grant — and since 23 September a grant answers only the person who connected it, so everyone else's Gmail, Drive and SharePoint tabs say "Connected with someone else's account". The frame (§V2-11 `19:07`, "meri Gmail pe jaa ke") is a person searching their own mailbox.
-
-*To close:* research ClickUp's Connected Search — which apps each person connects for themselves and which an admin connects for the workspace, and what a member sees of the latter — then store per-person grants beside the workspace one (the calendar accounts already do: `user_calendar_accounts`), connect from the person's own settings, and search with the searcher's own grant. A suite per source: two members, each finding only their own.
-
-### `commit-log/log-214dac0-1` — open, large
-
-**The Brain² hub and everything that depends on it is unbuilt**
-
-*Evidence:* Recorded in commits 214dac0, 4dacd13, 10c3194, d626849, 601eacc and 4cb50d3 ('Brain²'s hub still needs a runtime'). The API has no agents module (ls apps/api/src/modules). quick-create-modal.tsx:275 says 'SUPER AGENT ... is deliberately absent', and task-detail-sheet.tsx:578 says the Brain² button 'does not exist and is not being built'. workspace-ai-page.tsx:123 and 184-196 is a seven-tab strip, not the frame's two-group left nav, and has no Ask|Agents toggle. ai-panel.tsx has no composer '+' and no generated-artifact or slide-deck output. The ledger still counts these rows as M, P or excluded: 743 (task-header Brain²), 745 (@ picker Brain and Agents), 751 ('Brain' in the + menu), 770 (Super Agent), 848 (Agents, excluded), 852 (hub, left nav, Ask|Agents, Super Agents), 853 (composer +, artifacts) and 870 (image generation).
-
-*To close:* Research how ClickUp Brain and Super Agents work: the hub layout, what an agent is, its tools and triggers, and Ask vs Agents. Build an agents table, module and route first, then the hub shell, the toggle and the entry points (task header, + menu, @ picker, create menu). Test on a lane that has the model stub.
-
-### `commit-log/log-601eacc-2` — open, large
-
-**Importers: Basecamp, Confluence and Slack are shown as text only, .xlsx is not read, and document import takes only .md and .txt**
-
-*Evidence:* spreadsheet-import.util.ts:241-258 lists Basecamp ('needs the Basecamp API'), Confluence (exports HTML/XML) and Slack (conversation JSON) with a reason and no control. Monday and Wrike at :148-151 and :216-219 tell the user to 'save as CSV' because .xlsx is not read. Ledger row 816 is P. Commits 68bc188 and 4a1fee7 refused Word import as 'a heavy parser dependency'.
-
-*To close:* Research which files and APIs ClickUp's importers accept for each tool, including .xlsx and .docx. Decide with the owner which to build. Credential-based imports can use a stub the way storage and the model do.
-
-### `commit-log/log-68bc188-1` — open, large
-
-**Activity and Workload view types were researched against ClickUp and are still not built; Map, Mind Map and Timeline are also not offered**
-
-*Evidence:* Commit 68bc188 researched both views against ClickUp and called them 'buildable rather than inventable'. It names the parts already in the tree: task_activity, tasks.timeEstimate, and findOverloadedAssignees for the colour bands. Commit 9609106 then HELD them because 'the walkthrough does not make' the decision. Commits 30183c3 and 716d25c say 'View types is exact at six'. The tree agrees: packages/db/src/schema/enums.ts:162-170 viewTypeEnum is list, board, calendar, gantt, table, team, and apps/web/src/lib/space-views.ts:65 SPACE_VIEW_KEYS holds the same six. Ledger row 777 reads 'View types 6 of 11 ... Map / Mind Map / Timeline deliberately NOT offered ... Activity and Workload remain buildable'. A workspace-level /workload page exists (routes/app.$workspaceId.workload.tsx), but it is not a list view type.
-
-*To close:* Build Activity and Workload as view types to the ClickUp design already written into 68bc188. Workload colour bands must reuse findOverloadedAssignees and must not add a second threshold. Research ClickUp's Map, Mind Map and Timeline views and build each one with a real renderer, so no view is stored that nothing reads. Add a suite and break patches for each view.
-
-### `commit-log/log-713a611-1` — open, large
-
-**'Add to ›' (one task in several lists) is blocked because it is ClickUp's feature rather than the video's**
-
-*Evidence:* Commit 713a611 and ledger row 845: 'The gloss ... a task in more than one list is ClickUp's real product, not anything in the video ... Blocked on the reference'. Under the new instruction, ClickUp's real product is the spec to build to. packages/db/src/schema/tasks.ts:17 has listId as a single notNull foreign key, and no task-to-list join table exists in the schema.
-
-*To close:* Research ClickUp's Tasks in Multiple Lists: the Add to submenu, the home list vs added lists, and how filters, views and moves treat a task in more than one list. Add a join table with readers in every list query, then a suite and break patches.
-
-### `commit-log/log-c980bee-1` — open, large
-
-**Ten custom field types are unbuilt, and the ledger still gives a reason that commit 4cb50d3 retired**
-
-*Evidence:* custom-fields.ts:7-52 has 22 types. Commits c980bee and ac1d0fa recorded ten as decisions: eight AI fields (Summary, Custom Text, Custom Dropdown, Progress Updates, Translation, Sentiment, Categorize, Action Items), plus Relationship and Button. Ledger row 719 still says the AI eight wait because 'ANTHROPIC_API_KEY is empty here and in CI'. Commit 4cb50d3 retired that exact reason ('The reason is retired and the seam is proven'): the SDK reads ANTHROPIC_BASE_URL, and model-stub.mjs answers there. Button waits on 'AutomationsService has no manual trigger'.
-
-*To close:* Research ClickUp's AI fields, Relationship field and Button field. Build the AI fields against the model-stub lane. Replace the stale reason on row 719 now, whatever is built.
-
-### `resume-defects/resume-8` — partly-fixed, large
+### `resume-defects/resume-8` — partly-fixed, large · reproduced 5 October
 
 **email.service send() still has no replyTo, cc or messageId, and task_comments still has no channel column**
 
@@ -7710,100 +7553,7 @@ FAILs. video-regression 94/94.
 
 *Partly fixed, 24 September (with `resume-8-reply-routing`):* `send()` takes a Message-ID and a Reply-To and hands both to the transport. A comment notification's Message-ID is kept where `resolveReplyContext` finds it. Its Reply-To is the task's address when the list has an alias; none is minted. Left: cc and bcc; the comment's channel column and its reader; email metadata on a comment; minting an alias; and carrying a thread on the other notifications.
 
-### `ledger-rows/row-719` — open, large
-
-**Field types: 10 of the frame's 29 absent; the 'ANTHROPIC_API_KEY is empty' blocker for the 8 AI types is stale**
-
-*Evidence:* reaudit.md:719: the 10 absent are 'not a build'. Eight need a language model and 'ANTHROPIC_API_KEY is empty here and in CI'. Relationship 'would be a second store for what task_doc_links already holds'. Button has no manual trigger. Tree: custom-fields.ts:7-53 has 22 types including 'tasks' (a named task→task reference, 0158). The key reason is retired by the ledger itself (reaudit.md:2843-2863) and by the model stub now being wired into the lanes (commits 6fbd79b, ad00a7c: RUNDESK_LANE_MODEL). For Button: AutomationsService.fire(triggerType, ctx) takes any trigger string (automations.service.ts:209-236), so a button trigger type is an addition, not a missing engine. The Relationship reason names task_doc_links (task↔doc), while the `tasks` field type already stores task→task references.
-
-*To close:* Build the 8 AI field types on ai.service's existing Anthropic path, measured on a model-stub lane. Add Button as a new automation trigger type fired by the field. Decide Relationship against ClickUp's actual Relationship field (list-scoped, rollups) versus the existing `tasks` type. Rewrite the row's reason.
-
-### `ledger-rows/row-770` — open, large
-
-**Create-menu 'Super Agent' — still absent**
-
-*Evidence:* reaudit.md:770 (P): 'Super Agent stays open and is blocked, not pending: Rundesk has no agents'. Confirmed: no agents table in packages/db/src/schema and no agents module in apps/api/src/modules. 'Describe anything to create' and Create with AI are built (create-menu-ai.mjs).
-
-*To close:* Depends on row-852's Super Agents build. Once that exists, a create-menu entry that opens 'Create Agent' is small.
-
-### `ledger-rows/row-777` — open, large
-
-**View types 6 of 11: the premise is partly stale — Workload, Timeline, Mind-map pages and a workspace activity feed already exist**
-
-*Evidence:* The row (reaudit.md:777), §12 (reaudit.md:6191-6250, 6476-6482) and space-views.ts:59-63 ('The five Rundesk does not have (Map, Activity, Mind Map, Timeline, Workload) are not offered') all treat these as absent. SPACE_VIEW_KEYS is six (space-presets.ts:32, space-views.ts:65). But these already exist at WORKSPACE level: (1) Workload: routes/app.$workspaceId.workload.lazy.tsx → workspace-workload-page.tsx (656 lines, people × day heat map, capacity, days off, estimated vs tracked hours), fed by GET /workspaces/:ws/reports/workload and /workload/day (reports.controller.ts:143-163). (2) Timeline: workspace-timeline-page.tsx (1124 lines) over /tasks/workspace/:id/timeline. (3) Mind maps: workspace-mindmaps-page.tsx:71-89 (canvases of type=mindmap, i.e. blank mode, not task mode). (4) Activity: GET /workspaces/:ws/reports/activity (reports.controller.ts:184-192) → reports.service.ts:1323-1353, task_activity joined to actor name/avatar and list/project/space, visibility filtered (used by dashboard-widget-builder.tsx:956). (5) Map: the `location` custom-field type exists (custom-fields.ts:26). There are also TWO rules for 'overloaded' already: the Workload page uses a load/capacity ratio (workspace-workload-page.tsx:85-88, 480-485), while §12 tells the new view to use findOverloadedAssignees (ai.service.ts:817).
-
-*To close:* Treat this as building list/space VIEW TYPES over the existing aggregators, not as greenfield. Add a listId/spaceId filter to /reports/activity and /reports/workload. Add 'activity' and 'workload' (then timeline/map/mind_map, using ClickUp research for their shape) to SPACE_VIEW_KEYS in both places. Settle which overload rule is canonical so the page, the new view and AI assign agree. Fix the space-views.ts comment and the §12 text.
-
-### `ledger-rows/row-852` — partly-fixed, large
-
-**Brain² hub row is still M as a whole, but its main column exists at /app/:ws/ai; only Super Agents, Ask|Agents, nav shape and onboarding are absent**
-
-*Evidence:* reaudit.md:852 is `| M | Brain² hub, /ai/brain, AI-scoped left nav, Ask|Agents toggle, Super Agents |`. The ledger's own read at reaudit.md:6500-6550 says the main column is 'largely built' and that the hub lives at /app/:workspaceId/ai. Tree: routes/app.$workspaceId.ai.tsx → workspace-ai-page.tsx:123 and :188-235 have seven tabs (chat, knowledge, commands, generate, notes, writing, analytics); the shell AI dock is at routes/app.tsx:168-190. There is still no agents table, module or route: packages/db/src/schema lists none, and apps/api/src/modules has no agents module. skills.ts:1-29 separates Skills (built) from ClickUp's Super Agents (instructions, triggers, skills, knowledge, memory). The 16:25 'Personalize Brain²' onboarding appears in no row except inside the Brain² decision (reaudit.md:2774).
-
-*To close:* Split the row. Mark the hub's main column B, then build Super Agents (Create / All / My) plus the Ask|Agents toggle from ClickUp research. Parts to reuse: `skills` (instructions), AutomationsService.fire() (triggers, automations.service.ts:209-236), COMMAND_TOOLS including create_list/create_folder (ai-command.ts), and the model stub lanes (RUNDESK_LANE_MODEL, ad00a7c) to measure it. The /ai/brain URL and left-nav shape are cosmetic.
-
-### `ledger-rows/row-853` — open, large
-
-**Credit meter, rotating placeholder, composer '+', generated artifacts/slide deck — absent; the placeholder's revert reason is weakening now lanes can carry a model**
-
-*Evidence:* reaudit.md:853 (M). ai-panel.tsx testids have no composer-plus. :1817-1823 has three static placeholder states with no rotation (built then reverted in 4ad25f6 because 'the resting state never renders in a lane'). Since 6fbd79b/ad00a7c a lane can be given a model per lane (RUNDESK_LANE_MODEL). TaskAiBar disables 'presentation' because there is 'no slide-deck entity' (task-detail-sheet.tsx:596-600, 625-629). The ai_usage metering exists (reaudit.md:6558-6564). Only the allowance and reset are missing, which the frames never give.
-
-*To close:* Rotating placeholder: built 29 September (`commit-log/log-4ad25f6-1`). Credit meter: allowance and reset from ClickUp research, reading ai_usage. Composer '+': contents from ClickUp research (existing parts: knowledge tab, skills, @-mention search). Slide deck: frame 16:50 specifies an inline 4-slide embed; needs an artifact entity plus a renderer.
-
-### `ledger-rows/row-869` — open, large
-
-**Credits (tab, category table, trend chart with limit, Add credits, My Agent Performance) — absent; a recorded decision plus parts no frame opens**
-
-*Evidence:* reaudit.md:869 (M). §3 decision at reaudit.md:889-891. §6 at reaudit.md:2819 says the usage-trend chart is separable and 'STILL OPEN'. Parts that exist: GET /ai/usage (ai.controller.ts:183-190) and an AI Usage settings tab (workspace-settings-page.tsx:1287-1330) with per-user and per-model spend over 7/30/90 days. The response has totals/byUser/byModel and no per-day series, so there is no trend. rollUpByCategory gives the 8 categories (ai-categories.ts). No AI quota exists in PlanLimits.
-
-*To close:* Build the dollar trend chart now: a per-day series from ai_usage. Take the credit unit, allowance and 'Add credits' flow from ClickUp research, and get the owner to reconsider the §3 decision. 'My Agent Performance' waits for Super Agents (row-852).
-
-### `resume-defects/s4-clip-link` — open, large
-
-**Section 4: 'A pasted clip link renders as the clip' is still unbuilt. There is no clips table, no per-clip route and no paste handling**
-
-*Evidence:* No clips table: I grepped packages/db/src/schema for a pgTable named with 'clip', and packages/db/src/migrations for CREATE TABLE with clip, and found nothing. A clip is a storage object. clips.service.ts:21-23 builds the prefix `workspaces/<id>/clips/`, :37 builds the key, and :50-80 lists the clips by listing storage objects, using the storage key as `id` and title and duration from object metadata. The routes are only the library /app/$workspaceId/clips (routeTree.gen.ts:419-423, 591); there is no per-clip route. For paste handling, the comment composer has no onPaste or unfurl: grep of apps/web/src finds unfurl only in chat (chat-message-body.tsx:124-169, 315-328), which unfurls task URLs and OG metadata, not clips. Copy link signs the storage object (clip-publish.ts:111-117), so a pasted link carries no clip identity and no title. The ledger entry is docs/video2-reaudit.md:1307-1330 (status M), with the row at 1532. ClickUp research: clip URLs are stable, unguessable public links (see resume-7).
-
-*To close:* The order is forced. First, a `clips` table (id, workspace_id, storage_key unique, title, duration_seconds, created_by, share_token, created_at), backfilled from the existing storage prefix, with list() reading the table. Second, a stable app route that resolves a token to a freshly signed playback URL, shared with resume-7. Third, paste handling in the comment composer (and chat) that recognises the route, stores a clip reference on the comment rather than a bare URL, and renders the existing comment-video card (task-detail-sheet.tsx:5732-5770) with its processing state. Checks: paste a copied clip link and assert the card shows the clip's title and plays; paste a foreign URL and assert it stays a link. Break patches: the route ignores the token; the paste handler falls back to plain text.
-
-
-*Update, 30 September:* the per-clip route this row says is missing now exists, from `resume-defects/resume-7`. `/clips/<token>` and `GET /public/clips/:token` give a clip's title, length, a playable URL and who it opens for, and that is what a pasted link would read to render the clip. What is still missing is the paste itself, turning a clip link into the clip in a description, a comment or a doc, and the clips table that `clip_links` would join or be absorbed into.
-### `resume-defects/s4-composer-email` — open, large
-
-**Section 4: 'The composer posts as Email' is still unbuilt. The mode menu now exists with Email disabled, a suite locks that state in, and the ledger's 'today' text is stale**
-
-*Evidence:* task-detail-sheet.tsx:7202-7260: the `Comment ▾` DropdownMenu has comment-mode-item-comment (ticked) and comment-mode-item-email, which is `disabled` and data-available="no" with no onSelect, carrying the reason catalogs.ts:2717-2718 'Rundesk cannot send a comment as email...'. test/e2e/task-mentions.mjs:357-400 asserts exactly this disabled state ('Comment carries the tick and Email is not selectable', and the reason length is over 30), so building the feature must rewrite those checks. The ledger entry docs/video2-reaudit.md:1252-1270 still says 'There is no mode switch on the comment composer', which is stale now that the switch exists. The row is M at docs/video2-reaudit.md:1532. Plumbing status, verified: the inbound threading exists (email-to-task.service.ts:28-33 and 184-187). Missing: replyTo, cc and bcc on send() (email.service.ts:584-589); a channel column (comments.ts:16-29); any route that sends a composed body; outbound Message-ID recording (resume-8-reply-routing). ClickUp research: in the task comment box, click Comment, then choose Email; fill To/CC/BCC, subject and body, add attachments and a signature, then Send (or schedule it). Responses appear in the task's activity feed, and a reply to an emailed comment can be sent as a comment or as an email (help.clickup.com 'Use Email in ClickUp', 'Create tasks and comments via email').
-
-*To close:* Build to ClickUp. Selecting Email switches the composer into an email form (To, CC and BCC with member and contact suggestions, Subject, body, attachments). Add a route such as POST /tasks/:id/comments/email. It sends through the extended send() with Reply-To set to the task's +task- address, stores the comment with channel='email' and the metadata, and records the outbound Message-ID. The thread renders email comments distinctly, and inbound replies land as channel='email'. Rewrite the task-mentions checks to assert the working mode, not the disabled one. Add e2e checks against a captured transport (the email itself, its Reply-To, and the stored channel read back in the thread), and a break patch for each (drop replyTo; store the channel but do not render it). Update docs/video2-reaudit.md:1260-1270 and the row at 1532.
-
-### `commit-log/log-3943965-1` — open, medium
-
-**Credit meter, Credits tab, usage-trend chart and the metered 'uses have expired' paywall are all unbuilt; the data for them already exists**
-
-*Evidence:* Commit 3943965 found its own blocker stale: ai_usage records every call, and ai.controller.ts:183 @Get('usage') serves it. It re-blocked the work on 'allowance, reset policy, Add credits ... no frame specifies', which is the reason the owner no longer accepts. workspace-settings-page.tsx:1304-1318 shows usage tables only. There is no trend chart with a limit line, and grep for 'credits left', 'creditMeter' and 'usage-trend' finds nothing in apps/web/src. Ledger §6 line 2819 still has the usage-trend chart as STILL OPEN (e07683b, d8d1e04). Row 788's metered state was blocked on the same reason (446cdba). Row 869 counts Credits as M, while §3 lines 889-891 call Credits a decision.
-
-*To close:* Research ClickUp's AI credits: the allowance per plan, reset timing, Add credits, and the usage chart with its limit line. Decide with the owner whether the §3 'no in-app currency' decision still stands. Build the usage-trend chart now, since §6 already says it is separable from credits. Then build the meter and the metered paywall state on top of ai_usage.
-
-### `commit-log/log-601eacc-1` — open, medium
-
-**The cover picker's Search tab is still absent because no photo provider is configured**
-
-*Evidence:* Commits 601eacc, 39863ff, 2ae54b4 and 716d25c keep the tab absent. cover-image-picker.tsx:23-53 says 'SEARCH IS DELIBERATELY ABSENT ... if a photo provider is ever configured'. Ledger row 739 is P. 'No credential configured' is the same kind of reason that went stale twice in this window: storage, fixed by s3-stub, and the model, fixed by model-stub.
-
-*To close:* Research ClickUp's cover Search (it searches a stock-photo library). Add a provider behind an environment variable, give the lanes a stub for it the way s3-stub works, and build a Search tab that really searches, with checks and break patches.
-
-### `commit-log/log-716d25c-1` — open, medium
-
-**'+ Add a new section' in Calendar settings › Sidebar is not built**
-
-*Evidence:* Commits 716d25c and 41f0ec5, and ledger row 835: 'blocked rather than pending ... what a NEW section would contain is a decision no frame makes'. git grep for 'add a new section', 'newSection' and 'customSection' in apps/web/src finds no such control. The rail sections are the fixed list in planner-settings-dialog.tsx.
-
-*To close:* Research how ClickUp's Planner or Calendar sidebar custom sections work: their name and the rule for what falls into them. Build storage for them, show them in the rail, and add checks.
-
-*Researched, 29 September* (help centre, through search excerpts). Not settled:
-- The help centre documents the Planner sidebar's categories as fixed: Priorities, Assigned to me, Today & overdue, and Backlog. Backlog alone is configured (a List and filters). "Meet with" is a people search. Categories collapse and expand, and the whole sidebar hides. Planner settings have no Sidebar page ("Appearance, Accounts, Upcoming meetings, Time blocking, and AI Notetaker").
-- The "+ Add a new section" the frame shows has no documented counterpart for the Planner or Calendar. The nearest is ClickUp 4.0's Home Sidebar custom sections: made with + › Section, named with an optional emoji, filled by hand (spaces, lists, tasks, docs, channels), each item in one section at a time, reordered in Customize › Sections, deleted without deleting what they hold.
-- The Planner's help pages are moving under "Calendar" names, so the docs may lag the app. What a new Calendar section would hold stays a decision for the owner: hand-picked tasks, as the Home Sidebar does, or a filter, as Backlog does.
+*Triage, 5 October:* reproduced on a lane. Reproduced: a reply to an @mention notification email lands nowhere because only comment notifications carry a thread. cc/bcc, a comment channel column with its reader, email metadata and alias minting are still unbuilt Email-composer plumbing. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `harness/model-lane-routing-unbuilt` — **closed** (test tooling, medium)
 
@@ -7820,38 +7570,6 @@ FAILs. video-regression 94/94.
 - (2) `verify.sh` asks the RUNNING API — `/ai/status`, signed in as the lane's admin (`lane_api_has_model`), not `RUNDESK_LANE_MODEL`, which says what the launcher meant — and refuses a lane whose model the suite cannot pass on (exit 10; `sweep.sh` counts 6 to 10 as refusals). The break runner takes the model away from a set's lane when its suite declares no-model (`lane_model_remove`), and refuses a set whose patches need a model its suite refuses.
 - (4) `scripts/check-suite-lane-need.mjs --mutate` (preflight, CI's verify job): a suite that tests an `/ai/` route's answer for "not configured" and never reads `/ai/status` must declare no-model; a declared need is one of the two; a no-model header over a suite that asserts no refusal is stale. On the suites before the headers: 2, `create-menu-ai` and `task-ai-bar`; now 0; 7 of 7 cases hold. `scripts/e2e-lanes/lane-need-selfcheck.sh --mutate` (the same two places): 14 cases — the need read from a header and not from an inline comment, every pair of need and lane answer, a lane taken out of a list and out of `all` — and 3 of 3 mutations caught.
 - On lane 7 restarted with the model stub: `create-menu-ai` and `task-ai-bar` refused (exit 10), and the model paths measured for the first time — `ai-activity-filters` 34/34 (a provider failure staged through `__control/next`), `ai-create-containers` 33/33 and `ai-answer-rendering` 51/51, each reading `/ai/status` as configured. Lane 7 without a model again: `create-menu-ai` 24/24.
-
-### `ledger-rows/row-1962` — open, medium
-
-**Calendar Automations (which tasks sync, to which calendar) — held by §3 parking, which is a 'walkthrough never explains' reason**
-
-*Evidence:* reaudit.md:1962-1991 (P, 'contested' against §3). planner-settings-dialog.tsx:66-73 parks Automations because 'the explanation was never given'. Yet frame 14:32 draws the page: the 'Sync ClickUp tasks to Google Calendar' card, the empty state 'Pick a list, folder, or space…' and '+ Add sync'. calendar-sync.service.ts:71-101: pushTask sends every due-dated, non-archived task to every connection, with no scope table and no off switch.
-
-*To close:* Research ClickUp's Calendar Automations. Add a sync-rule table (scope = list/folder/space, target calendar), make pushTask read it, and add the Automations settings page. The default becomes 'nothing is syncing', as the frame shows.
-
-### `ledger-rows/row-745` — open, medium
-
-**@ picker Brain section and Agents — still absent**
-
-*Evidence:* reaudit.md:745 says Brain and Agents are 'blocked rather than pending'. task-detail-sheet.tsx:299-305: MentionTab is 'people'|'tasks'|'docs'|'whiteboards'|'locations'|'channels', and the comment refuses Brain/Agents because 'The Brain² hub is a recorded decision'. The AI service and dock exist (see row-743), so an @Brain mention that asks the AI in the thread has something to call. Agents have nothing: no agents schema or module.
-
-*To close:* @Brain: research how ClickUp's @Brain answers in a comment thread, then build it on ai.service + comment create, measured on a model-stub lane. Agents: wait for row-852's Super Agents.
-
-### `ledger-rows/row-788` — open, medium
-
-**Paywall's metered 'uses have expired' state (B* remainder) — absent, held only because frame 09:30 shows no allowance or reset**
-
-*Evidence:* reaudit.md:788 B*: the metered state is 'blocked on the reference'; reaudit.md:2887-2891 repeats that. Tree: plans.constants.ts:40-55 has PLAN_FEATURES ['teamView','boardExport'] and PlanLimits {maxMembers, maxProjects} only. A grep for expired/usesLeft/feature_uses across feature-gate.tsx, the plans module and billing schema finds nothing. Parts that exist: plan-feature.guard.ts (server refusal), FeatureGateDialog.
-
-*To close:* Research ClickUp's limited-uses model for Free-plan features (the allowance and whether it resets). Add a per-workspace per-feature use counter incremented by the guard's allowed path, and render 09:30's state (preview, sentence, one Contact admin button) when the counter is exhausted.
-
-### `ledger-rows/row-835` — open, medium
-
-**Planner sidebar '+ Add a new section' — absent, held only because no frame says what a new section contains**
-
-*Evidence:* reaudit.md:835 (P): 'blocked rather than pending … what no frame supplies is what a NEW section would contain'. planner-settings-dialog.tsx:233-246 fixes RAIL_SECTIONS at five; :618-630 renders show/hide/reorder over them and has no add control. Parts that exist: the `railSections` planner setting, and saved-filter storage in packages/db/src/schema/list-filter-presets.ts and saved-searches.ts.
-
-*To close:* Research how ClickUp's planner sidebar 'Add a new section' works (custom section contents and rule). Store custom sections next to railSections and render them in the planner rail.
 
 ### `ledger-rows/row-845` — **closed**, medium
 
@@ -7876,14 +7594,6 @@ FAILs. video-regression 94/94.
 - `acp-38` (Add to cannot be opened) is 28/30, reddening both. `acp-39` (every choice onto your own list) is 29/30, reddening the colleague's.
 - Regression on lanes 5–7: 15 suites that use the task menu, the task sheet or priorities, all green, 323 checks.
 - `a2p-3` (the prompt's add passes a string where the task belongs) anchored on the prompt's own add, which moved into `usePriorityAdds`. That helper holds the task's id and not its title, so the patch now passes the id as a line of text. It is 27/30: its own check, the rail's, and the Priority field's add, since all three share it. The preflight found the lost anchor. Its two patch gates were run again once it was re-aimed: all 2111 patches apply, and every claim is verified.
-
-### `ledger-rows/section3-team-analytics` — open, medium
-
-**§3 'Team analytics' is held only because 'she never opens it', and a suite enforces its absence**
-
-*Evidence:* reaudit.md:892-893: 'the frames list the tab, nothing is behind it, she never opens it. Guarded against by teams-destination.mjs'. teams-destination.mjs:16, :212-235 asserts Analytics must NOT appear. workspace-teams-page.tsx:22-24 and :218-224 give tabs teams/people/chart only. Under the new policy this is an unbuilt feature, and building it will redden teams-destination.mjs by design. Parts that exist: reports workload and activity endpoints, and the time-entries and people modules.
-
-*To close:* Research ClickUp Teams Hub Analytics and build it over the existing reports aggregators. Replace the absence check in teams-destination.mjs with a check of the new tab. Record the row in §2 so it is counted.
 
 ### `commit-log/log-4ad25f6-1` — **closed** (small)
 
@@ -8045,7 +7755,7 @@ So the write takes a person: a member, admin or owner may add a task they can se
 - In CI (234).
 - Regression on lane 7, 16 suites (the console's audit page, Settings' tabs by key, custom-role grants, the admin-key pages): 16/16.
 
-### `found-25-sep/connected-calendars-read-by-nothing` — open, unbuilt (large; found closing `meetings-connect-calendar-goes-to-settings`)
+### `found-25-sep/connected-calendars-read-by-nothing` — open, unbuilt (large; found closing `meetings-connect-calendar-goes-to-settings`) · reproduced 5 October
 
 **A connected calendar's events are read by nothing, and three sentences say they are**
 
@@ -8060,76 +7770,9 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* read each connected account's events for a window (Google `events.list`, Graph `calendarView`), with the providers' base addresses overridable so a lane stub can answer, and draw them on the grid and in "Upcoming". Write a new event to the default account. Until then, correct the two Accounts page sentences.
 
+*Triage, 5 October:* reproduced on a lane. The two Accounts-page sentences still promise that events appear on the Planner and that new events are created in one calendar. They are false, shown on lane 4 in four locales. Reading and writing connected calendars is unbuilt. Evidence: `docs/triage-2026-10-05.md`.
+
 ## Ledger rows still open — 18
-
-### `harness/ai-rows-blocked-on-empty-key` — partly-fixed, large
-
-**Ledger rows still give 'ANTHROPIC_API_KEY is empty here and in CI' as the reason the AI field types and AI surfaces are unbuilt or refusal-only**
-
-*Evidence:* docs/video2-reaudit.md:642 ('eight of the ten need a language model and ANTHROPIC_API_KEY is empty here and in CI') and :719 (row P, the 10 absent field types: Summary, Custom Text, Custom Dropdown, Progress Updates, Translation, Sentiment, Categorize, Action Items, plus Relationship and Button). Also :727 (row B: the task AI bar ends in 'not configured'). The same ledger at :2843 says 'The ANTHROPIC_API_KEY half of that reason is now known to be wrong', and scripts/e2e-lanes/model-stub.mjs plus lane_model_env (lane-env.sh:170-177) now supply a model to a lane. Under the owner's policy these rows are UNBUILT, not blocked.
-
-*To close:* Relabel these rows as unbuilt. Build the eight AI field types, and Relationship and Button, to ClickUp's documented behaviour. Measure them on a model lane through model-stub (this depends on model-lane-routing-unbuilt).
-
-*Partly fixed, 30 September:*
-- The rows are relabelled. `docs/video2-reaudit.md` keeps its words about the empty key, and says beside each (§4's paragraph, the field-types row, the task AI bar's row) that a lane runs a model stub, so the eight AI types are unbuilt, not blocked.
-- The dependency is closed: model-lane routing is built (`harness/model-lane-routing-unbuilt`).
-- What stays open is the build: the eight AI field types, and Relationship and Button, to ClickUp's documented behaviour, measured on the model lane.
-
-### `resume-defects/resume-5` — partly-fixed, large
-
-**Gantt ledger row: the Today part is now true, but on a different surface from the one the frame shows. Zoom, drag and critical path have no check, and there are now two Gantts that have drifted apart**
-
-*Evidence:* Ledger docs/video2-reaudit.md:789 reads `B | Calendar view, Gantt (today line, zoom, drag, critical path)` and names no closing suite. Line 790 reads `B | Gantt: Auto fit, week numbers, collapsible panels, local export`. Neither wording has changed since 39863ff. The Today control now exists and is checked, but only on the WORKSPACE timeline page: workspace-timeline-page.tsx:219-223, 290, 333 (goToToday), 630 (data-testid timeline-today) and 869 (timeline-today-line), checked by gantt-controls.mjs:528-600. Breaks 13 and 14 redden it (/tmp/claude-0/brk-gantt-controls-13-today-noscroll.log, -14-today-onceonly.log), and the 8083f88 baseline was 29/0. But docs/video2-frame-observations.md:230,245-247 places the 09:40 Gantt in the list's five view tabs (line 206). The list's own Gantt tab renders a different component: app.$workspaceId.$spaceId.$projectId.$listId.tsx:3538-3539 renders GanttView (6005-6013). That component has zoom as Day/Week/Month buttons (6307-6308, 6438-6456), a today line only when today is in range (6425-6426, 6518-6523, which is the exact 'Today nowhere on the chart' problem the timeline page solved at 276-290), drag (6063, 6106) and critical path (import at 107). It has no Today button, no Auto fit, no week numbers, no collapsible panel, no export and no data-testid at all, so no suite can check it. Going the other way, the timeline page has no dependency arrows or critical path (grep for depend/critical finds only the comment at line 694). Zoom is used in gantt-controls only as a reset click (536), never checked to change px/day. Drag is unchecked on both surfaces. Critical path has no unit or e2e test (no *.test for apps/web/src/lib/gantt.ts). ClickUp research: the Gantt view defaults to a Week time period, has Auto fit and Export as PDF/PNG (Business plan and up), and a 'Show critical path' toggle that highlights the path in red (help.clickup.com Gantt view and 'Critical Path and Slack Time'). Rundesk's export is CSV.
-
-*To close:* Re-read row 789 against the tree and split it. The Calendar half is closed by list-view-controls, per docs/video2-reaudit.md:1750-1760. For the Gantt half, choose one Gantt, preferably one shared component used by both the list tab and /app/:ws/timeline. Give the list tab the frame's toolbar (Tasks panel toggle, Today, Week ▾ time-scale dropdown, Auto fit, Export) plus week numbers and collapsible panels. Give the timeline page ClickUp's 'Show critical path' toggle and dependency arrows. Add testids and checks on the list tab for zoom (measured px/day changes), drag (a PATCHed start and due date that survive reload), critical path (the red set equals the computed longest dependency chain, and a patch that returns [] reddens it) and Today. Add break patches for each, and name the closing suite in the row. Decide and record whether Export follows ClickUp (PDF/PNG) or keeps CSV.
-
-### `ledger-rows/row-1252` — open, large
-
-**Composer posts as Email — absent (Email mode listed but disabled)**
-
-*Evidence:* reaudit.md:1252-1269 (M); resume.md:247-249 and 253-257. email.service.ts:584-603: the private send() takes {to, subject, html, attachments} with no replyTo or cc. comments.ts has no channel column. The mode menu exists with Email disabled (task-detail-sheet.tsx:7242-7258). The inbound half exists: the email-to-task address (tasks.controller GET /tasks/:id/email-address).
-
-*To close:* Add replyTo (the task's inbound address) and cc to send(), a channel column on task_comments that the thread renders, and a route that sends a composed body. Then enable the Email mode (it also closes row-730's first remainder).
-
-### `ledger-rows/row-1307` — open, large
-
-**A pasted clip link renders as a player — absent**
-
-*Evidence:* reaudit.md:1307-1322 (M); resume.md:258-262. There is no onPaste or unfurl handling in task-detail-sheet.tsx. clips.controller.ts:10-37 has only GET list, POST presign and POST share. There is no clips table in packages/db/src/schema, so a link carries no clip identity. resume §3.7: Copy link expires in 24h and says nothing.
-
-*To close:* Add a clips record plus a stable app route first, then paste detection that renders the clip card/player in comments.
-
-### `ledger-rows/row-2294` — open, large
-
-**The AI acts inside a connected app — absent**
-
-*Evidence:* reaudit.md:2294-2321 (M). COMMAND_TOOLS (ai-command.ts:179-246, plus create_list/create_folder at :118-123 and :265) are all internal. ai-categories.ts:62-78 marks externalActions/externalSearches unsupported with reasons. Parts that exist: calendar-sync's Google event upsert, and the Gmail/SharePoint search providers. The §5 note that AiService injects SearchService and never calls it is FIXED: it was removed (ai.service.ts:915-921).
-
-*To close:* Add connector tools, e.g. book a meeting via calendar-sync, and search/send via Gmail. Measure them on a model-stub lane with provider stubs.
-
-### `ledger-rows/row-816` — open, large
-
-**Import P row (7 of 10 named tools) is still accurate, and it contradicts the B 'Importers' row for the same frame**
-
-*Evidence:* reaudit.md:816 (P): Basecamp needs its API, Confluence exports pages, Slack exports JSON, and Monday/Wrike .xlsx is not read. reaudit.md:817 (B) covers the same submenu and says 'every row of frame 12:08's submenu is now either built or drawn with its reason'. Tree: spreadsheet-import.util.ts:115-230 has seven named presets; :241-277 UNSUPPORTED_SOURCES = basecamp/confluence/slack/documents; monday/wrike hints at :151 and :219 say 'save as CSV'. common/export/xlsx.ts is a dependency-free xlsx WRITER (zlib), so an xlsx READER is its inverse, the same move document import made.
-
-*To close:* Merge 816 and 817 into one row. Build xlsx reading (ClickUp's spreadsheet import accepts XLS/XLSX). Basecamp and Confluence become API importers per ClickUp research. Confluence could target Docs through the existing doc importer.
-
-### `ledger-rows/row-870` — open, large
-
-**Image generation — absent; needs an image-capable provider**
-
-*Evidence:* reaudit.md:870 (M). A grep for generateImage|image generation|dall-e|imagen|gpt-image in apps/api/src and apps/web/src finds only comments (ai-value-panel.tsx:29). ai-categories.ts:42-45 records images as having no code path. The only model client is Anthropic, which outputs no images.
-
-*To close:* Needs the owner's choice of image provider plus a harness stub. After that, a tool in COMMAND_TOOLS and the 'images' category becomes countable.
-
-### `suite-hygiene/task-mentions-pins-unbuilt-email-mode` — open, large
-
-**task-mentions pins the unbuilt 'Comment ▾ → Email' mode as disabled; the ledger row's 'Create Task ▾' half is blocked for a reason the owner no longer accepts**
-
-*Evidence:* task-detail-sheet.tsx:7242-7258 hard-codes `data-testid="comment-mode-item-email" data-available="no" disabled`, with the reason from catalogs.ts:2717-2718 ('Rundesk cannot send a comment as email'). task-mentions.mjs:378-409 asserts `data-available === 'no'`, that a reason is present, and that clicking it does not change the mode, so the suite locks the unbuilt state in. Ledger docs/video2-reaudit.md:730 (row B*) records Email as deliberately disabled and 'Create Task ▾' as 'Blocked on the reference … no frame in the video ever opens that chevron', a reason the owner's policy no longer accepts. I did not research ClickUp's behaviour in this session; the lens was suites.
-
-*To close:* Research how ClickUp's comment composer handles Email and the Create Task split-button menu, build both, then rewrite task-mentions:378-409 to drive the built mode. Re-mark row B* as unbuilt until then.
 
 ### `product-siblings/assign-with-ai-picker-unbuilt` — **closed** (unbuilt control, medium)
 
@@ -8205,22 +7848,6 @@ Checks:
 
 Found while building it: `found-30-sep/template-save-dialog-says-admin-only`, `found-30-sep/template-tags-spelled-by-collation`, `found-30-sep/no-save-list-or-folder-as-template`, `found-30-sep/killed-suites-leave-members-behind` and `found-30-sep/legacy-break-patches-directory`.
 
-### `ledger-rows/row-1904` — open, medium
-
-**Planner 'Sync now' — absent, and the service header claims a scheduler that does not exist**
-
-*Evidence:* reaudit.md:1904-1927 (M). No RefreshCw, sync or pullEvents in workspace-planner-page.tsx. pullEvents' only caller is calendar-sync.controller.ts:108. There is no @Cron or @Interval in the calendar-sync module. calendar-sync.service.ts:25 says 'a manual or scheduled pullEvents call'.
-
-*To close:* Add a sync button in the planner header that calls pullEvents for the user's connections, and either add a scheduled pull or correct the comment.
-
-### `ledger-rows/row-739` — open, medium
-
-**Cover 'Search' tab — absent; the reason (no image provider) still holds**
-
-*Evidence:* reaudit.md:739 (P). cover-image-picker.tsx:20-58 records the decision and the grep. Re-running `grep -rliE "unsplash|pexels|pixabay|imageProvider" apps packages .env.example` finds only cover-image-picker.tsx. The frame does draw the tab, so this is not a 'no frame' block: it needs an external provider.
-
-*To close:* Research which photo provider ClickUp's Search tab uses (believed to be Unsplash; the research lens should confirm) and add a server-side proxy with a key. Add a harness stub like s3-stub.mjs/model-stub.mjs so it can be measured. Needs the owner's decision to take a key.
-
 ### `commit-log/log-3100ba1-1` — **closed** (already fixed, small)
 
 **The create-modal placeholder and its ⚡AI button are built and tested, but the ledger counts the row as missing**
@@ -8230,16 +7857,6 @@ Found while building it: `found-30-sep/template-save-dialog-says-admin-only`, `f
 *To close:* Re-extract frame 10:04. Then move row 791 to B, or strike it as answering no frame (as the tab-title countdown was), and let check-video2-counts recompute 148/11/14.
 
 *Closed, 29 September, as already fixed:* `ledger-rows/row-791` did what this asks. Frames 10:02 to 10:06, re-extracted from the video, show the create-task modal with its placeholder, so row 791 is `B` (closed by `create-menu-ai`), §7's "all Board view" is corrected, and `check-video2-counts.mjs` holds the recomputed totals, 151 · 9 · 13 of 173.
-
-### `commit-log/log-6f62af6-1` — partly-fixed, small
-
-**The end of the third Teams carousel card is our own wording and is not checked**
-
-*Evidence:* Commit 6f62af6: the third card is cut off in the frame, 'its tail is written by me' and is not checked. catalogs.ts:2831-2835 reads 'Stay focused with Priorities' / 'Instantly know what each team is working on ...'.
-
-*To close:* Research ClickUp's actual Teams empty-state card copy, use it in all four locales, and check it.
-
-*Researched, 29 September:* not settled by public sources. ClickUp's pages describe Priorities in Teams Hub ("see what each person is working on", "share and compare priorities") but not the empty state's carousel copy, and no page quotes the third card. The frame's beginning stays, and the tail stays ours until the owner or a later frame gives the real one.
 
 ### `ledger-rows/row-2398-remainder` — **closed** (small)
 
@@ -8624,14 +8241,6 @@ longer claims a schedule.
 
 ## Other — 5
 
-### `commit-log/log-39863ff-1` — open, medium
-
-**Four recorded 'decisions' need owner confirmation: ChatGPT/Gemini, the three AI categories that can never be filled, AI Notetaker, Automations**
-
-*Evidence:* Commit 39863ff 'DECISIONS RECORDED RATHER THAN QUIETLY BUILT'. ChatGPT and Gemini are listed and not selectable (ledger row 860). ai-categories.ts:76-78: images, externalActions and externalSearches are unsupported and print a reason. AI Notetaker (needs a meeting bot) and Automations (parked, [14:29]) are in §3. Automations was parked by the client, so it is not simply unbuilt. The rest are product decisions, not gaps in the frames.
-
-*To close:* Put each one to the owner: which stay parked, and which to research and build now that frame silence is not an accepted reason.
-
 ### `harness/dist-brk-committed` — **closed** (one item with `commit-log/log-39863ff-2` below)
 
 **A break-run web bundle (apps/web/dist-brk, 80 files) is committed and not ignored**
@@ -8685,3 +8294,633 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
+## Found by the triage, 5 October — 7, each reproduced
+
+Each was reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a feature or
+a decision; each is a defect beside that item, and counts. Their full evidence is in `docs/triage-2026-10-05.md`
+under the item they were found beside.
+
+### `found-5-oct/guests-read-and-delete-every-clip` — open (security, small; found by the triage beside `found-30-sep/guests-may-ask-for-clip-links`) · reproduced 5 October
+
+**A guest lists, downloads and deletes every clip in the workspace's library**
+
+*Evidence, reproduced 5 October on lane 1 by the triage's skeptic:* a guest of a throwaway workspace, an admin's clip in its library.
+- As the guest, `GET /workspaces/:ws/clips` answered 200 with the admin's clip, and the signed URL in the listing downloaded its bytes (200).
+- `DELETE /workspaces/:ws/clips {storageKey}` on the admin's clip answered 200. The admin's listing was then empty, and the clip's public link answered 404 "Clip not found".
+- The guest can also add clips to the library (presign 201, PUT 200), and a member then lists them.
+- In the browser, signed in as the guest, `/app/:ws/clips` drew the admin's card with its delete button; confirming the dialog deleted it.
+- Control in the same run: the same guest's `GET …/canvases?type=whiteboard` answered `[]` after the admin made a board, as the closed `found-24-sep/guests-list-every-whiteboard` rule says (no share can name a canvas; none can name a clip either).
+
+The cause: `clips.controller.ts` is guarded by `JwtAuthGuard` and `WorkspaceMemberGuard` alone. `ClipsService.list` returns every clip with a signed URL, and `remove` checks only the key's shape, with no role and no owner. Not measured: a member deleting another person's clip goes through the same route.
+
+*To close:* research what ClickUp lets a guest do with a workspace's clips (see, delete, record), and what a member may do with another's clip. Then give the library's routes the guest read rule and an owner-or-manager rule for delete, and check both in a suite.
+
+### `found-5-oct/readers-change-shared-views` — open (security, small; found by the triage beside `found-25-sep/view-only-individual-permissions`) · reproduced 5 October
+
+**A reader of a list renames, reconfigures, deletes and re-defaults the views everybody shares**
+
+*Evidence, reproduced 5 October on lane 7 by the triage's skeptic:* a space whose default is View only, a list holding five views the admin made (visibility "everyone", one the default). A plain member, and a guest given the list at View. The same for both:
+- `PATCH` an admin's view with a new name and config: 200; `DELETE` an admin's view: 200, gone.
+- `POST` a view of their own: 201; `PATCH` it `{isDefault: true, isPinned: true}`: 200, and the list's default moved to it.
+- On a list with no views, the member's first `POST /lists/:id/views` was saved with `isDefault` true and visibility "everyone", and the admin's list then opened on it.
+- Control in the same run: the same member's `PATCH` of a task title on that list answered 403, "This space's default permission is "View only", which does not allow changing its tasks".
+
+The cause: `views.service.ts` `create()` asks no level and makes the first view the default; `assertMayWrite` returns at once for a view whose visibility is "everyone". The list page's view menu offers Update, Rename, Make default and Delete on every view to everybody. The ledger's own line ("Saved views … made by any reader … change what the reader sees, not the list") does not hold: they change what everyone sees.
+
+*To close:* research ClickUp's rule for who may create, change and delete a shared view, and who may set a list's default view (its view-only individual permission "create views" is off by default). Ask the location's level on every shared-view write, keep a reader's private views theirs, offer in the menu only what the reader may do, and check it in a suite.
+
+### `found-5-oct/default-list-files-into-an-archived-list` — open (visible bug, small; found by the triage beside `found-24-sep/planner-default-list-read-by-nothing`) · reproduced 5 October
+
+**A task made by /task, a chat message or the AI lands in an archived Default list, where nobody can find it**
+
+*Evidence, reproduced 5 October on lane 7 by the triage's skeptic:* a member chose a list as their planner Default list (`PATCH /planner/:ws/settings`, 200). Message-to-task and `/task` then filed into it (201), as they should. The admin archived that list (`DELETE /lists/:id`, 200, `is_archived` true). `/task` afterwards still answered 201 and filed the task into the archived list, while the settings still named it; `GET /projects/:id/lists` no longer lists it. A direct `POST /tasks` into the archived list answered 201 too.
+
+The cause: in `tasks.service.ts` `defaultListFor`, the chosen list is asked only for its workspace and `canCreateTaskIn`; the fallback alone filters out archived lists. The create gate (`common/permissions/task-create.ts`) never asks whether a list is archived.
+
+*To close:* research what ClickUp does when a Default list is archived (fall back to the personal list, or refuse and say so) and whether a task can be made in an archived list at all. Then do the same in `defaultListFor` and the create gate, and check it in a suite.
+
+### `found-5-oct/xlsx-read-as-text` — open (visible bug, small; found by the triage beside `commit-log/log-601eacc-2` and `ledger-rows/row-816`) · reproduced 5 October
+
+**An .xlsx put into the spreadsheet import is read as text, offered for import, and fails leaving an empty space behind**
+
+*Evidence, reproduced 5 October on lane 1 by two of the triage's skeptics:* the page says ".xlsx is not read — re-save the sheet as CSV first", and its file input says `accept=".csv,.tsv,.txt"`. That is only a hint to the picker: the dialog's "All files", or a drop, puts an .xlsx in. The page took it ("triage-board.xlsx (1.5 KB)"). Preview answered 201 with one column named by the zip's bytes (`PK\u0003\u0004…[Content_Types].xml…`) and drew them as column names. Mapping that column to Title enabled "Start import (1 task)". Pressing it, the panel said "Import failed / unsupported Unicode escape sequence"; the job ended failed with 0 tasks made, and left a new space, project and an empty "Imported Tasks" list behind.
+
+The cause: `workspace-import-page.tsx` `onFileChange` reads any file with `readAsText` and checks neither its name nor its content; `spreadsheet-import.service.ts` parses any string as delimited text, makes the space and project outside a transaction, and writes an error holding a NUL into the job's jsonb, which Postgres refuses. Its own comment says the UI asks for CSV "rather than accepting an .xlsx it would then fail to read". The document import refuses a .docx by its name.
+
+*To close:* refuse a file that is not delimited text, by its name and by its first bytes (a zip begins `PK`), before anything is made, in the words the page already uses; make a failed import leave nothing behind; check both in a suite. Reading .xlsx is the separate feature in `ledger-rows/row-816`.
+
+### `found-5-oct/timeline-press-moves-dates` — open (visible bug, small; found by the triage beside `resume-defects/resume-5`) · reproduced 5 October
+
+**A press on a timeline bar rewrites the task's dates, and the Gantt drag drops the times**
+
+*Evidence, reproduced 5 October on lane 4 by the triage's skeptic* (screenshots in `/tmp/claude-0/triage/lane4-sk/` on that machine):
+1. Workspace timeline, a UTC browser: a press and release on a bar, without moving, changed a task due 9 October 17:30 and starting 7 October 09:00 to midnight on both days. No task sheet opened. `workspace-timeline-page.tsx` saves `startOfDay` of each date on every mouseup, even when the bar did not move.
+2. The same press in a Los Angeles browser on a date-only task, 12–14 October: it became 11 October 07:00Z – 13 October 07:00Z. One click moved it a day earlier.
+3. The list's Gantt, a UTC browser: a one-day drag of a task 16 October 09:00 – 17 October 15:00 saved 17 and 18 October at midnight. `rescheduleTaskSpan` sends `yyyy-MM-dd`, the loss `lib/task-dates.ts` `withDatePart` exists to prevent.
+4. The list's Gantt, a Los Angeles browser: a date-only task of 19–21 October is drawn as "Oct 18 – Oct 20", every date-only bar a day early, and a one-day drag saved nothing. `GanttView` reads a UTC-midnight day as local time.
+
+Coverage: `list-page-levels.mjs` asserts only that the due date changed, in a UTC browser; no suite presses or drags a workspace-timeline bar.
+
+*To close:* a press that does not move a bar saves nothing; a drag moves each date by whole days and keeps its time (`withDatePart`); a date-only day is drawn and moved as that day in any zone. Check each in a suite in UTC and in a zone west of it.
+
+### `found-5-oct/comment-links-not-links` — open (visible bug, small; found by the triage beside `resume-defects/s4-clip-link`) · reproduced 5 October
+
+**A web address in a one-line comment is drawn as plain text, not a link**
+
+*Evidence, reproduced 5 October on lane 4 by the triage's skeptic:* two comments posted (201 each): "see https://example.com/triage-plain for the spec", and "notes" followed by a list holding the same kind of address. In the task sheet's Comments tab the first address is text with no link (0 anchors); the second, because the comment holds a list, is a link (1 anchor).
+
+The cause: `mention-text.tsx` takes its plain path whenever the text has no block markdown, and draws every segment as a `<span>`; `markdown.tsx`'s bare-URL autolinker is reached only on the block path. The plain path's comment explains skipping emphasis, not links.
+
+*To close:* research how ClickUp draws a pasted address in a comment (a link, opening in a new tab). Link bare addresses on the plain path too, safely (http and https only), and check both kinds of comment in a suite.
+
+### `found-5-oct/calendar-push-ignores-who-may-read` — open (security, medium; found by the triage beside `ledger-rows/row-1962`) · reproduced 5 October as far as a push can go here
+
+**A task is pushed into the Google or Outlook calendar of a connection's owner who may not read it, and after they have left**
+
+*Evidence, reproduced 5 October on lane 7 by the triage's skeptic:* a plain member granted `integrations.manage` through a custom role started the workspace's Google Calendar connection (201, `connectedById` is them). The admin made a private space with a dated task; the member's `GET /tasks/:id` answered 404. With that connection staged without a token (so nothing left the machine), the admin's push of the task answered 201 `{"pushed":[],"skipped":["gcal:No access token for gcal"]}`: the push chose the member's connection for a task they cannot read, and stopped only at the missing token. The admin then removed the member (200, no member row left); the connection stayed "connected", and the push chose it again.
+
+The cause: `calendar-sync.service.ts` `pushTask` loops over every connection and `resolveTaskContext` asks nothing of `connectedById`; `upsertGoogleEvent` sends the title and description; `fireCalendarPush` runs on every task write; `removeMember` leaves the member's connections. The iCal feed was fixed for exactly this (it applies the container rule and resolves only while its owner is a member); the Google and Outlook push does neither. A real Google write could not be made here.
+
+*To close:* push a task only into connections whose owner may read it now, and stop a connection when its owner leaves the workspace; check both in a suite with the store-and-stub harness (no real calendar). Which lists push at all is the Automations feature, `ledger-rows/row-1962`.
+
+## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
+
+Moved here by the triage of 5 October, at the owner's request: these are not open defects and are not in the
+counts. Each says what it is in its heading, with the status it had before. Their full evidence is in
+`docs/triage-2026-10-05.md`.
+
+#### Features and ClickUp gaps — 35
+
+### `found-30-sep/no-save-list-or-folder-as-template` — feature, not counted (triage, 5 October; was: open (feature, medium; found closing `ledger-rows/row-1874`))
+
+**A Folder or a List cannot be saved as a template from the sidebar**
+
+*Evidence, 30 September:* ClickUp saves a Folder or a List as a template from the sidebar (⋯ › Templates › Save as Template, with tags). Rundesk's only save dialog is the Template Center's "Save project as template". It never sends `targetType: 'list'`, though the API makes a list template of a one-list project when asked, so a list template can only be made through the API.
+
+*To close:* research ClickUp's sidebar save, then offer Save as Template on a folder's and a list's menu, with tags, and check that each makes a template of the right kind.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Nothing is broken here; the feature is missing. No folder, project or list menu in the sidebar offers Save as Template, and the Template Center's dialog always saves a folder template, so a list template can only be made through the API. ClickUp saves a Folder or List as a template from the sidebar (⋯ › Templates › Save as Template, with tags). Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/load-template-takes-every-attribute` — feature, not counted (triage, 5 October; was: open (parity, medium; found closing `found-30-sep/template-submit-ignores-the-form`))
+
+**Use Template brings everything the template holds, where ClickUp lets you choose**
+
+*Evidence, 30 September:* a search summary of ClickUp's "Use task templates" reads "When you load a Template, you can choose which attributes you'd like to inherit". Here, a template chosen in the create modal brings everything: its checklists, subtasks and custom-field values, and its one values wherever the form left them alone. Only the form can win over it.
+
+*To close:* research ClickUp's attribute choice (which attributes, and where it is offered), then offer the same under Use Template, and check it with a suite.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). This is a missing feature (a parity gap), not a defect. Use Template brings everything the template holds, and nothing in the modal or the instantiate API lets the person choose which attributes to inherit. ClickUp: "When you load a Template, you can choose which attributes you'd like to inherit". Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/save-as-template-asks-no-description` — feature, not counted (triage, 5 October; was: open (feature, small; found closing `ledger-rows/row-1060`))
+
+**Save as template in the create modal takes no description, and Update's picker has no search**
+
+*Evidence, 30 September:* ClickUp's save offers an optional description, which the API accepts as `description`, and its update picker is searched. The frame shows neither, and the brief asked for the name only.
+
+*To close:* add the optional description and a search over the templates, as ClickUp does, and check both.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). This is a missing feature. In the create modal, Save as template asks for a name only, with no optional description (the API already accepts one), and the Update existing template picker cannot be searched. ClickUp's save offers an optional description, and its update picker can be searched. Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/duplicate-copies-no-attachments` — feature, not counted (triage, 5 October; was: open (parity, small; found closing `found-30-sep/duplicate-copies-votes-and-files`))
+
+**Duplicate copies none of a task's attachments, and offers no choice of what to copy**
+
+*Evidence, 30 September:* ClickUp's duplicate asks you to "choose what you want to include in the new task" ("Duplicate a task", through search excerpts), a checklist "with pre-selected boxes of what to keep" (feedback board). Rundesk's Duplicate is one button that copies fields, checklists, subtasks, assignees and labels, and no attachments, so a Files value is not carried to the copy either.
+
+*To close:* find which items ClickUp's dialog offers, offer them, and copy attachments as objects of the copy's own (as `attachClip` copies a clip), carrying a Files value over to the copies; check it.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Duplicate still copies no attachments, so the copy's Files field comes out empty, and it gives no choice of what to copy (seen on lane 6). Both are unbuilt ClickUp parity, not a broken behaviour: the code drops files on purpose. Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/ai-page-fields-checked-only-by-a-unit` — feature, not counted (triage, 5 October; was: open (test tooling, small; found closing `found-30-sep/field-route-takes-another-projects-field`))
+
+**The AI page's field boxes are checked by no suite**
+
+*Evidence, 30 September:*
+- The AI page's "Generate task" now offers only the chosen list's fields (`fieldsOfList`).
+- Its field boxes appear only after a model has answered, and no suite drives that page to them. The filter is covered by `field-scope.test.ts` alone.
+
+*To close:* on a model lane, generate a task for a list whose project has a field scoped to another list, and check that no box is offered for it and that saving writes no refused value.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The AI page's Generate task correctly offers and writes only the chosen list's fields; what is missing is a suite check, so this is unbuilt coverage and not an open defect. Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/comment-clips-have-no-copy-link` — feature, not counted (triage, 5 October; was: open (feature, small; found closing `resume-defects/resume-7`))
+
+**A clip in a comment has no Copy link**
+
+*Evidence, 30 September:* ClickUp's share icon on an expanded comment clip copies its URL. A comment clip is the task's own attachment, not a library clip, so a link to it needs the task's read rule on the route rather than the library's.
+
+*To close:* give comment clips a link under the task's read rule, and check that it opens for those who may read the task and nobody else.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). A clip in a comment still has no Copy link: its card offers only the native player (seen on lane 6), and no route links to a task attachment under the task's read rule. Unbuilt. Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-25-sep/view-only-individual-permissions` — feature, not counted (triage, 5 October; was: open, feature, medium (found closing `guest-guard-reads-the-account-role`))
+
+**ClickUp's four individual permissions for view-only members and guests are not built**
+
+ClickUp (help centre, "Manage individual permissions for view only users", search snippets): view-only members and guests have four individual permissions.
+- On by default: time estimates and time tracking.
+- Off by default: adding or removing tags, and creating views.
+- An owner or admin turns each on or off per person, on the Unlimited plan and above.
+
+Here:
+- Time tracking follows reading, with no switch.
+- A time estimate asks the task's write rule, so a view-only member cannot set one where ClickUp's default lets them.
+- Tags ask the write rule, which matches ClickUp's default.
+- Making views is not measured.
+
+*To close:*
+- Measure time estimates and views for a view-only member and a guest.
+- Build the four switches per person, with ClickUp's defaults, on the member's row of the workspace's people settings.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The four per-person switches are unbuilt. Measured defaults: time tracking matches ClickUp and tags match ClickUp. Time estimates are refused where ClickUp allows them. View-only members and guests can create shared views, which ClickUp's default does not allow. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/readers-change-shared-views`. Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-24-sep/planner-default-list-read-by-nothing` — feature, not counted (triage, 5 October; was: partly-fixed, small (dead control; found fixing the block prefix))
+
+**The planner's Time blocking "Default list" saves, and nothing reads it**
+
+*Evidence, read not run:* `planner-settings-dialog.tsx` draws a Default list picker (`planner-default-list`). Its comment calls it "the answer to the question video 1 left open: where a task made from a message, from /task, or by the AI should land". It writes `defaultListId` into the person's planner settings, and the server checks the list exists. A search of `apps/web/src` and `apps/api/src` finds no other reader. A task made from a chat message, from `/task` or by the AI lands wherever those flows put it, and the picker changes nothing. `planner-settings` checks only that the picker offers the workspace's lists.
+
+*The frame answers what it governs:* `14:20`, Time blocking, "**Default list for new tasks** — *Defaults to your personal list*" (`video2-frame-observations.md`). The gap audit reads it as the answer to video 1's open question: where a task made by `/task`, from a message, or by the AI lands. That is the person's Personal List unless they choose another.
+
+*To close:* have each of those flows read the setting when no list is named: `/task`, a message turned into a task, and the AI's task-making. Add a check per flow that the task lands in the chosen list, and in the personal list when none is chosen.
+
+*Partly fixed, 24 September.* A chosen list now decides where all three land. `defaultListFor` (tasks.service), which `/task` and the AI's "Create task from this" already asked, reads the person's chosen list first. It uses it when the list is in this workspace and they may add to it (`canCreateTaskIn`), and otherwise takes the oldest list they can add to, as before. The chat page chose the first list of the first project of the first space itself and always named it. It names none now, and `create-task` from a message asks `defaultListFor`, as `/task` does. Three strings for the page's own lookup went with it.
+
+The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the first four): `/task`, a message and an AI answer each landed in the oldest list with a list chosen, and the twin (none chosen: the oldest) passed. After, 6/6, with two more for the guards on the chosen list:
+- a list chosen in another workspace is not used here (a message's words would have crossed into the other workspace);
+- a member's chosen list in a private space they are not in is passed over, not refused.
+
+`pdl-1..4` (the choice ignored, the page picking the list, any workspace, no create rule), each compiled, 4 of 4 reddened on lane 2.
+
+*What is left:* the frame's default, "your personal list". This product's personal tasks are a separate table, not a list, so there is no personal list to default to. The empty choice was labelled "My personal list" over a behaviour that is the oldest list the person can add to. It says so now ("The first list I can add to", in the four locales). A personal list per person, as ClickUp has, is unbuilt. Regression on lane 1, 12/12: `planner-default-list`, `chat-message-actions`, `chat-history`, `replies-inline-thread`, `task-creation-access`, `lookup-read-access`, `ai-answer-rendering`, `planner-settings`, `task-mentions`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The dead-control defect does not reproduce, because all three flows now read the chosen Default list (7/7 on lane 4). What remains is ClickUp's per-person Personal List, which is unbuilt. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/default-list-files-into-an-archived-list`. Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-23-sep/connected-search-per-person` — feature, not counted (triage, 5 October; was: open, medium (unbuilt; found closing federated search))
+
+**Each member should search their OWN mail and files; today one person's connection is the workspace's only one**
+
+*Evidence:* `workspace_integration_connections` is unique on (workspace, provider), so a second member connecting Google replaces the first's grant — and since 23 September a grant answers only the person who connected it, so everyone else's Gmail, Drive and SharePoint tabs say "Connected with someone else's account". The frame (§V2-11 `19:07`, "meri Gmail pe jaa ke") is a person searching their own mailbox.
+
+*To close:* research ClickUp's Connected Search — which apps each person connects for themselves and which an admin connects for the workspace, and what a member sees of the latter — then store per-person grants beside the workspace one (the calendar accounts already do: `user_calendar_accounts`), connect from the person's own settings, and search with the searcher's own grant. A suite per source: two members, each finding only their own.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Connected search allows one grant per workspace and provider, and that grant answers only the person who connected it. Per-person Gmail, Drive and SharePoint grants are unbuilt. Evidence: `docs/triage-2026-10-05.md`.
+
+### `commit-log/log-214dac0-1` — feature, not counted (triage, 5 October; was: open, large)
+
+**The Brain² hub and everything that depends on it is unbuilt**
+
+*Evidence:* Recorded in commits 214dac0, 4dacd13, 10c3194, d626849, 601eacc and 4cb50d3 ('Brain²'s hub still needs a runtime'). The API has no agents module (ls apps/api/src/modules). quick-create-modal.tsx:275 says 'SUPER AGENT ... is deliberately absent', and task-detail-sheet.tsx:578 says the Brain² button 'does not exist and is not being built'. workspace-ai-page.tsx:123 and 184-196 is a seven-tab strip, not the frame's two-group left nav, and has no Ask|Agents toggle. ai-panel.tsx has no composer '+' and no generated-artifact or slide-deck output. The ledger still counts these rows as M, P or excluded: 743 (task-header Brain²), 745 (@ picker Brain and Agents), 751 ('Brain' in the + menu), 770 (Super Agent), 848 (Agents, excluded), 852 (hub, left nav, Ask|Agents, Super Agents), 853 (composer +, artifacts) and 870 (image generation).
+
+*To close:* Research how ClickUp Brain and Super Agents work: the hub layout, what an agent is, its tools and triggers, and Ask vs Agents. Build an agents table, module and route first, then the hub shell, the toggle and the entry points (task header, + menu, @ picker, create menu). Test on a lane that has the model stub.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). There are still no agents (no table, module or route; every agents route is a 404 on lane 6), no hub nav or Ask|Agents toggle, no composer '+', no artifacts and no image generation, but the task-header Brain² button (row 743) and the '+' menu Brain (row 751) are now built. Evidence: `docs/triage-2026-10-05.md`.
+
+### `commit-log/log-601eacc-2` — feature, not counted (triage, 5 October; was: open, large)
+
+**Importers: Basecamp, Confluence and Slack are shown as text only, .xlsx is not read, and document import takes only .md and .txt**
+
+*Evidence:* spreadsheet-import.util.ts:241-258 lists Basecamp ('needs the Basecamp API'), Confluence (exports HTML/XML) and Slack (conversation JSON) with a reason and no control. Monday and Wrike at :148-151 and :216-219 tell the user to 'save as CSV' because .xlsx is not read. Ledger row 816 is P. Commits 68bc188 and 4a1fee7 refused Word import as 'a heavy parser dependency'.
+
+*To close:* Research which files and APIs ClickUp's importers accept for each tool, including .xlsx and .docx. Decide with the owner which to build. Credential-based imports can use a stub the way storage and the model do.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Importers still take only CSV/TSV/TXT spreadsheets and .md/.txt documents: on lane 6, .xlsx is not an accepted extension, a .docx import gets a 400, and Basecamp, Confluence and Slack are returned as reasons with no control. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/xlsx-read-as-text`. Evidence: `docs/triage-2026-10-05.md`.
+
+### `commit-log/log-68bc188-1` — feature, not counted (triage, 5 October; was: open, large)
+
+**Activity and Workload view types were researched against ClickUp and are still not built; Map, Mind Map and Timeline are also not offered**
+
+*Evidence:* Commit 68bc188 researched both views against ClickUp and called them 'buildable rather than inventable'. It names the parts already in the tree: task_activity, tasks.timeEstimate, and findOverloadedAssignees for the colour bands. Commit 9609106 then HELD them because 'the walkthrough does not make' the decision. Commits 30183c3 and 716d25c say 'View types is exact at six'. The tree agrees: packages/db/src/schema/enums.ts:162-170 viewTypeEnum is list, board, calendar, gantt, table, team, and apps/web/src/lib/space-views.ts:65 SPACE_VIEW_KEYS holds the same six. Ledger row 777 reads 'View types 6 of 11 ... Map / Mind Map / Timeline deliberately NOT offered ... Activity and Workload remain buildable'. A workspace-level /workload page exists (routes/app.$workspaceId.workload.tsx), but it is not a list view type.
+
+*To close:* Build Activity and Workload as view types to the ClickUp design already written into 68bc188. Workload colour bands must reuse findOverloadedAssignees and must not add a second threshold. Research ClickUp's Map, Mind Map and Timeline views and build each one with a real renderer, so no view is stored that nothing reads. Add a suite and break patches for each view.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). A list or space can still only use six view types (list, board, table, calendar, gantt, team). The API refuses Activity, Workload, Map, Mind Map and Timeline with a 400, and the app does not offer them. Nothing that exists is wrong. Evidence: `docs/triage-2026-10-05.md`.
+
+### `commit-log/log-713a611-1` — feature, not counted (triage, 5 October; was: open, large)
+
+**'Add to ›' (one task in several lists) is blocked because it is ClickUp's feature rather than the video's**
+
+*Evidence:* Commit 713a611 and ledger row 845: 'The gloss ... a task in more than one list is ClickUp's real product, not anything in the video ... Blocked on the reference'. Under the new instruction, ClickUp's real product is the spec to build to. packages/db/src/schema/tasks.ts:17 has listId as a single notNull foreign key, and no task-to-list join table exists in the schema.
+
+*To close:* Research ClickUp's Tasks in Multiple Lists: the Add to submenu, the home list vs added lists, and how filters, views and moves treat a task in more than one list. Add a join table with readers in every list query, then a suite and break patches.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). A task still belongs to exactly one list. The Add to menu offers only Personal Priorities, and nothing exists for 'Add to another List': no join table and no route. Evidence: `docs/triage-2026-10-05.md`.
+
+### `commit-log/log-c980bee-1` — feature, not counted (triage, 5 October; was: open, large)
+
+**Ten custom field types are unbuilt, and the ledger still gives a reason that commit 4cb50d3 retired**
+
+*Evidence:* custom-fields.ts:7-52 has 22 types. Commits c980bee and ac1d0fa recorded ten as decisions: eight AI fields (Summary, Custom Text, Custom Dropdown, Progress Updates, Translation, Sentiment, Categorize, Action Items), plus Relationship and Button. Ledger row 719 still says the AI eight wait because 'ANTHROPIC_API_KEY is empty here and in CI'. Commit 4cb50d3 retired that exact reason ('The reason is retired and the seam is proven'): the SDK reads ANTHROPIC_BASE_URL, and model-stub.mjs answers there. Button waits on 'AutomationsService has no manual trigger'.
+
+*To close:* Research ClickUp's AI fields, Relationship field and Button field. Build the AI fields against the model-stub lane. Replace the stale reason on row 719 now, whatever is built.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The ten field types (eight AI fields, Relationship and Button) are still refused by the API, which accepts 22 types. The stale 'API key is empty' reason on the ledger row now carries a correction, but the original sentence is still there. Evidence: `docs/triage-2026-10-05.md`.
+
+### `ledger-rows/row-719` — feature, not counted (triage, 5 October; was: open, large)
+
+**Field types: 10 of the frame's 29 absent; the 'ANTHROPIC_API_KEY is empty' blocker for the 8 AI types is stale**
+
+*Evidence:* reaudit.md:719: the 10 absent are 'not a build'. Eight need a language model and 'ANTHROPIC_API_KEY is empty here and in CI'. Relationship 'would be a second store for what task_doc_links already holds'. Button has no manual trigger. Tree: custom-fields.ts:7-53 has 22 types including 'tasks' (a named task→task reference, 0158). The key reason is retired by the ledger itself (reaudit.md:2843-2863) and by the model stub now being wired into the lanes (commits 6fbd79b, ad00a7c: RUNDESK_LANE_MODEL). For Button: AutomationsService.fire(triggerType, ctx) takes any trigger string (automations.service.ts:209-236), so a button trigger type is an addition, not a missing engine. The Relationship reason names task_doc_links (task↔doc), while the `tasks` field type already stores task→task references.
+
+*To close:* Build the 8 AI field types on ai.service's existing Anthropic path, measured on a model-stub lane. Add Button as a new automation trigger type fired by the field. Decide Relationship against ClickUp's actual Relationship field (list-scoped, rollups) versus the existing `tasks` type. Rewrite the row's reason.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The 10 field types (8 AI, Relationship, Button) are still unbuilt (lane 6 refuses each with 400 'Unknown custom field type'), and the row's stale empty-key reason now carries a note saying they are unbuilt, not blocked. Evidence: `docs/triage-2026-10-05.md`.
+
+### `ledger-rows/row-770` — feature, not counted (triage, 5 October; was: open, large)
+
+**Create-menu 'Super Agent' — still absent**
+
+*Evidence:* reaudit.md:770 (P): 'Super Agent stays open and is blocked, not pending: Rundesk has no agents'. Confirmed: no agents table in packages/db/src/schema and no agents module in apps/api/src/modules. 'Describe anything to create' and Create with AI are built (create-menu-ai.mjs).
+
+*To close:* Depends on row-852's Super Agents build. Once that exists, a create-menu entry that opens 'Create Agent' is small.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The create menu has no Super Agent entry and Rundesk has no agents at all. This is an unbuilt feature that depends on row-852, not a defect. Evidence: `docs/triage-2026-10-05.md`.
+
+### `ledger-rows/row-777` — feature, not counted (triage, 5 October; was: open, large)
+
+**View types 6 of 11: the premise is partly stale — Workload, Timeline, Mind-map pages and a workspace activity feed already exist**
+
+*Evidence:* The row (reaudit.md:777), §12 (reaudit.md:6191-6250, 6476-6482) and space-views.ts:59-63 ('The five Rundesk does not have (Map, Activity, Mind Map, Timeline, Workload) are not offered') all treat these as absent. SPACE_VIEW_KEYS is six (space-presets.ts:32, space-views.ts:65). But these already exist at WORKSPACE level: (1) Workload: routes/app.$workspaceId.workload.lazy.tsx → workspace-workload-page.tsx (656 lines, people × day heat map, capacity, days off, estimated vs tracked hours), fed by GET /workspaces/:ws/reports/workload and /workload/day (reports.controller.ts:143-163). (2) Timeline: workspace-timeline-page.tsx (1124 lines) over /tasks/workspace/:id/timeline. (3) Mind maps: workspace-mindmaps-page.tsx:71-89 (canvases of type=mindmap, i.e. blank mode, not task mode). (4) Activity: GET /workspaces/:ws/reports/activity (reports.controller.ts:184-192) → reports.service.ts:1323-1353, task_activity joined to actor name/avatar and list/project/space, visibility filtered (used by dashboard-widget-builder.tsx:956). (5) Map: the `location` custom-field type exists (custom-fields.ts:26). There are also TWO rules for 'overloaded' already: the Workload page uses a load/capacity ratio (workspace-workload-page.tsx:85-88, 480-485), while §12 tells the new view to use findOverloadedAssignees (ai.service.ts:817).
+
+*To close:* Treat this as building list/space VIEW TYPES over the existing aggregators, not as greenfield. Add a listId/spaceId filter to /reports/activity and /reports/workload. Add 'activity' and 'workload' (then timeline/map/mind_map, using ClickUp research for their shape) to SPACE_VIEW_KEYS in both places. Settle which overload rule is canonical so the page, the new view and AI assign agree. Fix the space-views.ts comment and the §12 text.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The five missing view types and list/space scoping of the activity and workload reports are unbuilt features. Which 'overloaded' rule is canonical is an owner decision, shown on the lane to give different answers. Evidence: `docs/triage-2026-10-05.md`.
+
+### `ledger-rows/row-852` — feature, not counted (triage, 5 October; was: partly-fixed, large)
+
+**Brain² hub row is still M as a whole, but its main column exists at /app/:ws/ai; only Super Agents, Ask|Agents, nav shape and onboarding are absent**
+
+*Evidence:* reaudit.md:852 is `| M | Brain² hub, /ai/brain, AI-scoped left nav, Ask|Agents toggle, Super Agents |`. The ledger's own read at reaudit.md:6500-6550 says the main column is 'largely built' and that the hub lives at /app/:workspaceId/ai. Tree: routes/app.$workspaceId.ai.tsx → workspace-ai-page.tsx:123 and :188-235 have seven tabs (chat, knowledge, commands, generate, notes, writing, analytics); the shell AI dock is at routes/app.tsx:168-190. There is still no agents table, module or route: packages/db/src/schema lists none, and apps/api/src/modules has no agents module. skills.ts:1-29 separates Skills (built) from ClickUp's Super Agents (instructions, triggers, skills, knowledge, memory). The 16:25 'Personalize Brain²' onboarding appears in no row except inside the Brain² decision (reaudit.md:2774).
+
+*To close:* Split the row. Mark the hub's main column B, then build Super Agents (Create / All / My) plus the Ask|Agents toggle from ClickUp research. Parts to reuse: `skills` (instructions), AutomationsService.fire() (triggers, automations.service.ts:209-236), COMMAND_TOOLS including create_list/create_folder (ai-command.ts), and the model stub lanes (RUNDESK_LANE_MODEL, ad00a7c) to measure it. The /ai/brain URL and left-nav shape are cosmetic.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The Brain hub's main column exists at /app/:ws/ai. Super Agents, the Ask|Agents toggle, the AI-scoped nav, /ai/brain and the onboarding are all still unbuilt features, not defects. Evidence: `docs/triage-2026-10-05.md`.
+
+### `ledger-rows/row-853` — feature, not counted (triage, 5 October; was: open, large)
+
+**Credit meter, rotating placeholder, composer '+', generated artifacts/slide deck — absent; the placeholder's revert reason is weakening now lanes can carry a model**
+
+*Evidence:* reaudit.md:853 (M). ai-panel.tsx testids have no composer-plus. :1817-1823 has three static placeholder states with no rotation (built then reverted in 4ad25f6 because 'the resting state never renders in a lane'). Since 6fbd79b/ad00a7c a lane can be given a model per lane (RUNDESK_LANE_MODEL). TaskAiBar disables 'presentation' because there is 'no slide-deck entity' (task-detail-sheet.tsx:596-600, 625-629). The ai_usage metering exists (reaudit.md:6558-6564). Only the allowance and reset are missing, which the frames never give.
+
+*To close:* Rotating placeholder: built 29 September (`commit-log/log-4ad25f6-1`). Credit meter: allowance and reset from ClickUp research, reading ai_usage. Composer '+': contents from ClickUp research (existing parts: knowledge tab, skills, @-mention search). Slide deck: frame 16:50 specifies an inline 4-slide embed; needs an artifact entity plus a renderer.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The rotating placeholder is built. The composer '+' and generated slide decks are unbuilt features, and the credit meter waits on the owner's Credits decision. None of it is a defect. Evidence: `docs/triage-2026-10-05.md`.
+
+### `resume-defects/s4-clip-link` — feature, not counted (triage, 5 October; was: open, large)
+
+**Section 4: 'A pasted clip link renders as the clip' is still unbuilt. There is no clips table, no per-clip route and no paste handling**
+
+*Evidence:* No clips table: I grepped packages/db/src/schema for a pgTable named with 'clip', and packages/db/src/migrations for CREATE TABLE with clip, and found nothing. A clip is a storage object. clips.service.ts:21-23 builds the prefix `workspaces/<id>/clips/`, :37 builds the key, and :50-80 lists the clips by listing storage objects, using the storage key as `id` and title and duration from object metadata. The routes are only the library /app/$workspaceId/clips (routeTree.gen.ts:419-423, 591); there is no per-clip route. For paste handling, the comment composer has no onPaste or unfurl: grep of apps/web/src finds unfurl only in chat (chat-message-body.tsx:124-169, 315-328), which unfurls task URLs and OG metadata, not clips. Copy link signs the storage object (clip-publish.ts:111-117), so a pasted link carries no clip identity and no title. The ledger entry is docs/video2-reaudit.md:1307-1330 (status M), with the row at 1532. ClickUp research: clip URLs are stable, unguessable public links (see resume-7).
+
+*To close:* The order is forced. First, a `clips` table (id, workspace_id, storage_key unique, title, duration_seconds, created_by, share_token, created_at), backfilled from the existing storage prefix, with list() reading the table. Second, a stable app route that resolves a token to a freshly signed playback URL, shared with resume-7. Third, paste handling in the comment composer (and chat) that recognises the route, stores a clip reference on the comment rather than a bare URL, and renders the existing comment-video card (task-detail-sheet.tsx:5732-5770) with its processing state. Checks: paste a copied clip link and assert the card shows the clip's title and plays; paste a foreign URL and assert it stays a link. Break patches: the route ignores the token; the paste handler falls back to plain text.
+
+
+*Update, 30 September:* the per-clip route this row says is missing now exists, from `resume-defects/resume-7`. `/clips/<token>` and `GET /public/clips/:token` give a clip's title, length, a playable URL and who it opens for, and that is what a pasted link would read to render the clip. What is still missing is the paste itself, turning a clip link into the clip in a description, a comment or a doc, and the clips table that `clip_links` would join or be absorbed into.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Still unbuilt: a pasted /clips/<token> link stays a bare URL in the composer, is stored as plain text, and renders as plain text with no player and no title, although the per-clip route and public endpoint now exist. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/comment-links-not-links`. Evidence: `docs/triage-2026-10-05.md`.
+
+### `resume-defects/s4-composer-email` — feature, not counted (triage, 5 October; was: open, large)
+
+**Section 4: 'The composer posts as Email' is still unbuilt. The mode menu now exists with Email disabled, a suite locks that state in, and the ledger's 'today' text is stale**
+
+*Evidence:* task-detail-sheet.tsx:7202-7260: the `Comment ▾` DropdownMenu has comment-mode-item-comment (ticked) and comment-mode-item-email, which is `disabled` and data-available="no" with no onSelect, carrying the reason catalogs.ts:2717-2718 'Rundesk cannot send a comment as email...'. test/e2e/task-mentions.mjs:357-400 asserts exactly this disabled state ('Comment carries the tick and Email is not selectable', and the reason length is over 30), so building the feature must rewrite those checks. The ledger entry docs/video2-reaudit.md:1252-1270 still says 'There is no mode switch on the comment composer', which is stale now that the switch exists. The row is M at docs/video2-reaudit.md:1532. Plumbing status, verified: the inbound threading exists (email-to-task.service.ts:28-33 and 184-187). Missing: replyTo, cc and bcc on send() (email.service.ts:584-589); a channel column (comments.ts:16-29); any route that sends a composed body; outbound Message-ID recording (resume-8-reply-routing). ClickUp research: in the task comment box, click Comment, then choose Email; fill To/CC/BCC, subject and body, add attachments and a signature, then Send (or schedule it). Responses appear in the task's activity feed, and a reply to an emailed comment can be sent as a comment or as an email (help.clickup.com 'Use Email in ClickUp', 'Create tasks and comments via email').
+
+*To close:* Build to ClickUp. Selecting Email switches the composer into an email form (To, CC and BCC with member and contact suggestions, Subject, body, attachments). Add a route such as POST /tasks/:id/comments/email. It sends through the extended send() with Reply-To set to the task's +task- address, stores the comment with channel='email' and the metadata, and records the outbound Message-ID. The thread renders email comments distinctly, and inbound replies land as channel='email'. Rewrite the task-mentions checks to assert the working mode, not the disabled one. Add e2e checks against a captured transport (the email itself, its Reply-To, and the stored channel read back in the thread), and a break patch for each (drop replyTo; store the channel but do not render it). Update docs/video2-reaudit.md:1260-1270 and the row at 1532.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Still unbuilt: the Comment ▾ menu lists Email as disabled with a reason (task-mentions 17/17 on lane 1), there is no route that sends a composed email, and send() has no cc/bcc while comments have no channel. Evidence: `docs/triage-2026-10-05.md`.
+
+### `commit-log/log-3943965-1` — feature, not counted (triage, 5 October; was: open, medium)
+
+**Credit meter, Credits tab, usage-trend chart and the metered 'uses have expired' paywall are all unbuilt; the data for them already exists**
+
+*Evidence:* Commit 3943965 found its own blocker stale: ai_usage records every call, and ai.controller.ts:183 @Get('usage') serves it. It re-blocked the work on 'allowance, reset policy, Add credits ... no frame specifies', which is the reason the owner no longer accepts. workspace-settings-page.tsx:1304-1318 shows usage tables only. There is no trend chart with a limit line, and grep for 'credits left', 'creditMeter' and 'usage-trend' finds nothing in apps/web/src. Ledger §6 line 2819 still has the usage-trend chart as STILL OPEN (e07683b, d8d1e04). Row 788's metered state was blocked on the same reason (446cdba). Row 869 counts Credits as M, while §3 lines 889-891 call Credits a decision.
+
+*To close:* Research ClickUp's AI credits: the allowance per plan, reset timing, Add credits, and the usage chart with its limit line. Decide with the owner whether the §3 'no in-app currency' decision still stands. Build the usage-trend chart now, since §6 already says it is separable from credits. Then build the meter and the metered paywall state on top of ai_usage.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The credit meter, Credits tab, dollar usage-trend chart and metered paywall do not exist. ai_usage and GET /ai/usage serve only totals and per-user, per-model and per-feature splits. Whether to have credits at all still waits on the owner's §3 decision. Evidence: `docs/triage-2026-10-05.md`.
+
+### `commit-log/log-601eacc-1` — feature, not counted (triage, 5 October; was: open, medium)
+
+**The cover picker's Search tab is still absent because no photo provider is configured**
+
+*Evidence:* Commits 601eacc, 39863ff, 2ae54b4 and 716d25c keep the tab absent. cover-image-picker.tsx:23-53 says 'SEARCH IS DELIBERATELY ABSENT ... if a photo provider is ever configured'. Ledger row 739 is P. 'No credential configured' is the same kind of reason that went stale twice in this window: storage, fixed by s3-stub, and the model, fixed by model-stub.
+
+*To close:* Research ClickUp's cover Search (it searches a stock-photo library). Add a provider behind an environment variable, give the lanes a stub for it the way s3-stub works, and build a Search tab that really searches, with checks and break patches.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The cover picker has no Search tab, and no photo provider, environment variable or lane stub exists; task-cover on lane 6 passes 42/42, asserting that the tab is absent. Evidence: `docs/triage-2026-10-05.md`.
+
+### `ledger-rows/row-1962` — feature, not counted (triage, 5 October; was: open, medium)
+
+**Calendar Automations (which tasks sync, to which calendar) — held by §3 parking, which is a 'walkthrough never explains' reason**
+
+*Evidence:* reaudit.md:1962-1991 (P, 'contested' against §3). planner-settings-dialog.tsx:66-73 parks Automations because 'the explanation was never given'. Yet frame 14:32 draws the page: the 'Sync ClickUp tasks to Google Calendar' card, the empty state 'Pick a list, folder, or space…' and '+ Add sync'. calendar-sync.service.ts:71-101: pushTask sends every due-dated, non-archived task to every connection, with no scope table and no off switch.
+
+*To close:* Research ClickUp's Calendar Automations. Add a sync-rule table (scope = list/folder/space, target calendar), make pushTask read it, and add the Automations settings page. The default becomes 'nothing is syncing', as the frame shows.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Calendar Automations is not built: there is no sync-rule storage and no settings page, and on lane 4 every task with a due date is pushed to every calendar connection in its workspace, whatever list it is in. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/calendar-push-ignores-who-may-read`. Evidence: `docs/triage-2026-10-05.md`.
+
+### `ledger-rows/row-745` — feature, not counted (triage, 5 October; was: open, medium)
+
+**@ picker Brain section and Agents — still absent**
+
+*Evidence:* reaudit.md:745 says Brain and Agents are 'blocked rather than pending'. task-detail-sheet.tsx:299-305: MentionTab is 'people'|'tasks'|'docs'|'whiteboards'|'locations'|'channels', and the comment refuses Brain/Agents because 'The Brain² hub is a recorded decision'. The AI service and dock exist (see row-743), so an @Brain mention that asks the AI in the thread has something to call. Agents have nothing: no agents schema or module.
+
+*To close:* @Brain: research how ClickUp's @Brain answers in a comment thread, then build it on ai.service + comment create, measured on a model-stub lane. Agents: wait for row-852's Super Agents.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The @ picker has six sections and no Brain or Agents section. @Brain could be built on the existing AI service, but Agents cannot be built until Super Agents (row-852) exists. Evidence: `docs/triage-2026-10-05.md`.
+
+### `ledger-rows/row-788` — feature, not counted (triage, 5 October; was: open, medium)
+
+**Paywall's metered 'uses have expired' state (B* remainder) — absent, held only because frame 09:30 shows no allowance or reset**
+
+*Evidence:* reaudit.md:788 B*: the metered state is 'blocked on the reference'; reaudit.md:2887-2891 repeats that. Tree: plans.constants.ts:40-55 has PLAN_FEATURES ['teamView','boardExport'] and PlanLimits {maxMembers, maxProjects} only. A grep for expired/usesLeft/feature_uses across feature-gate.tsx, the plans module and billing schema finds nothing. Parts that exist: plan-feature.guard.ts (server refusal), FeatureGateDialog.
+
+*To close:* Research ClickUp's limited-uses model for Free-plan features (the allowance and whether it resets). Add a per-workspace per-feature use counter incremented by the guard's allowed path, and render 09:30's state (preview, sentence, one Contact admin button) when the counter is exhausted.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). There is no metered paywall: a Free workspace is refused a paid feature from the first use, with no use counter and no 'uses have expired' state. Evidence: `docs/triage-2026-10-05.md`.
+
+### `ledger-rows/section3-team-analytics` — feature, not counted (triage, 5 October; was: open, medium)
+
+**§3 'Team analytics' is held only because 'she never opens it', and a suite enforces its absence**
+
+*Evidence:* reaudit.md:892-893: 'the frames list the tab, nothing is behind it, she never opens it. Guarded against by teams-destination.mjs'. teams-destination.mjs:16, :212-235 asserts Analytics must NOT appear. workspace-teams-page.tsx:22-24 and :218-224 give tabs teams/people/chart only. Under the new policy this is an unbuilt feature, and building it will redden teams-destination.mjs by design. Parts that exist: reports workload and activity endpoints, and the time-entries and people modules.
+
+*To close:* Research ClickUp Teams Hub Analytics and build it over the existing reports aggregators. Replace the absence check in teams-destination.mjs with a check of the new tab. Record the row in §2 so it is counted.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The Teams hub has All Teams, All People and Org Chart but no Analytics tab, and teams-destination asserts that absence; the tab is unbuilt. Evidence: `docs/triage-2026-10-05.md`.
+
+### `harness/ai-rows-blocked-on-empty-key` — feature, not counted (triage, 5 October; was: partly-fixed, large)
+
+**Ledger rows still give 'ANTHROPIC_API_KEY is empty here and in CI' as the reason the AI field types and AI surfaces are unbuilt or refusal-only**
+
+*Evidence:* docs/video2-reaudit.md:642 ('eight of the ten need a language model and ANTHROPIC_API_KEY is empty here and in CI') and :719 (row P, the 10 absent field types: Summary, Custom Text, Custom Dropdown, Progress Updates, Translation, Sentiment, Categorize, Action Items, plus Relationship and Button). Also :727 (row B: the task AI bar ends in 'not configured'). The same ledger at :2843 says 'The ANTHROPIC_API_KEY half of that reason is now known to be wrong', and scripts/e2e-lanes/model-stub.mjs plus lane_model_env (lane-env.sh:170-177) now supply a model to a lane. Under the owner's policy these rows are UNBUILT, not blocked.
+
+*To close:* Relabel these rows as unbuilt. Build the eight AI field types, and Relationship and Button, to ClickUp's documented behaviour. Measure them on a model lane through model-stub (this depends on model-lane-routing-unbuilt).
+
+*Partly fixed, 30 September:*
+- The rows are relabelled. `docs/video2-reaudit.md` keeps its words about the empty key, and says beside each (§4's paragraph, the field-types row, the task AI bar's row) that a lane runs a model stub, so the eight AI types are unbuilt, not blocked.
+- The dependency is closed: model-lane routing is built (`harness/model-lane-routing-unbuilt`).
+- What stays open is the build: the eight AI field types, and Relationship and Button, to ClickUp's documented behaviour, measured on the model lane.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The ledger rows are relabelled and the routing dependency is closed; what remains, the 8 AI field types plus Relationship and Button, is unbuilt (lane 6 rejects each type), which duplicates row-719. Evidence: `docs/triage-2026-10-05.md`.
+
+### `resume-defects/resume-5` — feature, not counted (triage, 5 October; was: partly-fixed, large)
+
+**Gantt ledger row: the Today part is now true, but on a different surface from the one the frame shows. Zoom, drag and critical path have no check, and there are now two Gantts that have drifted apart**
+
+*Evidence:* Ledger docs/video2-reaudit.md:789 reads `B | Calendar view, Gantt (today line, zoom, drag, critical path)` and names no closing suite. Line 790 reads `B | Gantt: Auto fit, week numbers, collapsible panels, local export`. Neither wording has changed since 39863ff. The Today control now exists and is checked, but only on the WORKSPACE timeline page: workspace-timeline-page.tsx:219-223, 290, 333 (goToToday), 630 (data-testid timeline-today) and 869 (timeline-today-line), checked by gantt-controls.mjs:528-600. Breaks 13 and 14 redden it (/tmp/claude-0/brk-gantt-controls-13-today-noscroll.log, -14-today-onceonly.log), and the 8083f88 baseline was 29/0. But docs/video2-frame-observations.md:230,245-247 places the 09:40 Gantt in the list's five view tabs (line 206). The list's own Gantt tab renders a different component: app.$workspaceId.$spaceId.$projectId.$listId.tsx:3538-3539 renders GanttView (6005-6013). That component has zoom as Day/Week/Month buttons (6307-6308, 6438-6456), a today line only when today is in range (6425-6426, 6518-6523, which is the exact 'Today nowhere on the chart' problem the timeline page solved at 276-290), drag (6063, 6106) and critical path (import at 107). It has no Today button, no Auto fit, no week numbers, no collapsible panel, no export and no data-testid at all, so no suite can check it. Going the other way, the timeline page has no dependency arrows or critical path (grep for depend/critical finds only the comment at line 694). Zoom is used in gantt-controls only as a reset click (536), never checked to change px/day. Drag is unchecked on both surfaces. Critical path has no unit or e2e test (no *.test for apps/web/src/lib/gantt.ts). ClickUp research: the Gantt view defaults to a Week time period, has Auto fit and Export as PDF/PNG (Business plan and up), and a 'Show critical path' toggle that highlights the path in red (help.clickup.com Gantt view and 'Critical Path and Slack Time'). Rundesk's export is CSV.
+
+*To close:* Re-read row 789 against the tree and split it. The Calendar half is closed by list-view-controls, per docs/video2-reaudit.md:1750-1760. For the Gantt half, choose one Gantt, preferably one shared component used by both the list tab and /app/:ws/timeline. Give the list tab the frame's toolbar (Tasks panel toggle, Today, Week ▾ time-scale dropdown, Auto fit, Export) plus week numbers and collapsible panels. Give the timeline page ClickUp's 'Show critical path' toggle and dependency arrows. Add testids and checks on the list tab for zoom (measured px/day changes), drag (a PATCHed start and due date that survive reload), critical path (the red set equals the computed longest dependency chain, and a patch that returns [] reddens it) and Today. Add break patches for each, and name the closing suite in the row. Decide and record whether Export follows ClickUp (PDF/PNG) or keeps CSV.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). No product defect: the list Gantt's zoom, today line (drawn only when today is in range) and drag all work. What remains is an unbuilt toolbar and critical path on the timeline (feature), a one-or-two-Gantts and export-format choice (decision), and missing zoom and critical-path checks. The 'drag unchecked' claim is stale. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/timeline-press-moves-dates`. Evidence: `docs/triage-2026-10-05.md`.
+
+### `ledger-rows/row-1252` — feature, not counted (triage, 5 October; was: open, large)
+
+**Composer posts as Email — absent (Email mode listed but disabled)**
+
+*Evidence:* reaudit.md:1252-1269 (M); resume.md:247-249 and 253-257. email.service.ts:584-603: the private send() takes {to, subject, html, attachments} with no replyTo or cc. comments.ts has no channel column. The mode menu exists with Email disabled (task-detail-sheet.tsx:7242-7258). The inbound half exists: the email-to-task address (tasks.controller GET /tasks/:id/email-address).
+
+*To close:* Add replyTo (the task's inbound address) and cc to send(), a channel column on task_comments that the thread renders, and a route that sends a composed body. Then enable the Email mode (it also closes row-730's first remainder).
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Sending a comment as email is unbuilt. The Email mode is drawn disabled with a reason, and there is no channel column, no cc and no send route; send() has had replyTo since resume-8. Evidence: `docs/triage-2026-10-05.md`.
+
+### `ledger-rows/row-1307` — feature, not counted (triage, 5 October; was: open, large)
+
+**A pasted clip link renders as a player — absent**
+
+*Evidence:* reaudit.md:1307-1322 (M); resume.md:258-262. There is no onPaste or unfurl handling in task-detail-sheet.tsx. clips.controller.ts:10-37 has only GET list, POST presign and POST share. There is no clips table in packages/db/src/schema, so a link carries no clip identity. resume §3.7: Copy link expires in 24h and says nothing.
+
+*To close:* Add a clips record plus a stable app route first, then paste detection that renders the clip card/player in comments.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). A pasted clip link posts as plain text with no player. The stable /clips/<token> link the item needed first now exists; detecting the pasted link and drawing a player are what remain. Evidence: `docs/triage-2026-10-05.md`.
+
+### `ledger-rows/row-2294` — feature, not counted (triage, 5 October; was: open, large)
+
+**The AI acts inside a connected app — absent**
+
+*Evidence:* reaudit.md:2294-2321 (M). COMMAND_TOOLS (ai-command.ts:179-246, plus create_list/create_folder at :118-123 and :265) are all internal. ai-categories.ts:62-78 marks externalActions/externalSearches unsupported with reasons. Parts that exist: calendar-sync's Google event upsert, and the Gmail/SharePoint search providers. The §5 note that AiService injects SearchService and never calls it is FIXED: it was removed (ai.service.ts:915-921).
+
+*To close:* Add connector tools, e.g. book a meeting via calendar-sync, and search/send via Gmail. Measure them on a model-stub lane with provider stubs.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The AI cannot act in or search a connected app. Every AI tool acts on Rundesk's own data, and the AI value report marks both external categories as unsupported. Evidence: `docs/triage-2026-10-05.md`.
+
+### `ledger-rows/row-816` — feature, not counted (triage, 5 October; was: open, large)
+
+**Import P row (7 of 10 named tools) is still accurate, and it contradicts the B 'Importers' row for the same frame**
+
+*Evidence:* reaudit.md:816 (P): Basecamp needs its API, Confluence exports pages, Slack exports JSON, and Monday/Wrike .xlsx is not read. reaudit.md:817 (B) covers the same submenu and says 'every row of frame 12:08's submenu is now either built or drawn with its reason'. Tree: spreadsheet-import.util.ts:115-230 has seven named presets; :241-277 UNSUPPORTED_SOURCES = basecamp/confluence/slack/documents; monday/wrike hints at :151 and :219 say 'save as CSV'. common/export/xlsx.ts is a dependency-free xlsx WRITER (zlib), so an xlsx READER is its inverse, the same move document import made.
+
+*To close:* Merge 816 and 817 into one row. Build xlsx reading (ClickUp's spreadsheet import accepts XLS/XLSX). Basecamp and Confluence become API importers per ClickUp research. Confluence could target Docs through the existing doc importer.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Rundesk still cannot import .xlsx files or import from Basecamp, Confluence or Slack. The two ledger rows (now video2-reaudit.md:836 and :837) still contradict each other. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/xlsx-read-as-text`. Evidence: `docs/triage-2026-10-05.md`.
+
+### `suite-hygiene/task-mentions-pins-unbuilt-email-mode` — feature, not counted (triage, 5 October; was: open, large)
+
+**task-mentions pins the unbuilt 'Comment ▾ → Email' mode as disabled; the ledger row's 'Create Task ▾' half is blocked for a reason the owner no longer accepts**
+
+*Evidence:* task-detail-sheet.tsx:7242-7258 hard-codes `data-testid="comment-mode-item-email" data-available="no" disabled`, with the reason from catalogs.ts:2717-2718 ('Rundesk cannot send a comment as email'). task-mentions.mjs:378-409 asserts `data-available === 'no'`, that a reason is present, and that clicking it does not change the mode, so the suite locks the unbuilt state in. Ledger docs/video2-reaudit.md:730 (row B*) records Email as deliberately disabled and 'Create Task ▾' as 'Blocked on the reference … no frame in the video ever opens that chevron', a reason the owner's policy no longer accepts. I did not research ClickUp's behaviour in this session; the lens was suites.
+
+*To close:* Research how ClickUp's comment composer handles Email and the Create Task split-button menu, build both, then rewrite task-mentions:378-409 to drive the built mode. Re-mark row B* as unbuilt until then.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Only the Email mode remains, and it is unbuilt and duplicates s4-composer-email. The Create Task ▾ half is built (create-task-chevron 9/9 on lane 1), and task-mentions pinning the disabled Email row is accurate reporting, not a tooling defect. Evidence: `docs/triage-2026-10-05.md`.
+
+### `ledger-rows/row-1904` — feature, not counted (triage, 5 October; was: open, medium)
+
+**Planner 'Sync now' — absent, and the service header claims a scheduler that does not exist**
+
+*Evidence:* reaudit.md:1904-1927 (M). No RefreshCw, sync or pullEvents in workspace-planner-page.tsx. pullEvents' only caller is calendar-sync.controller.ts:108. There is no @Cron or @Interval in the calendar-sync module. calendar-sync.service.ts:25 says 'a manual or scheduled pullEvents call'.
+
+*To close:* Add a sync button in the planner header that calls pullEvents for the user's connections, and either add a scheduled pull or correct the comment.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The planner still has no 'Sync now' control and nothing schedules a pull. The stale comment that claimed a scheduler has already been corrected. Evidence: `docs/triage-2026-10-05.md`.
+
+#### Decisions for the owner — 10
+
+### `found-30-sep/template-leaves-values-out-silently` — decision, not counted (triage, 5 October; was: open (decision, small; found closing `found-30-sep/template-values-written-unchecked`))
+
+**A template applied where a field refuses its value leaves that field unset, and nothing says so**
+
+*Evidence, 30 September:* `instantiate` now writes only what each field's route would take and leaves out the rest (words into a Number field, an option a Dropdown lacks). Its answer does not say which were left out, and the create modal's toast says only that the task was made. ClickUp's help centre has nothing on a template's value that its target field refuses.
+
+*To close:* the owner decides whether the person is told. If so, the answer names the fields left out and the modal says so, in four locales; check it with a template applied where a field refuses its value.
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Still true on lane 6: a template value its target field refuses is left out, and neither the API answer nor the create modal says so. The owner has yet to decide whether the person should be told. Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/template-tags-keep-their-case` — decision, not counted (triage, 5 October; was: open (decision, small; found closing `found-30-sep/template-tags-spelled-by-collation`))
+
+**ClickUp forces a tag to lower case; Rundesk keeps each template's own spelling, so the Tags facet has to choose one**
+
+*Evidence, 30 September:*
+- ClickUp's feedback board ("Allow Tags to use capital letters", read through search excerpts): tags "are currently forced to be lowercase, no matter what you write or rename it to". Template Center tags are the Space's tags.
+- Rundesk keeps the case typed on each template (`ledger-rows/row-1874`), and the facet now shows the most-used spelling.
+- A card and the facet can show the same word in two cases.
+
+*To close:* the owner decides whether template tags keep their case, as now, or are stored lower-cased as ClickUp's are. If they are lower-cased, migrate the stored tags, and check that the facet and the cards agree.
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Template tags still keep each template's own case, and the Tags facet shows the most-used spelling, so cards and facet can differ (seen on lane 6). The owner has yet to decide whether to lower-case tags as ClickUp does. Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/guests-may-ask-for-clip-links` — decision, not counted (triage, 5 October; was: open (decision, small; found closing `resume-defects/resume-7`))
+
+**A guest may ask for a clip's link, as a guest could sign one before**
+
+*Evidence, 30 September:* the library's routes admit any workspace member, guests included. ClickUp's sources say nothing about guests and Clip links. Rundesk's public doc links are not a guest's to make ("guests never share publicly").
+
+*To close:* the owner decides. If guests may not make public links of any kind, refuse them the link route, as doc links refuse them, and check it.
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Still true on lane 6: a guest can mint a clip's public link through clips/link (and through clips/share with mode=public), and anyone can open it, while doc public links refuse guests. The owner has yet to decide whether that should change. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/guests-read-and-delete-every-clip`. Evidence: `docs/triage-2026-10-05.md`.
+
+### `ledger-rows/row-869` — decision, not counted (triage, 5 October; was: open, large)
+
+**Credits (tab, category table, trend chart with limit, Add credits, My Agent Performance) — absent; a recorded decision plus parts no frame opens**
+
+*Evidence:* reaudit.md:869 (M). §3 decision at reaudit.md:889-891. §6 at reaudit.md:2819 says the usage-trend chart is separable and 'STILL OPEN'. Parts that exist: GET /ai/usage (ai.controller.ts:183-190) and an AI Usage settings tab (workspace-settings-page.tsx:1287-1330) with per-user and per-model spend over 7/30/90 days. The response has totals/byUser/byModel and no per-day series, so there is no trend. rollUpByCategory gives the 8 categories (ai-categories.ts). No AI quota exists in PlanLimits.
+
+*To close:* Build the dollar trend chart now: a per-day series from ai_usage. Take the credit unit, allowance and 'Add credits' flow from ClickUp research, and get the owner to reconsider the §3 decision. 'My Agent Performance' waits for Super Agents (row-852).
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Credits (the tab, credit table, limit line and Add credits) wait on the owner's §3 decision. The dollar usage-trend chart is an unbuilt feature that can be built now, and My Agent Performance waits for Super Agents. None of it is a defect. Evidence: `docs/triage-2026-10-05.md`.
+
+### `commit-log/log-716d25c-1` — decision, not counted (triage, 5 October; was: open, medium)
+
+**'+ Add a new section' in Calendar settings › Sidebar is not built**
+
+*Evidence:* Commits 716d25c and 41f0ec5, and ledger row 835: 'blocked rather than pending ... what a NEW section would contain is a decision no frame makes'. git grep for 'add a new section', 'newSection' and 'customSection' in apps/web/src finds no such control. The rail sections are the fixed list in planner-settings-dialog.tsx.
+
+*To close:* Research how ClickUp's Planner or Calendar sidebar custom sections work: their name and the rule for what falls into them. Build storage for them, show them in the rail, and add checks.
+
+*Researched, 29 September* (help centre, through search excerpts). Not settled:
+- The help centre documents the Planner sidebar's categories as fixed: Priorities, Assigned to me, Today & overdue, and Backlog. Backlog alone is configured (a List and filters). "Meet with" is a people search. Categories collapse and expand, and the whole sidebar hides. Planner settings have no Sidebar page ("Appearance, Accounts, Upcoming meetings, Time blocking, and AI Notetaker").
+- The "+ Add a new section" the frame shows has no documented counterpart for the Planner or Calendar. The nearest is ClickUp 4.0's Home Sidebar custom sections: made with + › Section, named with an optional emoji, filled by hand (spaces, lists, tasks, docs, channels), each item in one section at a time, reordered in Customize › Sections, deleted without deleting what they hold.
+- The Planner's help pages are moving under "Calendar" names, so the docs may lag the app. What a new Calendar section would hold stays a decision for the owner: hand-picked tasks, as the Home Sidebar does, or a filter, as Backlog does.
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). '+ Add a new section' is not built. The Sidebar page offers the five fixed sections with show, hide and reorder. It cannot be built until the owner decides what a new section holds: hand-picked tasks or a filter. Evidence: `docs/triage-2026-10-05.md`.
+
+### `ledger-rows/row-835` — decision, not counted (triage, 5 October; was: open, medium)
+
+**Planner sidebar '+ Add a new section' — absent, held only because no frame says what a new section contains**
+
+*Evidence:* reaudit.md:835 (P): 'blocked rather than pending … what no frame supplies is what a NEW section would contain'. planner-settings-dialog.tsx:233-246 fixes RAIL_SECTIONS at five; :618-630 renders show/hide/reorder over them and has no add control. Parts that exist: the `railSections` planner setting, and saved-filter storage in packages/db/src/schema/list-filter-presets.ts and saved-searches.ts.
+
+*To close:* Research how ClickUp's planner sidebar 'Add a new section' works (custom section contents and rule). Store custom sections next to railSections and render them in the planner rail.
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). The planner rail has five fixed sections and no add control; the server refuses any other name. What a custom section would hold is still the owner's choice, and the gap is also open as commit-log/log-716d25c-1. Evidence: `docs/triage-2026-10-05.md`.
+
+### `ledger-rows/row-870` — decision, not counted (triage, 5 October; was: open, large)
+
+**Image generation — absent; needs an image-capable provider**
+
+*Evidence:* reaudit.md:870 (M). A grep for generateImage|image generation|dall-e|imagen|gpt-image in apps/api/src and apps/web/src finds only comments (ai-value-panel.tsx:29). ai-categories.ts:42-45 records images as having no code path. The only model client is Anthropic, which outputs no images.
+
+*To close:* Needs the owner's choice of image provider plus a harness stub. After that, a tool in COMMAND_TOOLS and the 'images' category becomes countable.
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Image generation is unbuilt and is waiting on the owner to choose an image provider. Until then the AI value report shows images as unsupported. Evidence: `docs/triage-2026-10-05.md`.
+
+### `ledger-rows/row-739` — decision, not counted (triage, 5 October; was: open, medium)
+
+**Cover 'Search' tab — absent; the reason (no image provider) still holds**
+
+*Evidence:* reaudit.md:739 (P). cover-image-picker.tsx:20-58 records the decision and the grep. Re-running `grep -rliE "unsplash|pexels|pixabay|imageProvider" apps packages .env.example` finds only cover-image-picker.tsx. The frame does draw the tab, so this is not a 'no frame' block: it needs an external provider.
+
+*To close:* Research which photo provider ClickUp's Search tab uses (believed to be Unsplash; the research lens should confirm) and add a server-side proxy with a key. Add a harness stub like s3-stub.mjs/model-stub.mjs so it can be measured. Needs the owner's decision to take a key.
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). The cover picker has 4 of ClickUp's 5 tabs; Search is missing. It is waiting on the owner to choose a photo provider and take a key. Evidence: `docs/triage-2026-10-05.md`.
+
+### `commit-log/log-6f62af6-1` — decision, not counted (triage, 5 October; was: partly-fixed, small)
+
+**The end of the third Teams carousel card is our own wording and is not checked**
+
+*Evidence:* Commit 6f62af6: the third card is cut off in the frame, 'its tail is written by me' and is not checked. catalogs.ts:2831-2835 reads 'Stay focused with Priorities' / 'Instantly know what each team is working on ...'.
+
+*To close:* Research ClickUp's actual Teams empty-state card copy, use it in all four locales, and check it.
+
+*Researched, 29 September:* not settled by public sources. ClickUp's pages describe Priorities in Teams Hub ("see what each person is working on", "share and compare priorities") but not the empty state's carousel copy, and no page quotes the third card. The frame's beginning stays, and the tail stays ours until the owner or a later frame gives the real one.
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). The end of the third Teams card is still our own wording and is not checked. Nothing behaves wrongly; it waits for the owner or a later frame to give ClickUp's real text. Evidence: `docs/triage-2026-10-05.md`.
+
+### `commit-log/log-39863ff-1` — decision, not counted (triage, 5 October; was: open, medium)
+
+**Four recorded 'decisions' need owner confirmation: ChatGPT/Gemini, the three AI categories that can never be filled, AI Notetaker, Automations**
+
+*Evidence:* Commit 39863ff 'DECISIONS RECORDED RATHER THAN QUIETLY BUILT'. ChatGPT and Gemini are listed and not selectable (ledger row 860). ai-categories.ts:76-78: images, externalActions and externalSearches are unsupported and print a reason. AI Notetaker (needs a meeting bot) and Automations (parked, [14:29]) are in §3. Automations was parked by the client, so it is not simply unbuilt. The rest are product decisions, not gaps in the frames.
+
+*To close:* Put each one to the owner: which stay parked, and which to research and build now that frame silence is not an accepted reason.
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Four recorded decisions still wait on the owner: ChatGPT/Gemini listed but unselectable, three AI categories that can never fill (images, external actions, external searches), AI Notetaker (bot build-vs-buy) and Automations (parked by the client). Evidence: `docs/triage-2026-10-05.md`.
+
+#### Deploy settings and production reads — 2
+
+### `found-30-sep/task-labels-left-in-production` — deploy, not counted (triage, 5 October; was: open (schema, small; found closing `found-30-sep/comment-file-index-only-in-a-migration`))
+
+**A table that migration 0001 made is still in production, and nothing reads it**
+
+*Evidence, 30 September, read, not measured on production:* 0001 creates `task_labels` (id, task_id, name, color), with a foreign key to tasks. The schema replaced it with `labels` and `task_label_assignments`, and no migration drops it or moves its rows. Nothing in the API, the web, the scripts or the suites names it. A migrated database has the table; a pushed one does not. The schema gate lets it be, by name, and gives this item as the reason.
+
+*To close:* find out whether production's `task_labels` holds rows. If it is empty, drop it in a migration and take it off the gate's list. If it holds rows, decide first whether they move to `task_label_assignments`.
+
+*Triage, 5 October:* a deploy setting or a production read, not a code defect (needs the production database). A migrated database gets an empty, unused task_labels table that nothing reads or drops. No behaviour is wrong; whether production has it, and any rows, needs a production read. Evidence: `docs/triage-2026-10-05.md`.
+
+### `found-30-sep/domain-left-on-the-private-bucket` — deploy, not counted (triage, 5 October; was: open (security, deploy; found in review of `found-30-sep/public-cdn-url-makes-every-object-public`))
+
+This replaces the builder's proposed `found-30-sep/public-domain-serves-the-whole-bucket`, whose "To close" the review did.
+
+**A deployment whose `R2_PUBLIC_URL` domain is connected to `R2_BUCKET_NAME` serves every private object by its key until the domain is disconnected. Code can refuse to use it and say so, and does.**
+
+*Evidence, 30 September:*
+- Cloudflare: "When you connect a Custom Domain, your R2 bucket becomes publicly accessible."
+- Measured after the fix, with the domain on the private bucket:
+  - the domain still served a task's file unsigned by its key (lane 4's API, 3 runs; `confirm-finding.mjs`, 3 runs);
+  - the API sent nobody there;
+  - it logged at boot "ERROR [R2Service] R2_PUBLIC_URL (…) serves the objects of R2_BUCKET_NAME (…) to anybody, unsigned … Disconnect that domain from …".
+- Not known: whether any deployment sets `R2_PUBLIC_URL`. `deploy/env.production.template` leaves it empty, and the ledger says the default deployment signs.
+- The API checks the domain it is given, and nothing else: an r2.dev URL or a second domain on `R2_BUCKET_NAME` is outside what it can see.
+
+*To close:*
+1. For each deployment, read `R2_PUBLIC_URL` and the API's boot log.
+2. Where the error is there:
+   1. create the pictures' bucket, with the private bucket's CORS rule;
+   2. set `R2_PUBLIC_BUCKET_NAME`;
+   3. connect the domain to that bucket, and disconnect it, and any r2.dev URL, from `R2_BUCKET_NAME`;
+   4. restart. The pictures move on boot.
+3. Read the log again for "Avatars and workspace logos are served from R2_PUBLIC_URL …; it serves no object of R2_BUCKET_NAME".
+4. Where no deployment sets `R2_PUBLIC_URL`, close this as not applicable.
+
+*Triage, 5 October:* a deploy setting or a production read, not a code defect (a deploy setting). Code already detects a public domain on the private bucket and refuses to use it. Whether any deployment has one (R2_PUBLIC_URL and its Cloudflare binding) is a deployment setting to read and fix outside the code. Evidence: `docs/triage-2026-10-05.md`.
