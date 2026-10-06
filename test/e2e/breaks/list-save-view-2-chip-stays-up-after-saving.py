@@ -20,12 +20,12 @@
 # Reddens: list-save-view: "and the chip goes once there is nothing left to save"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
-a = """    await api(`/views/${viewId}`, { method: 'PATCH', body: { config: currentViewConfig() } })
-    await refreshSavedViews()
-    setViewStamp((n) => n + 1)
+a = """      await api(`/views/${viewId}`, { method: 'PATCH', body: { config: currentViewConfig() } })
+      await refreshSavedViews()
+      setViewStamp((n) => n + 1)
 """
-b = """    await api(`/views/${viewId}`, { method: 'PATCH', body: { config: currentViewConfig() } })
-    await refreshSavedViews()
+b = """      await api(`/views/${viewId}`, { method: 'PATCH', body: { config: currentViewConfig() } })
+      await refreshSavedViews()
 """
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

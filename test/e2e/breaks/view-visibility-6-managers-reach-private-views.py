@@ -1,5 +1,6 @@
 # A PRIVATE VIEW IS FOUND BY ANYBODY WHO HAS ITS ID: the lookup that answers "not found" stops hiding it,
-# and the managers' write rule then lets a workspace admin or manager rename somebody's private view.
+# so a workspace admin or manager who asks to rename somebody's private view is told it is there — refused
+# by the write rule (403, "only the person who made it"), where the managers' rule once let them rename it.
 # Reddens: view-visibility: "while neither may touch a member’s private view — it is not theirs to find"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/views/views.service.ts'

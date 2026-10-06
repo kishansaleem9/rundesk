@@ -648,7 +648,8 @@ jobs:
     #
     # IT STOPS AT THE FIRST FAILURE, AND IT STARTS ONLY AFTER THE SHORT JOBS
     # PASS. This repository is private, so every minute here is billed, and
-    # this job is 45 to 85 minutes of it, by the runner. Each step used to
+    # this job is most of it: 108 of the 141 minutes of the full run that
+    # passed on 1 October (36906129570). Each step used to
     # carry `if: '!cancelled()'` so that one failure named itself without
     # hiding the rest — which also meant a failure in the first suite still
     # paid for the other 250. Every failure is now found before a push, for
@@ -668,11 +669,14 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs TWO HUNDRED AND FIFTY-THREE — every suite in the repo but the
+    # The job now runs TWO HUNDRED AND FIFTY-EIGHT — every suite in the repo but the
     # six in `browser-suites`, which `check-suites-registered.mjs` now enforces
     # rather than this comment asserting it. At the measured 1.1 minutes each
-    # that is about 278 minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155 → 156 → 158 → 159 → 160 → 161 → 162 → 163 → 164 → 165 → 166 → 167 → 168 → 169 → 170 → 171 → 172 → 173 → 174 → 175 → 176 → 177 → 178 → 179 → 180 → 181 → 182 → 183 → 184 → 185 → 186 → 187 → 188 → 189 → 190 → 191 → 192 → 193 → 194 → 195 → 196 → 197 → 198 → 199 → 200 → 201 → 202 → 203 → 204 → 205 → 206 → 207 → 208 → 216 → 217 → 218 → 219 → 220 → 221 → 222 → 223 → 224 → 225 → 227 → 229 → 231 → 232 → 233 → 234 → 236 → 237 → 241 → 242 → 243 → 244 → 245 → 246 → 247 → 248 → 249 → 250 → 251 → 252 → 253.
+    # that is about 284 minutes plus setup, against the limit of 300 below; the
+    # whole job took 108 minutes on the run that passed on 1 October
+    # (`scripts/ci-rehearsal/README.md`), so the estimate is the ceiling, not the
+    # expectation. The count has gone
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155 → 156 → 158 → 159 → 160 → 161 → 162 → 163 → 164 → 165 → 166 → 167 → 168 → 169 → 170 → 171 → 172 → 173 → 174 → 175 → 176 → 177 → 178 → 179 → 180 → 181 → 182 → 183 → 184 → 185 → 186 → 187 → 188 → 189 → 190 → 191 → 192 → 193 → 194 → 195 → 196 → 197 → 198 → 199 → 200 → 201 → 202 → 203 → 204 → 205 → 206 → 207 → 208 → 216 → 217 → 218 → 219 → 220 → 221 → 222 → 223 → 224 → 225 → 227 → 229 → 231 → 232 → 233 → 234 → 236 → 237 → 241 → 242 → 243 → 244 → 245 → 246 → 247 → 248 → 249 → 250 → 251 → 252 → 253 → 256 → 257 → 258.
     #
     # The limit is 300, raised from 270 when the job reached 227 suites: about
     # 250 minutes plus setup against 270 left a margin smaller than one slow
@@ -687,16 +691,12 @@ jobs:
     # twenty percent, which is thinner than the variance between a warm runner
     # and a cold one.
     #
-    # **THE FIX IS TO SPLIT THIS JOB**, and it is deliberately not being done
-    # here. Splitting means duplicating the Postgres + object store + build
-    # setup into a second job and dividing 107 steps between them, and CI
-    # cannot run until October, so it could not be validated — a restructure
-    # that is wrong is worse on the first green day than a job that is merely
-    # long. Whoever has a working pipeline should do it, and will be able to
-    # see it work.
-    #
-    # Splitting shortens the WALL CLOCK and not the bill: the minutes are the
-    # same either way, plus one more setup.
+    # SPLITTING THIS JOB is the owner's call, not a defect
+    # (`commit-log/log-a5b6b69-1`). It would mean duplicating the Postgres +
+    # object store + build setup into a second job and dividing the steps
+    # between them. Splitting shortens the WALL CLOCK and not the bill: the
+    # minutes are the same either way, plus one more setup — and the job ran
+    # in 108 of its 300 minutes on 1 October.
     #
     # IF YOU ADD A SUITE, RE-DO THIS ARITHMETIC. `grep -c "^ *run: node test/e2e/"`
     # over this job gives the count — unanchored, it also counts this comment —
@@ -2787,6 +2787,20 @@ jobs:
       - name: The list page offers only what its reader may do
         timeout-minutes: 15
         run: node test/e2e/list-page-levels.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # A list's shared views — made, renamed, reconfigured, pinned, defaulted,
+      # deleted — answer to the level on them, a share on the view itself first:
+      # Edit to change one, Full edit to delete one. A view-only member, a guest
+      # with a view share and a commenter are refused in the level's words, a
+      # reader's own private view stays theirs, a list keeps one default however
+      # many ask at once, and the view menu and Customize panel offer only what
+      # the reader may do. Read back by SQL.
+      - name: A list's shared views are changed by those who may edit it
+        timeout-minutes: 15
+        run: node test/e2e/view-writes-by-level.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

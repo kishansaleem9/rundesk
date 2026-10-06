@@ -1,5 +1,5 @@
 import { Injectable, Inject, Optional, BadRequestException, NotFoundException } from '@nestjs/common'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import {
   spaces,
   projects,
@@ -25,11 +25,14 @@ import {
   splitList,
   mapStatus,
   mapPriority,
+  mergeSetOf,
   safeDate,
   coerceCustomValue,
+  type CsvCarries,
   type ParsedTask,
   type CustomFieldColumn,
 } from './clickup-csv.util'
+import { assertImportTarget } from './import-target'
 import {
   ClickUpApiClient,
   extractCommentText,
@@ -179,6 +182,10 @@ export class ClickUpImportService {
     const { rows } = parseClickUpCsv(dto.csv)
     if (rows.length === 0) throw new BadRequestException('CSV contained no data rows')
 
+    // Where it goes, before anything is written — the job row included
+    // (`found-5-oct/import-writes-into-another-workspace`, see `assertImportTarget`).
+    if (dto.targetSpaceId) await assertImportTarget(this.db, { workspaceId, spaceId: dto.targetSpaceId, actorId: userId })
+
     const [job] = await this.db
       .insert(clickupImportJobs)
       .values({ workspaceId, createdById: userId, status: 'pending', total: rows.length })
@@ -215,7 +222,7 @@ export class ClickUpImportService {
     const summary = this.emptySummary()
 
     try {
-      const { rows, customFieldColumns } = parseClickUpCsv(dto.csv)
+      const { rows, customFieldColumns, carries } = parseClickUpCsv(dto.csv)
       if (rows.length === 0) throw new BadRequestException('CSV contained no data rows')
 
       await this.db
@@ -315,7 +322,7 @@ export class ClickUpImportService {
               summary.tasksSkipped++
             } else if (isDup && strategy === 'merge') {
               const targetId = existingId ?? seenId!
-              await this.mergeTask(targetId, t)
+              await this.mergeTask(targetId, t, carries)
               summary.tasksUpdated++
               if (t.taskId) created.set(t.taskId, { ourId: targetId, parentId: t.parentId })
               seenByKey.set(key, targetId)
@@ -734,29 +741,33 @@ export class ClickUpImportService {
     const key = name.trim().toLowerCase()
     if (!key) return null
     if (cache.has(key)) return cache.get(key)!
-    const [existing] = await this.db
-      .select({ id: labels.id })
-      .from(labels)
-      .where(and(eq(labels.workspaceId, workspaceId), eq(labels.name, name.trim())))
-      .limit(1)
+    // WHATEVER ITS CASE, as the tags route and a task's `labelsByName` find a
+    // tag (`found-30-sep/spreadsheet-import-skips-task-rules`): an exact match
+    // made "urgent-X" beside the workspace's "Urgent-X" — the unique
+    // constraint is case-sensitive — measured on lane 3 and again on lane 4.
+    //
+    // AND BY THE NAME IT IS STORED UNDER as well as the name in the file: a
+    // tag is made cut to 60 characters, so a longer one was looked up by a
+    // name no tag has — a second import of it in another case made a twin
+    // differing only in case, and in the same case found nothing, struck the
+    // twin's conflict and dropped the tag (measured on lane 4).
+    const full = name.trim()
+    const stored = full.slice(0, 60)
+    const named = and(
+      eq(labels.workspaceId, workspaceId),
+      sql`lower(${labels.name}) in (lower(${full}), lower(${stored}))`,
+    )
+    const [existing] = await this.db.select({ id: labels.id }).from(labels).where(named).limit(1)
     if (existing) {
       cache.set(key, existing.id)
       return existing.id
     }
     const [row] = await this.db
       .insert(labels)
-      .values({ workspaceId, name: name.trim().slice(0, 60), color: '#8b5cf6' })
+      .values({ workspaceId, name: stored, color: '#8b5cf6' })
       .onConflictDoNothing()
       .returning()
-    const id =
-      row?.id ??
-      (
-        await this.db
-          .select({ id: labels.id })
-          .from(labels)
-          .where(and(eq(labels.workspaceId, workspaceId), eq(labels.name, name.trim())))
-          .limit(1)
-      )[0]?.id
+    const id = row?.id ?? (await this.db.select({ id: labels.id }).from(labels).where(named).limit(1))[0]?.id
     if (id) {
       if (row) summary.labelsCreated++
       cache.set(key, id)
@@ -852,17 +863,11 @@ export class ClickUpImportService {
       })
   }
 
-  /** Merge = update the existing task's mapped fields from the CSV row. */
-  private async mergeTask(taskId: string, t: ParsedTask) {
+  /** Merge = update the existing task's fields the CSV carries (`mergeSetOf`), and no other. */
+  private async mergeTask(taskId: string, t: ParsedTask, carries: CsvCarries) {
     await this.db
       .update(tasks)
-      .set({
-        description: t.description ?? undefined,
-        status: mapStatus(t.status),
-        priority: mapPriority(t.priority),
-        dueDate: t.dueDate ? safeDate(t.dueDate) : undefined,
-        updatedAt: new Date(),
-      })
+      .set({ ...mergeSetOf(t, carries), updatedAt: new Date() })
       .where(eq(tasks.id, taskId))
   }
 }

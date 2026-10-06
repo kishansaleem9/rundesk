@@ -80,9 +80,12 @@ export type SpaceLevelSource = 'workspace-role' | 'space-member' | 'object-share
 /**
  * What a guest's level is asked ABOUT, below the space: the item and the
  * containers above it, most specific first (a task, its list, its project, the
- * project's folder). A share on any of them is a guest's grant there.
+ * project's folder). A share on any of them is a guest's grant there. A saved
+ * view is such an item too: its share panel chains it view, list, project,
+ * folder (`SharesService.locate`), and its writes ask the same chain
+ * (`views/view-write.ts`).
  */
-export type WithinStep = { type: 'task' | 'list' | 'project' | 'folder'; id: string }
+export type WithinStep = { type: 'task' | 'view' | 'list' | 'project' | 'folder'; id: string }
 
 export type ResolvedSpaceLevel = {
   level: SpaceDefaultPermission

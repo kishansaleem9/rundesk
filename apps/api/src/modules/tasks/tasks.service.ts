@@ -112,6 +112,7 @@ import { assertManagerTaskScope, taskRestorable } from '../../common/permissions
 import { assertCanCreateTaskIn, canCreateTaskIn } from '../../common/permissions/task-create'
 import { assertMayShapeStatuses } from '../../common/permissions/status-access'
 import { assertMayDefineFields } from '../../common/permissions/field-access'
+import { SHARED_VIEW_LEVEL } from '../views/view-write'
 import { checkContainerAccess, containerRefusal, containerVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
 import { attachmentKind, isLinkAttachmentKey, isTaskOwnObjectKey, isTaskUploadKey } from './task-object-keys'
 import { isWorkspaceClipKey } from '../clips/clip-keys'
@@ -5407,7 +5408,10 @@ export class TasksService {
    *              assignees (the page asks the row's assignees for that half);
    *   statuses — its statuses, as the status routes ask (`assertMayShapeStatuses`);
    *   fields   — its project's custom fields, as the field routes ask
-   *              (`assertMayDefineFields`).
+   *              (`assertMayDefineFields`);
+   *   views    — a new shared view, as the views routes ask (`SHARED_VIEW_LEVEL`,
+   *              `views/view-write.ts`): + View and Save as view. A view that
+   *              exists says what may be done to it itself (`ViewsService.listByList`).
    *
    * A task's own share can say more than its list does; the sheet asks the
    * task for that (`taskCapabilities`).
@@ -5439,8 +5443,9 @@ export class TasksService {
     ])
     // Nothing resolved is somebody no space setting narrows (a super-admin
     // acting across workspaces), as every rule reads it.
+    // `views`: the views service lets a super-admin past the level, so this does too.
     const level = resolved?.level ?? 'admin'
-    return { add, edit: spaceLevelReaches(level, 'edit'), comment: spaceLevelReaches(level, 'comment'), statuses, fields }
+    return { add, edit: spaceLevelReaches(level, 'edit'), comment: spaceLevelReaches(level, 'comment'), statuses, fields, views: actor.role === 'super_admin' || spaceLevelReaches(level, SHARED_VIEW_LEVEL) }
   }
 
   /**

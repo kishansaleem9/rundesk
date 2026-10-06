@@ -34,10 +34,15 @@ export type CustomFieldColumn = {
   options?: Array<{ label: string; value: string }>
 }
 
+/** Which of the fields a merge would reset the file carries a column for. */
+export type CsvCarries = { status: boolean; priority: boolean }
+
 export type ParsedCsv = {
   rows: ParsedTask[]
   headers: string[]
   customFieldColumns: CustomFieldColumn[]
+  /** Read by the merge (`mergeSetOf`): a column the file lacks is not a value to write. */
+  carries: CsvCarries
 }
 
 /**
@@ -283,7 +288,7 @@ export function splitCsvRow(line: string): string[] {
  */
 export function parseClickUpCsv(csv: string): ParsedCsv {
   const lines = splitCsvLines(csv)
-  if (lines.length < 2) return { rows: [], headers: [], customFieldColumns: [] }
+  if (lines.length < 2) return { rows: [], headers: [], customFieldColumns: [], carries: { status: false, priority: false } }
 
   const rawHeaders = splitCsvRow(lines[0]).map((h) => h.trim())
   const headers = rawHeaders.map(normalizeHeader)
@@ -349,5 +354,32 @@ export function parseClickUpCsv(csv: string): ParsedCsv {
       : { name: c.name, type }
   })
 
-  return { rows, headers: rawHeaders, customFieldColumns }
+  return { rows, headers: rawHeaders, customFieldColumns, carries: { status: sIdx !== -1, priority: pIdx !== -1 } }
+}
+
+/**
+ * WHAT A MERGE WRITES: THE COLUMNS THE FILE CARRIES, AND NO OTHER
+ * (`found-5-oct/import-merge-resets-fields-the-file-lacks`, measured here as
+ * on the spreadsheet import). The merge wrote `mapStatus(t.status)` and
+ * `mapPriority(t.priority)` from every row, and a file with no Status or
+ * Priority column carries neither — so a matched task In progress and High
+ * came out To do and Normal. Status and priority are written when the file
+ * has their column; the description and the due date exactly as before: the
+ * description whenever the file has a Description column — an empty cell
+ * writes an empty description, as it did — and the due date when its cell
+ * holds one. (What an empty cell in a column the file does carry should
+ * write is the owner's to settle, for this importer and the spreadsheet one.)
+ */
+export function mergeSetOf(t: ParsedTask, carries: CsvCarries): {
+  description?: string
+  status?: TaskStatus
+  priority?: TaskPriority
+  dueDate?: Date
+} {
+  return {
+    description: t.description ?? undefined,
+    ...(carries.status ? { status: mapStatus(t.status) } : {}),
+    ...(carries.priority ? { priority: mapPriority(t.priority) } : {}),
+    dueDate: t.dueDate ? safeDate(t.dueDate) : undefined,
+  }
 }

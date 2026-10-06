@@ -15,7 +15,8 @@ import type { ViewVisibility } from '@rundesk/db'
  * belongs to. That was the ONLY check here until now, which meant any member
  * could rename, re-default or delete any view on any list they could open,
  * including someone else's. The second check — who may see it, who may change
- * it — is in the service, because it needs the row.
+ * it — is in the service, because it needs the row; making or changing a
+ * shared view asks the list's level there too (`view-write.ts`).
  */
 @ApiTags('views')
 @ApiBearerAuth()
@@ -46,14 +47,17 @@ export class ViewsController {
       visibility?: ViewVisibility
     },
   ) {
-    return this.views.create({
-      listId,
-      name: body.name,
-      type: body.type,
-      config: body.config,
-      visibility: body.visibility,
-      createdById: user.id,
-    })
+    return this.views.create(
+      {
+        listId,
+        name: body.name,
+        type: body.type,
+        config: body.config,
+        visibility: body.visibility,
+        createdById: user.id,
+      },
+      { id: user.id, role: user.role },
+    )
   }
 
   @Patch('views/:viewId')

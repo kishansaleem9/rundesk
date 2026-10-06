@@ -5,8 +5,8 @@
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 s = io.open(p, encoding='utf-8').read()
-a = "    return { add, edit: spaceLevelReaches(level, 'edit'), comment: spaceLevelReaches(level, 'comment'), statuses, fields }\n"
-b = "    return { add, edit: true, comment: spaceLevelReaches(level, 'comment'), statuses, fields }\n"
+a = "    return { add, edit: spaceLevelReaches(level, 'edit'), comment: spaceLevelReaches(level, 'comment'), statuses, fields, views:"
+b = "    return { add, edit: true, comment: spaceLevelReaches(level, 'comment'), statuses, fields, views:"
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 s = s.replace(a, b)
 io.open(p, 'w', encoding='utf-8').write(s)

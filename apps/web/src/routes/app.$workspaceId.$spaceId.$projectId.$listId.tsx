@@ -743,14 +743,43 @@ const ListStatusesContext = createContext<ListStatus[]>([])
  *   comment  — through `mayProgress`, the status and assignees of a task
  *              assigned to the reader (ClickUp's "comment with task assigned");
  *   statuses — Statuses, the board's column names and Add group;
- *   fields   — Create field.
+ *   fields   — Create field;
+ *   views    — + View and Save as view: a new view everybody shares
+ *              (`found-5-oct/readers-change-shared-views`). A saved view says
+ *              itself what may be done to it (`SavedViewOffers`).
  */
-type ListCaps = { add: boolean; edit: boolean; comment: boolean; statuses: boolean; fields: boolean }
+type ListCaps = { add: boolean; edit: boolean; comment: boolean; statuses: boolean; fields: boolean; views: boolean }
 type ListAccess = ListCaps & { mayProgress: (task: { assignees?: Array<{ userId: string }> }) => boolean }
-const LIST_CAPS_ALL: ListCaps = { add: true, edit: true, comment: true, statuses: true, fields: true }
-const LIST_CAPS_NONE: ListCaps = { add: false, edit: false, comment: false, statuses: false, fields: false }
+const LIST_CAPS_ALL: ListCaps = { add: true, edit: true, comment: true, statuses: true, fields: true, views: true }
+const LIST_CAPS_NONE: ListCaps = { add: false, edit: false, comment: false, statuses: false, fields: false, views: false }
 const isListCaps = (x: unknown): x is ListCaps =>
-  !!x && (['add', 'edit', 'comment', 'statuses', 'fields'] as const).every((k) => typeof (x as ListCaps)[k] === 'boolean')
+  !!x && (['add', 'edit', 'comment', 'statuses', 'fields', 'views'] as const).every((k) => typeof (x as ListCaps)[k] === 'boolean')
+
+/**
+ * WHAT MAY BE DONE TO A SAVED VIEW, as `GET /lists/:id/views` answers per view
+ * (`viewOffers` on the server): `mayChange` — Update, Rename, Pin;
+ * `mayDelete` — Delete, which asks Full edit; `mayMakeDefault`;
+ * `mayChangeVisibility` — Protect, and Private off; `mayMakePrivate` — Private
+ * on, never on the list's default. A list's readers renamed, reconfigured,
+ * re-defaulted and deleted the views everybody works in, and the menu offered
+ * all of it to them (`found-5-oct/readers-change-shared-views`). An answer
+ * without them — an older server — offers what the page always did, and the
+ * routes refuse as they always have, as `ListCaps` does.
+ */
+type SavedViewOffers = {
+  mayChange?: boolean
+  mayDelete?: boolean
+  mayMakeDefault?: boolean
+  mayChangeVisibility?: boolean
+  mayMakePrivate?: boolean
+}
+const viewOffersOf = (view: SavedViewOffers) => ({
+  change: view.mayChange !== false,
+  delete: view.mayDelete !== false,
+  makeDefault: view.mayMakeDefault !== false,
+  visibility: view.mayChangeVisibility !== false,
+  makePrivate: view.mayMakePrivate !== false,
+})
 /* Outside the provider (a test, a story) a row offers what it always did. */
 const ListCapsContext = createContext<ListAccess>({ ...LIST_CAPS_ALL, mayProgress: () => true })
 function useListCaps() {
@@ -1795,7 +1824,7 @@ function ListDetail() {
         listCaps.edit || (listCaps.comment && (task.assignees ?? []).some((a) => a.userId === currentUserId)),
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [listCaps.add, listCaps.edit, listCaps.comment, listCaps.statuses, listCaps.fields, currentUserId],
+    [listCaps.add, listCaps.edit, listCaps.comment, listCaps.statuses, listCaps.fields, listCaps.views, currentUserId],
   )
   const { data: allProjectFields = [] } = useQuery({
     queryKey: ['project-fields', workspaceId, projectId],
@@ -1854,7 +1883,7 @@ function ListDetail() {
           autosave?: boolean
           createdById?: string | null
           config?: any
-        }>
+        } & SavedViewOffers>
       >(`/lists/${listId}/views`),
   })
   const { data: workspaceMembers = [] } = useQuery({
@@ -2399,36 +2428,54 @@ function ListDetail() {
 
   const refreshSavedViews = () => qc.invalidateQueries({ queryKey: ['list-views', listId] })
 
-  const createSavedView = async () => {
-    const name = window.prompt(t('list.viewNamePrompt'))?.trim()
-    if (!name) return
-    const created = await api<{ id: string }>(`/lists/${listId}/views`, {
-      method: 'POST',
-      body: JSON.stringify({ name, type: activeView, config: currentViewConfig() }),
+  /*
+   * A REFUSED VIEW WRITE SAYS WHY, in the server's words, and the strip is read
+   * again. These threw into nothing (their callers do not wait), so a refusal
+   * left the tab as drawn and said nothing (`found-5-oct/readers-change-shared-views`).
+   */
+  const sayingViewRefusal = async (write: () => Promise<void>) => {
+    try {
+      await write()
+    } catch (err) {
+      toast.error(refusalMessage(err, t('list.view.changeFailed')))
+      await refreshSavedViews()
+    }
+  }
+
+  const createSavedView = () =>
+    sayingViewRefusal(async () => {
+      const name = window.prompt(t('list.viewNamePrompt'))?.trim()
+      if (!name) return
+      const created = await api<{ id: string }>(`/lists/${listId}/views`, {
+        method: 'POST',
+        body: JSON.stringify({ name, type: activeView, config: currentViewConfig() }),
+      })
+      await refreshSavedViews()
+      setSelectedSavedViewId(created.id)
+      setViewStamp((n) => n + 1)
     })
-    await refreshSavedViews()
-    setSelectedSavedViewId(created.id)
-    setViewStamp((n) => n + 1)
-  }
 
-  const renameSavedView = async (viewId: string, currentName: string) => {
-    const name = window.prompt(t('list.viewRenamePrompt'), currentName)?.trim()
-    if (!name || name === currentName) return
-    await api(`/views/${viewId}`, { method: 'PATCH', body: { name } })
-    await refreshSavedViews()
-  }
+  const renameSavedView = (viewId: string, currentName: string) =>
+    sayingViewRefusal(async () => {
+      const name = window.prompt(t('list.viewRenamePrompt'), currentName)?.trim()
+      if (!name || name === currentName) return
+      await api(`/views/${viewId}`, { method: 'PATCH', body: { name } })
+      await refreshSavedViews()
+    })
 
-  const updateSavedView = async (viewId: string) => {
-    await api(`/views/${viewId}`, { method: 'PATCH', body: { config: currentViewConfig() } })
-    await refreshSavedViews()
-    setViewStamp((n) => n + 1)
-    toast.success(t('list.viewUpdated'))
-  }
+  const updateSavedView = (viewId: string) =>
+    sayingViewRefusal(async () => {
+      await api(`/views/${viewId}`, { method: 'PATCH', body: { config: currentViewConfig() } })
+      await refreshSavedViews()
+      setViewStamp((n) => n + 1)
+      toast.success(t('list.viewUpdated'))
+    })
 
-  const makeSavedViewDefault = async (viewId: string) => {
-    await api(`/views/${viewId}`, { method: 'PATCH', body: { isDefault: true } })
-    await refreshSavedViews()
-  }
+  const makeSavedViewDefault = (viewId: string) =>
+    sayingViewRefusal(async () => {
+      await api(`/views/${viewId}`, { method: 'PATCH', body: { isDefault: true } })
+      await refreshSavedViews()
+    })
 
   /** The saved view the tab strip is currently on, if it is on one at all. */
   const selectedSavedView = savedViews.find((v) => v.id === selectedSavedViewId)
@@ -2479,11 +2526,12 @@ function ListDetail() {
     }
   }
 
-  const deleteSavedView = async (viewId: string) => {
-    await api(`/views/${viewId}`, { method: 'DELETE' })
-    if (selectedSavedViewId === viewId) setSelectedSavedViewId('')
-    await refreshSavedViews()
-  }
+  const deleteSavedView = (viewId: string) =>
+    sayingViewRefusal(async () => {
+      await api(`/views/${viewId}`, { method: 'DELETE' })
+      if (selectedSavedViewId === viewId) setSelectedSavedViewId('')
+      await refreshSavedViews()
+    })
 
   useEffect(() => {
     if (appliedInitialView || savedViews.length === 0) return
@@ -2682,45 +2730,61 @@ function ListDetail() {
           setSelectedSavedViewId('')
         },
       })),
-    ...savedViews.map((view) => ({
-      key: `view:${view.id}`,
-      label: view.isDefault ? `★ ${view.name}` : view.name,
-      active: selectedSavedViewId === view.id,
-      onSelect: () => applyView(view.id),
-      action: (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className="mr-1 rounded p-0.5 text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground"
-              aria-label={t('list.viewActions', { name: view.name })}
-              title={t('list.viewActions', { name: view.name })}
-            >
-              <MoreHorizontal className="h-3.5 w-3.5" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-48">
-            <DropdownMenuItem onClick={() => void updateSavedView(view.id)}>
-              {t('list.viewUpdate')}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => void renameSavedView(view.id, view.name)}>
-              {t('list.viewRename')}
-            </DropdownMenuItem>
-            {!view.isDefault && (
-              <DropdownMenuItem onClick={() => void makeSavedViewDefault(view.id)}>
-                {t('list.viewDefault')}
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuItem
-              className="text-rose-600 dark:text-rose-400"
-              onClick={() => void deleteSavedView(view.id)}
-            >
-              {t('common.delete')}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ),
-    })),
+    ...savedViews.map((view) => {
+      /*
+       * What this reader may do to THIS view, as the server answered for it
+       * (`SavedViewOffers`). A view-only member and a guest with a view share
+       * were offered Update, Rename, Make default and Delete on every view, and
+       * the server took them all. A view with nothing to offer has no ⋯ at all.
+       */
+      const may = viewOffersOf(view)
+      const offersAny = may.change || may.delete || (may.makeDefault && !view.isDefault)
+      return {
+        key: `view:${view.id}`,
+        label: view.isDefault ? `★ ${view.name}` : view.name,
+        active: selectedSavedViewId === view.id,
+        onSelect: () => applyView(view.id),
+        action: offersAny ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="mr-1 rounded p-0.5 text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground"
+                aria-label={t('list.viewActions', { name: view.name })}
+                title={t('list.viewActions', { name: view.name })}
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-48">
+              {may.change && (
+                <DropdownMenuItem onClick={() => void updateSavedView(view.id)}>
+                  {t('list.viewUpdate')}
+                </DropdownMenuItem>
+              )}
+              {may.change && (
+                <DropdownMenuItem onClick={() => void renameSavedView(view.id, view.name)}>
+                  {t('list.viewRename')}
+                </DropdownMenuItem>
+              )}
+              {!view.isDefault && may.makeDefault && (
+                <DropdownMenuItem onClick={() => void makeSavedViewDefault(view.id)}>
+                  {t('list.viewDefault')}
+                </DropdownMenuItem>
+              )}
+              {may.delete && (
+                <DropdownMenuItem
+                  className="text-rose-600 dark:text-rose-400"
+                  onClick={() => void deleteSavedView(view.id)}
+                >
+                  {t('common.delete')}
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : undefined,
+      }
+    }),
   ]
 
   /*
@@ -2862,14 +2926,19 @@ function ListDetail() {
           <WorkViewTabs
             tabs={viewTabs}
             trailing={
-              <button
-                type="button"
-                onClick={() => void createSavedView()}
-                className="ml-1 inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                {t('list.addView')}
-              </button>
+              // A new view is shared with every reader of the list, so it is
+              // offered where the list's level allows one (`ListCaps.views`).
+              listAccess.views ? (
+                <button
+                  type="button"
+                  onClick={() => void createSavedView()}
+                  data-testid="list-add-view"
+                  className="ml-1 inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {t('list.addView')}
+                </button>
+              ) : null
             }
           />
         }
@@ -2880,8 +2949,10 @@ function ListDetail() {
               to save, which is what makes its presence the message. On a saved
               view it updates that view; on a built-in tab there is nothing to
               update, so it offers to save what you have built as a new one.
+              Either only where this reader may: the view's own answer, or the
+              list's for a new one (`found-5-oct/readers-change-shared-views`).
             */}
-            {viewDirty && (
+            {viewDirty && (selectedSavedViewId ? !!selectedSavedView && viewOffersOf(selectedSavedView).change : listAccess.views) && (
               <button
                 type="button"
                 data-testid="list-save-view"
@@ -7364,7 +7435,7 @@ type SavedViewRow = {
   isPinned?: boolean
   visibility?: 'everyone' | 'private' | 'protected'
   autosave?: boolean
-}
+} & SavedViewOffers
 
 function CustomizeViewPanel({
   listId,
@@ -7691,11 +7762,18 @@ function CustomizeViewPanel({
               checked={!!view.autosave}
               onChange={onAutosave}
             />
+            {/*
+              The view's own switches are offered as its answer says
+              (`SavedViewOffers`); one this reader may not use is drawn, still
+              saying what it holds, and not pressed. Autosave above is the
+              reader's own flag, and is theirs to set on any view.
+            */}
             <PanelSwitch
               testId="list-view-pin"
               icon={<Pin className="h-3.5 w-3.5" aria-hidden />}
               label={t('list.view.pin')}
               checked={!!view.isPinned}
+              disabled={!viewOffersOf(view).change}
               onChange={(next) => onPatch({ isPinned: next })}
             />
             <PanelSwitch
@@ -7704,6 +7782,9 @@ function CustomizeViewPanel({
               label={t('list.view.private')}
               hint={t('list.view.privateHint')}
               checked={view.visibility === 'private'}
+              // On, it makes the view private, which the list's default cannot
+              // be (the server says so, 400); off, it shares it again.
+              disabled={view.visibility === 'private' ? !viewOffersOf(view).visibility : !viewOffersOf(view).makePrivate}
               onChange={(next) => onPatch({ visibility: next ? 'private' : 'everyone' })}
             />
             <PanelSwitch
@@ -7712,6 +7793,7 @@ function CustomizeViewPanel({
               label={t('list.view.protect')}
               hint={t('list.view.protectHint')}
               checked={view.visibility === 'protected'}
+              disabled={!viewOffersOf(view).visibility}
               onChange={(next) => onPatch({ visibility: next ? 'protected' : 'everyone' })}
             />
             <PanelSwitch
@@ -7721,7 +7803,7 @@ function CustomizeViewPanel({
               checked={!!view.isDefault}
               // Un-defaulting would leave the list with no default at all, and
               // the way you change it is by making another view the default.
-              disabled={!!view.isDefault}
+              disabled={!!view.isDefault || !viewOffersOf(view).makeDefault}
               onChange={() => onPatch({ isDefault: true })}
             />
             <PanelAction

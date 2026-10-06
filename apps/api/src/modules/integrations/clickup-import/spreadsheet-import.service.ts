@@ -26,7 +26,7 @@
  */
 
 import { Injectable, Inject, BadRequestException, NotFoundException } from '@nestjs/common'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import {
   spaces,
   projects,
@@ -43,21 +43,47 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../../common/database/database.module'
 import { dupKey } from './clickup-csv.util'
+import { assertImportTarget } from './import-target'
 import {
+  ACCEPTED_SHEET_EXTENSIONS,
   DEFAULT_STATUSES,
   DEFAULT_LIST_NAME,
+  NOT_DELIMITED_TEXT,
   SHEET_SOURCES,
   UNSUPPORTED_SOURCES,
   autoMap,
+  headerHoldsNul,
+  isZipContent,
   mapSheet,
   mappingError,
+  mergeSet,
   parseSheet,
   sourceByKey,
+  storable,
   type ColumnMapping,
   type MappedRow,
   type RowRejection,
   type SheetDelimiter,
 } from './spreadsheet-import.util'
+
+/** What the writers below need of a handle: the database, or a transaction in it. */
+type Writer = Pick<Db, 'select' | 'insert' | 'update'>
+
+/**
+ * What one row wrote beside its task — people and tags — counted into the
+ * summary only once the row's transaction commits, so a row that fails
+ * counts nothing and leaves no tag it made in the cache.
+ */
+type RowTally = {
+  assigneesLinked: number
+  assigneesUnmatched: number
+  labelsCreated: number
+  labelKeys: string[]
+  labelIds: string[]
+}
+
+/** What a run has made so far — what `undoRun` takes away if it fails. */
+type RunMade = { spaceId?: string; projectId?: string; labelIds: string[] }
 
 export type SheetConflictStrategy = 'skip' | 'create' | 'merge'
 
@@ -123,11 +149,24 @@ export class SpreadsheetImportService {
       unsupported: UNSUPPORTED_SOURCES.map((u) => ({ key: u.key, label: u.label, reason: u.reason })),
       /*
        * No XLSX parser ships in this repo and none was added for this row, so
-       * the UI says "save it as CSV" rather than accepting an .xlsx it would
-       * then fail to read.
+       * the UI says "save it as CSV" — and refuses an .xlsx put in anyway, by
+       * its name and by its first bytes, as preview and import refuse its
+       * content here (`assertDelimitedText`).
        */
-      acceptedExtensions: ['.csv', '.tsv', '.txt'],
+      acceptedExtensions: [...ACCEPTED_SHEET_EXTENSIONS],
     }
+  }
+
+  /**
+   * THE ROUTE RECEIVES CONTENT ONLY, SO IT ASKS THE CONTENT'S FIRST BYTES
+   * (`found-5-oct/xlsx-read-as-text`). A zip, or a first line holding a NUL
+   * (a legacy .xls, or any other binary file), is not delimited text, whatever
+   * the page or a client called it: refused in the page's own words, before
+   * anything is parsed or written.
+   */
+  private assertDelimitedText(content: unknown) {
+    if (isZipContent(content)) throw new BadRequestException(NOT_DELIMITED_TEXT)
+    if (headerHoldsNul(content)) throw new BadRequestException(NOT_DELIMITED_TEXT)
   }
 
   // ── preview ────────────────────────────────────────────────────────────────
@@ -142,6 +181,7 @@ export class SpreadsheetImportService {
     dto: { content: string; delimiter?: SheetDelimiter; preset?: string; mapping?: ColumnMapping; defaultListName?: string },
   ) {
     const source = sourceByKey(dto.preset)
+    this.assertDelimitedText(dto.content)
     const table = parseSheet(dto.content ?? '', dto.delimiter)
     if (table.headers.length === 0) {
       throw new BadRequestException('The file has no header row.')
@@ -196,6 +236,7 @@ export class SpreadsheetImportService {
 
   async startSheetImport(workspaceId: string, userId: string, dto: SheetImportDto): Promise<{ jobId: string }> {
     if (!dto.content?.trim()) throw new BadRequestException('The uploaded file is empty.')
+    this.assertDelimitedText(dto.content)
     const table = parseSheet(dto.content, dto.delimiter)
     if (table.headers.length === 0) throw new BadRequestException('The file has no header row.')
     if (table.rows.length === 0) throw new BadRequestException('The file has a header but no data rows.')
@@ -203,6 +244,9 @@ export class SpreadsheetImportService {
     const mapping = this.resolveMapping(table.headers, dto.mapping, dto.preset)
     const problem = mappingError(mapping)
     if (problem) throw new BadRequestException(problem)
+
+    // Where it goes, before anything is written — the job row included.
+    if (dto.targetSpaceId) await assertImportTarget(this.db, { workspaceId, spaceId: dto.targetSpaceId, actorId: userId })
 
     const source = sourceByKey(dto.preset)
     const [job] = await this.db
@@ -274,6 +318,7 @@ export class SpreadsheetImportService {
     const source = sourceByKey(dto.preset)
     const strategy: SheetConflictStrategy = dto.strategy ?? 'skip'
     const summary = this.emptySummary(source.key)
+    const made: RunMade = { labelIds: [] }
 
     try {
       const table = parseSheet(dto.content, dto.delimiter)
@@ -295,12 +340,36 @@ export class SpreadsheetImportService {
           status: 'processing',
           total: table.rows.length,
           rejectedCount: summary.tasksRejected,
-          rowErrors: summary.rowErrors,
+          rowErrors: storable(summary.rowErrors),
           updatedAt: new Date(),
         })
         .where(eq(clickupImportJobs.id, jobId))
 
-      // ── target tree ────────────────────────────────────────────────────────
+      /*
+       * A RUN THAT FAILS TAKES AWAY WHAT IT MADE (`found-5-oct/xlsx-read-as-text`),
+       * AND HOLDS NO TRANSACTION OPEN WHILE IT RUNS.
+       *
+       * The space and the project were written first and on their own, so a
+       * run that then failed left them behind: an .xlsx read as text ended
+       * "failed" with a new space, project and empty "Imported Tasks" list,
+       * and a file with one row holding a NUL ended "failed" with its other
+       * rows imported (measured on lane 4). Now what a run makes is noted as
+       * it is made (`made`), and a run that fails takes it away (`undoRun`).
+       *
+       * NOT ONE TRANSACTION FOR THE WHOLE RUN, which was tried first and
+       * measured on lane 4: it held one of the API's pooled connections for
+       * the run while each progress write waited for another, so twelve
+       * imports at once held all ten and every route of the API stopped
+       * answering until it was restarted; a task the run merged stayed locked
+       * until the run ended, and nine edits of it did the same with one
+       * import; and a tag the run made was invisible to the tags route until
+       * then, which made the same tag in another case beside it.
+       *
+       * So each list, and each row with its people and tags, is written in a
+       * transaction of its own that waits on nothing but its own writes. A row
+       * that fails fails alone, as it always did: its error is reported, it
+       * leaves nothing half-written, and the rest of the file goes on.
+       */
       let spaceId = dto.targetSpaceId
       if (!spaceId) {
         const [space] = await this.db
@@ -311,22 +380,24 @@ export class SpreadsheetImportService {
             icon: '📥',
             color: '#354fb0',
           })
-          .returning()
-        spaceId = space.id
+          .returning({ id: spaces.id })
+        spaceId = made.spaceId = space.id
         summary.spacesCreated++
       }
+      const inSpace = spaceId
 
       const [project] = await this.db
         .insert(projects)
         .values({
-          spaceId,
+          spaceId: inSpace,
           name: dto.targetProjectName?.trim() || `${source.label} import`,
           description: `Imported from a ${source.label} export on ${new Date().toISOString()}`,
         })
-        .returning()
+        .returning({ id: projects.id })
+      made.projectId = project.id
       summary.projectsCreated++
 
-      const memberByKey = await this.loadMemberIndex(workspaceId)
+      const memberByKey = await this.loadMemberIndex(this.db, workspaceId)
       const existing = await this.loadExistingTaskIndex(workspaceId, dto.targetSpaceId)
       const labelCache = new Map<string, string>()
 
@@ -348,7 +419,8 @@ export class SpreadsheetImportService {
       for (const [listName, listRows] of byList) {
         let listId: string
         try {
-          listId = await this.createList(project.id, spaceId, listName, position++, userId)
+          const at = position++
+          listId = await this.db.transaction((tx) => this.createList(tx, project.id, inSpace, listName, at, userId))
           summary.listsCreated++
         } catch (e: any) {
           summary.errors.push(`List "${listName}": ${e?.message ?? 'unknown error'}`)
@@ -358,6 +430,7 @@ export class SpreadsheetImportService {
         }
 
         for (const r of listRows) {
+          const tally: RowTally = { assigneesLinked: 0, assigneesUnmatched: 0, labelsCreated: 0, labelKeys: [], labelIds: [] }
           try {
             const key = dupKey(listName, r.title)
             const targetId = existing.get(key) ?? seenByKey.get(key)
@@ -366,41 +439,44 @@ export class SpreadsheetImportService {
             if (targetId && strategy === 'skip') {
               summary.tasksSkipped++
             } else if (targetId && strategy === 'merge') {
-              await this.db
-                .update(tasks)
-                .set({
-                  description: r.description ?? undefined,
-                  status: r.status,
-                  statusCategory: r.statusCategory,
-                  priority: r.priority,
-                  dueDate: r.dueDate,
-                  startDate: r.startDate,
-                  updatedAt: new Date(),
-                })
-                .where(eq(tasks.id, targetId))
+              await this.db.transaction(async (tx) => {
+                // Only what the file maps (`mergeSet`): a column the file
+                // lacks leaves its field as the task has it.
+                await tx
+                  .update(tasks)
+                  .set({ ...mergeSet(r, mapping), updatedAt: new Date() })
+                  .where(eq(tasks.id, targetId))
+                await this.applyPeopleAndTags(tx, workspaceId, targetId, r, memberByKey, labelCache, tally)
+              })
               summary.tasksUpdated++
-              await this.applyPeopleAndTags(workspaceId, targetId, r, memberByKey, labelCache, summary)
+              this.count(summary, tally, made)
             } else {
-              const [task] = await this.db
-                .insert(tasks)
-                .values({
-                  listId,
-                  createdById: userId,
-                  title: r.title,
-                  description: r.description ?? null,
-                  status: r.status,
-                  // The column every rollup reads. See the header note.
-                  statusCategory: r.statusCategory,
-                  priority: r.priority,
-                  dueDate: r.dueDate,
-                  startDate: r.startDate,
-                })
-                .returning()
+              const taskId = await this.db.transaction(async (tx) => {
+                const [task] = await tx
+                  .insert(tasks)
+                  .values({
+                    listId,
+                    createdById: userId,
+                    title: r.title,
+                    description: r.description ?? null,
+                    status: r.status,
+                    // The column every rollup reads. See the header note.
+                    statusCategory: r.statusCategory,
+                    priority: r.priority,
+                    dueDate: r.dueDate,
+                    startDate: r.startDate,
+                  })
+                  .returning({ id: tasks.id })
+                await this.applyPeopleAndTags(tx, workspaceId, task.id, r, memberByKey, labelCache, tally)
+                return task.id
+              })
               summary.tasksCreated++
-              if (!seenByKey.has(key)) seenByKey.set(key, task.id)
-              await this.applyPeopleAndTags(workspaceId, task.id, r, memberByKey, labelCache, summary)
+              if (!seenByKey.has(key)) seenByKey.set(key, taskId)
+              this.count(summary, tally, made)
             }
           } catch (e: any) {
+            // Its transaction is rolled back: a tag it made is not there to find.
+            for (const k of tally.labelKeys) labelCache.delete(k)
             summary.errors.push(`Row ${r.row} ("${r.title}"): ${e?.message ?? 'unknown error'}`)
           } finally {
             processed++
@@ -418,20 +494,58 @@ export class SpreadsheetImportService {
           updatedCount: summary.tasksUpdated,
           skippedCount: summary.tasksSkipped,
           rejectedCount: summary.tasksRejected,
-          rowErrors: summary.rowErrors,
-          result: summary as unknown as Record<string, unknown>,
+          rowErrors: storable(summary.rowErrors),
+          result: storable(summary) as unknown as Record<string, unknown>,
           updatedAt: new Date(),
         })
         .where(eq(clickupImportJobs.id, jobId))
 
       return summary
     } catch (e: any) {
+      const left = await this.undoRun(made)
+      // What it made is gone, so it created nothing; a merge into a task that
+      // was already there stays, and is counted.
       await this.db
         .update(clickupImportJobs)
-        .set({ status: 'failed', error: e?.message ?? 'Import failed', updatedAt: new Date() })
+        .set({
+          status: 'failed',
+          error: storable([e?.message ?? 'Import failed', left].filter(Boolean).join(' ')),
+          createdCount: left ? summary.tasksCreated : 0,
+          updatedCount: summary.tasksUpdated,
+          skippedCount: summary.tasksSkipped,
+          updatedAt: new Date(),
+        })
         .where(eq(clickupImportJobs.id, jobId))
         .catch(() => undefined)
       throw e
+    }
+  }
+
+  /**
+   * WHAT A RUN THAT FAILED MADE, TAKEN AWAY AGAIN: its project — and with it
+   * every list, status and task in it, by the foreign keys' cascade — its
+   * space when it made one, and the tags it made that label nothing once
+   * those are gone. A merge it wrote into a task that was already there
+   * stays: that task is not the run's to remove. `null` when all of it went,
+   * or the sentence the job's error carries when some could not.
+   */
+  private async undoRun(made: RunMade): Promise<string | null> {
+    try {
+      if (made.projectId) await this.db.delete(projects).where(eq(projects.id, made.projectId))
+      if (made.spaceId) await this.db.delete(spaces).where(eq(spaces.id, made.spaceId))
+      if (made.labelIds.length > 0) {
+        await this.db
+          .delete(labels)
+          .where(
+            and(
+              inArray(labels.id, made.labelIds),
+              sql`not exists (select 1 from ${taskLabelAssignments} where ${taskLabelAssignments.labelId} = ${labels.id})`,
+            ),
+          )
+      }
+      return null
+    } catch (e: any) {
+      return `What it made could not all be removed: ${e?.message ?? 'unknown error'}`
     }
   }
 
@@ -453,17 +567,18 @@ export class SpreadsheetImportService {
    * `space_id` is set here too; the ClickUp path leaves it null.
    */
   private async createList(
+    db: Writer,
     projectId: string,
     spaceId: string,
     name: string,
     position: number,
     userId: string,
   ): Promise<string> {
-    const [list] = await this.db
+    const [list] = await db
       .insert(lists)
       .values({ projectId, spaceId, name: name.slice(0, 200), position, createdById: userId })
       .returning({ id: lists.id })
-    await this.db
+    await db
       .insert(listStatuses)
       .values(DEFAULT_STATUSES.map((s) => ({ listId: list.id, ...s })))
       .onConflictDoNothing()
@@ -471,72 +586,84 @@ export class SpreadsheetImportService {
   }
 
   private async applyPeopleAndTags(
+    db: Writer,
     workspaceId: string,
     taskId: string,
     row: MappedRow,
     memberByKey: Map<string, string>,
     labelCache: Map<string, string>,
-    summary: SheetImportSummary,
+    tally: RowTally,
   ) {
     for (const who of row.assignees) {
       const userId = memberByKey.get(who.toLowerCase())
       if (!userId) {
-        summary.assigneesUnmatched++
+        tally.assigneesUnmatched++
         continue
       }
-      await this.db.insert(taskAssignees).values({ taskId, userId }).onConflictDoNothing()
-      summary.assigneesLinked++
+      await db.insert(taskAssignees).values({ taskId, userId }).onConflictDoNothing()
+      tally.assigneesLinked++
     }
     for (const tag of row.tags) {
-      const labelId = await this.ensureLabel(workspaceId, tag, labelCache, summary)
+      const labelId = await this.ensureLabel(db, workspaceId, tag, labelCache, tally)
       if (labelId) {
-        await this.db.insert(taskLabelAssignments).values({ taskId, labelId }).onConflictDoNothing()
+        await db.insert(taskLabelAssignments).values({ taskId, labelId }).onConflictDoNothing()
       }
     }
   }
 
+  /** A row's people and tags, into the run's summary — and its new tags into what it made — once the row is written. */
+  private count(summary: SheetImportSummary, tally: RowTally, made: RunMade) {
+    summary.assigneesLinked += tally.assigneesLinked
+    summary.assigneesUnmatched += tally.assigneesUnmatched
+    summary.labelsCreated += tally.labelsCreated
+    made.labelIds.push(...tally.labelIds)
+  }
+
+  /**
+   * The workspace's tag of this name, WHATEVER ITS CASE, or a new one
+   * (`found-30-sep/spreadsheet-import-skips-task-rules`). The lookup matched
+   * the exact spelling while only its cache key was lower-cased, and the
+   * unique constraint is case-sensitive: a row tagged "urgent-X" in a
+   * workspace holding "Urgent-X" made a second tag beside it, where the tags
+   * route (`LabelsService.create`) and a task's `labelsByName` find the one
+   * there. ClickUp has no such pair: its tags are lower-case whatever is typed.
+   */
   private async ensureLabel(
+    db: Writer,
     workspaceId: string,
     name: string,
     cache: Map<string, string>,
-    summary: SheetImportSummary,
+    tally: RowTally,
   ): Promise<string | null> {
     const trimmed = name.trim().slice(0, 60)
     const key = trimmed.toLowerCase()
     if (!key) return null
     if (cache.has(key)) return cache.get(key)!
 
-    const [found] = await this.db
-      .select({ id: labels.id })
-      .from(labels)
-      .where(and(eq(labels.workspaceId, workspaceId), eq(labels.name, trimmed)))
-      .limit(1)
+    const named = and(eq(labels.workspaceId, workspaceId), sql`lower(${labels.name}) = lower(${trimmed})`)
+    const [found] = await db.select({ id: labels.id }).from(labels).where(named).limit(1)
     if (found) {
       cache.set(key, found.id)
       return found.id
     }
-    const [row] = await this.db
+    const [row] = await db
       .insert(labels)
       .values({ workspaceId, name: trimmed, color: '#8b5cf6' })
       .onConflictDoNothing()
       .returning({ id: labels.id })
-    const id =
-      row?.id ??
-      (
-        await this.db
-          .select({ id: labels.id })
-          .from(labels)
-          .where(and(eq(labels.workspaceId, workspaceId), eq(labels.name, trimmed)))
-          .limit(1)
-      )[0]?.id
+    const id = row?.id ?? (await db.select({ id: labels.id }).from(labels).where(named).limit(1))[0]?.id
     if (!id) return null
-    if (row) summary.labelsCreated++
+    if (row) {
+      tally.labelsCreated++
+      tally.labelKeys.push(key)
+      tally.labelIds.push(id)
+    }
     cache.set(key, id)
     return id
   }
 
-  private async loadMemberIndex(workspaceId: string): Promise<Map<string, string>> {
-    const rows = await this.db
+  private async loadMemberIndex(db: Writer, workspaceId: string): Promise<Map<string, string>> {
+    const rows = await db
       .select({ userId: users.id, displayName: users.displayName, email: users.email })
       .from(workspaceMembers)
       .innerJoin(users, eq(users.id, workspaceMembers.userId))
@@ -549,11 +676,15 @@ export class SpreadsheetImportService {
     return byKey
   }
 
-  private async loadExistingTaskIndex(workspaceId: string, targetSpaceId?: string): Promise<Map<string, string>> {
+  private async loadExistingTaskIndex(
+    workspaceId: string,
+    targetSpaceId?: string,
+    db: Writer = this.db,
+  ): Promise<Map<string, string>> {
     const where = targetSpaceId
       ? and(eq(spaces.workspaceId, workspaceId), eq(spaces.id, targetSpaceId))
       : eq(spaces.workspaceId, workspaceId)
-    const rows = await this.db
+    const rows = await db
       .select({ id: tasks.id, listName: lists.name, title: tasks.title })
       .from(tasks)
       .innerJoin(lists, eq(lists.id, tasks.listId))

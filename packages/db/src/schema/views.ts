@@ -12,7 +12,10 @@ import { viewTypeEnum } from './enums'
  * different questions:
  *
  *   everyone   what every view was until now: visible to anyone who can open
- *              the list, and editable by them too.
+ *              the list, changed by those whose level on the view — a share
+ *              on it first, then the list's — reaches Edit, and deleted at
+ *              Full edit (`apps/api/src/modules/views/view-write.ts`). Any
+ *              reader changed it until `found-5-oct/readers-change-shared-views`.
  *   private    only its creator can see it at all. It is not in anyone else's
  *              tab strip, and asking for it by id is a 404 — the same answer
  *              they would get for a view that does not exist, because "you

@@ -280,6 +280,78 @@ export const UNSUPPORTED_SOURCES: ReadonlyArray<{ key: string; label: string; re
 export const sourceByKey = (key?: string): SheetSource =>
   SHEET_SOURCES.find((s) => s.key === key) ?? SHEET_SOURCES[0]
 
+// ── what is read at all ──────────────────────────────────────────────────────
+
+/**
+ * The files this importer reads: delimited text. No XLSX parser ships in this
+ * repo (reading one is the feature `ledger-rows/row-816`), so the page asks
+ * for a CSV rather than accepting an .xlsx it would then fail to read.
+ */
+export const ACCEPTED_SHEET_EXTENSIONS = ['.csv', '.tsv', '.txt'] as const
+
+/**
+ * A FILE THAT IS NOT DELIMITED TEXT IS REFUSED IN THE PAGE'S OWN WORDS
+ * (`found-5-oct/xlsx-read-as-text`): its `import.sheetAccepted` and
+ * `import.sheetNoXlsx`, run together as the page shows them under the picker.
+ * An .xlsx put in anyway (the picker's "All files", a drop) was read as text,
+ * its zip's bytes drawn as one column name, offered for import, and the run
+ * failed on them — leaving an empty space, project and list behind.
+ */
+export const NOT_DELIMITED_TEXT = `Accepted: ${ACCEPTED_SHEET_EXTENSIONS.join(' · ')}. .xlsx is not read — re-save the sheet as CSV first.`
+
+/**
+ * A ZIP, BY ITS FIRST BYTES: "PK" and one of its three signatures (a file's
+ * local header 03 04, an empty archive's 05 06, a spanned one's 07 08). An
+ * .xlsx, an .ods and a .numbers are all zips. The route receives the file's
+ * content only, read as text by the page — the zip's first four bytes are
+ * ASCII control characters and survive that reading unchanged. "PK" alone is
+ * not the test: a sheet whose first column is named "PK" is a CSV.
+ *
+ * What is not a string is no zip: the body is whatever a client sent, and a
+ * number or an object goes on to `parseSheet`, which finds no header row in
+ * it (400), as it did before this was asked — it answered 500 here.
+ */
+export function isZipContent(content: unknown): boolean {
+  if (typeof content !== 'string') return false
+  const head = content
+  if (head.length < 4 || !head.startsWith('PK')) return false
+  const pair = (head.charCodeAt(2) << 8) | head.charCodeAt(3)
+  return pair === 0x0304 || pair === 0x0506 || pair === 0x0708
+}
+
+/**
+ * A NUL IN THE FIRST LINE: NOT DELIMITED TEXT EITHER. A header row never holds
+ * one, and a binary file does within its first bytes — a legacy .xls (an OLE2
+ * compound file: D0 CF 11 E0 A1 B1 1A E1, then NULs) is no zip, and read as
+ * text by the page it reached the preview as five columns of binary, was
+ * offered for import, and failed (measured on lane 4). Only the first line is
+ * asked: a NUL in a later row is that row's own, and it fails alone.
+ */
+export function headerHoldsNul(content: unknown): boolean {
+  if (typeof content !== 'string') return false
+  const ends = [content.indexOf('\n'), content.indexOf('\r')].filter((i) => i !== -1)
+  const head = ends.length ? content.slice(0, Math.min(...ends)) : content
+  return head.includes('\u0000')
+}
+
+/**
+ * WHAT IS WRITTEN TO THE JOB ROW, WITHOUT A NUL: Postgres refuses U+0000 in
+ * text and in jsonb ("unsupported Unicode escape sequence"). A row's error
+ * names its title and a refused row names its value, so one NUL in one cell
+ * reached the job's `result` and the whole run failed on its last write, in
+ * those raw words (`found-5-oct/xlsx-read-as-text`) — where that row should
+ * fail alone, as any other row the database refuses does. Each NUL is
+ * written as U+FFFD, the character that says one stood there.
+ */
+export function storable<T>(value: T): T {
+  if (typeof value === 'string') return value.split('\u0000').join('\uFFFD') as T
+  if (Array.isArray(value)) return value.map((v) => storable(v)) as T
+  if (value && typeof value === 'object' && !(value instanceof Date)) {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, storable(v)])) as T
+  }
+  return value
+}
+
 // ── parsing ──────────────────────────────────────────────────────────────────
 
 const DELIMITERS: SheetDelimiter[] = [',', '\t', ';', '|']
@@ -629,6 +701,42 @@ export function mapSheet(
     else rejections.push(res.rejection)
   }
   return { rows, rejections }
+}
+
+/** The task fields a merge may write — those a sheet carries values for. */
+export type MergeSet = {
+  description?: string
+  status?: TaskStatus
+  statusCategory?: StatusCategory
+  priority?: TaskPriority
+  dueDate?: Date
+  startDate?: Date
+}
+
+/**
+ * WHAT A MERGE WRITES: THE FIELDS THE FILE MAPS, AND NO OTHER
+ * (`found-5-oct/import-merge-resets-fields-the-file-lacks`). The merge wrote
+ * `status` and `priority` from every row, and a row of a file with neither
+ * column carries `mapStatus(undefined)` = "To do" and
+ * `normalizePriority(undefined)` = "Normal": a matched task In progress and
+ * High came out of a merge To do and Normal, where the page promises to
+ * "update the matching task's fields from the imported row". A field the file
+ * does not map is not in the row, so it is left as it is. A mapped field is
+ * written as it was before: status and priority from the cell, and the
+ * description and dates when the cell holds one.
+ */
+export function mergeSet(row: MappedRow, mapping: ColumnMapping): MergeSet {
+  const mapped = new Set(Object.values(mapping))
+  const set: MergeSet = {}
+  if (mapped.has('description') && row.description !== undefined) set.description = row.description
+  if (mapped.has('status')) {
+    set.status = row.status
+    set.statusCategory = row.statusCategory
+  }
+  if (mapped.has('priority')) set.priority = row.priority
+  if (mapped.has('dueDate') && row.dueDate) set.dueDate = row.dueDate
+  if (mapped.has('startDate') && row.startDate) set.startDate = row.startDate
+  return set
 }
 
 /** A mapping can only be run when exactly one column feeds the title. */

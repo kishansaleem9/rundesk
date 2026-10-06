@@ -44,7 +44,7 @@ import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { LOGIN_NAV_TIMEOUT_MS, signUpApi } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil } from './lib/wait.mjs'
 
@@ -58,7 +58,7 @@ const argOf = (name, fallback) => {
  * run that still passes — and half of this suite is branches that only run once
  * an earlier step really happened.
  */
-const EXPECTED_CHECKS = 20
+const EXPECTED_CHECKS = 43
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -136,6 +136,20 @@ try {
 
   // ── the browser ────────────────────────────────────────────────────────────
   const ctx = await browser.newContext({ viewport: { width: 1500, height: 1100 } })
+  /*
+   * A DISK THAT READS ONE FILE SLOWLY: a large file's read, without the large
+   * file. A file named `slow-…` has its `readAsText` start 1.5 s late, and each
+   * such read that lands is counted, so section 11 can choose a file, replace
+   * it while its read is still out, and know when the first read has landed.
+   */
+  await ctx.addInitScript(() => {
+    const read = FileReader.prototype.readAsText
+    FileReader.prototype.readAsText = function (blob, ...rest) {
+      if (typeof blob?.name !== 'string' || !blob.name.startsWith('slow-')) return read.call(this, blob, ...rest)
+      this.addEventListener('load', () => { window.__slowReadsLanded = (window.__slowReadsLanded ?? 0) + 1 })
+      setTimeout(() => read.call(this, blob, ...rest), 1500)
+    }
+  })
   const page = await ctx.newPage()
 
   /** Every preview request body this run sent, so the mapping can be PROVED. */
@@ -563,19 +577,617 @@ try {
     `the ClickUp preview answered ${clickupPreview.status} with ${JSON.stringify(clickupPreview.data?.totalRows)}`,
   )
 
+  // ── a workspace of this run's own, for what the imports below may and may not write ──
+  // Made through the fixture's client, so it is journaled and swept with all it holds.
+  const made = await api('/workspaces', { method: 'POST', body: { name: `Import targets ${TAG}` } })
+  const WT = made.data?.id
+  if (!WT) throw new Error(`could not make the run's workspace: ${made.status} ${made.message}`)
+  const spaceIn = async (name, extra = {}) => {
+    const res = await api('/spaces', { method: 'POST', body: { workspaceId: WT, name: `${name} ${TAG}`, ...extra } })
+    if (!res.data?.id) throw new Error(`could not make the space "${name}": ${res.status} ${res.message}`)
+    return res.data.id
+  }
+  const OPEN = await spaceIn('Open')
+  const VIEW_ONLY = await spaceIn('View-only', { defaultPermission: 'view' })
+  const PRIVATE = await spaceIn('Private', { visibility: 'private' })
+  /** An import's job, polled to its end; `null` when there was none to poll or it never ended. */
+  const jobOf = async (who, ws, kind, run, timeoutMs = 30_000) => {
+    if (!run.data?.jobId) return null
+    let job = null
+    await waitUntil(async () => {
+      job = (await who(`/workspaces/${ws}/import/${kind}/jobs/${run.data.jobId}`)).data
+      return job?.status === 'completed' || job?.status === 'failed'
+    }, { timeoutMs })
+    return job?.status === 'completed' || job?.status === 'failed' ? job : null
+  }
+  /** Projects in a space whose name carries a marker — what an import made there. */
+  const projectsIn = async (spaceId, marker) =>
+    (await sql`select name from projects where space_id = ${spaceId} and name like ${`%${marker}%`}`).length
+  const jobRowsOf = async (ws, source) =>
+    (await sql`select count(*)::int as n from clickup_import_jobs where workspace_id = ${ws} and source = ${source}`)[0].n
+  const SHEET = (title) => `Title\n${title}\n`
+  const CLICKUP = (title) => `Task Name\n${title}\n`
+  const NOWHERE = '00000000-0000-4000-8000-000000000000'
+
+  // ══ 8. WHERE AN IMPORT MAY WRITE ═══════════════════════════════════════════
+  /*
+   * `found-5-oct/import-writes-into-another-workspace` (security). Both
+   * importers took `targetSpaceId` as given: an admin of one workspace wrote a
+   * project, a list and a task into another workspace's space, measured on
+   * lanes 6 and 4. And inside the workspace an import made a project where its
+   * maker may add nothing. Each refusal is read off the answer and then off the
+   * database: nothing written, not even the job row.
+   */
+  console.log('\n▶ a stranger names a space of another workspace, from a workspace of their own')
+  const stamp = TAG.replace(/[^a-z0-9]/g, '')
+  const signed = await signUpApi(API, {
+    fullName: `Importer ${TAG}`,
+    email: `${TAG}-stranger@rundesk.invalid`,
+    password: 'ImportTargets@12345!',
+    organizationName: `Importer ${TAG}`,
+    organizationSlug: `importer-${stamp}`,
+  })
+  const S = apiClient(API, signed.accessToken)
+  const HOME = (signed.workspaces ?? [])[0]?.id
+  if (!HOME) throw new Error('the stranger’s sign-up made no workspace of their own')
+  const sheetThere = await S(`/workspaces/${HOME}/import/spreadsheet`, { method: 'POST', body: { content: SHEET(`Injected sheet ${TAG}`), preset: 'generic', targetSpaceId: OPEN, targetProjectName: `Injected sheet ${TAG}` } })
+  const sheetNowhere = await S(`/workspaces/${HOME}/import/spreadsheet`, { method: 'POST', body: { content: SHEET(`Nowhere sheet ${TAG}`), preset: 'generic', targetSpaceId: NOWHERE } })
+  await jobOf(S, HOME, 'spreadsheet', sheetThere)
+  const sheetLeft = { projects: await projectsIn(OPEN, `Injected sheet ${TAG}`), jobs: await jobRowsOf(HOME, 'spreadsheet') }
+  chk(
+    sheetThere.status === 403 && sheetThere.message === 'That space is not in this workspace' &&
+      sheetNowhere.status === 404 && sheetLeft.projects === 0 && sheetLeft.jobs === 0,
+    'the spreadsheet import refuses a space of another workspace, 403 “That space is not in this workspace”, and one naming nothing 404 — writing nothing there, not even a job row',
+    `another workspace’s space: ${sheetThere.status} ${JSON.stringify(sheetThere.message)}; an id naming nothing: ${sheetNowhere.status}; ` +
+      `left behind: ${sheetLeft.projects} project(s) in that space, ${sheetLeft.jobs} job row(s)`,
+  )
+
+  const clickupThere = await S(`/workspaces/${HOME}/import/clickup`, { method: 'POST', body: { csv: CLICKUP(`Injected clickup ${TAG}`), targetSpaceId: OPEN, targetProjectName: `Injected clickup ${TAG}` } })
+  const clickupNowhere = await S(`/workspaces/${HOME}/import/clickup`, { method: 'POST', body: { csv: CLICKUP(`Nowhere clickup ${TAG}`), targetSpaceId: NOWHERE } })
+  await jobOf(S, HOME, 'clickup', clickupThere)
+  const clickupLeft = { projects: await projectsIn(OPEN, `Injected clickup ${TAG}`), jobs: await jobRowsOf(HOME, 'clickup_csv') }
+  chk(
+    clickupThere.status === 403 && clickupThere.message === 'That space is not in this workspace' &&
+      clickupNowhere.status === 404 && clickupLeft.projects === 0 && clickupLeft.jobs === 0,
+    'the ClickUp import refuses a space of another workspace, 403 “That space is not in this workspace”, and one naming nothing 404 — writing nothing there, not even a job row',
+    `another workspace’s space: ${clickupThere.status} ${JSON.stringify(clickupThere.message)}; an id naming nothing: ${clickupNowhere.status}; ` +
+      `left behind: ${clickupLeft.projects} project(s) in that space, ${clickupLeft.jobs} job row(s)`,
+  )
+
+  console.log('\n▶ a member granted workspace.import, in a view-only space and a private one')
+  const memberEmail = `${TAG}-importer@rundesk.invalid`
+  const memberSigned = await signUpApi(API, {
+    fullName: `Member importer ${TAG}`,
+    email: memberEmail,
+    password: 'ImportTargets@12345!',
+    organizationName: `Member importer ${TAG}`,
+    organizationSlug: `member-importer-${stamp}`,
+  })
+  const M = apiClient(API, memberSigned.accessToken)
+  const added = await api(`/workspaces/${WT}/members`, { method: 'POST', body: { email: memberEmail, role: 'member' } })
+  if (!added.ok) throw new Error(`could not add the member: ${added.status} ${added.message}`)
+  const [memberRow] = await sql`select m.id from workspace_members m join users u on u.id = m.user_id where m.workspace_id = ${WT} and u.email = ${memberEmail}`
+  const role = await api(`/workspaces/${WT}/roles`, { method: 'POST', body: { name: `Importers ${TAG}`, permissions: ['workspace.import'] } })
+  const granted = role.data?.id && memberRow
+    ? await api(`/workspaces/${WT}/members/${memberRow.id}/roles/${role.data.id}`, { method: 'POST', body: {} })
+    : null
+  if (!granted?.ok) throw new Error(`could not grant the member workspace.import: ${role.status} ${role.message}; ${granted?.status} ${granted?.message}`)
+
+  const intoViewOnly = {
+    sheet: await M(`/workspaces/${WT}/import/spreadsheet`, { method: 'POST', body: { content: SHEET(`Member view ${TAG}`), preset: 'generic', targetSpaceId: VIEW_ONLY, targetProjectName: `Member view ${TAG}` } }),
+    clickup: await M(`/workspaces/${WT}/import/clickup`, { method: 'POST', body: { csv: CLICKUP(`Member view ${TAG}`), targetSpaceId: VIEW_ONLY, targetProjectName: `Member view ${TAG}` } }),
+  }
+  const intoOpen = await M(`/workspaces/${WT}/import/spreadsheet`, { method: 'POST', body: { content: SHEET(`Member open ${TAG}`), preset: 'generic', targetSpaceId: OPEN, targetProjectName: `Member open ${TAG}` } })
+  const openJob = await jobOf(M, WT, 'spreadsheet', intoOpen)
+  const [openTask] = await sql`select t.id from tasks t join lists l on l.id = t.list_id join projects p on p.id = l.project_id where p.space_id = ${OPEN} and t.title = ${`Member open ${TAG}`}`
+  const viewLeft = await projectsIn(VIEW_ONLY, `Member view ${TAG}`)
+  const levelWords = /does not allow adding a project/
+  chk(
+    intoViewOnly.sheet.status === 403 && levelWords.test(intoViewOnly.sheet.message) &&
+      intoViewOnly.clickup.status === 403 && levelWords.test(intoViewOnly.clickup.message) &&
+      viewLeft === 0 && intoOpen.status === 201 && openJob?.status === 'completed' && !!openTask,
+    'a member granted workspace.import cannot import into a view-only space — both importers refuse in the space’s words and write nothing there — while an import into the open space beside it goes through',
+    `view-only: sheet ${intoViewOnly.sheet.status} ${JSON.stringify(intoViewOnly.sheet.message)}, clickup ${intoViewOnly.clickup.status} ${JSON.stringify(intoViewOnly.clickup.message)}, ` +
+      `${viewLeft} project(s) made there; the open space: ${intoOpen.status}, job ${openJob?.status ?? 'none'}, task ${openTask ? 'there' : 'missing'}`,
+  )
+
+  const intoPrivate = {
+    sheet: await M(`/workspaces/${WT}/import/spreadsheet`, { method: 'POST', body: { content: SHEET(`Member private ${TAG}`), preset: 'generic', targetSpaceId: PRIVATE, targetProjectName: `Member private ${TAG}` } }),
+    clickup: await M(`/workspaces/${WT}/import/clickup`, { method: 'POST', body: { csv: CLICKUP(`Member private ${TAG}`), targetSpaceId: PRIVATE, targetProjectName: `Member private ${TAG}` } }),
+  }
+  await jobOf(M, WT, 'spreadsheet', intoPrivate.sheet)
+  await jobOf(M, WT, 'clickup', intoPrivate.clickup)
+  const privateLeft = await projectsIn(PRIVATE, `Member private ${TAG}`)
+  const noAccess = 'You do not have access to where this project would go'
+  chk(
+    intoPrivate.sheet.status === 403 && intoPrivate.sheet.message === noAccess &&
+      intoPrivate.clickup.status === 403 && intoPrivate.clickup.message === noAccess && privateLeft === 0,
+    'nor into a private space they cannot open: both importers refuse, 403 “You do not have access to where this project would go”, and nothing is written there',
+    `sheet ${intoPrivate.sheet.status} ${JSON.stringify(intoPrivate.sheet.message)}, clickup ${intoPrivate.clickup.status} ${JSON.stringify(intoPrivate.clickup.message)}, ${privateLeft} project(s) made there`,
+  )
+
+  console.log('\n▶ the workspace named in capitals in the address')
+  /*
+   * The guards take a workspace id in any case, as Postgres compares ids, and
+   * the refusal above compared it as a string: an import into the workspace's
+   * own space answered 403 “That space is not in this workspace” — a reason
+   * that was not true (measured on lane 4, both importers).
+   */
+  const WT_CAPS = WT.toUpperCase()
+  const capsSheet = await api(`/workspaces/${WT_CAPS}/import/spreadsheet`, { method: 'POST', body: { content: SHEET(`Caps sheet ${TAG}`), preset: 'generic', targetSpaceId: OPEN, targetProjectName: `Caps sheet ${TAG}` } })
+  const capsClickup = await api(`/workspaces/${WT_CAPS}/import/clickup`, { method: 'POST', body: { csv: CLICKUP(`Caps clickup ${TAG}`), targetSpaceId: OPEN, targetProjectName: `Caps clickup ${TAG}` } })
+  const capsJobs = { sheet: await jobOf(api, WT, 'spreadsheet', capsSheet), clickup: await jobOf(api, WT, 'clickup', capsClickup) }
+  const capsMade = { sheet: await projectsIn(OPEN, `Caps sheet ${TAG}`), clickup: await projectsIn(OPEN, `Caps clickup ${TAG}`) }
+  chk(
+    capsSheet.status === 201 && capsClickup.status === 201 && capsJobs.sheet?.status === 'completed' &&
+      capsJobs.clickup?.status === 'completed' && capsMade.sheet === 1 && capsMade.clickup === 1,
+    'an import addressed to its workspace in capitals takes that workspace’s own space — both importers — rather than refusing it as another workspace’s',
+    `sheet ${capsSheet.status} ${JSON.stringify(capsSheet.message)} (job ${capsJobs.sheet?.status ?? 'none'}, ${capsMade.sheet} project(s)); ` +
+      `clickup ${capsClickup.status} ${JSON.stringify(capsClickup.message)} (job ${capsJobs.clickup?.status ?? 'none'}, ${capsMade.clickup} project(s))`,
+  )
+
+  // ══ 9. A TAG WHATEVER ITS CASE ═════════════════════════════════════════════
+  /*
+   * `found-30-sep/spreadsheet-import-skips-task-rules`, its tag half: both
+   * importers found a tag by its exact spelling, so "urgent-x" beside the
+   * workspace's "Urgent-X" made a second tag, where the tags route and a
+   * task's `labelsByName` find the one there.
+   */
+  console.log('\n▶ a row tagged in another case than the workspace’s tag')
+  const TAG_NAME = `Urgent-${TAG}`
+  const tagMade = await api(`/workspaces/${WT}/labels`, { method: 'POST', body: { name: TAG_NAME, color: '#ef4444' } })
+  if (!tagMade.data?.id) throw new Error(`could not make the tag: ${tagMade.status} ${tagMade.message}`)
+  const tagsLike = async () =>
+    (await sql`select name from labels where workspace_id = ${WT} and lower(name) = lower(${TAG_NAME}) order by name`).map((l) => l.name)
+  const tagsOn = async (title) =>
+    (await sql`select lb.name from tasks t join task_label_assignments a on a.task_id = t.id join labels lb on lb.id = a.label_id where t.title = ${title}`).map((l) => l.name)
+
+  const sheetTagged = await api(`/workspaces/${WT}/import/spreadsheet`, { method: 'POST', body: { content: `Title,Tags\nTagged sheet ${TAG},${TAG_NAME.toLowerCase()}\n`, preset: 'generic', targetSpaceId: OPEN, targetProjectName: `Tagged sheet ${TAG}` } })
+  const sheetTagJob = await jobOf(api, WT, 'spreadsheet', sheetTagged)
+  const afterSheet = { tags: await tagsLike(), on: await tagsOn(`Tagged sheet ${TAG}`) }
+  chk(
+    sheetTagJob?.status === 'completed' && sheetTagJob?.result?.labelsCreated === 0 &&
+      afterSheet.tags.length === 1 && afterSheet.tags[0] === TAG_NAME && afterSheet.on.length === 1 && afterSheet.on[0] === TAG_NAME,
+    'a sheet row tagged in another case is tagged with the workspace’s tag — no second tag differing only in case',
+    `job ${sheetTagJob?.status ?? 'none'} (tags made: ${sheetTagJob?.result?.labelsCreated}); the workspace’s tags of that name: ${JSON.stringify(afterSheet.tags)}; the task is tagged ${JSON.stringify(afterSheet.on)}`,
+  )
+
+  const clickupTagged = await api(`/workspaces/${WT}/import/clickup`, { method: 'POST', body: { csv: `Task Name,Tags\nTagged clickup ${TAG},${TAG_NAME.toUpperCase()}\n`, targetSpaceId: OPEN, targetProjectName: `Tagged clickup ${TAG}` } })
+  const clickupTagJob = await jobOf(api, WT, 'clickup', clickupTagged)
+  const afterClickup = { tags: await tagsLike(), on: await tagsOn(`Tagged clickup ${TAG}`) }
+  // Read apart from the sheet's: whichever spelling the workspace holds, the ClickUp row made none of its own.
+  chk(
+    clickupTagJob?.status === 'completed' && clickupTagJob?.result?.labelsCreated === 0 &&
+      !afterClickup.tags.includes(TAG_NAME.toUpperCase()) && afterClickup.on.length === 1 &&
+      afterClickup.on[0].toLowerCase() === TAG_NAME.toLowerCase() && afterClickup.on[0] !== TAG_NAME.toUpperCase(),
+    'a ClickUp row tagged in another case is tagged with the workspace’s tag — no second tag differing only in case',
+    `job ${clickupTagJob?.status ?? 'none'} (tags made: ${clickupTagJob?.result?.labelsCreated}); the workspace’s tags of that name: ${JSON.stringify(afterClickup.tags)}; the task is tagged ${JSON.stringify(afterClickup.on)}`,
+  )
+
+  console.log('\n▶ a ClickUp tag longer than the 60 characters a tag is made with')
+  /*
+   * The ClickUp import makes a tag cut to 60 characters and looked it up by
+   * the whole name, which no tag has: a second import of a 70-character tag in
+   * another case made a twin differing only in case, and a third in the first
+   * case struck the twin's conflict and dropped the tag (measured on lane 4).
+   */
+  const LONG = `Quarterly-Review-${stamp}-`.padEnd(70, 'Xy')
+  const longRuns = []
+  for (const [title, tag] of [[`Long one ${TAG}`, LONG], [`Long two ${TAG}`, LONG.toLowerCase()], [`Long three ${TAG}`, LONG]]) {
+    const run = await api(`/workspaces/${WT}/import/clickup`, { method: 'POST', body: { csv: `Task Name,Tags\n${title},${tag}\n`, targetSpaceId: OPEN, targetProjectName: title } })
+    longRuns.push((await jobOf(api, WT, 'clickup', run))?.status ?? `${run.status} and no job`)
+  }
+  const longTags = (await sql`select name from labels where workspace_id = ${WT} and lower(left(name, 60)) = lower(${LONG.slice(0, 60)})`).map((l) => l.name)
+  const longOn = [await tagsOn(`Long one ${TAG}`), await tagsOn(`Long two ${TAG}`), await tagsOn(`Long three ${TAG}`)]
+  chk(
+    longRuns.every((r) => r === 'completed') && longTags.length === 1 && longOn.every((on) => on.length === 1 && on[0] === longTags[0]),
+    'a ClickUp row tagged with a 70-character tag, in another case or the same, is tagged with the one tag the import made — no twin differing only in case, and none dropped',
+    `jobs ${JSON.stringify(longRuns)}; the workspace’s tags of that name: ${JSON.stringify(longTags)}; the three tasks are tagged ${JSON.stringify(longOn)}`,
+  )
+
+  // ══ 10. A MERGE WRITES WHAT THE FILE MAPS ══════════════════════════════════
+  /*
+   * `found-5-oct/import-merge-resets-fields-the-file-lacks`: a merge from a
+   * file with no Status and no Priority column set the matched task To do and
+   * Normal (lane 6, and on lane 4 the ClickUp import's merge too). The file
+   * below carries a description, so the merge visibly ran.
+   */
+  console.log('\n▶ a merge from a file with no Status or Priority column')
+  const project = await api('/projects', { method: 'POST', body: { spaceId: OPEN, name: `Merge project ${TAG}` } })
+  if (!project.data?.id) throw new Error(`could not make the merge project: ${project.status} ${project.message}`)
+  const mergeList = await api('/lists', { method: 'POST', body: { projectId: project.data.id, name: `Merge ${TAG}` } })
+  if (!mergeList.data?.id) throw new Error(`could not make the merge list: ${mergeList.status} ${mergeList.message}`)
+  const matched = async (title) => {
+    const res = await api('/tasks', { method: 'POST', body: { listId: mergeList.data.id, title, status: 'in_progress', priority: 'high', description: 'old words' } })
+    if (!res.data?.id) throw new Error(`could not make "${title}": ${res.status} ${res.message}`)
+    return res.data.id
+  }
+  const fieldsOf = async (id) => (await sql`select status, status_category, priority, description from tasks where id = ${id}`)[0] ?? {}
+  const kept = (t) => t.status === 'in_progress' && t.status_category === 'in_progress' && t.priority === 'high' && t.description === 'new words'
+
+  const twoId = await matched(`Two ${TAG}`)
+  const sheetMerge = await api(`/workspaces/${WT}/import/spreadsheet`, { method: 'POST', body: { content: `Title,List,Description\nTwo ${TAG},Merge ${TAG},new words\n`, preset: 'generic', strategy: 'merge', targetSpaceId: OPEN, targetProjectName: `Merged sheet ${TAG}` } })
+  const sheetMergeJob = await jobOf(api, WT, 'spreadsheet', sheetMerge)
+  const two = await fieldsOf(twoId)
+  chk(
+    sheetMergeJob?.status === 'completed' && sheetMergeJob?.updatedCount === 1 && kept(two),
+    'a spreadsheet merge from a file with no Status or Priority column writes the description it carries and leaves the task In progress and High',
+    `job ${sheetMergeJob?.status ?? 'none'} (updated ${sheetMergeJob?.updatedCount}); the task reads ${JSON.stringify(two)}`,
+  )
+
+  const threeId = await matched(`Three ${TAG}`)
+  const clickupMerge = await api(`/workspaces/${WT}/import/clickup`, { method: 'POST', body: { csv: `Task Name,List,Description\nThree ${TAG},Merge ${TAG},new words\n`, strategy: 'merge', targetSpaceId: OPEN, targetProjectName: `Merged clickup ${TAG}` } })
+  const clickupMergeJob = await jobOf(api, WT, 'clickup', clickupMerge)
+  const three = await fieldsOf(threeId)
+  chk(
+    clickupMergeJob?.status === 'completed' && clickupMergeJob?.updatedCount === 1 && kept(three),
+    'a ClickUp merge from a file with no Status or Priority column writes the description it carries and leaves the task In progress and High',
+    `job ${clickupMergeJob?.status ?? 'none'} (updated ${clickupMergeJob?.updatedCount}); the task reads ${JSON.stringify(three)}`,
+  )
+
+  // ══ 11. A FILE THAT IS NOT DELIMITED TEXT ══════════════════════════════════
+  /*
+   * `found-5-oct/xlsx-read-as-text`: an .xlsx put in anyway (the picker's "All
+   * files", a drop) was read as text, its zip's bytes drawn as a column,
+   * offered for import, and the run failed leaving an empty space, project and
+   * list. The .xlsx here is a real one: this run's merge list, exported by the
+   * product itself.
+   */
+  console.log('\n▶ an .xlsx put into the spreadsheet import anyway')
+  const exported = await fetch(`${API}/tasks/list/${mergeList.data.id}/export?format=xlsx`, { headers: { authorization: `Bearer ${auth.accessToken}` } })
+  const XLSX = Buffer.from(await exported.arrayBuffer())
+  if (exported.status !== 200 || XLSX.subarray(0, 2).toString('latin1') !== 'PK') {
+    throw new Error(`could not export a real .xlsx to put in: ${exported.status}, ${XLSX.length} bytes`)
+  }
+  /** What the page did with the file named `name`: refused it, or took it (its name on the file line). */
+  const settledOn = async (name) => {
+    await waitUntil(
+      async () => (await page.getByTestId('import-sheet-not-text').count()) > 0 ||
+        ((await page.getByTestId('import-sheet-filename').filter({ visible: true }).innerText({ timeout: 1000 }).catch(() => '')) ?? '').includes(name),
+      { timeoutMs: 8000 },
+    )
+    return {
+      said: await page.getByTestId('import-sheet-not-text').filter({ visible: true }).innerText({ timeout: 3000 }).catch(() => ''),
+      kept: await page.getByTestId('import-sheet-filename').count(),
+      preview: await page.getByTestId('import-sheet-preview').isEnabled({ timeout: 3000 }).catch(() => null),
+    }
+  }
+  const PAGE_WORDS = /Accepted: \.csv · \.tsv · \.txt\. \.xlsx is not read — re-save the sheet as CSV first\./
+  /** A real CSV between two files, so the refusal read next is that file's and not the last one's. */
+  const chooseFine = async () => {
+    await page.getByTestId('import-sheet-file').setInputFiles({ name: `fine-${TAG}.csv`, mimeType: 'text/csv', buffer: Buffer.from(`Title\nFine ${TAG}\n`, 'utf8') }, { timeout: 10_000 })
+    await waitUntil(async () => (await page.getByTestId('import-sheet-not-text').count()) === 0, { timeoutMs: 8000 })
+  }
+  await page.getByTestId('import-sheet-file').setInputFiles({ name: `board-${TAG}.xlsx`, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: XLSX }, { timeout: 10_000 })
+  const byName = await settledOn(`board-${TAG}.xlsx`)
+  /*
+   * AND AN .xls WHOSE BYTES ARE TEXT: some tools save tab-separated text
+   * under an .xls name. Its first bytes say nothing, so only its name does —
+   * this one is the name rule's alone. (The .xlsx above is refused by its
+   * first bytes as well, and a real .xls by its own, below.)
+   */
+  await chooseFine()
+  const TEXT_XLS = Buffer.from(`Title\tStatus\nOld board ${TAG}\tDone\n`, 'utf8')
+  await page.getByTestId('import-sheet-file').setInputFiles({ name: `board-${TAG}.xls`, mimeType: 'application/vnd.ms-excel', buffer: TEXT_XLS }, { timeout: 10_000 })
+  const byOldName = await settledOn(`board-${TAG}.xls`)
+  chk(
+    PAGE_WORDS.test(byName.said) && byName.kept === 0 && byName.preview === false &&
+      PAGE_WORDS.test(byOldName.said) && byOldName.kept === 0 && byOldName.preview === false,
+    'an .xlsx or .xls chosen anyway is refused by its name, in the words under the picker, and nothing is offered: no file kept, no Preview',
+    `the .xlsx: the page said ${JSON.stringify(byName.said)}, kept ${byName.kept} file line(s), Preview enabled: ${byName.preview}; ` +
+      `the .xls: ${JSON.stringify(byOldName.said)}, kept ${byOldName.kept}, Preview enabled: ${byOldName.preview}`,
+  )
+
+  await chooseFine()
+  const previewsBefore = previewBodies.length
+  await page.getByTestId('import-sheet-file').setInputFiles({ name: `board-${TAG}.csv`, mimeType: 'text/csv', buffer: XLSX }, { timeout: 10_000 })
+  const byBytes = await settledOn(`board-${TAG}.csv`)
+  // Pressed only where it can be: a Preview the page offers would send the zip to the server.
+  if (byBytes.preview) await page.getByTestId('import-sheet-preview').click({ timeout: 5000 }).catch(() => {})
+  await waitUntil(async () => previewBodies.length > previewsBefore, { timeoutMs: 3000 })
+  chk(
+    PAGE_WORDS.test(byBytes.said) && byBytes.kept === 0 && byBytes.preview === false && previewBodies.length === previewsBefore,
+    'an .xlsx renamed .csv is refused by its first bytes, the same way, and no preview is asked of the server',
+    `the page said ${JSON.stringify(byBytes.said)}, kept ${byBytes.kept} file line(s), Preview enabled: ${byBytes.preview}; ${previewBodies.length - previewsBefore} preview request(s) sent`,
+  )
+
+  /*
+   * A LEGACY .xls IS NO ZIP: an OLE2 compound file, D0 CF 11 E0 A1 B1 1A E1
+   * and then NULs. A real one (written by xlwt) renamed .csv was taken, its
+   * preview drew five column names of binary, and its import failed (measured
+   * on lane 4). These are its first 512 bytes as a compound file begins them.
+   */
+  await chooseFine()
+  const XLS = Buffer.concat([Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), Buffer.alloc(504)])
+  const previewsBeforeXls = previewBodies.length
+  await page.getByTestId('import-sheet-file').setInputFiles({ name: `legacy-${TAG}.csv`, mimeType: 'text/csv', buffer: XLS }, { timeout: 10_000 })
+  const xlsByBytes = await settledOn(`legacy-${TAG}.csv`)
+  if (xlsByBytes.preview) await page.getByTestId('import-sheet-preview').click({ timeout: 5000 }).catch(() => {})
+  await waitUntil(async () => previewBodies.length > previewsBeforeXls, { timeoutMs: 3000 })
+  chk(
+    PAGE_WORDS.test(xlsByBytes.said) && xlsByBytes.kept === 0 && xlsByBytes.preview === false && previewBodies.length === previewsBeforeXls,
+    'a legacy .xls renamed .csv is refused by its first bytes too — the compound file’s signature — and no preview is asked of the server',
+    `the page said ${JSON.stringify(xlsByBytes.said)}, kept ${xlsByBytes.kept} file line(s), Preview enabled: ${xlsByBytes.preview}; ${previewBodies.length - previewsBeforeXls} preview request(s) sent`,
+  )
+
+  console.log('\n▶ a file still being read when a refused one replaces it')
+  /*
+   * A file is read after an await and then by a FileReader, so a large file
+   * chosen and replaced by one the page refused finished its read afterwards:
+   * the page said the second was refused and kept no file line, yet offered
+   * Preview — which sent the first file, 21 MB of it (measured on lane 4,
+   * three runs of three). `slow-…` is read 1.5 s late (the init script above).
+   */
+  await chooseFine()
+  const previewsBeforeSlow = previewBodies.length
+  const slowLanded = async () => Number(await page.evaluate(() => window.__slowReadsLanded ?? 0))
+  const slowBefore = await slowLanded()
+  await page.getByTestId('import-sheet-file').setInputFiles({ name: `slow-${TAG}.csv`, mimeType: 'text/csv', buffer: Buffer.from(`Title\nSlow ${TAG}\n`, 'utf8') }, { timeout: 10_000 })
+  const slowTaken = await waitUntil(
+    async () => ((await page.getByTestId('import-sheet-filename').filter({ visible: true }).innerText({ timeout: 1000 }).catch(() => '')) ?? '').includes(`slow-${TAG}.csv`),
+    { timeoutMs: 8000 },
+  )
+  await page.getByTestId('import-sheet-file').setInputFiles({ name: `replaced-${TAG}.csv`, mimeType: 'text/csv', buffer: XLSX }, { timeout: 10_000 })
+  const slowRead = await waitUntil(async () => (await slowLanded()) > slowBefore, { timeoutMs: 8000 })
+  const afterSlow = await settledOn(`replaced-${TAG}.csv`)
+  if (afterSlow.preview) await page.getByTestId('import-sheet-preview').click({ timeout: 5000 }).catch(() => {})
+  await waitUntil(async () => previewBodies.length > previewsBeforeSlow, { timeoutMs: 3000 })
+  chk(
+    slowTaken && slowRead && PAGE_WORDS.test(afterSlow.said) && afterSlow.kept === 0 && afterSlow.preview === false &&
+      previewBodies.length === previewsBeforeSlow,
+    'a file still being read when a refused one replaces it is not offered: no file line, no Preview, no preview request',
+    `the slow file was ${slowTaken ? '' : 'never '}taken and its read ${slowRead ? 'landed' : 'never landed'}; then the page said ${JSON.stringify(afterSlow.said)}, ` +
+      `kept ${afterSlow.kept} file line(s), Preview enabled: ${afterSlow.preview}; ${previewBodies.length - previewsBeforeSlow} preview request(s) sent`,
+  )
+
+  console.log('\n▶ the same .xlsx sent to the server, as the page would have read it')
+  const asText = new TextDecoder('utf-8').decode(XLSX)
+  const firstColumn = asText.split('\n')[0]
+  const xlsxPreview = await api(`/workspaces/${WT}/import/spreadsheet/preview`, { method: 'POST', body: { content: asText } })
+  // Mapped as its preview drew it, when it drew one: the zip's bytes, as one column, to Title.
+  const column = xlsxPreview.data?.headers?.[0] ?? firstColumn
+  const xlsxImport = await api(`/workspaces/${WT}/import/spreadsheet`, { method: 'POST', body: { content: asText, mapping: { [column]: 'title' }, targetProjectName: `Xlsx ${TAG}` } })
+  await jobOf(api, WT, 'spreadsheet', xlsxImport)
+  const xlsxLeft = {
+    jobs: xlsxImport.data?.jobId ? (await sql`select count(*)::int as n from clickup_import_jobs where id = ${xlsxImport.data.jobId}`)[0].n : 0,
+    spaces: (await sql`select count(*)::int as n from spaces where workspace_id = ${WT} and name = ${`Xlsx ${TAG}`}`)[0].n,
+  }
+  const SERVER_WORDS = 'Accepted: .csv · .tsv · .txt. .xlsx is not read — re-save the sheet as CSV first.'
+  chk(
+    xlsxPreview.status === 400 && xlsxPreview.message === SERVER_WORDS &&
+      xlsxImport.status === 400 && xlsxImport.message === SERVER_WORDS && xlsxLeft.jobs === 0 && xlsxLeft.spaces === 0,
+    'the server refuses an .xlsx’s content too — preview and import answer 400 in the page’s words — and makes nothing: no job row, no space',
+    `preview ${xlsxPreview.status} ${JSON.stringify(xlsxPreview.message)}; import ${xlsxImport.status} ${JSON.stringify(xlsxImport.message)}; ` +
+      `left behind: ${xlsxLeft.jobs} job row(s), ${xlsxLeft.spaces} space(s)`,
+  )
+
+  console.log('\n▶ the same legacy .xls sent to the server, as the page would have read it')
+  /*
+   * No zip, so the zip test passed it: as text its first line holds NULs,
+   * which no header row of delimited text does.
+   */
+  const xlsAsText = new TextDecoder('utf-8').decode(XLS)
+  const xlsPreview = await api(`/workspaces/${WT}/import/spreadsheet/preview`, { method: 'POST', body: { content: xlsAsText } })
+  const xlsColumn = xlsPreview.data?.headers?.[0] ?? xlsAsText.split('\n')[0]
+  const xlsImport = await api(`/workspaces/${WT}/import/spreadsheet`, { method: 'POST', body: { content: xlsAsText, mapping: { [xlsColumn]: 'title' }, targetProjectName: `Xls ${TAG}` } })
+  await jobOf(api, WT, 'spreadsheet', xlsImport)
+  const xlsLeft = {
+    jobs: xlsImport.data?.jobId ? (await sql`select count(*)::int as n from clickup_import_jobs where id = ${xlsImport.data.jobId}`)[0].n : 0,
+    spaces: (await sql`select count(*)::int as n from spaces where workspace_id = ${WT} and name = ${`Xls ${TAG}`}`)[0].n,
+  }
+  chk(
+    xlsPreview.status === 400 && xlsPreview.message === SERVER_WORDS &&
+      xlsImport.status === 400 && xlsImport.message === SERVER_WORDS && xlsLeft.jobs === 0 && xlsLeft.spaces === 0,
+    'the server refuses a legacy .xls’s content too — a NUL in its first line — preview and import answering 400 in the page’s words, and makes nothing',
+    `preview ${xlsPreview.status} ${JSON.stringify(xlsPreview.message)} (${xlsPreview.data?.headers?.length ?? 0} column(s) drawn); import ${xlsImport.status} ${JSON.stringify(xlsImport.message)}; ` +
+      `left behind: ${xlsLeft.jobs} job row(s), ${xlsLeft.spaces} space(s)`,
+  )
+
+  console.log('\n▶ a preview whose content is no text at all')
+  // A number is no zip and holds no NUL: it goes on to the parser, which finds no header row in it.
+  const numberPreview = await api(`/workspaces/${WT}/import/spreadsheet/preview`, { method: 'POST', body: { content: 123 } })
+  chk(
+    numberPreview.status === 400 && numberPreview.message === 'The file has no header row.',
+    'a preview whose content is a number, not text, answers 400 “The file has no header row.” — not a 500',
+    `the preview answered ${numberPreview.status} ${JSON.stringify(numberPreview.message)}`,
+  )
+
+  console.log('\n▶ a row holding a NUL')
+  /*
+   * Postgres refuses a NUL in a title, so that row fails — and its error,
+   * naming the title, then reached the job's jsonb, which refuses a NUL too:
+   * the whole run failed on its last write, in the raw words "unsupported
+   * Unicode escape sequence", with none of its good rows imported (measured on
+   * lane 4). What is written to the job row now holds no NUL, so the row
+   * fails alone, as any row the database refuses does.
+   */
+  const nulRow = await api(`/workspaces/${WT}/import/spreadsheet`, { method: 'POST', body: { content: `Title\nKept one ${TAG}\nBro\u0000ken ${TAG}\nKept two ${TAG}\n`, preset: 'generic', targetSpaceId: OPEN, targetProjectName: `Nul row ${TAG}` } })
+  const nulJob = await jobOf(api, WT, 'spreadsheet', nulRow)
+  const nulKept = (await sql`select title from tasks where title in (${`Kept one ${TAG}`}, ${`Kept two ${TAG}`}) order by title`).map((t) => t.title)
+  const nulErrors = nulJob?.result?.errors ?? []
+  chk(
+    nulJob?.status === 'completed' && nulJob?.createdCount === 2 && nulKept.length === 2 && nulErrors.length === 1 &&
+      nulErrors[0].startsWith(`Row 3 ("Bro\uFFFDken ${TAG}")`),
+    'a row holding a NUL fails alone: the job completes with the rows around it imported, and that row’s error is reported without the NUL',
+    `job ${nulJob?.status ?? 'none'} (${JSON.stringify(nulJob?.error ?? null)}, created ${nulJob?.createdCount}, errors ${JSON.stringify(nulErrors)}); kept: ${JSON.stringify(nulKept)}`,
+  )
+
+  console.log('\n▶ an import the database refuses at its last write')
+  /*
+   * A run that fails takes away what it made. Nothing a file can hold fails a
+   * run now — a row that fails, fails alone — so the database is made to refuse
+   * this run's last write, its "completed": a trigger on the job table, for
+   * this run's workspace alone, made before the import and dropped after it.
+   * That is the end the .xlsx came to, and a dropped connection or a full disk
+   * would come to; the run made a space, a project, a list, two tasks and a
+   * tag before it, and leaves none of them.
+   */
+  const REFUSE = `e2e_refuse_last_write_${stamp}`
+  if (!/^[0-9a-f-]{36}$/.test(WT)) throw new Error(`the run's workspace id is not an id: ${WT}`)
+  const dropRefusal = async () => {
+    await sql.unsafe(`drop trigger if exists ${REFUSE} on clickup_import_jobs`).catch(() => {})
+    await sql.unsafe(`drop function if exists ${REFUSE}()`).catch(() => {})
+  }
+  await sql.unsafe(`create function ${REFUSE}() returns trigger language plpgsql as $$ begin raise exception 'the database refused this run''s last write'; end $$`)
+  await sql.unsafe(`create trigger ${REFUSE} before update on clickup_import_jobs for each row when (new.status = 'completed' and new.workspace_id = '${WT}') execute function ${REFUSE}()`)
+  let failing = null
+  let failedJob = null
+  try {
+    failing = await api(`/workspaces/${WT}/import/spreadsheet`, { method: 'POST', body: { content: `Title,Tags\nKept ${TAG},Undone-${TAG}\nAlso kept ${TAG},\n`, preset: 'generic', targetProjectName: `Failed ${TAG}` } })
+    failedJob = await jobOf(api, WT, 'spreadsheet', failing)
+  } finally {
+    await dropRefusal()
+  }
+  const failedLeft = (await sql`
+    select (select count(*)::int from spaces where workspace_id = ${WT} and name = ${`Failed ${TAG}`}) as spaces,
+           (select count(*)::int from projects p join spaces s on s.id = p.space_id where s.workspace_id = ${WT} and p.name = ${`Failed ${TAG}`}) as projects,
+           (select count(*)::int from lists l join projects p on p.id = l.project_id where p.name = ${`Failed ${TAG}`}) as lists,
+           (select count(*)::int from tasks where title in (${`Kept ${TAG}`}, ${`Also kept ${TAG}`})) as tasks,
+           (select count(*)::int from labels where workspace_id = ${WT} and name = ${`Undone-${TAG}`}) as tags`)[0]
+  chk(
+    failing?.status === 201 && failedJob?.status === 'failed' && failedJob?.createdCount === 0 &&
+      /refused this run's last write/.test(failedJob?.error ?? '') &&
+      failedLeft.spaces === 0 && failedLeft.projects === 0 && failedLeft.lists === 0 && failedLeft.tasks === 0 && failedLeft.tags === 0,
+    'an import the database refuses at its last write ends failed and leaves nothing behind: no space, project, list, task or tag of it is there',
+    `the import answered ${failing?.status}, its job ${failedJob?.status ?? 'none'} (${JSON.stringify(failedJob?.error ?? null)}, created ${failedJob?.createdCount}); left behind: ${JSON.stringify(failedLeft)}`,
+  )
+
+  console.log('\n▶ …while a row the database refuses still fails alone')
+  /*
+   * Each row is written in a transaction of its own, so a row Postgres
+   * refuses is reported and the rest of the file is imported, as it always
+   * was. Year 0 is a date JavaScript reads and Postgres refuses ("date/time
+   * field value out of range").
+   */
+  const rowAlone = await api(`/workspaces/${WT}/import/spreadsheet`, { method: 'POST', body: { content: `Title,Due Date\nSaved one ${TAG},2026-10-10\nRefused ${TAG},0000-01-01\nSaved two ${TAG},2026-10-11\n`, preset: 'generic', targetSpaceId: OPEN, targetProjectName: `Row alone ${TAG}` } })
+  const rowAloneJob = await jobOf(api, WT, 'spreadsheet', rowAlone)
+  const rowAloneTasks = (await sql`select title from tasks where title in (${`Saved one ${TAG}`}, ${`Refused ${TAG}`}, ${`Saved two ${TAG}`}) order by title`).map((t) => t.title)
+  const rowAloneErrors = rowAloneJob?.result?.errors ?? []
+  chk(
+    rowAloneJob?.status === 'completed' && rowAloneJob?.createdCount === 2 && rowAloneErrors.length === 1 &&
+      /^Row 3 /.test(rowAloneErrors[0] ?? '') && rowAloneTasks.length === 2 && !rowAloneTasks.includes(`Refused ${TAG}`),
+    'a row the database refuses fails alone: the job completes with the rows around it imported and that row’s error reported',
+    `job ${rowAloneJob?.status ?? 'none'} (created ${rowAloneJob?.createdCount}, errors ${JSON.stringify(rowAloneErrors)}); tasks there: ${JSON.stringify(rowAloneTasks)}`,
+  )
+
+  // ══ 12. IMPORTS THAT RUN WHILE EVERYTHING ELSE DOES ═════════════════════════
+  /*
+   * Measured on lane 4 against a run written as ONE transaction: it held one
+   * of the API's ten pooled connections for the whole run and waited on
+   * another for each progress write — twelve imports at once held all ten,
+   * and every route of the API stopped answering until it was restarted; a
+   * task the run merged stayed locked until the run ended; and a tag it made
+   * was invisible to the tags route until then, which made the same tag in
+   * another case beside it. Each import below is long enough to be running
+   * still when it is asked about; the database is read directly, because the
+   * question is whether the API answers at all. A request here gives up
+   * after its own few seconds (its `signal`) rather than waiting on a stopped
+   * API, and a request nothing answered reads as a status of 0 (`noAnswer`).
+   */
+  const noAnswer = (err) => ({ status: 0, ok: false, data: null, message: `no answer: ${err?.message ?? err}` })
+  const longSheet = (head, first, rows, row) => [head, first, ...Array.from({ length: rows }, (_, i) => row(i))].join('\n') + '\n'
+  const jobNow = async (id) => (id ? (await sql`select status, processed from clickup_import_jobs where id = ${id}`)[0] ?? null : null)
+
+  console.log('\n▶ a tag a running import has made, asked for by the tags route while it runs')
+  const RACE = `Race-${TAG}`
+  const raceRun = await api(`/workspaces/${WT}/import/spreadsheet`, { method: 'POST', body: { content: longSheet('Title,Tags', `Race 0 ${TAG},${RACE}`, 2999, (i) => `Race ${i + 1} ${TAG},`), preset: 'generic', targetSpaceId: OPEN, targetProjectName: `Race ${TAG}` } })
+  // Until the import's first row is in — its tag is there to find, or the run is well past it — and if neither comes, the tags route is asked all the same.
+  await waitUntil(async () => {
+    const seen = await sql`select 1 from labels where workspace_id = ${WT} and lower(name) = lower(${RACE})`
+    return seen.length > 0 || ((await jobNow(raceRun.data?.jobId))?.processed ?? 0) >= 60
+  }, { timeoutMs: 3000 })
+  const raceAsked = await api(`/workspaces/${WT}/labels`, { method: 'POST', body: { name: RACE.toLowerCase(), color: '#22c55e' }, signal: AbortSignal.timeout(10_000) }).catch(noAnswer)
+  const raceThen = (await jobNow(raceRun.data?.jobId))?.status ?? null
+  const raceJob = await jobOf(api, WT, 'spreadsheet', raceRun, 120_000)
+  const raceTags = (await sql`select name from labels where workspace_id = ${WT} and lower(name) = lower(${RACE}) order by name`).map((l) => l.name)
+  const raceOn = await tagsOn(`Race 0 ${TAG}`)
+  chk(
+    raceThen === 'processing' && raceAsked.ok && raceAsked.data?.name === RACE && raceJob?.status === 'completed' &&
+      raceTags.length === 1 && raceOn.length === 1 && raceOn[0] === RACE,
+    'a tag a running import has made is the one the tags route finds, whatever its case, while the import is still running — no second tag beside it',
+    `the import was ${raceThen ?? 'nowhere'} when the tags route was asked; it answered ${raceAsked.status} with ${JSON.stringify(raceAsked.data?.name ?? null)}; ` +
+      `the import ended ${raceJob?.status ?? 'never'}; the workspace’s tags of that name: ${JSON.stringify(raceTags)}; the first row is tagged ${JSON.stringify(raceOn)}`,
+  )
+
+  console.log('\n▶ a task an import is merging, edited while the import runs')
+  const lockedId = await matched(`Locked ${TAG}`)
+  const lockRun = await api(`/workspaces/${WT}/import/spreadsheet`, { method: 'POST', body: { content: longSheet('Title,List', `Locked ${TAG},Merge ${TAG}`, 2999, (i) => `Filler ${i} ${TAG},Filler ${TAG}`), preset: 'generic', strategy: 'merge', targetSpaceId: OPEN, targetProjectName: `Lock ${TAG}` } })
+  // Its first row — the merge — is in once the run is well past it; if the run does not move, the edit is sent all the same.
+  await waitUntil(async () => ((await jobNow(lockRun.data?.jobId))?.processed ?? 0) >= 60, { timeoutMs: 3000 })
+  const editStart = Date.now()
+  const edit = await api(`/tasks/${lockedId}`, { method: 'PATCH', body: { title: `Locked, edited ${TAG}` }, signal: AbortSignal.timeout(15_000) }).catch(noAnswer)
+  const editMs = Date.now() - editStart
+  const lockThen = (await jobNow(lockRun.data?.jobId))?.status ?? null
+  const lockJob = await jobOf(api, WT, 'spreadsheet', lockRun, 120_000)
+  chk(
+    lockRun.status === 201 && lockThen === 'processing' && edit.status === 200 && editMs < 2000 && lockJob?.status === 'completed' && lockJob?.updatedCount === 1,
+    'a task an import has merged can be edited while the import runs on: the edit answers at once',
+    `the merge import answered ${lockRun.status} and was ${lockThen ?? 'nowhere'} when the edit answered ${edit.status} after ${editMs} ms; it ended ${lockJob?.status ?? 'never'} (updated ${lockJob?.updatedCount})`,
+  )
+
+  console.log('\n▶ twelve imports at once — more than the API holds connections')
+  const POOL_ROWS = 600
+  const poolRuns = await Promise.all(Array.from({ length: 12 }, (_, k) =>
+    api(`/workspaces/${WT}/import/spreadsheet`, { method: 'POST', body: { content: longSheet('Title', `Pool ${k}-0 ${TAG}`, POOL_ROWS - 1, (i) => `Pool ${k}-${i + 1} ${TAG}`), preset: 'generic', targetSpaceId: OPEN, targetProjectName: `Pool ${k} ${TAG}` }, signal: AbortSignal.timeout(20_000) }).catch(noAnswer)))
+  const poolIds = poolRuns.map((r) => r.data?.jobId).filter(Boolean)
+  const meStart = Date.now()
+  const meWhile = await api('/auth/me', { signal: AbortSignal.timeout(5000) }).catch(noAnswer)
+  const meMs = Date.now() - meStart
+  const poolJobs = async () => (poolIds.length ? await sql`select status, processed from clickup_import_jobs where id in ${sql(poolIds)}` : [])
+  // Until every job has ended — or none has moved for 20 s, which is a run that will not end.
+  let poolMoved = { at: Date.now(), processed: -1 }
+  await waitUntil(async () => {
+    const jobs = await poolJobs()
+    const processed = jobs.reduce((n, j) => n + (j.processed ?? 0), 0)
+    if (processed !== poolMoved.processed) poolMoved = { at: Date.now(), processed }
+    const ended = jobs.length === poolIds.length && jobs.every((j) => j.status === 'completed' || j.status === 'failed')
+    return ended || Date.now() - poolMoved.at > 20_000
+  }, { timeoutMs: 90_000 })
+  const poolEnd = (await poolJobs()).map((j) => j.status)
+  const poolEnded = poolEnd.length === poolIds.length && poolEnd.every((st) => st === 'completed' || st === 'failed')
+  /*
+   * AN API WHOSE IMPORTS HOLD ITS CONNECTIONS FOR EVER STOPS ANSWERING, AND
+   * NOTHING FROM HERE GIVES THEM BACK. Measured with the defect put back:
+   * ending the open transactions' backends from here did not bring the API
+   * back — it went on not answering until it was restarted. So this is the
+   * suite's last check, the teardown below waits on no lock for long, and the
+   * lane's API has to be restarted after it fails.
+   */
+  if (!poolEnded) console.log("  (the imports did not end and the API holds its connections: restart the lane's API after this run)")
+  const poolTasks = (await sql`select count(*)::int as n from tasks where title like ${`Pool %-% ${TAG}`}`)[0].n
+  chk(
+    poolRuns.every((r) => r.status === 201) && poolIds.length === 12 && poolEnded && poolEnd.every((st) => st === 'completed') &&
+      poolTasks === 12 * POOL_ROWS && meWhile.ok && meMs < 3000,
+    'twelve imports at once, more than the API holds connections, all complete — and the API answers while they run',
+    `started ${JSON.stringify(poolRuns.map((r) => r.status))}; their jobs ${poolEnded ? 'ended' : 'had stopped moving, unended'}: ${JSON.stringify(poolEnd)}; ` +
+      `${poolTasks} of ${12 * POOL_ROWS} tasks made; GET /auth/me while they ran answered ${meWhile.status} in ${meMs} ms`,
+  )
+
   await page.close()
 } catch (err) {
   failed += 1
   console.error('\n\x1b[31mSUITE ERROR\x1b[0m', err)
 } finally {
   if (sql) {
-    // The e2e database is shared; this run takes its own fixtures away with it.
-    await sql`delete from tasks where title like ${`%${TAG}%`}`.catch(() => {})
-    await sql`delete from lists where name like ${`%${TAG}%`}`.catch(() => {})
-    await sql`delete from projects where name like ${`%${TAG}%`}`.catch(() => {})
-    await sql`delete from spaces where name like ${`%${TAG}%`}`.catch(() => {})
+    // The fault section 11 put in, if the run ended inside it.
+    const REFUSE = `e2e_refuse_last_write_${TAG.replace(/[^a-z0-9]/g, '')}`
+    if ((await sql`select 1 from pg_proc where proname = ${REFUSE}`.catch(() => [])).length) {
+      await sql.unsafe(`drop trigger if exists ${REFUSE} on clickup_import_jobs`).catch(() => {})
+      await sql.unsafe(`drop function if exists ${REFUSE}()`).catch(() => {})
+    }
+    // The e2e database is shared; this run takes its own fixtures away with it —
+    // each statement waiting at most 10 s on a lock, which an API whose imports
+    // never ended holds for ever (section 12's last check).
+    const bounded = (statement) => sql.begin(async (t) => {
+      await t`set local lock_timeout = '10s'`
+      await statement(t)
+    }).catch(() => {})
+    await bounded((t) => t`delete from tasks where title like ${`%${TAG}%`}`)
+    await bounded((t) => t`delete from lists where name like ${`%${TAG}%`}`)
+    await bounded((t) => t`delete from projects where name like ${`%${TAG}%`}`)
+    await bounded((t) => t`delete from spaces where name like ${`%${TAG}%`}`)
     if (createdJobId) {
-      await sql`delete from clickup_import_jobs where id = ${createdJobId}`.catch(() => {})
+      await bounded((t) => t`delete from clickup_import_jobs where id = ${createdJobId}`)
     }
     await sql.end({ timeout: 5 }).catch(() => {})
   }

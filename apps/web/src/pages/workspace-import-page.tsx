@@ -18,6 +18,7 @@ import {
   type SheetJob,
   type SheetPreview,
 } from '../lib/imports-api'
+import { createPickTurns, isSheetFile } from '../lib/sheet-file'
 
 type ConflictStrategy = 'skip' | 'create' | 'merge'
 
@@ -316,6 +317,10 @@ function SpreadsheetImportPanel() {
   const [defaultListName, setDefaultListName] = useState('')
   const [strategy, setStrategy] = useState<ConflictStrategy>('skip')
   const [jobId, setJobId] = useState<string | null>(null)
+  // The last file chosen was not delimited text, and was not read (`isSheetFile`).
+  const [notText, setNotText] = useState(false)
+  // Whose read may land: the last file chosen, and no earlier one.
+  const [pickTurns] = useState(createPickTurns)
 
   const catalogue = useQuery({
     queryKey: ['sheet-import-sources', workspaceId],
@@ -383,12 +388,35 @@ function SpreadsheetImportPanel() {
     [catalogue.data, preset],
   )
 
-  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
+  /*
+   * A FILE THAT IS NOT DELIMITED TEXT IS REFUSED BEFORE IT IS READ
+   * (`found-5-oct/xlsx-read-as-text`): by its name and by its first bytes,
+   * in the words this card already shows under the picker. It was read with
+   * `readAsText` whatever it was — an .xlsx chosen through "All files" or
+   * dropped had its zip's bytes drawn as a column, offered for import, and
+   * failed. Refused, nothing of it is kept: no name, no content, no preview —
+   * and no earlier file's read that lands later either (`createPickTurns`).
+   */
+  async function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const input = e.target
+    const file = input.files?.[0]
     if (!file) return
+    const turn = pickTurns.next()
+    const isSheet = await isSheetFile(file, accepted)
+    if (!pickTurns.isLatest(turn)) return
+    if (!isSheet) {
+      setNotText(true)
+      setFilename('')
+      setContent('')
+      input.value = ''
+      return
+    }
+    setNotText(false)
     setFilename(file.name)
     const reader = new FileReader()
-    reader.onload = () => setContent(typeof reader.result === 'string' ? reader.result : '')
+    reader.onload = () => {
+      if (pickTurns.isLatest(turn)) setContent(typeof reader.result === 'string' ? reader.result : '')
+    }
     reader.readAsText(file)
   }
 
@@ -474,6 +502,11 @@ function SpreadsheetImportPanel() {
         <p className="text-xs text-muted-foreground" data-testid="import-sheet-accepted">
           {t('import.sheetAccepted', { list: accepted.join(' · ') })} {t('import.sheetNoXlsx')}
         </p>
+        {notText && (
+          <div data-testid="import-sheet-not-text" role="alert">
+            <ErrorBox message={`${t('import.sheetAccepted', { list: accepted.join(' · ') })} ${t('import.sheetNoXlsx')}`} />
+          </div>
+        )}
         {filename && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="import-sheet-filename">
             <FileText className="h-4 w-4" />

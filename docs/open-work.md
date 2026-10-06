@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 477 items: 36 open · 5 partly fixed · 382 closed, and 54 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 6 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 488 items: 42 open · 4 partly fixed · 388 closed, and 54 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 6 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -2139,7 +2139,7 @@ Checks:
   claim.
 - Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `create-modal-templates` 45, `task-values` 21, `task-creation-access` 6, `time-estimate` 13, `task-depth` 92.
 
-### `found-30-sep/spreadsheet-import-skips-task-rules` — open (visible bug, small; found closing `found-30-sep/a-task-starts-after-it-is-due`) · reproduced 5 October
+### `found-30-sep/spreadsheet-import-skips-task-rules` — **closed** (visible bug, small; found closing `found-30-sep/a-task-starts-after-it-is-due`) · reproduced 5 October
 
 **The spreadsheet import makes a second tag that differs only in case**
 
@@ -2159,6 +2159,22 @@ half stands.
 it with the `imports` suite, by SQL.
 
 *Triage, 5 October, after the revert:* partly reproduced on a lane. The spreadsheet import, and the ClickUp CSV import, still make a second tag that differs only in case ('urgent-X' beside 'Urgent-X') where the tags route finds the existing one. Its start-after-due write is no longer a defect, since every route now takes one. The ClickUp CSV import makes the same second tag (its `ensureLabel` matches exact case too). The skeptic reproduced the tag half by the merge path, and found two more defects in the same code, now counted: `found-5-oct/import-writes-into-another-workspace` and `found-5-oct/import-merge-resets-fields-the-file-lacks`. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 5 October (the tag half; the date half is no defect since the owner's decision of 1 October).* ClickUp holds no two tags that differ only in case: "Tags of tasks are currently forced to be lowercase, no matter what you write or rename it to" (feedback board, "Allow Tags to use capital letters", through a search excerpt). Rundesk's tags route and a task's `labelsByName` already find a tag whatever its case, and both importers' `ensureLabel` now do too: `lower(name) = lower(given)`, for the lookup and for the re-read after a conflicting insert.
+
+Measured on lane 4 (`probe-tags-merge.mjs`): before, with the workspace's "Urgent-X" (POST labels "urgent-x" answered with it), a sheet row tagged "urgent-X" made a second tag and a ClickUp row tagged "URGENT-x" a third, each tagging its task with its own; after, both rows are tagged "Urgent-X", no tag is made (labelsCreated 0) and the workspace holds one.
+
+Checks:
+- `imports` +2, one per importer, by SQL: red on HEAD's product code, green after (33/33 three times).
+- One test each in `spreadsheet-import.service.test.ts` and `clickup-import.service.test.ts`, reading the SQL the lookup sends.
+- `imports-25` and `-26` redden exactly their checks; `iss-7` and `ics-3` redden their tests.
+
+*Review fix, 6 October* (lane 4):
+- The ClickUp import made a tag cut to 60 characters but looked it up by the whole name. A 70-character tag imported again in another case made a twin differing only in case; imported again in the same case, it hit the twin's conflict and the tag was dropped (labelsCreated 1|1|0, the third task untagged). It now looks a tag up by the name in the file and by the name it is stored under, for the lookup and the re-read after a conflict. After: 1|0|0, one tag, all three tasks tagged.
+- A tag a running spreadsheet import makes is committed with its row, so the tags route finds it while the import goes on (when the run was briefly one transaction, it made "racetag-…" beside "RaceTag-…").
+Checks: `imports` +2 (a 70-character ClickUp tag; a tag asked for during a running import). Patches `imports-35`, `imports-43` (42/43 each); `imports-26` and `ics-3` re-aimed; unit claim `ics-4`.
+
+*Merged, 6 October,* into the main checkout (onto `687a51d`) with the batch's other builder's work, and run again there on lanes 2, 4 and 6: 20 suites, all green — `imports` 43, `view-writes-by-level` 20 and `view-visibility` 23 among them — and the API's 2033 unit tests and the web's 326, both typechecks clean.
 
 ### `found-30-sep/timeline-drags-refused-silently` — open (visible bug, small; found closing `found-30-sep/a-task-starts-after-it-is-due`) · reproduced 5 October
 
@@ -6070,7 +6086,7 @@ Break verdicts at `6a31a5f`, through `wt-break.sh`, which gave the lanes the stu
 
 *Closed:* one reading for a lane argument, `lane_list` (lane-env.sh): "3" is lane three, "9 10" is lanes nine and ten, and anything but a lane from 1 to 10 is refused with exit 2. `fleet-up.sh` and `fleet-restart.sh` both read their lanes through it; `fleet-restart.sh` had its own copy of the rule. Found closing it: `sweep-until-clean.sh` heals its down lanes with `fleet-up.sh "${down[*]}"`. With one lane down, say 3, that was a count: lanes 1 to 3 dropped and restored, including lane 1. The README's `fleet-up.sh 4` is `fleet-up.sh "1 2 3 4"`. The new `check-lane-lists.sh` holds the readings and the two scripts' wiring, and catches 5 of 5 mutations. Against the scripts before the change it failed on every one. In preflight and CI.
 
-### `commit-log/log-a5b6b69-1` — partly-fixed, small · reproduced 5 October
+### `commit-log/log-a5b6b69-1` — **closed**, small · reproduced 5 October
 
 **The long CI e2e job is still not split, and the suite count in its comment is stale**
 
@@ -6081,6 +6097,8 @@ Break verdicts at `6a31a5f`, through `wt-break.sh`, which gave the lanes the stu
 *Partly fixed, 24 September:* the count is kept with each suite added (160 in the long job, `grep` over it agrees). The leftover paragraph arguing for 120 is gone, as is a second copy of the paragraph on splitting. The limit is 210. The split waits for a working pipeline.
 
 *Triage, 5 October:* partly reproduced on a lane. The long CI job is still unsplit, but it passed in 108 of its 300 minutes; what remains wrong is its comment, which says 253 suites (there are 256) and gives three different durations, none of them the measured 108 minutes. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 6 October.* The defect left was the comment. It now gives the job's count as `ci.yml` holds it (258 `node test/e2e/` steps; the count history ends "→ 256 → 257 → 258"), the estimate from it (about 284 minutes against the limit of 300), and the measured time beside it: the job took 108 of the 141 minutes of the full run that passed on 1 October (36906129570). The job's opening comment said "45 to 85 minutes"; it now says 108 of 141. The paragraph that deferred the split "until October" now says the split is the owner's call (it shortens the wall clock and not the bill), not a defect. The count was measured with a YAML read of the job's steps (258) and `check-suites-registered.mjs` (264 suites, each run by `ci.yml`).
 
 ### `commit-log/log-c592545-1` — **closed**
 
@@ -8136,7 +8154,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 20, each reproduced
+## Found by the triage, 5 October, and since — 31, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -8179,7 +8197,7 @@ The new suite `clip-library-access`, 10 checks, against the lane's real store: t
 
 *Merged, 6 October,* into the main checkout with the batch's other two builders' work (fields, clips, sign-in and sockets), and run again there on lanes 2, 5 and 7: 47 suites, all green — `password-hash-time`, which compares timings, failed once at a load of 13 on four cores and passed 4/4 twice on a quiet lane — and the API's 1984 unit tests and the web's 320, both typechecks clean.
 
-### `found-5-oct/readers-change-shared-views` — open (security, small; found by the triage beside `found-25-sep/view-only-individual-permissions`) · reproduced 5 October
+### `found-5-oct/readers-change-shared-views` — **closed** (security, small; found by the triage beside `found-25-sep/view-only-individual-permissions`) · reproduced 5 October
 
 **A reader of a list renames, reconfigures, deletes and re-defaults the views everybody shares**
 
@@ -8193,6 +8211,104 @@ The cause: `views.service.ts` `create()` asks no level and makes the first view 
 
 *To close:* research ClickUp's rule for who may create, change and delete a shared view, and who may set a list's default view (its view-only individual permission "create views" is off by default). Ask the location's level on every shared-view write, keep a reader's private views theirs, offer in the menu only what the reader may do, and check it in a suite.
 
+*Closed, 5 October* (worktree off `68b89c1`, lane 6; reviewed, and fixed after review):
+
+ClickUp (help centre, read through search excerpts; the help centre is not reachable from here):
+- "Views feature availability and limits": "To create views, you must have Edit or Full edit permissions to the List, Subfolder, Folder, or Space where the view is created."
+- "Manage individual permissions for view only users": view-only users and guests have four individual permissions, and "Add/remove tags and create views are deactivated by default."
+- "Manage Custom Role permissions": the Create Views permission "permits users to create and edit views on locations", and "when toggled off, members can still create personal views".
+- "Permissions in detail": Edit "Permits the person to make changes to a location or item … The person isn't able to delete the location or item". Comment is "to add and reply to comments"; View only gives "read-only access".
+- "Delete a view": "Guests with Full access to a Folder, Subfolder, or List can delete views in it."
+- "Protect a view" and "Create and share a private view": a person given Full edit on a view "can save changes, protect and unprotect, share, and delete the view"; Limited "can only view, duplicate, and favorite the view".
+- "Set a default view": "On the Business Plan and above, owners and admins can set default views for everyone in specific Workspace locations"; "any guest, member, or admin can set their own personal default".
+- "Pin a view": "Everyone, including guests with full edit permissions, can pin the views they have access to."
+
+What changed:
+- **Every write to a shared view asks the level on that view** (`views/view-write.ts`).
+  - The chain is the one the view's share panel already read (`SharesService.locate`): a share on the view itself first, then the list, its project, its folder and the space. It is read through `resolveSpaceLevel`, as every write rule reads it (`WithinStep` takes `view`).
+  - Changing a view (its name, layout, pin, position, who sees it) asks Edit.
+  - Deleting one asks Full edit, as deleting a task or a location does here.
+  - Making a view, making a private one shared, and changing the list's default ask the list's level, Edit.
+  - A refusal is a 403 in the level's words: "This space's default permission is "View only", which does not allow changing its shared views" (… "deleting its shared views", … "adding a shared view", … "changing its default view"). For a share, it is the share's words: "What is shared with you here is "View only", …".
+  - A protected view keeps its own rule on top: its maker and the workspace's managers.
+- **A private view stays its maker's at any level.** They make, rename, reconfigure, pin and delete it. Making it shared asks the list's level, and it is never the list's default.
+- **One default per list.**
+  - Making a view and Make default each run in one transaction under a lock on the list (`lockListViews`).
+  - The list's first shared view becomes its default; private views are not counted.
+  - A private view that the old rule made a list's default gives the default up to that first shared view.
+- **The page offers only what the reader may do.** `GET /lists/:id/views` gives each view `mayChange`, `mayDelete`, `mayMakeDefault`, `mayChangeVisibility` and `mayMakePrivate` (`viewOffers`, the write rule's answers). The list's capabilities give `views`.
+  - The tab's ⋯ offers Update, Rename, Make default and Delete by those answers, with Delete only at Full edit. It is not drawn when it would offer nothing.
+  - + View and Save view follow the list's answer or the view's.
+  - The Customize panel draws Pin, Private, Protect and Set as default disabled where the reader may not use them, and Private disabled on the list's default. Autosave stays the reader's own.
+  - Make default is no longer offered on a private view.
+  - A refused write from the page says why, in the server's words.
+
+*Measured* on lane 6 (probes adapted from the triage's `views-by-readers.mjs` and from the review's):
+- Before (`68b89c1`), as on 5 October:
+  - The view-only member and the guest renamed, reconfigured and deleted the admin's views, and made their own the default (200).
+  - The member's first view on an empty list was saved shared and as the default.
+  - The task-title control was refused (403). A member at Comment did the same as the readers.
+- The review of the first build measured more:
+  - A member held to View on one view by a share on it renamed and deleted it (200). One given Full edit on a view of a view-only list was refused (403). The share panel read both cases the other way.
+  - A member at Edit, refused trashing a task (403), deleted the list's default view for good (200).
+  - Six views made at once on an empty list left 4, 6 and 6 defaults; three Make defaults at once left up to 3.
+  - The panel offered Private on the default view (400 when pressed).
+  - A private default left by the old rule sat beside the first shared view as a second default.
+- After:
+  - The readers are refused every write (403, in the level's words), and the views are as the admin left them. Their own private views are theirs.
+  - Comment is refused the same.
+  - Edit makes, renames, pins and defaults, and is refused deleting (403); so is an Edit guest. Full edit deletes, for a member and a guest alike.
+  - The View share refuses (403, in the share's words). The Full edit share renames and deletes that view (200) and does not choose the list's default (403).
+  - The list keeps one default however many ask at once, and Private is not offered on the default.
+  - The task-title control is unchanged.
+
+The suite `view-writes-by-level` has 20 checks:
+- the readers on the admin's views, and making one (read back by SQL);
+- a reader's own private view; the empty list's default;
+- Comment and Edit; deleting at Full edit, by a member and by a guest;
+- what the API offers: the list's `views`, and each view's offers;
+- a View share on one view; a Full edit share on one view; a workspace manager's offers and rename;
+- six views made at once; Make default pressed at once; a private default giving way (its fixture written by SQL);
+- the page: the view-only list (+ View, ⋯, Save view); the member's own private view's ⋯; the Customize panel for a reader; the Edit list's ⋯ (no Delete) and a rename from it; the panel on a view of their own, with Pin and Set as default saved; Private not offered once it is the default; and a rename refused in the server's words after the space drops to View only while the page is open.
+
+Results:
+- `68b89c1`'s API and web: 1/20. The one passing check guards against the panel locking for everybody.
+- The first build: 10/20.
+- Final: 20/20, four runs on lane 6.
+
+Break patches. Each was measured on lane 6 against a 20/20 baseline and reddens exactly what it claims.
+- e2e `vwl-1..18` and `vwl-28..42`:
+  - re-aimed at moved lines: `vwl-1`, `-4`, `-5`, `-7`, `-9`, `-13`;
+  - claims reworded to follow the reworded checks: `vwl-2`, `-6`, `-17`, `-18`.
+- unit `vwl-19..27` and `vwl-43..50`, on `view-write.test.ts` (16 tests). Each reddens its test; re-aimed: `vwl-20`, `-26`, `-27`.
+- `view-visibility-1..6`, re-run on the final rule: each reddens its claim.
+
+Regression on lane 6, all green: `view-visibility` 23, `list-save-view` 7, `list-page-levels` 9, `list-customize` 37, `list-card-cover` 26, `list-view-controls` 50, `list-export` 33, `paywall-sites` 30, `space-features` 12, `task-depth` 92, `space-wizard` 23, `team-view` 13, `ui-sweep` 107, `video-regression` 94.
+- API unit tests 1961/1961; web 321/321; both typechecks clean.
+- In CI: the postgres-harnesses comment counts 258 after the merge (257 in the worktree).
+
+*Not changed, recorded (the owner's to decide):*
+- **Who sets a list's default for everyone.**
+  - ClickUp: owners and admins, on the Business Plan and above, with a personal default for everybody else. "Setting a default view for everyone will also make that view required."
+  - Here, Make default is the only default and asks Edit on the view and on the list.
+  - Personal defaults, required views and plan gating are unbuilt.
+  - The workspace dashboard's default asks `dashboard.workspace_default.manage`, an admin's by default.
+- **Pin.** ClickUp's text says everyone can pin the views they can open, and guests with Full edit. Here a pin is one flag that reorders every reader's strip, so it asks Edit on the view: a view-only member is refused, and an Edit guest pins.
+- **Whether + View should offer a reader a private view.** ClickUp lets members make personal views without the Create Views permission. Here a reader makes, renames and deletes their own private views through the API, but the page offers them none.
+- **A guest's individual "create views" switch** (`found-25-sep/view-only-individual-permissions`). A guest at Edit makes shared views by the location's level.
+- **A colleague's private view answers 404 "View not found".**
+  - An id naming nothing answers 404 "Resource not found", so the 404 does not hide that the view exists.
+  - The owner's 1 October rule is 403 with its reason.
+  - Changing it reverses four `view-visibility` checks.
+- **A share on a view does not reach every rule.** It gives nothing on a protected view to somebody who is not its maker or a manager, gives no protect or unprotect (those are its maker's and the managers'), and does not open a private view. ClickUp's Full edit on a view does all three.
+- **Required views.** ClickUp: "You can't delete a required view." Here the list's default can be deleted at Full edit, which leaves the list with no default.
+
+The line in `found-25-sep/list-page-offers-refused-edits` ("Saved views … change what the reader sees, not the list") now holds only for saved filters and private views.
+
+*Found beside it:* `found-6-oct/autosave-switch-saves-nothing`, `found-6-oct/a-guest-shared-one-task-told-nothing-is-shared`, `found-6-oct/verify-refuses-a-lane-restarted-in-its-builds-second`.
+
+*Merged, 6 October,* into the main checkout (onto `687a51d`) with the batch's other builder's work, and run again there on lanes 2, 4 and 6: 20 suites, all green — `imports` 43, `view-writes-by-level` 20 and `view-visibility` 23 among them — and the API's 2033 unit tests and the web's 326, both typechecks clean.
+
 ### `found-5-oct/default-list-files-into-an-archived-list` — open (visible bug, small; found by the triage beside `found-24-sep/planner-default-list-read-by-nothing`) · reproduced 5 October
 
 **A task made by /task, a chat message or the AI lands in an archived Default list, where nobody can find it**
@@ -8203,7 +8319,7 @@ The cause: in `tasks.service.ts` `defaultListFor`, the chosen list is asked only
 
 *To close:* research what ClickUp does when a Default list is archived (fall back to the personal list, or refuse and say so) and whether a task can be made in an archived list at all. Then do the same in `defaultListFor` and the create gate, and check it in a suite.
 
-### `found-5-oct/xlsx-read-as-text` — open (visible bug, small; found by the triage beside `commit-log/log-601eacc-2` and `ledger-rows/row-816`) · reproduced 5 October
+### `found-5-oct/xlsx-read-as-text` — **closed** (visible bug, small; found by the triage beside `commit-log/log-601eacc-2` and `ledger-rows/row-816`) · reproduced 5 October
 
 **An .xlsx put into the spreadsheet import is read as text, offered for import, and fails leaving an empty space behind**
 
@@ -8212,6 +8328,48 @@ The cause: in `tasks.service.ts` `defaultListFor`, the chosen list is asked only
 The cause: `workspace-import-page.tsx` `onFileChange` reads any file with `readAsText` and checks neither its name nor its content; `spreadsheet-import.service.ts` parses any string as delimited text, makes the space and project outside a transaction, and writes an error holding a NUL into the job's jsonb, which Postgres refuses. Its own comment says the UI asks for CSV "rather than accepting an .xlsx it would then fail to read". The document import refuses a .docx by its name.
 
 *To close:* refuse a file that is not delimited text, by its name and by its first bytes (a zip begins `PK`), before anything is made, in the words the page already uses; make a failed import leave nothing behind; check both in a suite. Reading .xlsx is the separate feature in `ledger-rows/row-816`.
+
+*Closed, 5 October.* ClickUp's Spreadsheets Importer reads .xls, .xlsx, .csv, .xml, .json, .tsv and .txt (help centre, through search excerpts); Rundesk reads delimited text only, and reading .xlsx stays the feature `ledger-rows/row-816`. What is closed is the defect: a file that is not delimited text is refused before anything is made, and a failed import leaves nothing.
+
+- The page (`isSheetFile`, `lib/sheet-file.ts`) checks a chosen file's name, which must be one of the server's `acceptedExtensions`, and its first eight bytes, which must not be a zip's signature (.xlsx, .ods) or a legacy .xls's compound-file signature (D0 CF 11 E0 A1 B1 1A E1). It checks both before reading the file. It refuses in the two sentences already under the picker and keeps no name, content or preview. Only the last file chosen is read into the page (`createPickTurns`): a read still in progress when another file is chosen, refused or not, is dropped. No new strings.
+- The spreadsheet routes receive content only. Preview and start therefore check its first bytes: a zip (`isZipContent`), or a first line holding a NUL, which no header row of delimited text has (`headerHoldsNul`). Either is answered 400 in the page's words before parsing. Content that is not a string goes on to the parser and gets 400 'The file has no header row.', as it did before.
+- Nothing written to the job row holds a NUL (`storable` writes each one as U+FFFD). A NUL in one row's title used to reach the job's jsonb inside that row's error, and the whole run failed on its last write with the raw message 'unsupported Unicode escape sequence'. That row now fails alone, like any row the database refuses.
+- A run that fails takes away what it made (`undoRun`): its project, and by the foreign keys every list, status and task in it; its space when it made one; and the tags it made that label nothing. A merge into a task that was already there stays and is counted. Each list, and each row with its people and tags, is written in its own transaction that waits only on its own writes. A row that fails leaves nothing half-written, and the rest of the file goes on. The run is not one transaction: that design was tried first and measured on lane 4. It held one pooled connection for the whole run while each progress write waited for another. Twelve imports at once held all ten connections, and no route answered until the API was restarted (none of the 7,200 tasks committed). A merged task stayed locked until the run ended: a PATCH waited 5.4 s, and nine PATCHes stopped the API. A tag the run made could not be seen until then, so the tags route made a second tag in another case.
+
+Measured on lane 4 (`probe-xlsx-ui.mjs`, `probe-xlsx-api.mjs`, the triage's .xlsx):
+- before: the page took an .xlsx and an .xlsx renamed .csv ("triage-board.xlsx (1.5 KB)"), Preview enabled, and drew one column of zip bytes over 3 rows; over the API preview and import answered 201, and the job failed "unsupported Unicode escape sequence", leaving a space, a project and an empty "Imported Tasks" list; a CSV with a NUL in its second row failed with its first row imported, leaving space, project, list and task.
+- after: the page refuses both in those words, Preview disabled, no request sent; preview and import answer 400 in the same words, no job row; the NUL file's job fails with created 0 and nothing left.
+
+Checks:
+- `imports` +5: the page by name (an .xlsx, and an .xls, which is no zip), the page by first bytes (an .xlsx renamed .csv), the server, a failed import leaving nothing, and a row Postgres refuses still failing alone (a year-0 date; green before as after: it guards the savepoints). On HEAD's product code the first four were red.
+- `sheet-file.test.ts` (4) is new; `spreadsheet-import.util.test.ts` +2; `spreadsheet-import.service.test.ts` 4.
+- `imports-29..33` redden exactly their checks; `isu-1`, `isu-2`, `iss-1`, `iss-2`, `iss-4`, `iss-5` and `sfl-1..4` redden their tests. `imports-10`, `-11` and `-13` were anchored on lines the transaction re-indented; re-aimed, each reddens its claim.
+
+Run on lane 4 with the four import items: `imports` 33/33 three times, `data-transfer-keys` 7/7, `doc-import` 16/16, `sidebar-sections` 25/25, `space-create-menu` 32/32.
+
+*Review fix, 6 October* (lane 4). The first build ran each import in one transaction; the review measured what that cost, and the fixer replaced it with the design above. Measured:
+- Before, on the batch as first built (lane 4): a real legacy .xls renamed .csv was accepted by the page, previewed as 5 columns of binary, and imported (201) to a job that failed with 'unsupported Unicode escape sequence'. A 20 MB CSV replaced 5 ms later by a refused zip left Preview enabled, and Preview sent the 21 MB file (3 runs of 3). A NUL in one title failed the whole run and took its good rows with it. A preview with content 123 answered 500. Twelve imports at once and a merge with nine edits stopped the API, as above.
+- After: the .xls is refused by the page and by both routes (400, no job row, no space). The superseded read is dropped (Preview disabled, 3 of 3). The NUL row fails alone (completed, created 2). Content 123 gets 400. Twelve imports of 600 rows complete (7,200 tasks) while /health answers in 4–7 ms. An edit of a merged task answers in 33 ms during the run.
+
+Checks: imports goes 20 → 33 (builder) → 43. This item's checks:
+- by name (the .xls fixture is now text named .xls);
+- an .xlsx renamed .csv;
+- a legacy .xls renamed .csv;
+- a superseded slow read;
+- the server refusing the .xlsx and the .xls;
+- a number as content;
+- a NUL row failing alone;
+- a run whose last write the database refuses ends failed and leaves nothing (a trigger on clickup_import_jobs for the run's workspace refuses its 'completed');
+- a refused date row failing alone;
+- twelve imports at once;
+- an edit during a merge.
+On the builder's product code, the 10 new checks were red and the last-write check was green. After, 43/43 three times.
+Units: sheet-file.test.ts 6; spreadsheet-import.util.test.ts 24; spreadsheet-import.service.test.ts 12 (its stand-in now models transactions, deletes and the pool).
+Patches: imports-29..33 and imports-36..42 each redden their own check (-30 also reddens the slow-read check, -31 the .xls server check, -33 the NUL-row check). imports-41 stops the lane's API, which must be restarted after it. imports-10, -11 and -13 were re-aimed again. Unit claims isu-1..8, iss-1..12, sfl-1..6.
+
+Found beside it: `found-6-oct/clickup-import-leaves-a-failed-run-behind`, `found-6-oct/doc-import-answers-500-to-a-binary-file`, `found-6-oct/import-start-answers-500-to-non-text`, `found-6-oct/verify-timeout-ends-no-hung-suite`, `found-6-oct/verify-refuses-a-lane-restarted-in-its-builds-second`.
+
+*Merged, 6 October,* into the main checkout (onto `687a51d`) with the batch's other builder's work, and run again there on lanes 2, 4 and 6: 20 suites, all green — `imports` 43, `view-writes-by-level` 20 and `view-visibility` 23 among them — and the API's 2033 unit tests and the web's 326, both typechecks clean.
 
 ### `found-5-oct/timeline-press-moves-dates` — open (visible bug, small; found by the triage beside `resume-defects/resume-5`) · reproduced 5 October
 
@@ -8247,7 +8405,7 @@ The cause: `calendar-sync.service.ts` `pushTask` loops over every connection and
 
 *To close:* push a task only into connections whose owner may read it now, and stop a connection when its owner leaves the workspace; check both in a suite with the store-and-stub harness (no real calendar). Which lists push at all is the Automations feature, `ledger-rows/row-1962`.
 
-### `found-5-oct/import-writes-into-another-workspace` — open (security, HIGH; found by the triage beside `found-30-sep/spreadsheet-import-skips-task-rules`) · reproduced 5 October
+### `found-5-oct/import-writes-into-another-workspace` — **closed** (security, HIGH; found by the triage beside `found-30-sep/spreadsheet-import-skips-task-rules`) · reproduced 5 October
 
 **A spreadsheet import writes a project, a list and tasks into another workspace's space**
 
@@ -8257,7 +8415,26 @@ The cause: `spreadsheet-import.service.ts` takes `dto.targetSpaceId` as given an
 
 *To close:* research where ClickUp's importers may put what they import (a space of the workspace being imported into, where the importer may create). Before anything is written, refuse a target space of another workspace, and one the importer may not create in (`assertCanCreateInSpace`), in both importers; check it in the `imports` suite by SQL (nothing written).
 
-### `found-5-oct/import-merge-resets-fields-the-file-lacks` — open (visible bug, small; found by the triage beside `found-30-sep/spreadsheet-import-skips-task-rules`) · reproduced 5 October
+*Closed, 5 October.* ClickUp's importers put what they import into a location of the Workspace being imported into: "On the Import Destination page, from the Select location dropdown, select a Space, Folder, or List" (help centre, "Use the Spreadsheets Importer", through search excerpts), and importing is the owner's and admins', or a member's whose custom role grants Importing ("Import and export feature availability and limits"). Nothing was found on what the importer must hold at that location.
+
+So both importers now ask, before anything is written, the job row included (`assertImportTarget`, `clickup-import/import-target.ts`): a malformed id is 400 "Malformed space id", an id naming nothing 404 "Space not found", a space of another workspace 403 "That space is not in this workspace" (the owner's rule of 1 October: a refusal says why), and then what putting a project into a space asks elsewhere, `assertCanPlaceIn` — a space the importer can see, and the space's create gate — as applying a template into a space does.
+
+Measured on lane 4 (`probe-security.mjs`, the triage's probe with the ClickUp import and a member added):
+- before: org-admin, no member of W2, imported from W1 into W2's space: 201 twice, both jobs completed, and the space held two projects, each with an "Imported Tasks" list and a task by org-admin, listed to W2's admin; a member granted workspace.import imported into a view-only space and into a private space they cannot open, 201 four times, four projects made; a space id naming nothing answered 201 and its job failed on the foreign key.
+- after: 403 "That space is not in this workspace" twice and nothing in W2; the member 403 "This space's default permission is "View only", which does not allow adding a project" twice and 403 "You do not have access to where this project would go" twice, nothing made; an id naming nothing 404 "Space not found"; no job row from any refused request.
+
+Checks:
+- `imports` had 20 checks and has 33; four are this item's: each importer naming another workspace's space and one naming nothing; a member in a view-only space, beside an import into an open space that goes through; a member in a private space. On HEAD's product code the final suite read 21/33 with these four red; after, 33/33 three times on lane 4.
+- `import-target.test.ts` (5) is new, and one test each in `spreadsheet-import.service.test.ts` (new) and `clickup-import.service.test.ts`.
+- `imports-20..24` redden what they name (20 and 21 also the view-only and private checks, 22 both foreign checks, 23 the private check too, 24 that one alone); `itg-1..5`, `iss-3` and `ics-1` redden their tests.
+
+*Review fix, 6 October* (lane 4): the space's workspace is compared with the route's as Postgres compares ids, whatever their case. With the workspace written in capitals in the address, both importers had refused that workspace's own space with 403 "That space is not in this workspace", which was untrue; after, 201. `imports` +1; patch `imports-34` (42/43); `imports-22` and `itg-3` re-aimed; unit claim `itg-6`.
+
+For the owner (recorded, not built): whether a member granted `workspace.import` alone may make projects and spaces through an import (`POST /projects` refuses such a member, while their import into a space they may add to makes a project there, and an import naming no space makes a space without `space.create` being asked); and a platform super admin importing into a private space of a workspace they are not in (refused by the container rule, as applying a template is). Found beside it: `found-6-oct/import-previews-tell-what-private-places-hold`, `found-6-oct/a-guest-who-may-import-makes-a-space`.
+
+*Merged, 6 October,* into the main checkout (onto `687a51d`) with the batch's other builder's work, and run again there on lanes 2, 4 and 6: 20 suites, all green — `imports` 43, `view-writes-by-level` 20 and `view-visibility` 23 among them — and the API's 2033 unit tests and the web's 326, both typechecks clean.
+
+### `found-5-oct/import-merge-resets-fields-the-file-lacks` — **closed** (visible bug, small; found by the triage beside `found-30-sep/spreadsheet-import-skips-task-rules`) · reproduced 5 October
 
 **An import's Merge sets a matched task's status and priority to their defaults when the file has neither column**
 
@@ -8266,6 +8443,26 @@ The cause: `spreadsheet-import.service.ts` takes `dto.targetSpaceId` as given an
 The cause: the merge writes `.set({status: r.status, priority: r.priority})` (`spreadsheet-import.service.ts`), where `mapStatus(undefined)` is "todo" and `normalizePriority(undefined)` is "normal".
 
 *To close:* research what ClickUp's import does to a matched task's fields the file does not carry; write only the fields the file maps, and check by SQL that a merge without those columns leaves them.
+
+*Closed, 5 October.* ClickUp's spreadsheet importer has no merge into existing tasks at all: updating tasks from a file is an open request on its feedback board ("Bulk Upload to Update Existing Tasks via Excel", "Ability to export a List and then re-upload into that same List with updated data", through search excerpts), and "Incoming fields not mapped to a ClickUp field will be excluded from the import" (help centre, "Fields supported by the Spreadsheets importer"). So the item's rule stands: a merge writes the fields the file maps.
+
+- The spreadsheet merge writes `mergeSet(row, mapping)` (`spreadsheet-import.util.ts`): status (with its category) and priority only when a column maps them, and the description and dates, as before, when the row holds them.
+- The ClickUp CSV import's merge had the same reset (measured below). `parseClickUpCsv` now says which of Status and Priority the file carries (`carries`). `mergeSetOf` writes Status and Priority only when the file has the column. It writes the description whenever the file has a Description column, so an empty cell clears it as it did before, and the due date when its cell holds one.
+
+Measured on lane 4 (`probe-tags-merge.mjs`, the triage's merge probe):
+- before: "two", In progress and High, merged from a sheet with Title and List only came out To do (category open) and Normal; put back and merged by the ClickUp import from Task Name and List only, To do and Normal, its category left in_progress.
+- after: both merges leave In progress and High; the description a file carries is still written.
+
+Checks:
+- `imports` +2, a merge per importer from a file with a Description and no Status or Priority column, read back by SQL: red on HEAD's product code, green after (33/33 three times).
+- `spreadsheet-import.util.test.ts` +3, `clickup-csv.util.test.ts` +3 (its empty-file assertion now names `carries`), one test each in `spreadsheet-import.service.test.ts` and `clickup-import.service.test.ts`.
+- `imports-27` and `-28` redden exactly their checks; `isu-3..5`, `icu-1..3`, `iss-6` and `ics-2` redden their tests.
+
+What a merge writes for an empty cell in a column the file does carry is the owner's to decide, for both importers. The spreadsheet merge writes the default for an empty mapped Status or Priority cell and leaves an empty description or date alone. The ClickUp merge writes an empty description. Both behave as before.
+
+Found beside it: `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change` (security), `found-6-oct/clickup-merge-writes-a-status-without-its-category`.
+
+*Merged, 6 October,* into the main checkout (onto `687a51d`) with the batch's other builder's work, and run again there on lanes 2, 4 and 6: 20 suites, all green — `imports` 43, `view-writes-by-level` 20 and `view-visibility` 23 among them — and the API's 2033 unit tests and the web's 326, both typechecks clean.
 
 ### `found-5-oct/years-below-100-read-back-wrong` — open (visible bug, small; found by the triage reproducing `found-30-sep/sheet-dates-write-as-typed`) · reproduced 5 October
 
@@ -8360,6 +8557,94 @@ ClickUp: "When you remove someone from your ClickUp Workspace, the person immedi
 *Evidence, 6 October, lane 2, three runs alike (`twotab-probe.mjs`, on the build that closes `found-30-sep/an-open-socket-outlives-its-session`):* two tabs open; the person signed out and back in from the first. The second tab's socket ended with the old session, as it now must, but its requests carried on with the new session's cookie, so no 401 led it to refresh, and it heard no event until reloaded. Before that closure the socket stayed connected on the ended session, which was the security defect.
 
 *To close:* research how ClickUp's other tabs follow a sign-in; open a tab's socket again when the session it follows changes (another tab's sign-in), and check it with two tabs.
+
+### `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change` — open (security, small; found closing `found-5-oct/import-merge-resets-fields-the-file-lacks`) · reproduced 6 October
+
+**An import's merge rewrites tasks its importer may not change, or even open**
+
+*Evidence, 6 October, lane 4, on the build that closes the import items (`probe-found.mjs`):* a member granted `workspace.import` was refused `PATCH` of a view-only space's task (403 "This space's default permission is "View only", which does not allow changing its tasks") and `GET` of a private list's task (403 "This list is private"). Their spreadsheet import with strategy merge and no target space, its rows naming those lists and titles with Status Done and Priority Low, answered 201; the job completed with 2 updated, and both tasks became Done and Low. The merge matches existing tasks by list name and title across the whole workspace when no space is named (`loadExistingTaskIndex`) and asks nothing of them; with a space named, a private list inside it is still reached.
+
+*To close:* a merge updates only a task its importer may change (the task write rule), and matches only among tasks they may open; check both refusals by SQL in `imports`.
+
+### `found-6-oct/import-previews-tell-what-private-places-hold` — open (security, small; found reviewing `found-5-oct/import-writes-into-another-workspace`) · reproduced 6 October
+
+**Both import previews tell any member or guest whether a task with a given list and title exists in a private space or list**
+
+*Evidence, 6 October, lane 4, on the final build:* a member and a guest without `workspace.import` got duplicates 1 from the spreadsheet preview and from the ClickUp preview for a private space's task and a private list's task, and 0 for a control, while `GET` of those tasks answered 403. The preview routes carry `WorkspaceMemberGuard` alone, and both previews build the merge's index over the whole workspace with no read filter.
+
+*To close:* ask `workspace.import` of the previews as of the import, and count duplicates only among tasks the asker may open; check it in `imports`.
+
+### `found-6-oct/a-guest-who-may-import-makes-a-space` — open (security, small; found reviewing `found-5-oct/import-writes-into-another-workspace`) · reproduced 6 October
+
+**A guest granted the import permission by a custom role imports, and with no space named makes a new public space**
+
+*Evidence, 6 October, lane 4, on the final build:* the guest's `POST /spaces` answered 403 "Missing required permission: space.create" and `POST /projects` 403 "This is not shared with you"; their import naming no space answered 201 and left a public space, created by nobody, holding their project and tasks. The ClickUp import did the same. ClickUp: "Free Forever guests, View only guests, Permission controlled guests, Limited members, and Limited members view only cannot import data into a Workspace" (help centre, "Import and export feature availability and limits", read through search excerpts).
+
+*To close:* refuse an import to a guest, whatever their role grants; whether a member's `workspace.import` alone may make spaces and projects through an import is the owner's to decide (recorded with the import items). Check the guest's refusal in `imports`.
+
+### `found-6-oct/clickup-merge-writes-a-status-without-its-category` — open (visible bug, small; found closing `found-5-oct/import-merge-resets-fields-the-file-lacks`) · reproduced 6 October
+
+**The ClickUp CSV merge writes a task's status and leaves its category, so a Done task still counts as in progress**
+
+*Evidence, 6 October, lane 4, on the final build:* a task In progress merged from "Task Name,List,Status" with Done became status done while `status_category` stayed in_progress; the spreadsheet merge of the same row stamps closed. `mergeSetOf` never wrote the category.
+
+*To close:* write the status with its category, as the spreadsheet merge does, and check it by SQL in `imports`.
+
+### `found-6-oct/clickup-import-leaves-a-failed-run-behind` — open (visible bug, small; found closing `found-5-oct/xlsx-read-as-text`) · reproduced 6 October
+
+**A ClickUp CSV import that fails leaves the space, project, list and tasks it had made**
+
+*Evidence, 6 October, lane 4, on the final build:* `POST import/clickup` with a NUL in the second row answered 201; the job failed "unsupported Unicode escape sequence" with 1 created, and its space, project, "Imported Tasks" list and the first row's task stayed. The spreadsheet import no longer does this (`undoRun`, `storable`).
+
+*To close:* give the ClickUp import the spreadsheet import's undo and NUL handling, and check a failed run leaves nothing.
+
+### `found-6-oct/doc-import-answers-500-to-a-binary-file` — open (visible bug, small; found reviewing `found-5-oct/xlsx-read-as-text`) · reproduced 6 October
+
+**The Document import reads any file named .md as text, and a binary one answers 500**
+
+*Evidence, 6 October, lane 4:* an .xlsx's bytes and a legacy .xls's bytes, each sent as notes.md, made `POST /workspaces/:ws/docs/import` answer 500 ("unsupported Unicode escape sequence" in the log), and no doc was made. The docs controller and the import panel check only the name.
+
+*To close:* refuse content that is not text, by its first bytes, in the page's own words, as the spreadsheet import now does; check it in `doc-import`.
+
+### `found-6-oct/import-start-answers-500-to-non-text` — open (visible bug, small; found reviewing `found-5-oct/xlsx-read-as-text`) · reproduced 6 October
+
+**Both import start routes answer 500 to content that is not a string**
+
+*Evidence, 6 October, lane 4:* the spreadsheet start with content 123, `{a:1}` or true, and the ClickUp start with csv 123, answered 500 (`dto.content?.trim()` throws); the ClickUp preview answers 201 to the same bodies. Older than the import items.
+
+*To close:* validate the body (a string) and answer 400 in the page's words, on all four routes; check it in `imports`.
+
+### `found-6-oct/verify-refuses-a-lane-restarted-in-its-builds-second` — open (test tooling, small; found by two builders of 5 October) · reproduced 6 October
+
+**`verify.sh` refuses a lane restarted in the same second as its build stamp, as a build older than its API**
+
+*Evidence, 5–6 October, lanes 4 and 6:* `build-api.sh` touches the stamp and restarts at once; when the restart falls in the stamp's second, `verify.sh` answers "REFUSING — the API on 3026 started at 23:32:16, before the build at 23:32:17" (exit 7). It compares `ps -o lstart` (whole seconds, from the boot time) with the stamp's time. It happened on the first of three restarts made without a pause, and on none of about 35 made with two seconds between.
+
+*To close:* compare at the resolution both clocks share (or stamp the build before the restart by more than that), and add the case to the lane self-checks.
+
+### `found-6-oct/verify-timeout-ends-no-hung-suite` — open (test tooling, small; found closing `found-5-oct/xlsx-read-as-text`) · reproduced 6 October
+
+**A suite whose teardown hangs outlives `verify.sh`'s `timeout 900`**
+
+*Evidence, 6 October, lane 4:* a suite whose teardown blocked on database locks started at 00:57 and was still running at 01:19; restarting lane 4's API released it. `timeout` sends SIGTERM alone, which the hung suite did not act on.
+
+*To close:* `timeout -k` (a kill after the term), and a self-check that a suite ignoring SIGTERM is ended.
+
+### `found-6-oct/autosave-switch-saves-nothing` — open (visible bug, small; found closing `found-5-oct/readers-change-shared-views`) · reproduced 6 October
+
+**The "Autosave for me" switch saves nothing**
+
+*Evidence, 5 October, lane 6 (`autosave-probe.mjs`):* as the admin, the switch turned on for a saved view (200, and the panel shows it on); the grouping changed to priority; six seconds later the Save view chip was still up, SQL still read the view's grouping as status, and after a reload the control read status. The switch stores `task_view_prefs.autosave`, and nothing in the web reads it, though its tooltip says it "will automatically save any layout changes you make to this view".
+
+*To close:* research ClickUp's view autosave; save a changed layout for whoever has the switch on (and may change the view), and check it by SQL.
+
+### `found-6-oct/a-guest-shared-one-task-told-nothing-is-shared` — open (visible bug, small; found reviewing `found-5-oct/readers-change-shared-views`) · reproduced 5 October
+
+**A guest whose share is one task in a list is refused every list-level write with "Nothing here is shared with you"**
+
+*Evidence, 5 October, lane 6:* making a shared view, renaming the admin's view, making a task in the list and renaming the list all answered the identical 403 "Nothing here is shared with you, and a guest changes only what is shared with them", though a task in that list is shared with them. The sentence is the guest-default branch of `assertSpaceLevel`, reached because list-level writes ask within the list, its project and folder, and the guest's grant sits below the list.
+
+*To close:* say what is true ("Only a task here is shared with you…") where the guest holds a share below the location; check it in a suite.
 
 ## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
 

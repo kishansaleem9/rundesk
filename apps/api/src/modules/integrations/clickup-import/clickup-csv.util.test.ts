@@ -8,6 +8,7 @@ import {
   dupKey,
   mapStatus,
   mapPriority,
+  mergeSetOf,
 } from './clickup-csv.util'
 
 /**
@@ -72,7 +73,7 @@ describe('parseClickUpCsv — custom-field detection', () => {
   })
 
   it('handles an empty / header-only CSV', () => {
-    assert.deepEqual(parseClickUpCsv(''), { rows: [], headers: [], customFieldColumns: [] })
+    assert.deepEqual(parseClickUpCsv(''), { rows: [], headers: [], customFieldColumns: [], carries: { status: false, priority: false } })
     assert.deepEqual(parseClickUpCsv('Task Name,Status').rows, [])
   })
 })
@@ -166,5 +167,32 @@ describe('buildDropdownOptions + dupKey + mappers', () => {
     assert.equal(mapPriority(undefined), 'normal')
     assert.equal(mapPriority(''), 'normal')
     assert.equal(mapPriority('banana'), 'normal')
+  })
+})
+
+/*
+ * `found-5-oct/import-merge-resets-fields-the-file-lacks`, in the ClickUp
+ * import: a merge writes the columns the file carries, and no other.
+ */
+describe('what a ClickUp merge writes', () => {
+  it('says which of status and priority the file carries a column for', () => {
+    assert.deepEqual(parseClickUpCsv('Task Name,List\ntwo,Alpha\n').carries, { status: false, priority: false })
+    assert.deepEqual(parseClickUpCsv('Task Name,Status,Priority\ntwo,done,high\n').carries, { status: true, priority: true })
+    assert.deepEqual(parseClickUpCsv('Task Name\n').carries, { status: false, priority: false })
+  })
+
+  it('writes no status and no priority from a file with neither column', () => {
+    const { rows, carries } = parseClickUpCsv('Task Name,List,Description\ntwo,Alpha,new words\n')
+    const set = mergeSetOf(rows[0], carries)
+    assert.equal('status' in set, false)
+    assert.equal('priority' in set, false)
+    assert.equal(set.description, 'new words')
+  })
+
+  it('writes them when the file carries them', () => {
+    const { rows, carries } = parseClickUpCsv('Task Name,Status,Priority\ntwo,in progress,urgent\n')
+    const set = mergeSetOf(rows[0], carries)
+    assert.equal(set.status, 'in_progress')
+    assert.equal(set.priority, 'urgent')
   })
 })
