@@ -9,6 +9,7 @@
 # an invitation for its account, so the checks that stand on a change ending it
 # redden too.
 #
+# RE-AIMED 6 October: the change keeps the session the caller's access token names as well (`found-30-sep/the-callers-session-is-named-by-its-refresh-token`).
 # Reddens: sign-in-and-password:
 #   "a change made as a browser makes it (its cookies and the CSRF header) signs out the account’s other sessions and keeps the browser’s: the other session’s refresh is refused 401, the browser’s answered 200"
 #   "a change by a client naming its session in the body (currentRefreshToken) keeps it and signs out the other two: its refresh is answered 200, the other sign-in’s and the sign-up’s are refused 401, and the change says it revoked 2"
@@ -17,17 +18,8 @@
 #   "a session that has ended claims no invitation for its account: the claim reads its token as nobody’s and is refused 403 \"Account already exists\", and the account joins nothing"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/users/users.service.ts'
-a = (
-    "      return tx\n"
-    "        .update(sessions)\n"
-    "        .set({ isRevoked: true })\n"
-    "        .where(and(eq(sessions.userId, userId), eq(sessions.isRevoked, false), ...kept.map((token) => ne(sessions.refreshToken, token))))\n"
-    "        .returning({ id: sessions.id })\n"
-)
-b = (
-    "      void kept\n"
-    "      return [] as Array<{ id: string }>\n"
-)
+a = "      return tx\n        .update(sessions)\n        .set({ isRevoked: true })\n        .where(\n          and(\n            eq(sessions.userId, userId),\n            eq(sessions.isRevoked, false),\n            ...kept.map((token) => ne(sessions.refreshToken, token)),\n            // The caller's own session, by the id its access token names (`found-30-sep/the-callers-session-is-named-by-its-refresh-token`).\n            ...(keepSessionId ? [ne(sessions.id, keepSessionId)] : []),\n          ),\n        )\n        .returning({ id: sessions.id })\n"
+b = '      void kept\n      void keepSessionId\n      return [] as Array<{ id: string }>\n'
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

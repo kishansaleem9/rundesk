@@ -662,7 +662,12 @@ export class AuthService {
     }
   }
 
-  async listSessions(userId: string, currentRefreshToken?: string | null) {
+  /**
+   * THIS DEVICE IS THE SESSION THE CALLER'S ACCESS TOKEN NAMES (`currentSessionId`, its `sid`),
+   * or the one a refresh token passed names. The refresh token alone was asked, and a page
+   * reloaded from its cookies holds none in memory: no row was this device (`found-30-sep/the-callers-session-is-named-by-its-refresh-token`).
+   */
+  async listSessions(userId: string, currentRefreshToken?: string | null, currentSessionId?: string | null) {
     const rows = await this.db
       .select({
         id: sessions.id,
@@ -690,8 +695,9 @@ export class AuthService {
         expiresAt: row.expiresAt,
         createdAt: row.createdAt,
         isCurrent:
-          Boolean(currentRefreshToken) &&
-          (row.refreshToken === hashedCurrent || row.refreshToken === currentRefreshToken),
+          (Boolean(currentSessionId) && row.id === currentSessionId) ||
+          (Boolean(currentRefreshToken) &&
+            (row.refreshToken === hashedCurrent || row.refreshToken === currentRefreshToken)),
       }))
   }
 
@@ -706,7 +712,7 @@ export class AuthService {
     return { revoked: true }
   }
 
-  async revokeOtherSessions(userId: string, currentRefreshToken?: string | null) {
+  async revokeOtherSessions(userId: string, currentRefreshToken?: string | null, currentSessionId?: string | null) {
     const userSessions = await this.db
       .select({ id: sessions.id, refreshToken: sessions.refreshToken })
       .from(sessions)
@@ -717,8 +723,9 @@ export class AuthService {
     const idsToRevoke = userSessions
       .filter(
         (s) =>
-          !currentRefreshToken ||
-          (s.refreshToken !== hashedCurrent && s.refreshToken !== currentRefreshToken),
+          // The caller's own, by the session its access token names, is kept as well.
+          s.id !== currentSessionId &&
+          (!currentRefreshToken || (s.refreshToken !== hashedCurrent && s.refreshToken !== currentRefreshToken)),
       )
       .map((s) => s.id)
     for (const id of idsToRevoke) {

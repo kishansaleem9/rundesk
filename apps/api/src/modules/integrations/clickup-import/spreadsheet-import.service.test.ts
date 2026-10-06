@@ -188,14 +188,20 @@ describe('SpreadsheetImportService — what is refused before anything is writte
     assert.deepEqual(committed, [])
   })
 
-  it('a preview of content that is no text at all answers 400 “The file has no header row.”, as it did — not a TypeError', async () => {
+  // No text is no file (`found-6-oct/import-start-answers-500-to-non-text`): the import's `.trim()` threw, a 500.
+  it('a preview or an import of content that is no text at all answers 400 in the page’s words — not a TypeError', async () => {
     const { db } = makeDb()
     const svc = serviceOn(db)
     for (const content of [123, { a: 1 }, true]) {
       await assert.rejects(
         () => svc.previewSheet('ws-1', IMPORTER, { content: content as any }),
-        (e: unknown) => e instanceof BadRequestException && e.message === 'The file has no header row.',
-        `content ${JSON.stringify(content)}`,
+        (e: unknown) => e instanceof BadRequestException && e.message === NOT_DELIMITED_TEXT,
+        `the preview of ${JSON.stringify(content)}`,
+      )
+      await assert.rejects(
+        () => svc.startSheetImport('ws-1', IMPORTER, { content: content as any, mapping: { a: 'title' } }),
+        (e: unknown) => e instanceof BadRequestException && e.message === NOT_DELIMITED_TEXT,
+        `the import of ${JSON.stringify(content)}`,
       )
     }
   })

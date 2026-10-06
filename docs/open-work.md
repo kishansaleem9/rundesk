@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 511 items: 34 open · 4 partly fixed · 416 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 6 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 512 items: 24 open · 4 partly fixed · 427 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 6 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -2357,7 +2357,7 @@ Found while closing it: `found-30-sep/comment-says-a-leaving-menu-keeps-its-esca
 
 *Triage, 5 October:* reproduced on a lane. A person-paced double-click on the task menu's Merge or Convert row still opens the dialog and shuts it again (7/7 rounds on lane 7); what the second press should do is still the owner's call after ClickUp research. Evidence: `docs/triage-2026-10-05.md`.
 
-### `found-30-sep/favorite-toggle-races-itself` — open (behaviour, small; found closing `found-30-sep/menu-items-take-a-press-while-closing`) · reproduced 5 October
+### `found-30-sep/favorite-toggle-races-itself` — **closed** (behaviour, small; found closing `found-30-sep/menu-items-take-a-press-while-closing`) · reproduced 5 October
 
 **Two favourite toggles sent together can both pin**
 
@@ -2366,6 +2366,16 @@ Found while closing it: `found-30-sep/comment-says-a-leaving-menu-keeps-its-esca
 *To close:* make the toggle one statement or one serialised transaction, and check that two toggles sent together leave the entity as it was.
 
 *Triage, 5 October:* reproduced on a lane. Two favourite toggles sent together both answer favorited:true and leave the item pinned in 25 of 30 rounds on lane 7, because toggle is a read then a write with no transaction. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 6 October* (lane 5). The toggle reads and writes in one transaction that first takes a lock for the person, the item's type and its id (`pg_advisory_xact_lock`), so two toggles in flight together take turns: the second reads what the first left, and undoes it.
+
+Measured on lane 5 with the extended `lookup-read-access` suite: before, on the build these fixes went onto, every one of twenty pairs sent at once answered pinned twice and left the list pinned (8 of 9, the new check red); after, each pair answered pinned once and unpinned once, and none moved the list (9 of 9 on lane 5, and again in the regression sweep on lane 4).
+
+Checks:
+- `lookup-read-access` 8 → 9: twenty pairs of toggles, each pair sent at once on one list; each answers pinned once and unpinned once, and none leaves the list moved.
+- Patch `lra-13` (the toggle takes no lock) reddens it.
+
+Regression on lanes 2, 4, 5, 6 and 7: the 34 suites the six fixes of this batch touch (`admin-audit-page`, `comment-plus-menu`, `data-transfer-keys`, `field-writes-by-level`, `file-exports`, `full-edit-levels`, `gantt-controls`, `goals-page`, `guest-canvas-scope`, `guest-chat-scope`, `guest-create-menu`, `guest-invitations`, `guest-read-scope`, `guest-space-level`, `guest-task-edits`, `guest-task-making`, `imports`, `list-export`, `local-dates`, `login-workspace-binding`, `lookup-read-access`, `menu-reopen`, `panel-collapse`, `realtime-access-ends`, `refused-as-forbidden`, `report-export-key`, `session-in-the-browser`, `sign-in-and-password`, `task-attachments`, `task-field-create`, `task-menu-favorite-archive`, `timeline-dates`, `view-visibility` and `view-writes-by-level`), 517 checks, all green.
 
 ### `found-30-sep/comment-says-a-leaving-menu-keeps-its-escape` — **closed** (stale doc, small; found closing `found-30-sep/leaving-menu-takes-the-next-escape`)
 
@@ -2806,7 +2816,7 @@ Checks:
 Found while building it: `found-30-sep/an-open-socket-outlives-its-session`, `found-30-sep/the-callers-session-is-named-by-its-refresh-token` and `found-30-sep/loading-states-reads-the-clip-page-loading`.
 - Merged here onto `6f8e02c` and run again on lane 3: `sign-in-and-password` 29, `session-in-the-browser` 3, `auth-route-limits` 22, `password-hash-time` 4, the socket handshake's `chat-realtime-access` 6, `call-realtime-access` 2, `workspace-read-access` 30 and `guest-chat-scope` 7, `credential-reads` 11, `guest-invitations` 2, `settings-depth` 62 and `menu-reopen` 26, all green, 204 checks; `loading-states` 25/26, its known failure (`found-30-sep/loading-states-reads-the-clip-page-loading`).
 
-### `found-30-sep/email-lookups-read-the-whole-table` — open (performance, small; found closing `found-30-sep/sign-in-reads-the-email-as-typed`) · reproduced 5 October
+### `found-30-sep/email-lookups-read-the-whole-table` — **closed** (performance, small; found closing `found-30-sep/sign-in-reads-the-email-as-typed`) · reproduced 5 October
 
 **Every lookup by email reads the whole `users` table**
 
@@ -2815,6 +2825,16 @@ Found while building it: `found-30-sep/an-open-socket-outlives-its-session`, `fo
 *To close:* an index on `lower(email)`, declared in the schema with its migration (`check-schema-declares-migrations`); a unique one once the accounts that differ only in case are folded. `rundesk_v3` holds twelve such pairs, every one made by a probe, a BEFORE run or a break patch (below); production's count is unknown and is the first thing to read.
 
 *Triage, 5 October:* reproduced on a lane. Every sign-in still does a full sequential scan of `users` (seq_scan +1 per login on lane 1, 4.6 ms against 0.28 ms through the index), because no index on lower(email) exists. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 6 October* (lanes 2 and 5). An index on `lower(email)`, `users_email_lower_idx` (migration `0172_users_email_lower_index.sql`, declared in the schema beside `users_email_unique`), so every lookup by email (`common/sql/same-email.ts`) reads the index. Not a unique one: the accounts that differ only in case are still to be folded, and production's count of them is still the first thing to read.
+
+Measured: on lane 5 with the extended `sign-in-and-password` suite, before, the plan of the sign-in lookup was a sequential scan of `users` even with sequential scans priced out (33 of 34, the new check red); after, a bitmap index scan on `users_email_lower_idx` (34 of 34). On lane 2's 3,826 accounts, EXPLAIN ANALYZE of the same lookup took 3.3–3.9 ms without the index (a sequential scan, six runs) and 0.07–0.15 ms with it (twelve runs). The index was made on every lane's database; CI's comes from the migration.
+
+Checks:
+- `sign-in-and-password` 33 → 34: a lookup by email, in any case, is planned through the index on `lower(email)`, not a scan of `users`.
+- No patch can take an index out of a lane's database, so it was broken by hand: with the index dropped on lane 2 the check failed, the plan a sequential scan of `users` (33 of 34), and it passed once the index was made again. And `verify.sh` refuses a lane whose database lacks the index ("missing: index users … lower(email)"), as it does any index the schema declares.
+
+Regression on lanes 2, 4, 5, 6 and 7: the 34 suites the six fixes of this batch touch (`admin-audit-page`, `comment-plus-menu`, `data-transfer-keys`, `field-writes-by-level`, `file-exports`, `full-edit-levels`, `gantt-controls`, `goals-page`, `guest-canvas-scope`, `guest-chat-scope`, `guest-create-menu`, `guest-invitations`, `guest-read-scope`, `guest-space-level`, `guest-task-edits`, `guest-task-making`, `imports`, `list-export`, `local-dates`, `login-workspace-binding`, `lookup-read-access`, `menu-reopen`, `panel-collapse`, `realtime-access-ends`, `refused-as-forbidden`, `report-export-key`, `session-in-the-browser`, `sign-in-and-password`, `task-attachments`, `task-field-create`, `task-menu-favorite-archive`, `timeline-dates`, `view-visibility` and `view-writes-by-level`), 517 checks, all green.
 
 ### `found-30-sep/an-accepted-invitation-sets-no-cookies` — **closed** (visible bug, small; found closing `found-30-sep/password-change-unthrottled`)
 
@@ -2946,7 +2966,7 @@ For the owner: the interval re-check is one of the two ways "To close" offered, 
 
 *Left:* nothing keeps a suite from deleting by membership again; `madeAccount` and the sweep already remove a member's own organization with the age and ownership rules these cleanups lack, so the three could give theirs up.
 
-### `found-30-sep/the-callers-session-is-named-by-its-refresh-token` — open (visible bug, small; found closing `found-30-sep/revoked-sessions-keep-their-access-tokens`) · reproduced 5 October
+### `found-30-sep/the-callers-session-is-named-by-its-refresh-token` — **closed** (visible bug, small; found closing `found-30-sep/revoked-sessions-keep-their-access-tokens`) · reproduced 5 October
 
 **The sessions list marks no device as this one after a reload, and a client that names no session is signed out by its own password change**
 
@@ -2958,6 +2978,18 @@ For the owner: the interval re-check is one of the two ways "To close" offered, 
 *To close:* name the caller's session by the access token's `sid` in the sessions list (`isCurrent`), "Sign out other sessions" and the password change, the refresh token in the body or cookie as well where one is given; check that a reloaded profile page marks its own session and keeps it through "Sign out other sessions", and that a Bearer client's change keeps its own session.
 
 *Triage, 5 October:* reproduced on a lane. On lane 7 the sessions list marks no session current unless the page passes its refresh token (so none after a reload), and a Bearer client that changes its password without naming its session is signed out (201 revoked:3, then 401 on read and refresh). Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 6 October* (lane 5). The caller's session is the one its access token names: `JwtStrategy` passes the token's `sid` on with the person, and the sessions list marks that session as this device, while "Sign out other sessions" and a password change keep it — beside the session a refresh token in the body or the cookie names, as before.
+
+Measured on lane 5 with the extended `sign-in-and-password` suite: before, on the build these fixes went onto, the list read by a browser's cookies alone marked none of its 3 sessions as this device, and read by the access token none either; a Bearer client that changed its password naming no session got 201 `{"ok":true,"revoked":2}` and was then refused 401 (31 of 33, both new checks red); after, both reads mark the same one session, and the client reads on while its other session is refused 401 (33 of 33 on lane 5, then 34 of 34 with the index's check, and again in the regression sweep on lane 5).
+
+Checks:
+- `sign-in-and-password` +2: the sessions list read by cookies alone marks one session as this device, the one its access token names; a client that names no session keeps its own through its own password change, and its other session is refused 401.
+- `auth.service.test.ts` +2; `jwt.strategy.test.ts`, `auth.controller.test.ts` and `users.controller.test.ts` ask for the session id.
+- Patches: `sip-69` (the list asks only a refresh token) and `sip-76` (the list is not told the caller's session) redden the list's check; `sip-72` (a password change keeps only a refresh token's session) and `sip-77` (a password change is not told the caller's session) the change's; `sip-73` (the token's session is not read) both. Unit claims `sip-70`, `sip-71` (signing out the others keeps only a refresh token's session), `sip-74`, `sip-75` and `sip-78`.
+- Re-aimed at the lines as they read now: `sip-19`, `sip-20` and `sip-50`. And three older patches stopped breaking anything: `sip-21` (the caller's session is revoked too) and `sip-22` (a browser's cookie is not read) went green on this build, 34 of 34, because the session the access token names kept what each took away, and `sip-49` ("Sign out other sessions" reads the body alone) would have. Each now takes away both, and each reddens its checks again (`sip-21` its 3, `sip-22` and `sip-49` theirs).
+
+Regression on lanes 2, 4, 5, 6 and 7: the 34 suites the six fixes of this batch touch (`admin-audit-page`, `comment-plus-menu`, `data-transfer-keys`, `field-writes-by-level`, `file-exports`, `full-edit-levels`, `gantt-controls`, `goals-page`, `guest-canvas-scope`, `guest-chat-scope`, `guest-create-menu`, `guest-invitations`, `guest-read-scope`, `guest-space-level`, `guest-task-edits`, `guest-task-making`, `imports`, `list-export`, `local-dates`, `login-workspace-binding`, `lookup-read-access`, `menu-reopen`, `panel-collapse`, `realtime-access-ends`, `refused-as-forbidden`, `report-export-key`, `session-in-the-browser`, `sign-in-and-password`, `task-attachments`, `task-field-create`, `task-menu-favorite-archive`, `timeline-dates`, `view-visibility` and `view-writes-by-level`), 517 checks, all green.
 
 ### `found-30-sep/sw-api-cache-reads-the-menu-box-once` — open (suite, small; found closing `found-30-sep/password-hash-holds-the-event-loop`) · reproduced 5 October
 
@@ -3179,7 +3211,7 @@ Found while closing it:
 - `found-30-sep/task-cover-second-board-reads-early`
 - Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `private-object-urls` 13, `list-export` 33, `file-exports` 9, `task-attachments` 33, `attach-on-create` 14.
 
-### `found-30-sep/export-names-worked-out-twice` — open (visible bug, small; found closing `found-30-sep/list-export-saved-as-list-csv`) · reproduced 5 October
+### `found-30-sep/export-names-worked-out-twice` — **closed** (visible bug, small; found closing `found-30-sep/list-export-saved-as-list-csv`) · reproduced 5 October
 
 **The workspace, members, tasks and report exports are still saved under names the page works out, which differ from the server's**
 
@@ -3193,6 +3225,17 @@ Found while closing it:
 *To close:* name each file once, on the server, with `downloadName`, and save under the header, as the list and doc exports now do. Where the page must add something the server cannot know, such as the reader's local date, say so in the code. Then check the saved names.
 
 *Triage, 5 October:* reproduced on a lane. The JSON, tasks CSV, members CSV and report-builder PDF exports are still saved under names the page works out, which differ from the server's header names (measured on lane 7); the audit export's dated name differs by design. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 6 October* (lane 5). Each file is named once, by the server, and saved under its header. Settings' Export JSON, Export tasks CSV and the members' Export CSV pass no name of their own, and `downloadFilePost` takes the name from `Content-Disposition` when it is given none, as `downloadFile` does. The custom report's CSV and PDF are named after the report on the server (`downloadName`, the list and doc exports' rule), and the report builder sends its name with the definition. The audit log's dated name stays the page's, as the code says: the server cannot know the reader's day.
+
+Measured on lane 5 with the extended `file-exports` suite: before, on the build these fixes went onto, the three Settings exports were saved as `rundesk-<ws>.json`, `rundesk-<ws>-tasks.csv` and `rundesk-<ws>-members.csv`, and the report as `Untitled-report.pdf` while the server called it `rundesk-report.pdf` (9 of 10, the new check red); after, each was saved under the server's name: `rundesk-export-<ws>.json`, `rundesk-tasks-<ws>.csv`, `rundesk-members-<ws>.csv` and `Untitled report.pdf` (10 of 10 on lane 5, and in the regression sweep on lane 6 with the report's own name asked as well).
+
+Checks:
+- `file-exports` 9 → 10: Settings' three exports and the report builder's PDF each save the file under the name the server gives it, the report under its own name.
+- Patches `fex-11`, `fex-12` and `fex-13` (a Settings export named by the page), `fex-14` (the builder names its PDF), `fex-15` (the server names every report alike) and `fex-16` (a posted download ignores the server's name) each redden it.
+- Re-aimed at the lines as they read now, each reddening its check again: `fex-6` (the web opens a posted export instead of saving it), `fex-7` (the custom report's PDF route returns its bare buffer) and `lxn-9`.
+
+Regression on lanes 2, 4, 5, 6 and 7: the 34 suites the six fixes of this batch touch (`admin-audit-page`, `comment-plus-menu`, `data-transfer-keys`, `field-writes-by-level`, `file-exports`, `full-edit-levels`, `gantt-controls`, `goals-page`, `guest-canvas-scope`, `guest-chat-scope`, `guest-create-menu`, `guest-invitations`, `guest-read-scope`, `guest-space-level`, `guest-task-edits`, `guest-task-making`, `imports`, `list-export`, `local-dates`, `login-workspace-binding`, `lookup-read-access`, `menu-reopen`, `panel-collapse`, `realtime-access-ends`, `refused-as-forbidden`, `report-export-key`, `session-in-the-browser`, `sign-in-and-password`, `task-attachments`, `task-field-create`, `task-menu-favorite-archive`, `timeline-dates`, `view-visibility` and `view-writes-by-level`), 517 checks, all green.
 
 ### `found-30-sep/lanes-save-downloads-in-ascii` — open (test tooling, small; found closing `found-30-sep/list-export-saved-as-list-csv`) · reproduced 5 October
 
@@ -8168,7 +8211,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 51, each reproduced
+## Found by the triage, 5 October, and since — 52, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -9072,7 +9115,7 @@ Whether a member's workspace.import alone may make spaces and projects through a
 
 *Merged, 6 October,* into the main checkout by hand (onto `893f8ff`) with the other builder's work, and run again there on lanes 2, 4, 5, 6 and 7: 62 suites and 1014 checks, 61 green at once; `subtask-row-actions` failed once at a load of 15, the row it reads not found, and was green twice when run again. API unit tests 2124/2124, web 344/344, both typechecks clean.
 
-### `found-6-oct/clickup-merge-writes-a-status-without-its-category` — open (visible bug, small; found closing `found-5-oct/import-merge-resets-fields-the-file-lacks`) · reproduced 6 October
+### `found-6-oct/clickup-merge-writes-a-status-without-its-category` — **closed** (visible bug, small; found closing `found-5-oct/import-merge-resets-fields-the-file-lacks`) · reproduced 6 October
 
 **The ClickUp CSV merge writes a task's status and leaves its category, so a Done task still counts as in progress**
 
@@ -9080,7 +9123,19 @@ Whether a member's workspace.import alone may make spaces and projects through a
 
 *To close:* write the status with its category, as the spreadsheet merge does, and check it by SQL in `imports`.
 
-### `found-6-oct/clickup-import-leaves-a-failed-run-behind` — open (visible bug, small; found closing `found-5-oct/xlsx-read-as-text`) · reproduced 6 October
+*Closed, 6 October* (lanes 5 and 7). The ClickUp merge writes a status with its category (`categoryForDefaultKey`), as the spreadsheet merge does, so a task merged from a Done row is closed.
+
+Measured with the extended `imports` suite: before, on lane 5, on the build these fixes went onto, a task In progress merged from a Done row read status done and category in_progress (56 of 57, the new check red); after, done and closed (57 of 57 on lane 7, and again in the regression sweep on lane 4).
+
+Checks:
+- `imports` +1: a ClickUp merge of a Done row writes the status with its category: the task reads done, and closed.
+- `clickup-import.service.test.ts` +1.
+- Patch `imports-74` (the merge writes no category) reddens it; unit claim `ics-17`.
+- Re-aimed at the merge's set as it reads now, each reddening its checks again: `imports-28` and `ics-2`.
+
+Regression on lanes 2, 4, 5, 6 and 7: the 34 suites the six fixes of this batch touch (`admin-audit-page`, `comment-plus-menu`, `data-transfer-keys`, `field-writes-by-level`, `file-exports`, `full-edit-levels`, `gantt-controls`, `goals-page`, `guest-canvas-scope`, `guest-chat-scope`, `guest-create-menu`, `guest-invitations`, `guest-read-scope`, `guest-space-level`, `guest-task-edits`, `guest-task-making`, `imports`, `list-export`, `local-dates`, `login-workspace-binding`, `lookup-read-access`, `menu-reopen`, `panel-collapse`, `realtime-access-ends`, `refused-as-forbidden`, `report-export-key`, `session-in-the-browser`, `sign-in-and-password`, `task-attachments`, `task-field-create`, `task-menu-favorite-archive`, `timeline-dates`, `view-visibility` and `view-writes-by-level`), 517 checks, all green.
+
+### `found-6-oct/clickup-import-leaves-a-failed-run-behind` — **closed** (visible bug, small; found closing `found-5-oct/xlsx-read-as-text`) · reproduced 6 October
 
 **A ClickUp CSV import that fails leaves the space, project, list and tasks it had made**
 
@@ -9088,7 +9143,23 @@ Whether a member's workspace.import alone may make spaces and projects through a
 
 *To close:* give the ClickUp import the spreadsheet import's undo and NUL handling, and check a failed run leaves nothing.
 
-### `found-6-oct/doc-import-answers-500-to-a-binary-file` — open (visible bug, small; found reviewing `found-5-oct/xlsx-read-as-text`) · reproduced 6 October
+*Closed, 6 October* (lane 4). The ClickUp import has the spreadsheet import's two rules (`found-5-oct/xlsx-read-as-text`):
+
+- What it stores holds no NUL (`storable`). A row's error names its title, NUL and all, and the job's jsonb refused it at the run's last write, failing the whole run; the row now fails alone, reported with U+FFFD for the NUL, and the rows around it are imported.
+- A run that fails takes away what it made (`undoRun`, one helper for both imports now, `run-undo.ts`): its project, and with it its lists, statuses and tasks, its space when it made one, and the tags it made that label nothing; the job says failed, having created nothing.
+
+Measured on lane 4 with the extended `imports` suite: before, on the build these fixes went onto, a ClickUp CSV with a NUL in its second row ended failed, "unsupported Unicode escape sequence", and a run the database refused at its last write left its space, project, list, both tasks and its tag (54 of 56, both new checks red); after, the NUL row fails alone with the rows around it imported, and the refused run ends failed, created 0, leaving nothing (56 of 56, three runs: lanes 4 and 6, and the regression sweep).
+
+Checks:
+- `imports` +2: a ClickUp row holding a NUL fails alone, reported without the NUL; a ClickUp run the database refuses at its last write ends failed and leaves no space, project, list, task or tag.
+- `clickup-import.service.test.ts` +2.
+- Patches: `imports-71` (a failed run keeps what it made) and `imports-73` (the tags a run makes are not recorded) each redden the run's check; `imports-72` (a row's error is stored with its NUL) the row's. Unit claims `ics-14`, `ics-15` and `ics-16`.
+
+Regression on lanes 2, 4, 6 and 7: the 25 suites the four fixes of this batch touch (`call-realtime-access`, `call-survives-navigation`, `chat-realtime-access`, `comment-plus-menu`, `create-menu-ai`, `data-transfer-keys`, `doc-boundaries`, `doc-import`, `emoji-picker`, `guest-canvas-scope`, `guest-chat-scope`, `guest-create-menu`, `guest-read-scope`, `imports`, `malformed-ids`, `object-key-boundaries`, `realtime-access-ends`, `realtime-sends-access`, `sign-in-and-password`, `space-create-menu`, `syncup-live`, `task-depth`, `task-mentions`, `video1-fast-items` and `workspace-read-access`), 612 checks, all green.
+
+Read, not reproduced (so not counted): files a ClickUp enrichment stored before its run failed are not taken out of the store (it runs only with a ClickUp API token, which no lane has).
+
+### `found-6-oct/doc-import-answers-500-to-a-binary-file` — **closed** (visible bug, small; found reviewing `found-5-oct/xlsx-read-as-text`) · reproduced 6 October
 
 **The Document import reads any file named .md as text, and a binary one answers 500**
 
@@ -9096,13 +9167,35 @@ Whether a member's workspace.import alone may make spaces and projects through a
 
 *To close:* refuse content that is not text, by its first bytes, in the page's own words, as the spreadsheet import now does; check it in `doc-import`.
 
-### `found-6-oct/import-start-answers-500-to-non-text` — open (visible bug, small; found reviewing `found-5-oct/xlsx-read-as-text`) · reproduced 6 October
+*Closed, 6 October* (lane 4). The Document import asks what a file holds, not only what it is called: a NUL, which no Markdown or plain text holds and every binary format here does — a zip's header (an .xlsx, a .docx), an .xls's — is answered 400 in the import panel's own words, "Accepts .md, .markdown and .txt. Word, PDF and Excel are not read — Rundesk has no parser for them." (`DOC_IMPORT_ACCEPTS`), before anything is asked of the database.
+
+Measured on lane 4 with the extended `doc-import` suite: before, on the build these fixes went onto, an .xlsx's bytes and a legacy .xls's, each sent as a .md, answered 500 "Internal server error" (16 of 17, the new check red); after, both are refused 400 in the panel's words and no doc is made (17 of 17, three runs, the third in the regression sweep).
+
+Checks:
+- `doc-import` 16 → 17: an .xlsx's bytes and a legacy .xls's, called .md, are refused 400 in the panel's words, and no doc is made from them.
+- `docs-import.test.ts` (2) is new.
+- Patch `doc-import-6` (a binary file is read as text) reddens the check; unit claim `doc-import-7`.
+
+Regression on lanes 2, 4, 6 and 7: the 25 suites the four fixes of this batch touch (`call-realtime-access`, `call-survives-navigation`, `chat-realtime-access`, `comment-plus-menu`, `create-menu-ai`, `data-transfer-keys`, `doc-boundaries`, `doc-import`, `emoji-picker`, `guest-canvas-scope`, `guest-chat-scope`, `guest-create-menu`, `guest-read-scope`, `imports`, `malformed-ids`, `object-key-boundaries`, `realtime-access-ends`, `realtime-sends-access`, `sign-in-and-password`, `space-create-menu`, `syncup-live`, `task-depth`, `task-mentions`, `video1-fast-items` and `workspace-read-access`), 612 checks, all green.
+
+### `found-6-oct/import-start-answers-500-to-non-text` — **closed** (visible bug, small; found reviewing `found-5-oct/xlsx-read-as-text`) · reproduced 6 October
 
 **Both import start routes answer 500 to content that is not a string**
 
 *Evidence, 6 October, lane 4:* the spreadsheet start with content 123, `{a:1}` or true, and the ClickUp start with csv 123, answered 500 (`dto.content?.trim()` throws); the ClickUp preview answers 201 to the same bodies. Older than the import items.
 
 *To close:* validate the body (a string) and answer 400 in the page's words, on all four routes; check it in `imports`.
+
+*Closed, 6 October* (lane 4). A body that is no text is no file: both previews and both starts answer it 400 in the page's words — "Accepted: .csv · .tsv · .txt. .xlsx is not read — re-save the sheet as CSV first." — before anything is parsed or made. The spreadsheet import asks it first in `assertDelimitedText`; the ClickUp import's preview and start ask it beside their parse.
+
+Measured on lane 4 with the extended `imports` suite: before, on the build these fixes went onto, the two starts answered 500 "Internal server error" to content 123, `{a: 1}` and true, the ClickUp preview answered 201, and the spreadsheet preview 400 "The file has no header row." (53 of 54, the new check red); after, all twelve answer 400 in the page's words and no job is made (54 of 54; with the two ClickUp checks below, 56 of 56 on lanes 4 and 6 and again in the regression sweep).
+
+Checks:
+- `imports`: the check of a preview of a number ("The file has no header row.") is the four routes' now, three bodies each, in the page's words, no job made.
+- `spreadsheet-import.service.test.ts`: its test asks the import as well as the preview; `clickup-import.service.test.ts` +1.
+- Patches: `imports-39`, re-aimed at the route's own string check (the guard moved up from `isZipContent`, which nothing reaches with a number now), `imports-69` (the ClickUp preview takes no text) and `-70` (the ClickUp start takes no text) each redden the check. Unit claims `iss-9` (re-aimed with it), `ics-12` and `ics-13`. Re-aimed at the lines as they read now: `ics-6`, `ics-9`, `iss-1`, `imports-47`, `imports-53` and `imports-62`.
+
+Regression on lanes 2, 4, 6 and 7: the 25 suites the four fixes of this batch touch (`call-realtime-access`, `call-survives-navigation`, `chat-realtime-access`, `comment-plus-menu`, `create-menu-ai`, `data-transfer-keys`, `doc-boundaries`, `doc-import`, `emoji-picker`, `guest-canvas-scope`, `guest-chat-scope`, `guest-create-menu`, `guest-read-scope`, `imports`, `malformed-ids`, `object-key-boundaries`, `realtime-access-ends`, `realtime-sends-access`, `sign-in-and-password`, `space-create-menu`, `syncup-live`, `task-depth`, `task-mentions`, `video1-fast-items` and `workspace-read-access`), 612 checks, all green.
 
 ### `found-6-oct/verify-refuses-a-lane-restarted-in-its-builds-second` — open (test tooling, small; found by two builders of 5 October) · reproduced 6 October
 
@@ -9128,13 +9221,24 @@ Whether a member's workspace.import alone may make spaces and projects through a
 
 *To close:* research ClickUp's view autosave; save a changed layout for whoever has the switch on (and may change the view), and check it by SQL.
 
-### `found-6-oct/a-guest-shared-one-task-told-nothing-is-shared` — open (visible bug, small; found reviewing `found-5-oct/readers-change-shared-views`) · reproduced 5 October
+### `found-6-oct/a-guest-shared-one-task-told-nothing-is-shared` — **closed** (visible bug, small; found reviewing `found-5-oct/readers-change-shared-views`) · reproduced 5 October
 
 **A guest whose share is one task in a list is refused every list-level write with "Nothing here is shared with you"**
 
 *Evidence, 5 October, lane 6:* making a shared view, renaming the admin's view, making a task in the list and renaming the list all answered the identical 403 "Nothing here is shared with you, and a guest changes only what is shared with them", though a task in that list is shared with them. The sentence is the guest-default branch of `assertSpaceLevel`, reached because list-level writes ask within the list, its project and folder, and the guest's grant sits below the list.
 
 *To close:* say what is true ("Only a task here is shared with you…") where the guest holds a share below the location; check it in a suite.
+
+*Closed, 6 October* (lanes 5 and 6). Where a guest's default refuses a write, the refusal asks what is shared with them inside the location — the outermost of a project, a list or a task below it (`sharedBelow`) — and says so: "Only a task here is shared with you, and a guest changes only what is shared with them". A guest who holds nothing there is told what they were told before.
+
+Measured with the extended `guest-task-edits` suite: before, on lane 5, on the build these fixes went onto, renaming the list holding the tasks shared with the guest answered 403 "Nothing here is shared with you, and a guest changes only what is shared with them" (5 of 6, the new check red); after, 403 "Only a task here is shared with you, …", while a list where nothing is shared is refused by the read rule ("This is not shared with you"), and neither list is renamed (6 of 6 on lane 6, and again in the regression sweep on lane 4).
+
+Checks:
+- `guest-task-edits` 5 → 6: a guest refused a list where only tasks are shared with them is told so, a list where nothing is shared is refused without saying a task is, and neither is renamed.
+- Patch `gte-6` (a guest is told nothing is shared, whatever is shared below) reddens it.
+- Re-aimed at the refusal as it reads now, each reddening its check again: `raf-10` and `sdp-5`.
+
+Regression on lanes 2, 4, 5, 6 and 7: the 34 suites the six fixes of this batch touch (`admin-audit-page`, `comment-plus-menu`, `data-transfer-keys`, `field-writes-by-level`, `file-exports`, `full-edit-levels`, `gantt-controls`, `goals-page`, `guest-canvas-scope`, `guest-chat-scope`, `guest-create-menu`, `guest-invitations`, `guest-read-scope`, `guest-space-level`, `guest-task-edits`, `guest-task-making`, `imports`, `list-export`, `local-dates`, `login-workspace-binding`, `lookup-read-access`, `menu-reopen`, `panel-collapse`, `realtime-access-ends`, `refused-as-forbidden`, `report-export-key`, `session-in-the-browser`, `sign-in-and-password`, `task-attachments`, `task-field-create`, `task-menu-favorite-archive`, `timeline-dates`, `view-visibility` and `view-writes-by-level`), 517 checks, all green.
 
 ### `found-6-oct/field-checks-name-a-private-lists-fields` — open (security, small; found reviewing `found-6-oct/field-lists-name-a-private-lists-fields`) · reproduced 6 October
 
@@ -9144,13 +9248,27 @@ Whether a member's workspace.import alone may make spaces and projects through a
 
 *To close (the owner chooses):* what a member refused a list is told when a formula kept to that list reads a field they rename (refused without naming the formula, or allowed), and when a formula they define names a field kept to that list (refused with its reason, or allowed). Then check both in `custom-field-access`.
 
-### `found-6-oct/a-socket-sends-into-rooms-it-may-not-read` — open (security, small; found reviewing `found-6-oct/an-open-socket-outlives-its-access`) · reproduced 6 October
+### `found-6-oct/a-socket-sends-into-rooms-it-may-not-read` — **closed** (security, small; found reviewing `found-6-oct/an-open-socket-outlives-its-access`) · reproduced 6 October
 
 **A removed member, or an account that was never a member, sends call reactions into a workspace's room and cursors, under a name of their choosing, into a canvas's room**
 
 *Evidence, 6 October, lane 2 (`probe-sweep-edges` [F]):* a member removed from the workspace and an account never in it each emitted `call.reaction {workspaceId}` and `canvas.cursor {canvasId, displayName}`. The owner's socket, in the workspace's and the canvas's rooms, heard both reactions (stamped with the senders' ids) and both cursors under the chosen names ("Rev owner (not really)"), while both senders' reads of the canvas answered 404. `handleCallReaction` emits to the named workspace's room with no check; `handleCanvasCursor` and `handleCanvasCursorLeave` send to `canvas:<id>` without the sender holding that room, and take `displayName` from the body.
 
 *To close:* research who may react in a ClickUp call; relay a cursor only from a socket that holds that canvas's room, named from the account; relay a reaction only from someone the call's channel lets read it. Check both with a removed member and an outsider, beside a member.
+
+*Closed, 6 October* (lane 2). A SyncUp is its channel's — "only people with access to the Channel can be invited to join a channel SyncUp" (ClickUp help centre, through a search excerpt) — so a reaction in one is for the channel's readers to send and to hear; a whiteboard's cursor is for those on the board.
+
+- `call.reaction` names its call alone: the call says its workspace and channel, and the body's workspace is not asked. A reaction is relayed only from one of the channel's readers (`channelReaders`, the rule its other events go by: those it names, or, for a channel the whole workspace reads, a member who is not a guest), and only to them; a call in no channel is its workspace's members'.
+- `canvas.cursor` and `canvas.cursor.leave` are relayed only from a socket in the canvas's room — let in by `canJoinRoom`, and taken out by the room pass once its person may no longer read the canvas — and a cursor carries its account's name, read once a socket, not the name in its body.
+
+Measured on lane 2 with the new `realtime-sends-access` suite: before, on the build these fixes went onto, the admin heard the reactions sent in a DM's call by its other person, by a member outside the DM, by a member removed from the workspace and by an account never in it, and the member outside the DM heard all four; in a public channel's call the removed member's and the stranger's were heard beside a member's; and four cursors reached the admin's board, each as "Rev owner (not really)", and the stranger's leave (0 of 3). After, the DM's other person and a member in the public channel are heard and nobody else, the member outside the DM hears none of the DM's, and one cursor arrives, the peer's, under their account's name (3 of 3, three runs).
+
+Checks:
+- `realtime-sends-access` (3) is new, in CI: a reaction in a DM's call, one in a public channel's call, and a cursor on a whiteboard, each sent by a member removed from the workspace and by an account never in it, beside somebody who may send it.
+- `realtime.gateway.test.ts` +4.
+- Patches: `rsa-1` (a cursor from outside the room), `rsa-2` (a cursor named by its body) and `rsa-3` (a leave from outside the room) each redden the cursor check; `rsa-4` (a reaction from anyone) both reaction checks; `rsa-5` (a reaction to the whole workspace) the DM's. Unit claims `rsa-6` (a guest reacts where the whole workspace reads), `rsa-7` (the body names the workspace), `rsa-8` (an id that is no call's is put to the database) and `rsa-9` (the name is read on every move).
+
+Regression on lanes 2, 4, 6 and 7: the 25 suites the four fixes of this batch touch (`call-realtime-access`, `call-survives-navigation`, `chat-realtime-access`, `comment-plus-menu`, `create-menu-ai`, `data-transfer-keys`, `doc-boundaries`, `doc-import`, `emoji-picker`, `guest-canvas-scope`, `guest-chat-scope`, `guest-create-menu`, `guest-read-scope`, `imports`, `malformed-ids`, `object-key-boundaries`, `realtime-access-ends`, `realtime-sends-access`, `sign-in-and-password`, `space-create-menu`, `syncup-live`, `task-depth`, `task-mentions`, `video1-fast-items` and `workspace-read-access`), 612 checks, all green.
 
 ### `found-6-oct/timeline-and-gantt-draw-a-column-per-day` — open (performance, small; found reviewing `found-5-oct/years-below-100-read-back-wrong`) · reproduced 6 October
 
@@ -9409,6 +9527,14 @@ Regression on lanes 2, 4, 6 and 7: the 23 suites that open the App Center or Mee
 *Closed, 6 October:* it waits for the section's `data-state="known"` (`found-6-oct/upcoming-says-nothing-scheduled-before-it-knows`), and reads the waiting section with the meetings and the calendars held back. With the calendars answering 4 s late, it passes, 6 of 6.
 
 Regression on lanes 2, 4, 6 and 7: the 23 suites that open the App Center or Meetings or reach them by a link (`app-catalogue`, `calendar-pull-access`, `calendar-push-reach`, `integration-error-card`, `search-sources`, `settings-role-grants`, `a61-meeting-record`, `local-dates`, `meeting-access`, `meeting-tags`, `meetings-connect-calendar`, `object-key-boundaries`, `planner-upcoming-meeting`, `private-object-urls`, `video1-acceptance`, `ui-sweep`, `no-dead-ends`, `addressability-live`, `video-regression`, `command-palette`, `oauth-start-readiness`, `calendar-accounts` and `personal-calendar-connect`), 518 checks, all green. The web typecheck is clean.
+
+### `found-6-oct/sidebar-reorder-drags-the-list-it-moved` — **closed** (test tooling, small; found by CI at `5049db0`, the Postgres harnesses job) · reproduced 6 October
+
+**`sidebar-reorder` drags a list it has just moved into a project the tree has not opened, so its drag source is gone once the tree refetches**
+
+*Evidence, 6 October:* CI's Postgres harnesses job failed at `5049db0` on this suite alone: "threw: page.evaluate: Error: no drag source [data-testid="tree-list-…"] — the list row this section drags is not drawn" (15 passed, 2 failed). The section "the strip is keyed on the KIND, never on a stale parent" drags `listIds[0]`, which the section before it had just moved into P1 (`movedList = drawnLists[0]`, the first list drawn, which is `listIds[0]`). The tree has opened only P0, so that row is drawn only until the tree refetches after the move. On lane 4 the suite as it stands passed (23 of 23), and failed as CI did — 15 passed, 2 failed, the same throw — when it first waited for the tree to drop the moved list's row.
+
+*Closed, 6 October* (lane 4). The section drags a list that stayed in P0, and waits for its row: a list in flight is all the check needs, and one of the two still in P0 is drawn whether the tree has refetched or not. With the same wait for the refetch first, 23 of 23, twice; and as it stands, through `verify.sh` on lane 7, 23 of 23.
 
 ## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
 

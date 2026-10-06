@@ -2341,6 +2341,16 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # A reaction went into the room of whichever workspace its body named, and
+      # a cursor into any canvas's room under the name its body gave, from anyone
+      # with a socket. Sockets send as a removed member and an outsider.
+      - name: What a socket sends goes only where its person may read
+        timeout-minutes: 15
+        run: node test/e2e/realtime-sends-access.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # A task handed its reader every related task's whole row, a private
       # space's title and description included. Dependencies planted by SQL.
       - name: A task shows only the related tasks its reader may open

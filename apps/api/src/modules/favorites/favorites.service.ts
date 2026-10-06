@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
-import { and, eq, inArray, notInArray } from 'drizzle-orm'
+import { and, eq, inArray, notInArray, sql } from 'drizzle-orm'
 import {
   favorites,
   spaces,
@@ -188,22 +188,32 @@ export class FavoritesService {
     const resolved = await this.resolveBatch(workspaceId, entityType, [entityId], { id: userId, isManager })
     if (!resolved.has(entityId)) throw new NotFoundException('That item does not exist in this workspace')
 
-    const [existing] = await this.db
-      .select({ id: favorites.id })
-      .from(favorites)
-      .where(and(eq(favorites.userId, userId), eq(favorites.entityType, entityType), eq(favorites.entityId, entityId)))
-      .limit(1)
+    /*
+     * ONE TOGGLE AT A TIME, PER PERSON AND ITEM (`found-30-sep/favorite-toggle-races-itself`).
+     * It read the row, then deleted it or wrote one, so two toggles in flight
+     * together both read "not pinned" and both pinned (measured on lane 5, 13 of
+     * 20 pairs). They take turns now, by a lock held for the transaction: the
+     * second reads what the first left, and undoes it.
+     */
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`favorite:${userId}:${entityType}:${entityId}`}))`)
+      const [existing] = await tx
+        .select({ id: favorites.id })
+        .from(favorites)
+        .where(and(eq(favorites.userId, userId), eq(favorites.entityType, entityType), eq(favorites.entityId, entityId)))
+        .limit(1)
 
-    if (existing) {
-      await this.db.delete(favorites).where(eq(favorites.id, existing.id))
-      return { favorited: false, entityType, entityId }
-    }
+      if (existing) {
+        await tx.delete(favorites).where(eq(favorites.id, existing.id))
+        return { favorited: false, entityType, entityId }
+      }
 
-    await this.db
-      .insert(favorites)
-      .values({ workspaceId, userId, entityType, entityId })
-      .onConflictDoNothing()
-    return { favorited: true, entityType, entityId }
+      await tx
+        .insert(favorites)
+        .values({ workspaceId, userId, entityType, entityId })
+        .onConflictDoNothing()
+      return { favorited: true, entityType, entityId }
+    })
   }
 
   /** Remove a favorite (idempotent). */

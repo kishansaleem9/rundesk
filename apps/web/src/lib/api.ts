@@ -193,8 +193,8 @@ export async function downloadFile(path: string, filename?: string): Promise<voi
   URL.revokeObjectURL(url)
 }
 
-/** Like downloadFile, but POSTs a JSON body (e.g. a report definition → PDF). */
-export async function downloadFilePost(path: string, body: unknown, filename: string): Promise<void> {
+/** Like downloadFile, but POSTs a JSON body (e.g. a report definition → PDF): saved under the name the response gives, unless one is passed. */
+export async function downloadFilePost(path: string, body: unknown, filename?: string): Promise<void> {
   const token = useAuthStore.getState().accessToken
   const init: RequestInit = { method: 'POST', body: JSON.stringify(body) }
   let res = await fetchWithAuth(path, init, token)
@@ -208,7 +208,7 @@ export async function downloadFilePost(path: string, body: unknown, filename: st
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = filename
+  a.download = filename ?? filenameFromContentDisposition(res.headers.get('content-disposition')) ?? 'download'
   document.body.appendChild(a)
   a.click()
   a.remove()

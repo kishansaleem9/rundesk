@@ -55,7 +55,8 @@ export class UsersController {
   ) {
     const named = typeof body?.currentRefreshToken === 'string' && body.currentRefreshToken ? body.currentRefreshToken : null
     const keep = named ?? req.cookies?.[REFRESH_TOKEN_COOKIE] ?? null
-    return this.users.changePassword(user.id, body?.currentPassword, body?.newPassword, keep)
+    // And the session the caller's access token names: a client naming none kept none, and was signed out by its own change.
+    return this.users.changePassword(user.id, body?.currentPassword, body?.newPassword, keep, user.sid)
   }
 
   @Get('me/export')

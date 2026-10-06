@@ -68,7 +68,7 @@ const argOf = (name, fallback) => {
  * the index holds as well as what the endpoint finds, with the same two checks
  * whichever engine answers.
  */
-const EXPECTED_CHECKS = 16
+const EXPECTED_CHECKS = 17
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -382,6 +382,27 @@ try {
     empty.status === 400,
     'an empty file is refused rather than making a doc with nothing in it',
     `importing whitespace answered ${empty.status}`,
+  )
+  /*
+   * A FILE THAT IS NOT TEXT, WHATEVER IT IS CALLED
+   * (`found-6-oct/doc-import-answers-500-to-a-binary-file`). An .xlsx's bytes or
+   * a legacy .xls's, sent as a .md, answered 500 — the database refused their
+   * NULs — and told the person nothing they could act on.
+   */
+  const DOC_ACCEPTED = 'Accepts .md, .markdown and .txt. Word, PDF and Excel are not read — Rundesk has no parser for them.'
+  const XLSX_BYTES = 'PK\u0003\u0004\u0014\u0000\u0006\u0000\u0008\u0000\u0000\u0000!\u0000[Content_Types].xml'
+  const XLS_BYTES = '\u00d0\u00cf\u0011\u00e0\u00a1\u00b1\u001a\u00e1' + '\u0000'.repeat(16) + '>\u0000\u0003\u0000'
+  const binaries = {}
+  for (const [kind, markdown] of [['xlsx', XLSX_BYTES], ['xls', XLS_BYTES]]) {
+    const res = await api(`/workspaces/${workspaceId}/docs/import`, { method: 'POST', body: { fileName: `${TAG}-${kind}.md`, markdown } })
+    binaries[kind] = { status: res.status, said: res.error?.message ?? null }
+  }
+  const listed = await api(`/workspaces/${workspaceId}/docs`)
+  const fromBinaries = (Array.isArray(listed.data) ? listed.data : []).filter((d) => String(d.title ?? '').startsWith(`${TAG}-xls`)).length
+  chk(
+    Object.values(binaries).every((b) => b.status === 400 && b.said === DOC_ACCEPTED) && listed.status === 200 && fromBinaries === 0,
+    'a file that is not text, called .md — an .xlsx’s bytes or a legacy .xls’s — is refused in the page’s own words, and no doc is made from it',
+    `${JSON.stringify(binaries)}; ${fromBinaries} doc(s) made from them (the list answered ${listed.status})`,
   )
   /*
    * A WRITE THAT LANDS IN THE WRONG WORKSPACE SUCCEEDS — no error, no failing

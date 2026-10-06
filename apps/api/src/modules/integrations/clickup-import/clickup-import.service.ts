@@ -32,6 +32,8 @@ import {
   type ParsedTask,
   type CustomFieldColumn,
 } from './clickup-csv.util'
+import { NOT_DELIMITED_TEXT, storable } from './spreadsheet-import.util'
+import { undoRun, type RunMade } from './run-undo'
 import { assertImportTarget } from './import-target'
 import { IMPORT_ACCESS, writtenFields, type Importer } from './import-access'
 import {
@@ -141,7 +143,9 @@ export class ClickUpImportService {
    */
   async preview(workspaceId: string, importer: Importer, dto: { csv: string; targetSpaceId?: string }) {
     await this.access.assertMayImport(this.db, { workspaceId, actorId: importer.id })
-    const { rows, customFieldColumns } = parseClickUpCsv(dto.csv ?? '')
+    // A body that is no text is no CSV, refused in the page's words (`found-6-oct/import-start-answers-500-to-non-text`).
+    if (typeof dto.csv !== 'string') throw new BadRequestException(NOT_DELIMITED_TEXT)
+    const { rows, customFieldColumns } = parseClickUpCsv(dto.csv)
 
     const existing = await this.access.matchableTaskIndex(this.db, { workspaceId, targetSpaceId: dto.targetSpaceId, importer })
     const seen = new Set<string>()
@@ -191,7 +195,8 @@ export class ClickUpImportService {
     const userId = importer.id
     // Who imports, before what or where: a guest is refused, whatever a custom role grants them (`assertMayImport`).
     await this.access.assertMayImport(this.db, { workspaceId, actorId: userId })
-    if (!dto.csv?.trim()) throw new BadRequestException('CSV body is empty')
+    if (typeof dto.csv !== 'string') throw new BadRequestException(NOT_DELIMITED_TEXT)
+    if (!dto.csv.trim()) throw new BadRequestException('CSV body is empty')
     const { rows } = parseClickUpCsv(dto.csv)
     if (rows.length === 0) throw new BadRequestException('CSV contained no data rows')
 
@@ -244,6 +249,9 @@ export class ClickUpImportService {
     const userId = importer.id
     const strategy: ConflictStrategy = dto.strategy ?? 'create'
     const summary = this.emptySummary()
+    // What this run makes, so a run that fails can take it away again (`undoRun`): a
+    // failed run left its space, project, list and tasks (`found-6-oct/clickup-import-leaves-a-failed-run-behind`).
+    const made: RunMade = { labelIds: [] }
 
     try {
       const { rows, customFieldColumns, carries } = parseClickUpCsv(dto.csv)
@@ -267,6 +275,7 @@ export class ClickUpImportService {
           })
           .returning()
         spaceId = space.id
+        made.spaceId = space.id
         summary.spacesCreated++
       }
 
@@ -278,6 +287,7 @@ export class ClickUpImportService {
           description: `Imported on ${new Date().toISOString()} by user ${userId}`,
         })
         .returning()
+      made.projectId = project.id
       summary.projectsCreated++
 
       // Custom-field definitions on the new project (name → def id + type + option map).
@@ -298,7 +308,7 @@ export class ClickUpImportService {
       const existing = await this.access.matchableTaskIndex(this.db, { workspaceId, targetSpaceId: dto.targetSpaceId, importer })
 
       const labelCache = new Map<string, string>()
-      const ensureLabel = (name: string) => this.ensureLabel(workspaceId, name, labelCache, summary)
+      const ensureLabel = (name: string) => this.ensureLabel(workspaceId, name, labelCache, summary, made.labelIds)
 
       // dupKey / clickup id → our task id, so merge + subtask linking can target it.
       const seenByKey = new Map<string, string>()
@@ -453,16 +463,28 @@ export class ClickUpImportService {
           createdCount: summary.tasksCreated,
           updatedCount: summary.tasksUpdated,
           skippedCount: summary.tasksSkipped,
-          result: summary as unknown as Record<string, unknown>,
+          // A row's error names its title, NUL and all, and the job's jsonb refuses a NUL:
+          // a row holding one failed the whole run at this write (`storable`).
+          result: storable(summary) as unknown as Record<string, unknown>,
           updatedAt: new Date(),
         })
         .where(eq(clickupImportJobs.id, jobId))
 
       return summary
     } catch (e: any) {
+      const left = await undoRun(this.db, made)
+      // What it made is gone, so it created nothing; a merge into a task that
+      // was already there stays, and is counted.
       await this.db
         .update(clickupImportJobs)
-        .set({ status: 'failed', error: e?.message ?? 'Import failed', updatedAt: new Date() })
+        .set({
+          status: 'failed',
+          error: storable([e?.message ?? 'Import failed', left].filter(Boolean).join(' ')),
+          createdCount: left ? summary.tasksCreated : 0,
+          updatedCount: summary.tasksUpdated,
+          skippedCount: summary.tasksSkipped,
+          updatedAt: new Date(),
+        })
         .where(eq(clickupImportJobs.id, jobId))
         .catch(() => undefined)
       throw e
@@ -789,6 +811,8 @@ export class ClickUpImportService {
     name: string,
     cache: Map<string, string>,
     summary: ImportSummary,
+    /** The tags this run made, for `undoRun` to take away if it fails. */
+    madeLabels?: string[],
   ): Promise<string | null> {
     const key = name.trim().toLowerCase()
     if (!key) return null
@@ -821,7 +845,10 @@ export class ClickUpImportService {
       .returning()
     const id = row?.id ?? (await this.db.select({ id: labels.id }).from(labels).where(named).limit(1))[0]?.id
     if (id) {
-      if (row) summary.labelsCreated++
+      if (row) {
+        summary.labelsCreated++
+        madeLabels?.push(id)
+      }
       cache.set(key, id)
       return id
     }
@@ -917,9 +944,17 @@ export class ClickUpImportService {
 
   /** Merge = update the existing task's fields the CSV carries (`mergeSetOf`), and no other. */
   private async mergeTask(taskId: string, t: ParsedTask, carries: CsvCarries) {
+    const set = mergeSetOf(t, carries)
     await this.db
       .update(tasks)
-      .set({ ...mergeSetOf(t, carries), updatedAt: new Date() })
+      .set({
+        ...set,
+        // The status with its category, as the spreadsheet merge writes it: a task
+        // merged Done read done and still counted in progress, every rollup and the
+        // Closed toggle reading the category (`found-6-oct/clickup-merge-writes-a-status-without-its-category`).
+        ...(set.status ? { statusCategory: categoryForDefaultKey(set.status) } : {}),
+        updatedAt: new Date(),
+      })
       .where(eq(tasks.id, taskId))
   }
 }

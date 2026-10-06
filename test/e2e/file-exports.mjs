@@ -34,7 +34,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 9
+const EXPECTED_CHECKS = 10
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -151,6 +151,14 @@ try {
     return { name: dl.suggestedFilename(), bytes: fs.readFileSync(await dl.path()) }
   }
   const told = (f) => (f.name ? `saved ${f.name}, ${f.bytes.length} bytes, starting ${head(f.bytes)}` : 'nothing was saved')
+  /** The file name a Content-Disposition header gives: its `filename*` (UTF-8) first, else its `filename`. */
+  const nameIn = (header) => {
+    if (!header) return null
+    const ext = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(header)
+    if (ext) return decodeURIComponent(ext[1].trim())
+    const plain = /filename\s*=\s*"([^"]*)"/i.exec(header) ?? /filename\s*=\s*([^;]+)/i.exec(header)
+    return plain ? plain[1].trim() : null
+  }
 
   await page.goto(`${B}/app/${WS}/insights`, { waitUntil: 'domcontentloaded' })
   const contribFile = await saved(page.getByRole('button', { name: /Download PDF/ }))
@@ -164,7 +172,9 @@ try {
   // The builder exports only a report with rows in it: wait for the preview.
   await page.getByRole('button', { name: /^Export PDF$/ }).waitFor({ state: 'visible', timeout: 20_000 })
   await page.waitForFunction(() => !document.body.innerText.includes('Running'), null, { timeout: 20_000 }).catch(() => {})
+  const reportResponse = page.waitForResponse((r) => r.url().includes('/reports/custom/export.pdf'), { timeout: 20_000 }).catch(() => null)
   const reportFile = await saved(page.getByRole('button', { name: /^Export PDF$/ }))
+  const reportServerName = nameIn((await reportResponse)?.headers()['content-disposition'])
   chk(
     reportFile.name?.endsWith('.pdf') && isPdfBytes(reportFile.bytes),
     'Reports → custom → Export PDF saves a .pdf that begins %PDF-',
@@ -195,6 +205,25 @@ try {
     docFile.name === `${DOC_TITLE}.md` && docFile.bytes.toString('utf8').startsWith(`# ${DOC_TITLE}`),
     'Docs → Export as Markdown saves the doc under its whole title, as the server names it',
     `${told(docFile)}; the doc is ${JSON.stringify(DOC_TITLE)}`,
+  )
+
+  /*
+   * EACH FILE IS NAMED ONCE, BY THE SERVER, AND SAVED UNDER THAT NAME
+   * (`found-30-sep/export-names-worked-out-twice`). The pages worked out names of
+   * their own: `rundesk-<ws>.json` for the server's `rundesk-export-<ws>.json`,
+   * `rundesk-<ws>-tasks.csv` for `rundesk-tasks-<ws>.csv`, `rundesk-<ws>-members.csv`
+   * for `rundesk-members-<ws>.csv`, and the report builder its own rule for the PDF.
+   */
+  await page.goto(`${B}/app/${WS}/settings?tab=integrations`, { waitUntil: 'domcontentloaded' })
+  const jsonFile = await saved(page.getByRole('button', { name: /^Export JSON$/ }))
+  const tasksFile = await saved(page.getByRole('button', { name: /^Export tasks CSV$/ }))
+  await page.goto(`${B}/app/${WS}/settings?tab=members`, { waitUntil: 'domcontentloaded' })
+  const membersFile = await saved(page.getByRole('button', { name: /^Export CSV$/ }))
+  chk(
+    jsonFile.name === `rundesk-export-${WS}.json` && tasksFile.name === `rundesk-tasks-${WS}.csv` && membersFile.name === `rundesk-members-${WS}.csv` &&
+      reportServerName === 'Untitled report.pdf' && reportFile.name === reportServerName,
+    'Settings’ Export JSON, Export tasks CSV and the members’ Export CSV, and the report builder’s Export PDF, each save the file under the name the server gives it — the report under its own name',
+    `${told(jsonFile)}; ${told(tasksFile)}; ${told(membersFile)}; the report: ${told(reportFile)}, the server named it ${JSON.stringify(reportServerName)}`,
   )
 } catch (e) {
   failed += 1

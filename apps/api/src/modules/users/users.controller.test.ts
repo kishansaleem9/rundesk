@@ -12,7 +12,8 @@ import { UsersController } from './users.controller'
  * both ways on a lane.
  */
 describe('UsersController.changePassword — the session it keeps is the caller’s', () => {
-  const caller = { id: 'u1' } as any
+  // The caller's own session, as its access token names it (`sid`), is passed as well.
+  const caller = { id: 'u1', sid: 'S1' } as any
   function controllerRecording() {
     const changePassword = mock.fn(async () => ({ ok: true, revoked: 0 }))
     return { controller: new UsersController({ changePassword } as any), changePassword }
@@ -21,7 +22,7 @@ describe('UsersController.changePassword — the session it keeps is the caller�
   it('a browser’s session is the one its refresh cookie names, when the body names none', async () => {
     const { controller, changePassword } = controllerRecording()
     await controller.changePassword(caller, { currentPassword: 'Old@12345!', newPassword: 'New@12345!x' }, { cookies: { refresh_token: 'COOKIE-REFRESH' } })
-    assert.deepEqual(changePassword.mock.calls[0].arguments, ['u1', 'Old@12345!', 'New@12345!x', 'COOKIE-REFRESH'])
+    assert.deepEqual(changePassword.mock.calls[0].arguments, ['u1', 'Old@12345!', 'New@12345!x', 'COOKIE-REFRESH', 'S1'])
   })
 
   it('a session named in the body is the one kept, cookie or no cookie; with neither, none is', async () => {

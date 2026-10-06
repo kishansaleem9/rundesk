@@ -452,6 +452,18 @@ try {
   console.log('\n▶ §V2-S13 — the strip is keyed on the KIND, never on a stale parent')
 
   /*
+   * A LIST STILL IN THE OPEN PROJECT IS THE ONE IN FLIGHT
+   * (`found-6-oct/sidebar-reorder-drags-the-list-it-moved`). This dragged
+   * `listIds[0]` — the list the section above had just moved into P1, which
+   * the tree has not opened — so its row was there only until the tree
+   * refetched after the move. On CI's runner it had (`5049db0`, "no drag
+   * source"). Any list will do for a list in flight; one of the two still in
+   * P0 is drawn, refetch or not.
+   */
+  const inFlight = listIds.find((id) => id !== movedList)
+  await page.getByTestId(`tree-list-${inFlight}`).waitFor({ timeout: 20_000 })
+
+  /*
    * THE CHECK THAT NAMES THE OLD BUG. A list in flight must NOT arm a project
    * strip: the predicate asks "can an item of this kind be ordered here", and
    * nothing else. If it ever asks where the dragged item currently lives it
@@ -478,7 +490,7 @@ try {
     if (!el) throw new Error(`no drag source ${s} — the list row this section drags is not drawn`)
     window.__dt = new DataTransfer()
     el.dispatchEvent(new DragEvent('dragstart', { dataTransfer: window.__dt, bubbles: true, cancelable: true }))
-  }, `[data-testid="tree-list-${listIds[0]}"]`)
+  }, `[data-testid="tree-list-${inFlight}"]`)
   await page.evaluate((s) => {
     const el = document.querySelector(s)
     if (!el) return

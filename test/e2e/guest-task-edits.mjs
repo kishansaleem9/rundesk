@@ -33,7 +33,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 5
+const EXPECTED_CHECKS = 6
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -114,6 +114,27 @@ try {
   const row = async (id) => (await sql`select title, status from tasks where id = ${id}`)[0] ?? null
   const rename = (t, title) => G(`/tasks/${t.id}`, { method: 'PATCH', body: { title } })
   const move = (t) => G(`/tasks/${t.id}`, { method: 'PATCH', body: { status: 'in_progress' } })
+
+  // ══ 0. WHAT A GUEST IS TOLD ABOUT A LIST ═════════════════════════════════
+  /*
+   * ONLY A TASK HERE IS SHARED, AND THE REFUSAL SAYS SO
+   * (`found-6-oct/a-guest-shared-one-task-told-nothing-is-shared`). A guest whose
+   * share is a task in a list was refused every list-level write in the words
+   * of a guest who holds nothing there: "Nothing here is shared with you".
+   */
+  console.log('\n▶ what a guest is told when only a task in a list is shared with them')
+  const LN = await list('shared with nobody at all')
+  const renameList = (id) => G(`/lists/${id}`, { method: 'PUT', body: { name: `${TAG} list renamed by the guest` } })
+  const onTasks = await renameList(L)
+  const onNothing = await renameList(LN)
+  const listNames = (await sql`select name from lists where id in (${L}, ${LN})`).map((l) => l.name)
+  const ONLY_A_TASK = 'Only a task here is shared with you, and a guest changes only what is shared with them'
+  chk(
+    onTasks.status === 403 && onTasks.error?.message === ONLY_A_TASK && onNothing.status === 403 && onNothing.error?.message !== ONLY_A_TASK &&
+      listNames.every((n) => !n.includes('renamed by the guest')),
+    'a guest refused a list where only tasks are shared with them is told only a task here is shared with them — and a list where nothing is shared is refused without saying a task is; neither list is renamed',
+    `the list of shared tasks: ${said(onTasks)}; the list of none: ${said(onNothing)}; the names now ${JSON.stringify(listNames)}`,
+  )
 
   // ══ 1. SHARED TO EDIT ════════════════════════════════════════════════════
   console.log('\n▶ a task shared with the guest to edit, and a task in a list shared with them to edit')

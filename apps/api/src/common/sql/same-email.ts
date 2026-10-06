@@ -18,10 +18,11 @@ import { sql, type AnyColumn, type SQL } from 'drizzle-orm'
  * and "email addresses are already case insensitive". `shares.service.ts`
  * already looked people up this way.
  *
- * `users.email`'s unique index is on the text as stored, so this reads the
- * table rather than the index: about 2 ms over lane 3's 2,602 accounts, where
- * the index answers in 0.15 ms (EXPLAIN ANALYZE, 30 September). An index on
- * `lower(email)` is a schema change of its own.
+ * `users.email`'s unique index is on the text as stored, so this read the
+ * whole table: about 2 ms over lane 3's 2,602 accounts on 30 September, 4.8 to
+ * 7.0 ms over its 4,786 on 6 October. `users_email_lower_idx` (0172) is on
+ * `lower(email)`, which this compares, and answers it
+ * (`found-30-sep/email-lookups-read-the-whole-table`).
  */
 export function sameEmail(column: AnyColumn, typed: string): SQL {
   return sql`lower(${column}) = lower(${typed.trim()})`

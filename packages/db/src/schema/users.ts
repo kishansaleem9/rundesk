@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, uuid, jsonb, integer, check } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, uuid, jsonb, integer, check, index } from 'drizzle-orm/pg-core'
 import type { PlannerSettings } from './time-blocks'
 import { relations, sql } from 'drizzle-orm'
 import { userRoleEnum, oauthProviderEnum } from './enums'
@@ -201,6 +201,10 @@ export const users = pgTable('users', {
   // Made by 0090. Declared here as well: a database built by
   // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
   check('users_presence_status_check', sql`${t.presenceStatus} IS NULL OR ${t.presenceStatus} IN ('online', 'away', 'busy', 'offline')`),
+  // Made by 0172: every lookup by email compares `lower(email)` (`same-email.ts`),
+  // and read the whole table without it. Not unique while accounts that differ
+  // only in case remain (`found-30-sep/email-lookups-read-the-whole-table`).
+  index('users_email_lower_idx').on(sql`lower(${t.email})`),
 ])
 
 export const oauthAccounts = pgTable('oauth_accounts', {

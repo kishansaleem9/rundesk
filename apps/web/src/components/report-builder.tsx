@@ -359,11 +359,8 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
       return
     }
     try {
-      await downloadFilePost(
-        `/workspaces/${workspaceId}/reports/custom/export.pdf`,
-        definition,
-        `${(name || 'report').replace(/[^a-z0-9-_]+/gi, '-')}.pdf`,
-      )
+      // The server names the file after the report, once (`found-30-sep/export-names-worked-out-twice`), and it is saved under that name.
+      await downloadFilePost(`/workspaces/${workspaceId}/reports/custom/export.pdf`, { ...definition, name })
     } catch (e) {
       toast.error(refusalMessage(e, t('reportBuilder.toastPdfError')))
     }

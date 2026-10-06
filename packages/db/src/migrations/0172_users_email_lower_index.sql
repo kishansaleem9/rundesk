@@ -1,0 +1,14 @@
+-- A person found by email, in any case, through an index (`found-30-sep/email-lookups-read-the-whole-table`).
+--
+-- Every lookup of a person by email compares `lower(email)` (`same-email.ts`):
+-- sign-in, sign-up, a password reset, an invitation, SSO, SCIM and inbound
+-- mail. The only index on the column, `users_email_unique`, is on the text as
+-- stored, so each of those read the whole `users` table — on a lane of 4,786
+-- accounts a sequential scan that read and dropped 4,785 rows, 4.8 to 7.0 ms,
+-- growing with every account.
+--
+-- NOT UNIQUE YET: accounts that differ only in case are there (every one on
+-- the lanes was made by a probe, a before-run or a break patch), and a unique
+-- index would refuse to build over them. Which account each person keeps is
+-- the owner's to settle; once they are folded, this can be made unique.
+CREATE INDEX IF NOT EXISTS "users_email_lower_idx" ON "users" USING btree (lower("email"));

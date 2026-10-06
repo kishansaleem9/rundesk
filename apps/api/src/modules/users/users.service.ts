@@ -370,7 +370,7 @@ export class UsersService {
    * web did, so one mistyped password counted twice). A right one clears the
    * count, as a right password at sign-in does.
    */
-  async changePassword(userId: string, currentPassword: string, newPassword: string, keepRefreshToken?: string | null) {
+  async changePassword(userId: string, currentPassword: string, newPassword: string, keepRefreshToken?: string | null, keepSessionId?: string | null) {
     if (typeof newPassword !== 'string' || newPassword.length < 8) throw new BadRequestException('Password must be at least 8 characters')
     const user = await this.findById(userId)
     if (!user) throw new BadRequestException('User not found')
@@ -405,7 +405,15 @@ export class UsersService {
       return tx
         .update(sessions)
         .set({ isRevoked: true })
-        .where(and(eq(sessions.userId, userId), eq(sessions.isRevoked, false), ...kept.map((token) => ne(sessions.refreshToken, token))))
+        .where(
+          and(
+            eq(sessions.userId, userId),
+            eq(sessions.isRevoked, false),
+            ...kept.map((token) => ne(sessions.refreshToken, token)),
+            // The caller's own session, by the id its access token names (`found-30-sep/the-callers-session-is-named-by-its-refresh-token`).
+            ...(keepSessionId ? [ne(sessions.id, keepSessionId)] : []),
+          ),
+        )
         .returning({ id: sessions.id })
     })
     return { ok: true, revoked: revoked.length }

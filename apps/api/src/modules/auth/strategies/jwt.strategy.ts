@@ -48,6 +48,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       role: payload.role,
       flags: payload.flags,
       activeWorkspaceId: payload.workspaceId,
+      // Which of the person's sessions this request is: the sessions list and a
+      // password change ask it (`found-30-sep/the-callers-session-is-named-by-its-refresh-token`).
+      sid: typeof payload.sid === 'string' ? payload.sid : undefined,
     }
   }
 }

@@ -174,7 +174,8 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'List current user sessions' })
   sessions(@CurrentUser() user: any, @Query('currentRefreshToken') currentRefreshToken?: string) {
-    return this.authService.listSessions(user.id, currentRefreshToken)
+    // The caller's session is the one its access token names, a refresh token in the query or not.
+    return this.authService.listSessions(user.id, currentRefreshToken, user.sid)
   }
 
   /*
@@ -192,7 +193,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Revoke all sessions except current one' })
   revokeOthers(@CurrentUser() user: any, @Body() body: { currentRefreshToken?: string }, @Req() req: RequestWithCookies) {
     const named = typeof body?.currentRefreshToken === 'string' && body.currentRefreshToken ? body.currentRefreshToken : null
-    return this.authService.revokeOtherSessions(user.id, named ?? req.cookies?.[REFRESH_TOKEN_COOKIE] ?? null)
+    return this.authService.revokeOtherSessions(user.id, named ?? req.cookies?.[REFRESH_TOKEN_COOKIE] ?? null, user.sid)
   }
 
   @Delete('sessions/:sessionId')

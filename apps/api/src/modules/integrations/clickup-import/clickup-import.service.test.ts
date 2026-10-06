@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { ForbiddenException } from '@nestjs/common'
+import { BadRequestException, ForbiddenException } from '@nestjs/common'
 import { PgDialect } from 'drizzle-orm/pg-core'
-import { customFieldDefinitions, customFieldValues, tasks, clickupImportJobs, labels, taskLabelAssignments } from '@rundesk/db'
+import { customFieldDefinitions, customFieldValues, tasks, clickupImportJobs, labels, taskLabelAssignments, projects, spaces } from '@rundesk/db'
 import { ClickUpImportService } from './clickup-import.service'
 import { dupKey } from './clickup-csv.util'
+import { NOT_DELIMITED_TEXT } from './spreadsheet-import.util'
 import { GUESTS_CANNOT_IMPORT, IMPORT_ACCESS, type ImportAccess } from './import-access'
 
 /**
@@ -19,10 +20,19 @@ import { GUESTS_CANNOT_IMPORT, IMPORT_ACCESS, type ImportAccess } from './import
  * queued select results. Insert `.returning()` yields a synthetic id so the
  * import can wire values/subtasks.
  */
-function makeDb(selects: unknown[][] = [], opts: { conflictOn?: unknown[] } = {}) {
+function makeDb(
+  selects: unknown[][] = [],
+  opts: {
+    conflictOn?: unknown[]
+    /** A write the database refuses, by its table and what it writes: the refusal's words, or null. */
+    refuse?: (kind: 'insert' | 'update', table: unknown, values: any) => string | null
+  } = {},
+) {
   const selectQueue = [...selects]
   const inserts: Array<{ table: unknown; values: any }> = []
   const updates: Array<{ table: unknown; set: any }> = []
+  // Every table a row was deleted from, in order.
+  const deletes: unknown[] = []
   // Every \`where\` asked, so a test can read the condition a lookup put to the database.
   const wheres: unknown[] = []
   let idCounter = 0
@@ -32,8 +42,9 @@ function makeDb(selects: unknown[][] = [], opts: { conflictOn?: unknown[] } = {}
     'returning', 'onConflictDoNothing', 'onConflictDoUpdate',
   ] as const
 
-  const node = (rows: unknown[]) => {
-    const p = Promise.resolve(rows) as any
+  const node = (rows: unknown[], refusal: string | null = null) => {
+    const p = (refusal ? Promise.reject(new Error(refusal)) : Promise.resolve(rows)) as any
+    if (refusal) p.catch(() => undefined)
     for (const v of VERBS) p[v] = () => p
     p.where = (cond: unknown) => {
       wheres.push(cond)
@@ -47,21 +58,25 @@ function makeDb(selects: unknown[][] = [], opts: { conflictOn?: unknown[] } = {}
     insert: (table: unknown) => ({
       values: (v: any) => {
         const id = `id-${++idCounter}`
-        inserts.push({ table, values: v })
+        const refusal = opts.refuse?.('insert', table, v) ?? null
+        if (!refusal) inserts.push({ table, values: v })
         // A row that is there already: ON CONFLICT DO NOTHING returns nothing.
-        return node(opts.conflictOn?.includes(table) ? [] : [{ id, ...v }])
+        return node(opts.conflictOn?.includes(table) ? [] : [{ id, ...v }], refusal)
       },
     }),
     update: (table: unknown) => ({
       set: (s: any) => {
         updates.push({ table, set: s })
-        return node([])
+        return node([], opts.refuse?.('update', table, s) ?? null)
       },
     }),
-    delete: () => node([]),
+    delete: (table: unknown) => {
+      deletes.push(table)
+      return node([])
+    },
   } as any
 
-  return { db, inserts, updates, wheres }
+  return { db, inserts, updates, wheres, deletes }
 }
 
 const insertsInto = (inserts: Array<{ table: unknown; values: any }>, table: unknown) =>
@@ -404,5 +419,74 @@ describe('ClickUpImportService — who may import, and which tasks an import may
     const linked = updates.filter((u) => u.table === tasks && 'parentTaskId' in u.set).map((u) => u.set.parentTaskId)
     assert.deepEqual(linked, [idOf('B')], 'only the link it allows is made: A under B')
     assert.equal(summary.subtasksLinked, 1)
+  })
+})
+
+/*
+ * NO TEXT IS NO CSV (`found-6-oct/import-start-answers-500-to-non-text`): the
+ * import's `.trim()` of a number threw, a 500, and the preview read it as a file
+ * of no rows and answered 201.
+ */
+describe('ClickUpImportService — a body that is no text', () => {
+  it('refuses a preview and an import of a body that is no text, in the page’s words', async () => {
+    const { db } = makeDb()
+    const svc = serviceOn(db)
+    for (const csv of [123, { a: 1 }, true]) {
+      for (const [what, run] of [
+        ['preview', () => svc.preview('ws-1', IMPORTER, { csv: csv as any })],
+        ['import', () => svc.startImport('ws-1', IMPORTER, { csv: csv as any })],
+      ] as const) {
+        await assert.rejects(run, (e: unknown) => e instanceof BadRequestException && e.message === NOT_DELIMITED_TEXT, `the ${what} of ${JSON.stringify(csv)}`)
+      }
+    }
+  })
+})
+
+/*
+ * A RUN THAT FAILS TAKES AWAY WHAT IT MADE, AND A ROW THAT FAILS FAILS ALONE
+ * (`found-6-oct/clickup-import-leaves-a-failed-run-behind`): the spreadsheet
+ * import's rules (`run-undo.ts`, `storable`), which the ClickUp import lacked.
+ */
+describe('ClickUpImportService.processImport — a run that fails, and a row that fails', () => {
+  it('a run whose last write is refused takes away what it made — its project, its space and the tags it made — and its job is marked failed, having created nothing', async () => {
+    const { db, inserts, updates, deletes } = makeDb([], {
+      refuse: (kind, table, v) => (kind === 'update' && table === clickupImportJobs && v.status === 'completed' ? 'the database refused the last write' : null),
+    })
+    const svc = serviceOn(db)
+    await assert.rejects(() => svc.processImport('job-1', 'ws-1', IMPORTER, { csv: 'Task Name,Tags\nAlpha,new-tag\nBeta,\n' }))
+    assert.equal(insertsInto(inserts, spaces).length, 1, 'the run made a space')
+    assert.equal(insertsInto(inserts, projects).length, 1, 'and a project')
+    assert.equal(insertsInto(inserts, labels).length, 1, 'and a tag, before its last write')
+    assert.deepEqual(deletes, [projects, spaces, labels], 'its project, its space and the tag it made are taken away')
+    const failed = jobUpdates(updates).find((u) => u.status === 'failed')
+    assert.ok(failed, 'the job is marked failed')
+    assert.equal(failed.createdCount, 0, 'having created nothing')
+    assert.equal(failed.error, 'the database refused the last write')
+  })
+
+  it('a row the database refuses fails alone, and its error is stored without a NUL the database would refuse', async () => {
+    const { db, updates } = makeDb([], {
+      refuse: (kind, table, v) => (kind === 'insert' && table === tasks && String(v.title).includes('\u0000') ? 'invalid byte sequence for encoding "UTF8": 0x00' : null),
+    })
+    const svc = serviceOn(db)
+    const summary = await svc.processImport('job-2', 'ws-1', IMPORTER, { csv: 'Task Name\nAlpha\nBe\u0000ta\nGamma\n' })
+    assert.equal(summary.tasksCreated, 2)
+    const completed = jobUpdates(updates).find((u) => u.status === 'completed')
+    assert.ok(completed, 'the job completes')
+    const stored = JSON.stringify(completed.result)
+    assert.ok(!stored.includes('\\u0000') && !completed.result.errors[0].includes('\u0000'), 'what it stores holds no NUL')
+    assert.match(completed.result.errors[0], /^Task "Be\uFFFDta"/)
+  })
+})
+
+describe('ClickUpImportService.processImport — a merged status carries its category', () => {
+  it('a merge of a Done row writes the status with its category, closed, as the spreadsheet merge does (found-6-oct/clickup-merge-writes-a-status-without-its-category)', async () => {
+    const existing = [{ id: 'existing-alpha', listName: 'Sprint 1', title: 'Alpha' }]
+    const { db, updates } = makeDb([[], existing])
+    const svc = serviceOn(db)
+    await svc.processImport('job-10', 'ws-1', IMPORTER, { csv: 'Task Name,List,Status\nAlpha,Sprint 1,Done\n', strategy: 'merge' })
+    const taskUpdate = updates.find((u) => u.table === tasks)
+    assert.equal(taskUpdate?.set.status, 'done')
+    assert.equal(taskUpdate?.set.statusCategory, 'closed')
   })
 })

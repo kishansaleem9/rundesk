@@ -1175,10 +1175,10 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
             variant="outline"
             className="text-xs"
             onClick={() =>
-              downloadFile(
-                `/workspaces/${workspaceId}/export/csv/members`,
-                `rundesk-${workspaceId}-members.csv`,
-              ).catch((e) => toast.error(refusalMessage(e, t('settings.exportFailed'))))
+              // Under the name the server gives it (`found-30-sep/export-names-worked-out-twice`).
+              downloadFile(`/workspaces/${workspaceId}/export/csv/members`).catch((e) =>
+                toast.error(refusalMessage(e, t('settings.exportFailed'))),
+              )
             }
           >
             <Upload className="h-3.5 w-3.5 mr-1" />
@@ -1875,7 +1875,8 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
               size="sm"
               variant="outline"
               onClick={() =>
-                downloadFile(`/workspaces/${workspaceId}/export/json`, `rundesk-${workspaceId}.json`).catch((e) =>
+                // Each under the name the server gives it, not one worked out here again.
+                downloadFile(`/workspaces/${workspaceId}/export/json`).catch((e) =>
                   toast.error(refusalMessage(e, t('settings.exportFailed'))),
                 )
               }
@@ -1886,7 +1887,7 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
               size="sm"
               variant="outline"
               onClick={() =>
-                downloadFile(`/workspaces/${workspaceId}/export/csv/tasks`, `rundesk-${workspaceId}-tasks.csv`).catch((e) =>
+                downloadFile(`/workspaces/${workspaceId}/export/csv/tasks`).catch((e) =>
                   toast.error(refusalMessage(e, t('settings.exportFailed'))),
                 )
               }

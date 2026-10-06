@@ -13,7 +13,7 @@ import { Logger, Inject, OnModuleDestroy } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { ConfigService } from '@nestjs/config'
 import { and, eq } from 'drizzle-orm'
-import { workspaceMembers, lists, projects, spaces, tasks, taskAssignees, docs, workspaceCanvases, users } from '@rundesk/db'
+import { workspaceMembers, lists, projects, spaces, tasks, taskAssignees, docs, workspaceCanvases, users, calls, chatChannels } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { checkContainerAccess } from '../../common/permissions/container-access.guard-helper'
@@ -23,6 +23,8 @@ import { PresenceService } from '../presence/presence.service'
 import { ACCESS_TOKEN_COOKIE } from '../auth/auth-cookies'
 import { guestMayRead, guestReachesList } from '../../common/permissions/guest-reach'
 import { sessionIsLive } from '../../common/security/live-session'
+import { isUuid } from '../../common/validation/uuid'
+import { channelReaders } from '../chat/channel-read-filter'
 
 /**
  * Extract the access_token from a raw Cookie header. Browser sessions no longer
@@ -804,26 +806,37 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
    * connection's authenticated identity, and fans out to all other sockets
    * in the canvas room. Sender is excluded so a client never sees its own
    * cursor reflected back.
+   *
+   * ONLY FROM A SOCKET IN THE CANVAS'S ROOM, UNDER ITS ACCOUNT'S NAME
+   * (`found-6-oct/a-socket-sends-into-rooms-it-may-not-read`). Any socket that named a
+   * canvas was relayed into its room under the name its body gave: measured,
+   * a member removed from the workspace and an account never in it each drew
+   * a cursor on the owner's board as "Rev owner (not really)". The room is let
+   * in by `canJoinRoom` and left by the room pass once its person may no
+   * longer read the canvas, so holding it is the read rule; the page joins it
+   * when the board opens.
    */
   @SubscribeMessage('canvas.cursor')
-  handleCanvasCursor(
+  async handleCanvasCursor(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { canvasId?: string; x?: number; y?: number; color?: string; displayName?: string },
+    @MessageBody() body: { canvasId?: string; x?: number; y?: number; color?: string },
   ) {
-    const data = client.data as { userId?: string; email?: string }
+    const data = client.data as { userId?: string }
     if (!data?.userId || !body?.canvasId || typeof body.x !== 'number' || typeof body.y !== 'number') {
       return { ok: false }
     }
+    const room = `canvas:${body.canvasId}`
+    if (!client.rooms.has(room)) return { ok: false }
     const event: RealtimeEvent = {
       type: 'canvas.cursor',
       canvasId: body.canvasId,
       userId: data.userId,
-      displayName: body.displayName ?? data.email ?? data.userId,
+      displayName: await this.nameOf(client),
       x: body.x,
       y: body.y,
       color: body.color,
     }
-    client.to(`canvas:${body.canvasId}`).emit('event', event)
+    client.to(room).emit('event', event)
     return { ok: true }
   }
 
@@ -834,13 +847,25 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   ) {
     const data = client.data as { userId?: string }
     if (!data?.userId || !body?.canvasId) return { ok: false }
+    const room = `canvas:${body.canvasId}`
+    if (!client.rooms.has(room)) return { ok: false }
     const event: RealtimeEvent = {
       type: 'canvas.cursor.leave',
       canvasId: body.canvasId,
       userId: data.userId,
     }
-    client.to(`canvas:${body.canvasId}`).emit('event', event)
+    client.to(room).emit('event', event)
     return { ok: true }
+  }
+
+  /** The account's own name, for its cursor: read the first time, and kept on the socket. */
+  private async nameOf(client: Socket): Promise<string> {
+    const data = client.data as { userId: string; email?: string; displayName?: string }
+    if (data.displayName === undefined) {
+      const [account] = await this.db.select({ displayName: users.displayName }).from(users).where(eq(users.id, data.userId)).limit(1)
+      data.displayName = account?.displayName?.trim() || data.email || data.userId
+    }
+    return data.displayName
   }
 
   /**
@@ -882,23 +907,70 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
    * meant to keep.
    */
   @SubscribeMessage('call.reaction')
-  handleCallReaction(
+  async handleCallReaction(
     @ConnectedSocket() client: Socket,
     @MessageBody() body: { callId?: string; workspaceId?: string; emoji?: string },
   ) {
     const data = client.data as { userId?: string }
-    if (!data?.userId || !body?.callId || !body?.workspaceId || !body?.emoji) return { ok: false }
+    if (!data?.userId || !body?.callId || !body?.emoji) return { ok: false }
     // Bounded: an emoji is one or two code points, and a "reaction" carrying a
     // paragraph is not a reaction.
     const emoji = String(body.emoji).slice(0, 8)
-    this.emitToWorkspace(body.workspaceId, {
+    /*
+     * FROM, AND TO, THOSE WHO MAY READ THE CALL'S CHANNEL
+     * (`found-6-oct/a-socket-sends-into-rooms-it-may-not-read`). It went into the room of
+     * whichever workspace the body named, from anyone: measured, a member
+     * removed from the workspace and an account never in it each put a
+     * reaction on the owner's screen, and a reaction in a DM's call reached
+     * every member. A SyncUp is its channel's ("only people with access to the
+     * Channel can be invited to join a channel SyncUp", ClickUp), so the call
+     * names its workspace and channel, and its channel's readers
+     * (`channelReaders`, the rule its other events go by) are who may send one
+     * and who hear it. The body's workspace is not asked.
+     */
+    const readers = await this.callReaders(body.callId)
+    if (!readers || !(await this.readsCall(readers, data.userId))) return { ok: false }
+    const event = {
       type: 'call.reaction',
-      workspaceId: body.workspaceId,
+      workspaceId: readers.workspaceId,
       callId: body.callId,
       userId: data.userId,
       emoji,
-    } as never)
+    } as never
+    if (readers.workspace) this.emitToWorkspace(readers.workspaceId, event)
+    for (const userId of readers.users) this.emitToUser(userId, event)
     return { ok: true }
+  }
+
+  /** Who may read a call's channel; for a call in no channel, the workspace's members. Null when there is no such call. */
+  private async callReaders(callId: string): Promise<{ workspaceId: string; workspace: boolean; users: string[] } | null> {
+    if (!isUuid(callId)) return null
+    const [call] = await this.db
+      .select({ workspaceId: calls.workspaceId, channelId: calls.channelId })
+      .from(calls)
+      .where(eq(calls.id, callId))
+      .limit(1)
+    if (!call) return null
+    if (!call.channelId) return { workspaceId: call.workspaceId, workspace: true, users: [] }
+    const [channel] = await this.db
+      .select({ id: chatChannels.id, workspaceId: chatChannels.workspaceId, spaceId: chatChannels.spaceId, isPrivate: chatChannels.isPrivate, isDm: chatChannels.isDm })
+      .from(chatChannels)
+      .where(eq(chatChannels.id, call.channelId))
+      .limit(1)
+    if (!channel) return null
+    return { workspaceId: call.workspaceId, ...(await channelReaders(this.db, channel)) }
+  }
+
+  /** One of a call's readers: named among them, or, where the whole workspace reads it, a member of it who is not a guest. */
+  private async readsCall(readers: { workspaceId: string; workspace: boolean; users: string[] }, userId: string): Promise<boolean> {
+    if (readers.users.includes(userId)) return true
+    if (!readers.workspace) return false
+    const [membership] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, readers.workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1)
+    return Boolean(membership && membership.role !== 'guest')
   }
 
   // --- Broadcast helpers ----------------------------------------------------

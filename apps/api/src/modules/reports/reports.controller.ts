@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, ForbiddenException, Get, Header, Param, Patch, Post, Query, StreamableFile, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query, StreamableFile, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { ReportsService, type ContributionPeriodType, type ReportDefinition, type ReportScheduleInput } from './reports.service'
 import { ScheduledReportsService } from './scheduled-reports.service'
@@ -10,6 +10,7 @@ import { FeatureFlagGuard } from '../../common/guards/feature-flag.guard'
 import { FeatureFlag } from '../../common/decorators/feature-flag.decorator'
 import { FLAGS } from '@rundesk/feature-flags'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import { downloadName } from '../../common/export/download-name'
 
 @ApiTags('reports')
 @ApiBearerAuth()
@@ -258,14 +259,17 @@ export class ReportsController {
   // Viewing and exporting, as `contribution.pdf`.
   @RequirePermissions('report.view.basic', 'report.export')
   @ApiOperation({ summary: 'Run a custom report and return it as CSV' })
-  @Header('Content-Type', 'text/csv; charset=utf-8')
-  @Header('Content-Disposition', 'attachment; filename="rundesk-report.csv"')
-  exportCustom(
+  async exportCustom(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: { id: string; role?: string },
     @Body() body: ReportDefinition,
-  ) {
-    return this.reports.exportCustomReportCsv(workspaceId, body ?? {}, { id: user.id, role: user.role })
+  ): Promise<StreamableFile> {
+    const csv = await this.reports.exportCustomReportCsv(workspaceId, body ?? {}, { id: user.id, role: user.role })
+    // Named once, here, after the report (`found-30-sep/export-names-worked-out-twice`): the page saves under this header.
+    return new StreamableFile(Buffer.from(csv, 'utf8'), {
+      type: 'text/csv; charset=utf-8',
+      disposition: downloadName(body?.name, '.csv', 'rundesk-report').disposition,
+    })
   }
 
   @Post('custom/export.pdf')
@@ -280,7 +284,8 @@ export class ReportsController {
     const buffer = await this.reports.exportCustomReportPdf(workspaceId, body ?? {}, { id: user.id, role: user.role })
     return new StreamableFile(buffer, {
       type: 'application/pdf',
-      disposition: 'attachment; filename="rundesk-report.pdf"',
+      // Named once, here, after the report: the report builder worked a name of its own out (`found-30-sep/export-names-worked-out-twice`).
+      disposition: downloadName(body?.name, '.pdf', 'rundesk-report').disposition,
     })
   }
 

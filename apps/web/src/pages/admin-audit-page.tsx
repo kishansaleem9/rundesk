@@ -211,6 +211,8 @@ export function AuditLogPanel({ workspaceId, picker }: { workspaceId: string | n
     // Server-side export streams the FULL filtered trail, not just the loaded page.
     const qs = filterParams.toString()
     // Its failure is said: this was `void`, so a failed export did nothing at all.
+    // Named here, not by the server's header: the name carries the reader's own day
+    // (`localDayKey`), which the server cannot know (`local-dates`, `found-30-sep/export-names-worked-out-twice`).
     downloadFile(
       `/workspaces/${workspaceId}/audit-logs/export${qs ? `?${qs}` : ''}`,
       `audit-log-${localDayKey(new Date())}.csv`,

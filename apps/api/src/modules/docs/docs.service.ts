@@ -36,6 +36,9 @@ function extractPlaintext(content: unknown): string {
   return ''
 }
 
+/** The import panel's own words (`import.docAccepted`), said when a file it cannot read is sent anyway. */
+export const DOC_IMPORT_ACCEPTS = 'Accepts .md, .markdown and .txt. Word, PDF and Excel are not read — Rundesk has no parser for them.'
+
 @Injectable()
 export class DocsService {
   constructor(
@@ -442,6 +445,16 @@ export class DocsService {
   ) {
     const raw = typeof opts.markdown === 'string' ? opts.markdown : ''
     if (!raw.trim()) throw new BadRequestException('The file is empty, so there is nothing to import')
+    /*
+     * A FILE THAT IS NOT TEXT IS REFUSED IN THE PAGE'S OWN WORDS
+     * (`found-6-oct/doc-import-answers-500-to-a-binary-file`). The name is all
+     * the route was asking, and an .xlsx's bytes or a legacy .xls's, sent as a
+     * .md, answered 500: the database refused their NULs. A NUL, which no
+     * Markdown or plain text holds and every binary format here does — a zip's
+     * header (an .xlsx, a .docx), an .xls's — says it is not a text file,
+     * whatever it is called.
+     */
+    if (raw.includes('\u0000')) throw new BadRequestException(DOC_IMPORT_ACCEPTS)
 
     // The title rule lives in `tiptap-markdown.ts` beside both converters, so
     // the unit test exercises the rule this uses rather than a copy of it.

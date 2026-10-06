@@ -49,6 +49,8 @@ export type ReportDefinition = {
   filters?: Array<{ field: string; op: string; value: string }>
   viz?: 'bar' | 'line' | 'pie' | 'table'
   days?: number
+  /** The report's name, which names its exported file (`downloadName`); not part of what it runs. */
+  name?: string
 }
 
 export type ReportResult = {

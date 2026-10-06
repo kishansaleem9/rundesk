@@ -58,7 +58,7 @@ const argOf = (name, fallback) => {
  * run that still passes — and half of this suite is branches that only run once
  * an earlier step really happened.
  */
-const EXPECTED_CHECKS = 54
+const EXPECTED_CHECKS = 57
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -825,6 +825,23 @@ try {
     `job ${clickupMergeJob?.status ?? 'none'} (updated ${clickupMergeJob?.updatedCount}); the task reads ${JSON.stringify(three)}`,
   )
 
+  /*
+   * A MERGED STATUS CARRIES ITS CATEGORY (`found-6-oct/clickup-merge-writes-a-status-without-its-category`):
+   * the ClickUp merge wrote `status` and left `status_category`, so a task In
+   * progress merged from a Done row read done and still counted in progress —
+   * every rollup and the Closed toggle read the category. The spreadsheet merge
+   * stamps both.
+   */
+  const fourId = await matched(`Four ${TAG}`)
+  const doneMerge = await api(`/workspaces/${WT}/import/clickup`, { method: 'POST', body: { csv: `Task Name,List,Status\nFour ${TAG},Merge ${TAG},Done\n`, strategy: 'merge', targetSpaceId: OPEN, targetProjectName: `Merged done ${TAG}` } })
+  const doneMergeJob = await jobOf(api, WT, 'clickup', doneMerge)
+  const four = await fieldsOf(fourId)
+  chk(
+    doneMergeJob?.status === 'completed' && doneMergeJob?.updatedCount === 1 && four.status === 'done' && four.status_category === 'closed',
+    'a ClickUp merge of a Done row writes the status with its category, as the spreadsheet merge does: the task reads done, and closed',
+    `job ${doneMergeJob?.status ?? 'none'} (updated ${doneMergeJob?.updatedCount}); the task reads ${JSON.stringify(four)}`,
+  )
+
   // ══ 11. A FILE THAT IS NOT DELIMITED TEXT ══════════════════════════════════
   /*
    * `found-5-oct/xlsx-read-as-text`: an .xlsx put in anyway (the picker's "All
@@ -983,13 +1000,30 @@ try {
       `left behind: ${xlsLeft.jobs} job row(s), ${xlsLeft.spaces} space(s)`,
   )
 
-  console.log('\n▶ a preview whose content is no text at all')
-  // A number is no zip and holds no NUL: it goes on to the parser, which finds no header row in it.
-  const numberPreview = await api(`/workspaces/${WT}/import/spreadsheet/preview`, { method: 'POST', body: { content: 123 } })
+  console.log('\n▶ a body whose content is no text at all')
+  /*
+   * NO TEXT IS NO FILE (`found-6-oct/import-start-answers-500-to-non-text`). The
+   * spreadsheet start with content 123, an object or true, and the ClickUp start
+   * with csv 123, answered 500 — `.trim()` of what is not a string threw — while
+   * the ClickUp preview answered 201 to the same bodies. All four routes now
+   * answer 400 in the page's words, before anything is made.
+   */
+  const jobsBefore = (await sql`select count(*)::int as n from clickup_import_jobs where workspace_id = ${WT}`)[0].n
+  const notText = []
+  for (const content of [123, { a: 1 }, true]) {
+    notText.push(['sheet preview', content, await api(`/workspaces/${WT}/import/spreadsheet/preview`, { method: 'POST', body: { content } })])
+    notText.push(['sheet start', content, await api(`/workspaces/${WT}/import/spreadsheet`, { method: 'POST', body: { content, mapping: { a: 'title' }, targetProjectName: `NotText ${TAG}` } })])
+    notText.push(['ClickUp preview', content, await api(`/workspaces/${WT}/import/clickup/preview`, { method: 'POST', body: { csv: content } })])
+    notText.push(['ClickUp start', content, await api(`/workspaces/${WT}/import/clickup`, { method: 'POST', body: { csv: content } })])
+  }
+  const jobsAfter = (await sql`select count(*)::int as n from clickup_import_jobs where workspace_id = ${WT}`)[0].n
+  const wrongly = notText
+    .filter(([, , r]) => !(r.status === 400 && r.message === SERVER_WORDS))
+    .map(([where, content, r]) => `${where} of ${JSON.stringify(content)}: ${r.status} ${JSON.stringify(r.message)}`)
   chk(
-    numberPreview.status === 400 && numberPreview.message === 'The file has no header row.',
-    'a preview whose content is a number, not text, answers 400 “The file has no header row.” — not a 500',
-    `the preview answered ${numberPreview.status} ${JSON.stringify(numberPreview.message)}`,
+    wrongly.length === 0 && jobsAfter === jobsBefore,
+    'a body that is no text — a number, an object or true — is refused 400 in the page’s words by both previews and both starts, and no job is made',
+    `${wrongly.length} of ${notText.length} answered otherwise: ${wrongly.join('; ')}; ${jobsAfter - jobsBefore} job(s) made`,
   )
 
   console.log('\n▶ a row holding a NUL')
@@ -1068,6 +1102,55 @@ try {
       /^Row 3 /.test(rowAloneErrors[0] ?? '') && rowAloneTasks.length === 2 && !rowAloneTasks.includes(`Refused ${TAG}`),
     'a row the database refuses fails alone: the job completes with the rows around it imported and that row’s error reported',
     `job ${rowAloneJob?.status ?? 'none'} (created ${rowAloneJob?.createdCount}, errors ${JSON.stringify(rowAloneErrors)}); tasks there: ${JSON.stringify(rowAloneTasks)}`,
+  )
+
+  console.log('\n▶ the ClickUp import: a row holding a NUL, and a run the database refuses at its last write')
+  /*
+   * THE CLICKUP IMPORT, AS THE SPREADSHEET IMPORT
+   * (`found-6-oct/clickup-import-leaves-a-failed-run-behind`). A NUL in its
+   * second row failed the whole run at its last write — the row's error,
+   * naming the title, reached the job's jsonb — and the space, project, list
+   * and first task it had made stayed.
+   */
+  const cuNul = await api(`/workspaces/${WT}/import/clickup`, { method: 'POST', body: { csv: `Task Name\nCu kept one ${TAG}\nCu bro\u0000ken ${TAG}\nCu kept two ${TAG}\n`, targetSpaceId: OPEN, targetProjectName: `Cu nul ${TAG}` } })
+  const cuNulJob = await jobOf(api, WT, 'clickup', cuNul)
+  const cuNulKept = (await sql`select title from tasks where title in (${`Cu kept one ${TAG}`}, ${`Cu kept two ${TAG}`}) order by title`).map((t) => t.title)
+  const cuNulErrors = cuNulJob?.result?.errors ?? []
+  chk(
+    cuNulJob?.status === 'completed' && cuNulJob?.createdCount === 2 && cuNulKept.length === 2 && cuNulErrors.length === 1 &&
+      String(cuNulErrors[0]).includes(`Cu bro\uFFFDken ${TAG}`) && !String(cuNulErrors[0]).includes('\u0000'),
+    'a ClickUp row holding a NUL fails alone: the job completes with the rows around it imported, and that row’s error is reported without the NUL',
+    `job ${cuNulJob?.status ?? 'none'} (${JSON.stringify(cuNulJob?.error ?? null)}, created ${cuNulJob?.createdCount}, errors ${JSON.stringify(cuNulErrors)}); kept: ${JSON.stringify(cuNulKept)}`,
+  )
+
+  // The database refuses this run's "completed", for this workspace alone, as above.
+  const REFUSE_CU = `e2e_refuse_cu_last_write_${stamp}`
+  const dropCuRefusal = async () => {
+    await sql.unsafe(`drop trigger if exists ${REFUSE_CU} on clickup_import_jobs`).catch(() => {})
+    await sql.unsafe(`drop function if exists ${REFUSE_CU}()`).catch(() => {})
+  }
+  await sql.unsafe(`create function ${REFUSE_CU}() returns trigger language plpgsql as $$ begin raise exception 'the database refused this run''s last write'; end $$`)
+  await sql.unsafe(`create trigger ${REFUSE_CU} before update on clickup_import_jobs for each row when (new.status = 'completed' and new.workspace_id = '${WT}') execute function ${REFUSE_CU}()`)
+  let cuFailing = null
+  let cuFailedJob = null
+  try {
+    cuFailing = await api(`/workspaces/${WT}/import/clickup`, { method: 'POST', body: { csv: `Task Name,List,Tags\nCu undone ${TAG},Cu list ${TAG},Cu-undone-${TAG}\nCu also undone ${TAG},Cu list ${TAG},\n`, targetProjectName: `Cu failed ${TAG}` } })
+    cuFailedJob = await jobOf(api, WT, 'clickup', cuFailing)
+  } finally {
+    await dropCuRefusal()
+  }
+  const cuFailedLeft = (await sql`
+    select (select count(*)::int from spaces where workspace_id = ${WT} and name = ${`Cu failed ${TAG}`}) as spaces,
+           (select count(*)::int from projects p join spaces s on s.id = p.space_id where s.workspace_id = ${WT} and p.name = ${`Cu failed ${TAG}`}) as projects,
+           (select count(*)::int from lists where name = ${`Cu list ${TAG}`}) as lists,
+           (select count(*)::int from tasks where title in (${`Cu undone ${TAG}`}, ${`Cu also undone ${TAG}`})) as tasks,
+           (select count(*)::int from labels where workspace_id = ${WT} and name = ${`Cu-undone-${TAG}`}) as tags`)[0]
+  chk(
+    cuFailing?.status === 201 && cuFailedJob?.status === 'failed' && cuFailedJob?.createdCount === 0 &&
+      /refused this run's last write/.test(cuFailedJob?.error ?? '') &&
+      cuFailedLeft.spaces === 0 && cuFailedLeft.projects === 0 && cuFailedLeft.lists === 0 && cuFailedLeft.tasks === 0 && cuFailedLeft.tags === 0,
+    'a ClickUp import the database refuses at its last write ends failed and leaves nothing behind: no space, project, list, task or tag of it is there',
+    `the import answered ${cuFailing?.status}, its job ${cuFailedJob?.status ?? 'none'} (${JSON.stringify(cuFailedJob?.error ?? null)}, created ${cuFailedJob?.createdCount}); left behind: ${JSON.stringify(cuFailedLeft)}`,
   )
 
   // ══ 12. WHO MAY IMPORT, AND WHICH TASKS AN IMPORT MAY MATCH AND MERGE INTO ═══

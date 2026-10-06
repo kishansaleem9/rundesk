@@ -44,6 +44,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../../common/database/database.module'
 import { dupKey } from './clickup-csv.util'
 import { assertImportTarget } from './import-target'
+import { undoRun as undoImportRun, type RunMade } from './run-undo'
 import { IMPORT_ACCESS, writtenFields, type Importer } from './import-access'
 import {
   ACCEPTED_SHEET_EXTENSIONS,
@@ -83,8 +84,6 @@ type RowTally = {
   labelIds: string[]
 }
 
-/** What a run has made so far — what `undoRun` takes away if it fails. */
-type RunMade = { spaceId?: string; projectId?: string; labelIds: string[] }
 
 export type SheetConflictStrategy = 'skip' | 'create' | 'merge'
 
@@ -168,7 +167,10 @@ export class SpreadsheetImportService {
    * the page or a client called it: refused in the page's own words, before
    * anything is parsed or written.
    */
-  private assertDelimitedText(content: unknown) {
+  private assertDelimitedText(content: unknown): asserts content is string {
+    // Nor is a body that is no text at all: a number, an object or true made
+    // the start answer 500 (`found-6-oct/import-start-answers-500-to-non-text`).
+    if (typeof content !== 'string') throw new BadRequestException(NOT_DELIMITED_TEXT)
     if (isZipContent(content)) throw new BadRequestException(NOT_DELIMITED_TEXT)
     if (headerHoldsNul(content)) throw new BadRequestException(NOT_DELIMITED_TEXT)
   }
@@ -250,8 +252,8 @@ export class SpreadsheetImportService {
     const userId = importer.id
     // Who imports, before what or where: a guest is refused, whatever a custom role grants them (`assertMayImport`).
     await this.access.assertMayImport(this.db, { workspaceId, actorId: userId })
-    if (!dto.content?.trim()) throw new BadRequestException('The uploaded file is empty.')
     this.assertDelimitedText(dto.content)
+    if (!dto.content.trim()) throw new BadRequestException('The uploaded file is empty.')
     const table = parseSheet(dto.content, dto.delimiter)
     if (table.headers.length === 0) throw new BadRequestException('The file has no header row.')
     if (table.rows.length === 0) throw new BadRequestException('The file has a header but no data rows.')
@@ -559,32 +561,9 @@ export class SpreadsheetImportService {
     }
   }
 
-  /**
-   * WHAT A RUN THAT FAILED MADE, TAKEN AWAY AGAIN: its project — and with it
-   * every list, status and task in it, by the foreign keys' cascade — its
-   * space when it made one, and the tags it made that label nothing once
-   * those are gone. A merge it wrote into a task that was already there
-   * stays: that task is not the run's to remove. `null` when all of it went,
-   * or the sentence the job's error carries when some could not.
-   */
-  private async undoRun(made: RunMade): Promise<string | null> {
-    try {
-      if (made.projectId) await this.db.delete(projects).where(eq(projects.id, made.projectId))
-      if (made.spaceId) await this.db.delete(spaces).where(eq(spaces.id, made.spaceId))
-      if (made.labelIds.length > 0) {
-        await this.db
-          .delete(labels)
-          .where(
-            and(
-              inArray(labels.id, made.labelIds),
-              sql`not exists (select 1 from ${taskLabelAssignments} where ${taskLabelAssignments.labelId} = ${labels.id})`,
-            ),
-          )
-      }
-      return null
-    } catch (e: any) {
-      return `What it made could not all be removed: ${e?.message ?? 'unknown error'}`
-    }
+  /** What a run that failed made, taken away again: both imports' rule (`run-undo.ts`). */
+  private undoRun(made: RunMade): Promise<string | null> {
+    return undoImportRun(this.db, made)
   }
 
   // ── helpers ────────────────────────────────────────────────────────────────

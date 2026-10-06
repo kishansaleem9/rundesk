@@ -27,7 +27,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 8
+const EXPECTED_CHECKS = 9
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -145,6 +145,30 @@ try {
     adminToggles.every((r) => r.ok) && namesHidden(adminList).length === HIDDEN.length,
     'while the admin favourites every one of them and reads each by name',
     `the admin's toggles answered ${adminToggles.map((r) => r.status).join(', ')}; the list names ${namesHidden(adminList).length} of ${HIDDEN.length}`,
+  )
+
+  /*
+   * TWO TOGGLES SENT TOGETHER TAKE TURNS (`found-30-sep/favorite-toggle-races-itself`).
+   * Each read the row, then deleted it or wrote one, so two in flight together both
+   * read "not pinned" and both pinned: measured on lane 5, 13 of 20 pairs. Twenty
+   * pairs, each sent at once, on one list; two toggles undo each other.
+   */
+  console.log('\n▶ two favourite toggles sent together')
+  const pinnedNow = async () => ((await A(`/workspaces/${WS}/favorites`)).data ?? []).some((f) => f.entityId === open.list)
+  const pairs = []
+  for (let i = 0; i < 20; i++) {
+    const before = await pinnedNow()
+    const [one, two] = await Promise.all([toggle(A, ['list', open.list]), toggle(A, ['list', open.list])])
+    const after = await pinnedNow()
+    pairs.push({ said: [one.data?.favorited, two.data?.favorited].map(String).sort().join('/'), moved: before !== after })
+    if (after !== before) await toggle(A, ['list', open.list]) // back to where the pair began
+  }
+  const moved = pairs.filter((p) => p.moved).length
+  const saidTwice = pairs.filter((p) => p.said !== 'false/true').length
+  chk(
+    moved === 0 && saidTwice === 0,
+    'two favourite toggles sent together undo each other: of twenty pairs, each answers pinned once and unpinned once, and none leaves the list moved',
+    `${moved} of 20 pairs left the list moved; ${saidTwice} answered the same twice (${JSON.stringify(pairs.slice(0, 5))})`,
   )
 
   // ══ 2. PLANNER BLOCKS ════════════════════════════════════════════════════

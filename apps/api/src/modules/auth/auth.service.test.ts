@@ -964,3 +964,31 @@ describe('AuthService.revokeOtherSessions — keeps the current session by hash'
     assert.ok(updates.some((u) => u.where.value === 's3'))
   })
 })
+
+/*
+ * THE CALLER'S SESSION IS THE ONE ITS ACCESS TOKEN NAMES
+ * (`found-30-sep/the-callers-session-is-named-by-its-refresh-token`): a page
+ * reloaded from its cookies holds no refresh token to pass, so no row was this
+ * device, and "Sign out other sessions" kept none of the caller's.
+ */
+describe('AuthService — the caller’s session, by the id its access token names', () => {
+  it('marks the session the access token names as this device, with no refresh token passed', async () => {
+    const now = Date.now()
+    const rows = [
+      { id: 's1', userAgent: 'ua1', ipAddress: 'ip1', isRevoked: false, expiresAt: new Date(now + 1000), createdAt: new Date(now), refreshToken: hashRefreshToken('ONE') },
+      { id: 's2', userAgent: 'ua2', ipAddress: 'ip2', isRevoked: false, expiresAt: new Date(now + 1000), createdAt: new Date(now - 1000), refreshToken: hashRefreshToken('TWO') },
+    ]
+    const { db } = recordingDb([rows])
+    const svc = makeAuthService({ db })
+    const list = await svc.listSessions('u1', null, 's2')
+    assert.deepEqual(list.map((r: any) => [r.id, r.isCurrent]), [['s1', false], ['s2', true]])
+  })
+
+  it('keeps the session the access token names when signing out the others, with no refresh token passed', async () => {
+    const rows = [{ id: 's1', refreshToken: hashRefreshToken('ONE') }, { id: 's2', refreshToken: hashRefreshToken('TWO') }, { id: 's3', refreshToken: hashRefreshToken('THREE') }]
+    const { db } = recordingDb([rows])
+    const svc = makeAuthService({ db })
+    const res = await svc.revokeOtherSessions('u1', null, 's2')
+    assert.equal(res.revoked, 2)
+  })
+})

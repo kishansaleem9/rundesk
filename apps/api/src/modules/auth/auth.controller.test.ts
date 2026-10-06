@@ -15,13 +15,14 @@ describe('AuthController.revokeOthers — the session it keeps is the caller’s
   it('“Sign out other sessions” keeps the session a browser’s refresh cookie names when the body names none, and one named in the body first', async () => {
     const revokeOtherSessions = mock.fn(async () => ({ revoked: 0 }))
     const controller = new AuthController({ revokeOtherSessions } as any, {} as any)
-    const caller = { id: 'u1' }
+    // The caller's own session, as its access token names it (`sid`), is passed as well.
+    const caller = { id: 'u1', sid: 'S1' }
     await controller.revokeOthers(caller, {}, { cookies: { refresh_token: 'COOKIE-REFRESH' } } as any)
     await controller.revokeOthers(caller, { currentRefreshToken: 'BODY-REFRESH' }, { cookies: { refresh_token: 'COOKIE-REFRESH' } } as any)
     await controller.revokeOthers(caller, {}, {} as any)
     assert.deepEqual(
       revokeOtherSessions.mock.calls.map((c) => c.arguments),
-      [['u1', 'COOKIE-REFRESH'], ['u1', 'BODY-REFRESH'], ['u1', null]],
+      [['u1', 'COOKIE-REFRESH', 'S1'], ['u1', 'BODY-REFRESH', 'S1'], ['u1', null, 'S1']],
     )
   })
 })

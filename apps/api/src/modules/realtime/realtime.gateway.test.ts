@@ -620,3 +620,89 @@ describe('RealtimeGateway — a super_admin’s rooms', () => {
     assert.equal(member.reads.includes('account role'), false, 'the account was asked about a socket whose token never said super_admin')
   })
 })
+
+/*
+ * WHAT A SOCKET SENDS GOES ONLY WHERE ITS PERSON MAY READ
+ * (`found-6-oct/a-socket-sends-into-rooms-it-may-not-read`). A cursor went into
+ * any canvas's room under the name its body gave, and a call reaction into the
+ * room of whichever workspace its body named, from anyone with a socket.
+ * `realtime-sends-access.mjs` sends both on a lane, from a removed member and
+ * an account never in the workspace, beside those who may.
+ */
+/** A fake socket in these rooms, recording what it sends to which room. */
+function sending(userId: string, rooms: string[]) {
+  const sent: Array<[string, any]> = []
+  const client = {
+    data: { userId, email: `${userId}@example.com` } as Record<string, unknown>,
+    rooms: new Set(rooms),
+    to: (room: string) => ({ emit: (_kind: string, event: unknown) => { sent.push([room, event]) } }),
+  }
+  return { client, sent }
+}
+/** A gateway whose database answers every select with these rows, counting the reads. */
+function gatewayAnswering(rows: unknown[]) {
+  let reads = 0
+  const db = { select: () => ({ from: () => ({ where: () => ({ limit: async () => { reads += 1; return rows } }) }) }) }
+  const gateway = new RealtimeGateway({} as any, {} as any, db as any, {} as any)
+  const heard: Array<[string, any]> = []
+  ;(gateway as any).server = { to: (room: string) => ({ emit: (_kind: string, event: unknown) => { heard.push([room, event]) } }) }
+  return { gateway, heard, reads: () => reads }
+}
+
+describe('RealtimeGateway — a cursor comes only from a socket in its canvas’s room, under its account’s name', () => {
+  it('refuses a cursor, and its leave, from a socket not in the room, and relays one from a socket in it under the account’s name whatever name the body gives, read once', async () => {
+    const { gateway, reads } = gatewayAnswering([{ displayName: 'Rev Member' }])
+    const outside = sending('u2', ['s1', 'user:u2'])
+    assert.deepEqual(await gateway.handleCanvasCursor(outside.client as any, { canvasId: 'c1', x: 1, y: 2, displayName: 'Rev owner (not really)' } as any), { ok: false })
+    assert.deepEqual(gateway.handleCanvasCursorLeave(outside.client as any, { canvasId: 'c1' }), { ok: false })
+    assert.equal(outside.sent.length, 0, 'nothing is relayed from outside the room')
+
+    const inside = sending('u2', ['s2', 'user:u2', 'canvas:c1'])
+    assert.deepEqual(await gateway.handleCanvasCursor(inside.client as any, { canvasId: 'c1', x: 1, y: 2, displayName: 'Rev owner (not really)' } as any), { ok: true })
+    assert.deepEqual(await gateway.handleCanvasCursor(inside.client as any, { canvasId: 'c1', x: 3, y: 4 } as any), { ok: true })
+    assert.deepEqual(gateway.handleCanvasCursorLeave(inside.client as any, { canvasId: 'c1' }), { ok: true })
+    assert.deepEqual(inside.sent.map(([room, e]) => [room, e.type, e.displayName ?? null]), [
+      ['canvas:c1', 'canvas.cursor', 'Rev Member'],
+      ['canvas:c1', 'canvas.cursor', 'Rev Member'],
+      ['canvas:c1', 'canvas.cursor.leave', null],
+    ])
+    assert.equal(reads(), 1, 'the name is read once a socket')
+  })
+})
+
+describe('RealtimeGateway — a call reaction comes from, and goes to, those who may read its channel', () => {
+  const CALL = 'c4444444-4444-4444-8444-444444444444'
+  it('relays a reaction from one of the channel’s readers to them alone, under the call’s workspace whatever the body names, and refuses anyone else', async () => {
+    const { gateway, heard } = gatewayAnswering([])
+    ;(gateway as any).callReaders = async () => ({ workspaceId: 'w1', workspace: false, users: ['u1', 'u2'] })
+    const outsider = sending('u3', ['s3'])
+    assert.deepEqual(await gateway.handleCallReaction(outsider.client as any, { callId: CALL, workspaceId: 'w1', emoji: 'x' }), { ok: false })
+    assert.equal(heard.length, 0, 'nothing from somebody the channel does not let read it')
+    const peer = sending('u2', ['s2'])
+    assert.deepEqual(await gateway.handleCallReaction(peer.client as any, { callId: CALL, workspaceId: 'w-other', emoji: '👍' }), { ok: true })
+    assert.deepEqual(heard.map(([room, e]) => [room, e.workspaceId, e.userId, e.emoji]), [
+      ['user:u1', 'w1', 'u2', '👍'],
+      ['user:u2', 'w1', 'u2', '👍'],
+    ])
+  })
+
+  it('where the whole workspace reads the channel, a member reacts into its room and a guest or somebody outside it does not', async () => {
+    const cases: Array<[unknown[], boolean]> = [[[{ role: 'member' }], true], [[{ role: 'guest' }], false], [[], false]]
+    for (const [membership, ok] of cases) {
+      const { gateway, heard } = gatewayAnswering(membership)
+      ;(gateway as any).callReaders = async () => ({ workspaceId: 'w1', workspace: true, users: [] })
+      const who = sending('u5', ['s5'])
+      assert.deepEqual(await gateway.handleCallReaction(who.client as any, { callId: CALL, emoji: 'x' }), { ok })
+      assert.deepEqual(heard.map(([room]) => room), ok ? ['workspace:w1'] : [], JSON.stringify(membership))
+    }
+  })
+
+  it('refuses a reaction to no call, or to an id that is not one, without asking the database', async () => {
+    const { gateway, heard, reads } = gatewayAnswering([])
+    const who = sending('u1', ['s1'])
+    assert.deepEqual(await gateway.handleCallReaction(who.client as any, { callId: 'not-a-call', emoji: 'x' }), { ok: false })
+    assert.equal(reads(), 0)
+    assert.deepEqual(await gateway.handleCallReaction(who.client as any, { callId: CALL, emoji: 'x' }), { ok: false })
+    assert.equal(heard.length, 0)
+  })
+})

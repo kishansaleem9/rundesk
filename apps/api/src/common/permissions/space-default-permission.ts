@@ -1,6 +1,6 @@
 import { isManagerRole } from './workspace-roles'
 import { ForbiddenException } from '@nestjs/common'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { spaces, spaceMembers, objectShares, projectMembers, workspaceMembers } from '@rundesk/db'
 import type { Db, SpaceDefaultPermission } from '@rundesk/db'
 
@@ -309,6 +309,39 @@ export async function resolveSpaceLevels(
   return out
 }
 
+/**
+ * What is shared with a guest inside the location a write asks about — the
+ * outermost of a project, a list or a task below it — or null. The location
+ * is the first step of `within` (a list, a project or a folder), or the space.
+ */
+async function sharedBelow(
+  db: Db,
+  params: { spaceId: string; actorId: string; within?: WithinStep[] },
+): Promise<'project' | 'list' | 'task' | null> {
+  const at = params.within?.[0] ?? null
+  if (at && at.type !== 'list' && at.type !== 'project' && at.type !== 'folder') return null
+  // Where a project, a list and a task of the location are, by the columns that hold them.
+  const inPlace = (project: ReturnType<typeof sql>, list?: ReturnType<typeof sql>) =>
+    !at ? sql`${project}.space_id = ${params.spaceId}`
+      : at.type === 'folder' ? sql`${project}.folder_id = ${at.id}`
+      : at.type === 'project' ? sql`${project}.id = ${at.id}`
+      : list ? sql`${list}.id = ${at.id}` : sql`false`
+  const p = sql.raw('p'), l = sql.raw('l')
+  const asks: Array<['project' | 'list' | 'task', ReturnType<typeof sql>]> = [
+    ['project', sql`select 1 from object_shares s join projects p on p.id = s.object_id
+      where s.object_type = 'project' and s.user_id = ${params.actorId} and ${at?.type === 'list' || at?.type === 'project' ? sql`false` : inPlace(p)} limit 1`],
+    ['list', sql`select 1 from object_shares s join lists l on l.id = s.object_id join projects p on p.id = l.project_id
+      where s.object_type = 'list' and s.user_id = ${params.actorId} and ${at?.type === 'list' ? sql`false` : inPlace(p, l)} limit 1`],
+    ['task', sql`select 1 from object_shares s join tasks t on t.id = s.object_id join lists l on l.id = t.list_id join projects p on p.id = l.project_id
+      where s.object_type = 'task' and s.user_id = ${params.actorId} and ${inPlace(p, l)} limit 1`],
+  ]
+  for (const [kind, ask] of asks) {
+    const found = await db.execute(ask)
+    if ((Array.isArray(found) ? found : (found as { rows?: unknown[] }).rows ?? []).length > 0) return kind
+  }
+  return null
+}
+
 /** True when `level` reaches `required` on the ladder. */
 export function spaceLevelReaches(
   level: SpaceDefaultPermission,
@@ -346,9 +379,20 @@ export async function assertSpaceLevel(
   const resolved = await resolveSpaceLevel(db, params)
   if (!resolved) return
   if (spaceLevelReaches(resolved.level, params.required)) return
+  /*
+   * A GUEST WHO HOLDS SOMETHING BELOW IS TOLD WHAT
+   * (`found-6-oct/a-guest-shared-one-task-told-nothing-is-shared`). The guest's
+   * default is reached when nothing on the location or above it is shared with
+   * them, and a guest reads a location only when something inside it is: so a
+   * guest whose share was a task in a list was refused every list-level write
+   * as though nothing were shared — "Nothing here is shared with you".
+   */
+  const below = resolved.source === 'guest-default' ? await sharedBelow(db, params) : null
   throw new ForbiddenException(
     resolved.source === 'guest-default'
-      ? `Nothing here is shared with you, and a guest changes only what is shared with them`
+      ? below
+        ? `Only a ${below} here is shared with you, and a guest changes only what is shared with them`
+        : `Nothing here is shared with you, and a guest changes only what is shared with them`
       : resolved.source === 'item-share'
         ? `What is shared with you here is "${LEVEL_LABEL[resolved.level]}", which does not allow ${params.act ?? 'changing its'} ${params.kind}`
         : resolved.source === 'project-member'

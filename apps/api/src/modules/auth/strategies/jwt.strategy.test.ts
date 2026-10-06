@@ -73,6 +73,6 @@ test('validate refuses a token whose session is revoked, past its window, anothe
 
 test('validate answers the person while the session the token names is live, reading it once by its id', async () => {
   const { strategy, asked } = strategyOver({ [SESSION]: { userId: 'u1', isRevoked: false, expiresAt: new Date(Date.now() + 60_000) } })
-  assert.deepEqual(await strategy.validate(claims()), { id: 'u1', email: 'a@b.com', role: 'member', flags: {}, activeWorkspaceId: 'w1' })
+  assert.deepEqual(await strategy.validate(claims()), { id: 'u1', email: 'a@b.com', role: 'member', flags: {}, activeWorkspaceId: 'w1', sid: SESSION })
   assert.deepEqual(asked, [SESSION], 'one read, by the session’s id')
 })

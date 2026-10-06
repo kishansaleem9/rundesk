@@ -84,7 +84,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 31
+const EXPECTED_CHECKS = 34
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -766,6 +766,60 @@ try {
     othersAsBrowser.status === 201 && cookiedReads.status === 200 && cookiedRefreshes.status === 200 && cookiedOtherReads.status === 401,
     '"Sign out other sessions" made as a browser (its cookies and the CSRF header, nothing in the body) keeps the browser’s session: it reads and refreshes on, and the other session’s read is refused 401',
     `it answered ${said(othersAsBrowser)} ${JSON.stringify(othersAsBrowser.data)}; the browser then read ${cookiedReads.status} and refreshed ${cookiedRefreshes.status}; the other session read ${cookiedOtherReads.status}`,
+  )
+
+  /*
+   * THE CALLER'S SESSION IS THE ONE ITS ACCESS TOKEN NAMES
+   * (`found-30-sep/the-callers-session-is-named-by-its-refresh-token`). The
+   * sessions list marked "this device" only by a refresh token passed in the
+   * query, which a page reloaded from its cookies does not have: no row was
+   * this device. And a client that named no session lost its own to its own
+   * password change. Every access token names its session (`sid`).
+   */
+  const lister = await account('lister')
+  const listedIn = await signIn(lister.email, PASSWORD)
+  await signIn(lister.email, PASSWORD)
+  const jarL = listedIn.cookies
+  const listedJar = `access_token=${jarL.access_token}; refresh_token=${jarL.refresh_token}; csrf_token=${jarL.csrf_token}`
+  const listByCookies = await visit('/auth/sessions', { cookie: listedJar })
+  const listByToken = await visit('/auth/sessions', { token: listedIn.data?.accessToken })
+  const currentOf = (res) => (res.data ?? []).filter((r) => r.isCurrent).map((r) => r.id)
+  chk(
+    listByCookies.status === 200 && currentOf(listByCookies).length === 1 && listByToken.status === 200 && currentOf(listByToken).length === 1 &&
+      currentOf(listByCookies)[0] === currentOf(listByToken)[0],
+    'the sessions list read by a browser’s cookies alone, as after a reload, marks one session as this device — the same one its access token names when read by it, no refresh token in the query',
+    `by cookies ${listByCookies.status}, current ${JSON.stringify(currentOf(listByCookies))} of ${(listByCookies.data ?? []).length}; by the token ${listByToken.status}, current ${JSON.stringify(currentOf(listByToken))}`,
+  )
+
+  const selfChanger = await account('self-changer')
+  const selfOther = (await signIn(selfChanger.email, PASSWORD)).data
+  const selfChanged = await visit('/users/me/change-password', { from: freshAddress(), method: 'POST', token: selfChanger.token, body: { currentPassword: PASSWORD, newPassword: 'Changer@12345!' } })
+  const selfReads = await reads({ token: selfChanger.token })
+  const selfOtherReads = await reads(selfOther)
+  chk(
+    selfChanged.status === 201 && selfReads.status === 200 && selfOtherReads.status === 401,
+    'a client that names no session keeps its own through its own password change — it reads on — and the other session is refused 401',
+    `the change answered ${said(selfChanged)} ${JSON.stringify(selfChanged.data)}; the client then read ${selfReads.status}; the other session ${selfOtherReads.status}`,
+  )
+
+  /*
+   * A LOOKUP BY EMAIL IS READ THROUGH AN INDEX (`found-30-sep/email-lookups-read-the-whole-table`).
+   * Every lookup of a person by email compares `lower(email)` (`same-email.ts`),
+   * and the only index on the column was on the text as stored: each sign-in,
+   * sign-up, reset, invitation and inbound mail read the whole `users` table
+   * (measured on rundesk_v3, 4,786 accounts: a sequential scan, 4.8–7.0 ms). The
+   * plan is asked with sequential scans set aside, so a small table — CI's — says
+   * the same as a large one: an index that serves the lookup is used, or none is there.
+   */
+  const lookupPlan = await sql.begin(async (tx) => {
+    await tx`set local enable_seqscan = off`
+    return tx`explain (format json) select id from users where lower(email) = lower(${lister.email})`
+  })
+  const planText = JSON.stringify(lookupPlan)
+  chk(
+    /users_email_lower_idx/.test(planText) && !/"Seq Scan"/.test(planText),
+    'a lookup of a person by email, in any case, is read through an index on lower(email), not the whole users table',
+    `the plan: ${planText.slice(0, 300)}`,
   )
 
   // -------------------------------------------------------------------------
