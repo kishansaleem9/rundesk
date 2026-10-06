@@ -84,13 +84,19 @@ export class SpreadsheetImportController {
   }
 
   @Get('jobs')
-  @ApiOperation({ summary: 'Import history. `source` filters on the job row — spreadsheet runs, not ClickUp ones.' })
+  // The history and each job's report are asked what the imports ask: any
+  // member or guest read every import's report, whose errors quote the rows a
+  // private space's import refused (`found-6-oct/import-history-read-by-anyone`).
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('workspace.import')
+  @ApiOperation({ summary: 'Import history (who may import) — `source` filters on the job row: spreadsheet runs, not ClickUp ones.' })
   jobs(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: any,
     @Query('source') source?: string,
     @Query('limit') limit?: string,
   ) {
-    return this.svc.listJobs(workspaceId, {
+    return this.svc.listJobs(workspaceId, { id: user.id, role: user.role }, {
       // Default to this importer's own runs; `source=all` opts out of the filter.
       source: source === 'all' ? undefined : (source ?? SHEET_SOURCE),
       limit: limit ? Number(limit) : undefined,
@@ -98,8 +104,10 @@ export class SpreadsheetImportController {
   }
 
   @Get('jobs/:jobId')
-  @ApiOperation({ summary: 'Poll one import job — progress, per-outcome counts, rejected rows and why' })
-  job(@Param('workspaceId') workspaceId: string, @Param('jobId') jobId: string) {
-    return this.svc.getJob(workspaceId, jobId)
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('workspace.import')
+  @ApiOperation({ summary: 'Poll one import job (who may import) — progress, per-outcome counts, rejected rows and why' })
+  job(@Param('workspaceId') workspaceId: string, @Param('jobId') jobId: string, @CurrentUser() user: any) {
+    return this.svc.readJob(workspaceId, jobId, { id: user.id, role: user.role })
   }
 }

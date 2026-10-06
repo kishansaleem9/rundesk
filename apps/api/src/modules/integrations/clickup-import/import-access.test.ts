@@ -72,7 +72,7 @@ describe('writtenFields', () => {
 /** The write rule, answered for a test: what it was asked, in order; `refuse` names a task it refuses, with the error. */
 function writeRule(refuse: Record<string, Error> = {}) {
   const asked: Array<{ taskId: string; actorId: string; level: string | undefined }> = []
-  const writable = async (_db: unknown, taskId: string, actorId: string, opts: { level?: 'comment' | 'edit' | 'full' } = {}) => {
+  const writable = async (_db: unknown, taskId: string, actorId: string, opts: { level?: 'comment' | 'edit' | 'full' | 'subtask' } = {}) => {
     asked.push({ taskId, actorId, level: opts.level })
     if (refuse[taskId]) throw refuse[taskId]
     return {} as any
@@ -112,8 +112,9 @@ describe('assertMayLinkSubtask (found-6-oct/import-merge-writes-tasks-its-import
   it('asks edit of a child that was already there and Full edit of a parent that was already there — no level of a task the run made — and a refusal is the rule’s', async () => {
     const cases: Array<[boolean, boolean, Array<[string, string]>]> = [
       [true, false, [['child', 'edit']]],
-      [false, true, [['parent', 'full']]],
-      [true, true, [['child', 'edit'], ['parent', 'full']]],
+      // Full edit, asked as adding a subtask, whose refusal says so (`found-6-oct/adding-a-subtask-is-refused-as-deleting`).
+      [false, true, [['parent', 'subtask']]],
+      [true, true, [['child', 'edit'], ['parent', 'subtask']]],
       [false, false, []],
     ]
     for (const [childWasThere, parentWasThere, expected] of cases) {
@@ -121,7 +122,7 @@ describe('assertMayLinkSubtask (found-6-oct/import-merge-writes-tasks-its-import
       await assertMayLinkSubtask(linkDb(null, false), { childId: 'child', parentId: 'parent', actorId: ACTOR, childWasThere, parentWasThere }, writable)
       assert.deepEqual(asked.map((a) => [a.taskId, a.level]), expected, `child there ${childWasThere}, parent there ${parentWasThere}`)
     }
-    const refusal = new ForbiddenException(`This space's default permission is "Edit", which does not allow deleting its tasks`)
+    const refusal = new ForbiddenException(`This space's default permission is "Edit", which does not allow adding subtasks to its tasks`)
     const { writable } = writeRule({ parent: refusal })
     await assert.rejects(
       () => assertMayLinkSubtask(linkDb(null, false), { childId: 'child', parentId: 'parent', actorId: ACTOR, childWasThere: false, parentWasThere: true }, writable),
@@ -169,7 +170,7 @@ describe('enrichmentRefusals (found-6-oct/import-merge-writes-tasks-its-importer
     const atComment = new ForbiddenException(`This space's default permission is "Comment", which does not allow changing its tasks`)
     const levels: Array<string | undefined> = []
     const readable = async () => ({ taskId: 'task', listId: 'list', projectId: 'project' })
-    const writable = async (_db: unknown, _taskId: string, _actorId: string, opts: { level?: 'comment' | 'edit' | 'full' } = {}) => {
+    const writable = async (_db: unknown, _taskId: string, _actorId: string, opts: { level?: 'comment' | 'edit' | 'full' | 'subtask' } = {}) => {
       levels.push(opts.level)
       throw atComment
     }

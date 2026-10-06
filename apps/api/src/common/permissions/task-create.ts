@@ -1,6 +1,6 @@
 import { ConflictException, HttpException, NotFoundException } from '@nestjs/common'
-import { eq } from 'drizzle-orm'
-import { lists, projects, spaces, users } from '@rundesk/db'
+import { and, eq, sql, type SQL } from 'drizzle-orm'
+import { folders, lists, projects, spaces, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { readableList } from './read-access'
 import { assertCanCreateInSpace } from './container-access'
@@ -18,7 +18,65 @@ import { isUuid } from '../validation/uuid'
  * rule; `TasksService.assertCanCreateTaskIn` asks it.
  */
 
-/** The list's workspace, space, project and folder, whether it is in the trash and who put it there; null when there is no such list. */
+/*
+ * WHAT HOLDS A LIST, IN THE TRASH (`found-6-oct/task-fallback-files-into-a-deleted-project`).
+ * Deleting a project, a folder or a space puts it in the trash, and what it
+ * holds with it, by its own `is_archived` alone: its lists' own flags stay as
+ * they were. Only the list's own was asked, so with the workspace's starter
+ * project deleted `/task` filed into its list (201) — while the space listed no
+ * such project — `POST /tasks` into it answered 201 too, and the Default-list
+ * picker still offered it. A list whose project, folder or space is in the
+ * trash takes no task, as a list in the trash takes none.
+ */
+export type HeldIn = 'project' | 'folder' | 'space'
+
+/** The trash state of what holds a list, for a select of lists joined to their project and space. The folder is the project's, if any. */
+export const HOLDER_TRASH_COLUMNS = {
+  projectInTrash: projects.isArchived,
+  projectDeletedById: projects.archivedById,
+  folderInTrash: sql<boolean>`coalesce((select ${folders.isArchived} from ${folders} where ${folders.id} = ${projects.folderId}), false)`,
+  folderDeletedById: sql<string | null>`(select ${folders.archivedById} from ${folders} where ${folders.id} = ${projects.folderId})`,
+  spaceInTrash: spaces.isArchived,
+  spaceDeletedById: spaces.archivedById,
+}
+
+/** The nearest of a list's holders in the trash — its project, the project's folder, the space — and who put it there; null when none is. */
+export function nearestHolderInTrash(row: {
+  projectInTrash?: boolean | null
+  projectDeletedById?: string | null
+  folderInTrash?: boolean | null
+  folderDeletedById?: string | null
+  spaceInTrash?: boolean | null
+  spaceDeletedById?: string | null
+}): { where: HeldIn; deletedById: string | null } | null {
+  if (row.projectInTrash) return { where: 'project', deletedById: row.projectDeletedById ?? null }
+  if (row.folderInTrash) return { where: 'folder', deletedById: row.folderDeletedById ?? null }
+  if (row.spaceInTrash) return { where: 'space', deletedById: row.spaceDeletedById ?? null }
+  return null
+}
+
+/** For a select of lists joined to their project and space: none whose project, the project's folder or space is in the trash. */
+export function holdersNotInTrash(): SQL {
+  return and(
+    eq(projects.isArchived, false),
+    eq(spaces.isArchived, false),
+    sql`not exists (select 1 from ${folders} where ${folders.id} = ${projects.folderId} and ${folders.isArchived})`,
+  ) as SQL
+}
+
+/** Whether what holds the list is in the trash, the nearest first, and who put it there; null when nothing is, or there is no such list. */
+export async function heldInTrash(db: Db, listId: string): Promise<{ where: HeldIn; deletedById: string | null } | null> {
+  const [row] = await db
+    .select(HOLDER_TRASH_COLUMNS)
+    .from(lists)
+    .innerJoin(projects, eq(projects.id, lists.projectId))
+    .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+    .where(eq(lists.id, listId))
+    .limit(1)
+  return row ? nearestHolderInTrash(row) : null
+}
+
+/** The list's workspace, space, project and folder, whether it is in the trash and who put it there, and what holds it in the trash; null when there is no such list. */
 async function listHome(db: Db, listId: string) {
   const [row] = await db
     .select({
@@ -28,6 +86,7 @@ async function listHome(db: Db, listId: string) {
       folderId: projects.folderId,
       inTrash: lists.isArchived,
       deletedById: lists.archivedById,
+      ...HOLDER_TRASH_COLUMNS,
     })
     .from(lists)
     .innerJoin(projects, eq(projects.id, lists.projectId))
@@ -66,9 +125,17 @@ export const LIST_IN_TRASH_RESTORE = 'This list is in the trash. Restore it from
 export const LIST_IN_TRASH_ASK =
   'This list is in the trash. Ask a workspace admin, or whoever deleted it, to restore it before adding tasks to it.'
 
+/** The same refusal when what is in the trash is what holds the list: its project, folder or space. */
+export function heldInTrashWords(where: HeldIn, mayRestore: boolean): string {
+  return mayRestore
+    ? `This list's ${where} is in the trash. Restore the ${where} from Trash before adding tasks to the list.`
+    : `This list's ${where} is in the trash. Ask a workspace admin, or whoever deleted the ${where}, to restore it before adding tasks to the list.`
+}
+
 export class ListInTrashException extends ConflictException {
-  constructor(readonly mayRestore: boolean = true) {
-    super(mayRestore ? LIST_IN_TRASH_RESTORE : LIST_IN_TRASH_ASK)
+  /** `heldIn`: what holds the list is in the trash, not the list itself (`HeldIn`). */
+  constructor(readonly mayRestore: boolean = true, readonly heldIn: HeldIn | null = null) {
+    super(heldIn ? heldInTrashWords(heldIn, mayRestore) : mayRestore ? LIST_IN_TRASH_RESTORE : LIST_IN_TRASH_ASK)
   }
 }
 
@@ -135,6 +202,9 @@ export async function assertCanCreateTaskIn(
   const list = await readableList(db, home.workspaceId, listId, { id: actorId, role: account?.role })
   if (!list) throw new NotFoundException('List not found')
   // Asked of somebody who may open the list, so it tells nobody else it is there.
+  // What holds it in the trash refuses as the list itself does; the list's own trash is said first (below).
+  const held = home.inTrash ? null : nearestHolderInTrash(home)
+  if (held && !opts.evenInTrash) throw new ListInTrashException(mayRestoreList(list.role, held.deletedById, actorId), held.where)
   if (home.inTrash && !opts.evenInTrash) throw new ListInTrashException(mayRestoreList(list.role, home.deletedById, actorId))
   await assertCanCreateInSpace(db, {
     spaceId: home.spaceId,

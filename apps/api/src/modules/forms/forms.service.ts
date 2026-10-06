@@ -10,7 +10,7 @@ import { safeFileName } from '../../common/storage/file-name'
 import { WebhooksService } from '../webhooks/webhooks.service'
 import { readableList } from '../../common/permissions/read-access'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
-import { ListInTrashException, listTrashState, mayRestoreList } from '../../common/permissions/task-create'
+import { heldInTrash, ListInTrashException, listTrashState, mayRestoreList } from '../../common/permissions/task-create'
 import { isUuid } from '../../common/validation/uuid'
 
 /** Hard cap on a single form-upload file (public intake). */
@@ -211,6 +211,9 @@ export class FormsService {
      * again once the list is restored (`retrySubmissionRouting`).
      */
     if (targetList.inTrash) throw new ListInTrashException()
+    // Nor one whose project, folder or space is (`found-6-oct/task-fallback-files-into-a-deleted-project`).
+    const held = await heldInTrash(this.db, targetList.id)
+    if (held) throw new ListInTrashException(true, held.where)
     const [newTask] = await this.db
       .insert(tasks)
       .values({
@@ -529,6 +532,8 @@ export class FormsService {
     // and aimed, at a list already deleted (201).
     const state = await listTrashState(this.db, listId)
     if (state?.inTrash) throw new ListInTrashException(mayRestoreList(list.role, state.deletedById, actorId))
+    const held = await heldInTrash(this.db, listId)
+    if (held) throw new ListInTrashException(mayRestoreList(list.role, held.deletedById, actorId), held.where)
     await assertCanCreateInSpace(this.db, { spaceId: list.spaceId, actorId, kind: 'task', within: [{ type: 'list', id: listId }] })
   }
 

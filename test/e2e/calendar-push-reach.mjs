@@ -49,7 +49,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 7
+const EXPECTED_CHECKS = 10
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -80,6 +80,10 @@ const OWNER_REFUSED = {
   google_meet: 'The Google Calendar connected to this workspace belongs to somebody who cannot open this task, so no meeting is made in it.',
   zoom: 'The Zoom account connected to this workspace belongs to somebody who cannot open this task, so no meeting is made in it.',
 }
+/** What a pull of the keeper's Google Calendar answers once they have left (`found-6-oct/calendar-pull-uses-a-leavers-connection`). */
+const LEAVERS_PULL = 'The Google Calendar connected to this workspace belongs to somebody who is no longer in it, so nothing is pulled from it. Connect it again under your own account.'
+/** …and what the App Center's tile says of it. */
+const OWNER_LEFT_WHY = 'Connected by somebody who is no longer in this workspace. Connect it again under your own account.'
 /** …and when it is somebody who may, with no token to make it with. */
 const CONNECT_FIRST = { google_meet: 'Connect Google Meet first', zoom: 'Connect Zoom first' }
 
@@ -124,11 +128,12 @@ try {
     const li = await C('/lists', { method: 'POST', body: { projectId: pr.data?.id, name: `${TAG} ${name}` } })
     const tk = await C('/tasks', { method: 'POST', body: { listId: li.data?.id, title: `${TAG} ${name} plan`, description: `the ${name} plan, word for word`, dueDate: due } })
     if (!tk.ok || !tk.data?.id) throw new Error(`could not make the ${name} task: ${said(sp)} ${said(pr)} ${said(li)} ${said(tk)}`)
-    return { id: tk.data.id, url: `/app/${workspaceId}/${sp.data.id}/${pr.data.id}/${li.data.id}?task=${tk.data.id}` }
+    return { id: tk.data.id, list: li.data.id, url: `/app/${workspaceId}/${sp.data.id}/${pr.data.id}/${li.data.id}?task=${tk.data.id}` }
   }
   const privatePlace = await placeIn(A, WS, 'private', { visibility: 'private' })
   const PRIVATE = privatePlace.id
-  const OPEN = (await placeIn(A, WS, 'open')).id
+  const openPlace = await placeIn(A, WS, 'open')
+  const OPEN = openPlace.id
   const kPrivate = await K(`/tasks/${PRIVATE}`)
   const kOpen = await K(`/tasks/${OPEN}`)
   if (kPrivate.status !== 403 || kOpen.status !== 200) throw new Error(`the keeper should be refused the private task and open the open one: ${said(kPrivate)}, ${said(kOpen)}`)
@@ -188,6 +193,11 @@ try {
   const toldOnSheet = await page.getByText(OWNER_REFUSED.google_meet, { exact: true }).first()
     .waitFor({ state: 'visible', timeout: 10_000 }).then(() => true, () => false)
   const genericOnSheet = await page.getByText('Could not create the meeting', { exact: true }).count().catch(() => 0)
+
+  // The keeper's Google Calendar pulled while they are a member, into the open list; and the integrations list then.
+  await sql`update workspace_integration_connections set metadata = ${sql.json({ inboxListId: openPlace.list })} where workspace_id = ${WS} and provider = 'gcal'`
+  const pullWhileIn = await A(`/workspaces/${WS}/calendar-sync/gcal/pull`, { method: 'POST' })
+  const healthWhileIn = await A(`/workspaces/${WS}/integrations/connections`)
 
   // ══ 3. THE KEEPER LEAVES ═════════════════════════════════════════════════
   console.log('\n▶ the keeper is removed from the workspace, and the open task pushed again')
@@ -273,6 +283,51 @@ try {
       && keptAdmin?.status === 'connected' && keptAdmin?.by_admin === true,
     'a platform admin’s calendar takes a workspace’s task while they are a member of it, and nothing once they have been removed — the read rule would let them in wherever they are, so the membership is asked of them too — and their connection is kept',
     `while a member ${tried(whileIn)}; removed ${said(left)} (${adminRows} member rows left); then ${tried(whenGone)}; the connection ${JSON.stringify(keptAdmin ?? null)}`,
+  )
+
+  /*
+   * `found-6-oct/calendar-pull-uses-a-leavers-connection`, measured on lane 6:
+   * the pull chose the keeper's Google Calendar after their removal as it had
+   * while they were a member (400 "No access token for gcal" both times; with
+   * no connection at all it answers 404), so with a token it would read a
+   * departed member's calendar into the inbox list as tasks made by them; and
+   * the integrations list said connected, healthy.
+   */
+  // ══ 8. THE PULL, ONCE THE KEEPER HAS LEFT ════════════════════════════════
+  console.log('\n▶ the keeper’s Google Calendar pulled, while they were a member and once they have left')
+  const pullAfter = await A(`/workspaces/${WS}/calendar-sync/gcal/pull`, { method: 'POST' })
+  const [{ n: pulledIn }] = await sql`select count(*)::int as n from tasks where list_id = ${openPlace.list} and created_by_id = ${keeper.id}`
+  chk(
+    pullWhileIn.status === 400 && pullWhileIn.error?.message === 'No access token for gcal' &&
+      pullAfter.status === 400 && pullAfter.error?.message === LEAVERS_PULL && pulledIn === 0,
+    'a calendar is pulled only while its owner is in the workspace: the keeper’s Google Calendar, chosen while they were a member (it stops at its missing token), is refused once they have left — 400, saying whose it is — and nothing is made from it',
+    `while a member ${said(pullWhileIn)}; after they left ${said(pullAfter)}; ${pulledIn} task(s) of theirs in the inbox list`,
+  )
+
+  // ══ 9. WHAT THE INTEGRATIONS LIST SAYS ═══════════════════════════════════
+  console.log('\n▶ the integrations list, while the keeper was a member and once they have left')
+  const healthAfter = await A(`/workspaces/${WS}/integrations/connections`)
+  const healthOf = (res) => Object.fromEntries((res.data ?? []).map((c) => [c.provider, c.health]))
+  const hIn = healthOf(healthWhileIn)
+  const hOut = healthOf(healthAfter)
+  chk(
+    hIn.gcal === 'healthy' && hIn.zoom === 'healthy' && hOut.gcal === 'owner_left' && hOut.zoom === 'owner_left' && hOut.outlook === 'healthy',
+    'the integrations list says a connection whose owner has left is not theirs to lend any more — `owner_left` for the keeper’s Google Calendar and Zoom, which read healthy while they were a member — and the admin’s Outlook stays healthy',
+    `while a member ${JSON.stringify(hIn)}; after ${JSON.stringify(hOut)}`,
+  )
+
+  // ══ 10. WHAT THE APP CENTER SHOWS ════════════════════════════════════════
+  console.log('\n▶ the App Center’s Google Calendar tile, once the keeper has left')
+  await page.goto(`${B}/app/${WS}/integrations`, { waitUntil: 'domcontentloaded' })
+  const tileOf = (provider) => page.locator(`[data-testid="integration-card"][data-provider="${provider}"]`)
+  const toldLeft = await waitUntil(async () => (await tileOf('gcal').getAttribute('data-health').catch(() => null)) === 'owner_left', { timeoutMs: 20_000 })
+  const leftWhy = await page.locator('[data-testid="integration-owner-left"][data-provider="gcal"]').filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')
+  const gcalTileText = await tileOf('gcal').innerText({ timeout: 5000 }).catch(() => '')
+  const outlookTile = await tileOf('outlook').getAttribute('data-health').catch(() => null)
+  chk(
+    toldLeft && leftWhy === OWNER_LEFT_WHY && outlookTile === 'healthy',
+    'the App Center’s Google Calendar tile says its owner has left the workspace, and to connect it again under one’s own account — where it said connected; the admin’s Outlook tile is as it was',
+    `the tile’s health ${JSON.stringify(await tileOf('gcal').getAttribute('data-health').catch(() => null))}; it read ${JSON.stringify(gcalTileText.slice(0, 200))}; said ${JSON.stringify(leftWhy)}; Outlook ${JSON.stringify(outlookTile)}`,
   )
 } catch (e) {
   failed += 1

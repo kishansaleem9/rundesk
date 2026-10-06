@@ -56,7 +56,7 @@ export function MeetingsPage() {
 
   // The server chooses the meetings for a tag, whatever its case.
   const meetingsQuery = useMeetings(workspaceId, tag)
-  const { data: upcoming = [] } = useUpcomingMeetings(workspaceId)
+  const upcomingQuery = useUpcomingMeetings(workspaceId)
   /*
    * The chips are the tags in use on EVERY meeting, one per word whatever its
    * case, so "Standup" and "standup" are one chip rather than two that look
@@ -92,7 +92,7 @@ export function MeetingsPage() {
 
       <MeetingsAsk workspaceId={workspaceId} name={me?.displayName?.split(' ')[0] ?? ''} />
 
-      <UpcomingMeetings meetings={upcoming} />
+      <UpcomingMeetings meetings={upcomingQuery.data} failed={upcomingQuery.isError} />
 
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2">
@@ -198,7 +198,7 @@ type UpcomingSettings = {
  * actual reason the list is empty for most people — Rundesk already has
  * calendar sync, so this is a door rather than an apology.
  */
-function UpcomingMeetings({ meetings }: { meetings: Meeting[] }) {
+function UpcomingMeetings({ meetings, failed }: { meetings: Meeting[] | undefined; failed: boolean }) {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ strict: false }) as { workspaceId: string }
 
@@ -216,11 +216,29 @@ function UpcomingMeetings({ meetings }: { meetings: Meeting[] }) {
    * connected calendar's meetings would show up here — and nothing reads a
    * calendar into this list (`found-25-sep/connected-calendars-read-by-nothing`).
    */
-  const { data: calendarAccounts } = useQuery({
+  const accounts = useQuery({
     ...calendarAccountsQuery(workspaceId),
     enabled: !!workspaceId,
   })
+  const calendarAccounts = accounts.data
   const offerConnect = calendarAccounts !== undefined && calendarAccounts.length === 0
+  /*
+   * NOTHING IS SAID BEFORE IT IS KNOWN
+   * (`found-6-oct/upcoming-says-nothing-scheduled-before-it-knows`). The
+   * meetings defaulted to none while they loaded, so the section said
+   * "Nothing scheduled" before anybody had answered, to a person with a call
+   * in ten minutes. It says nothing until the meetings answer, and that they
+   * could not be loaded when they cannot; and it says which it is: `known`
+   * once the meetings and the person's calendars have answered.
+   */
+  const state =
+    meetings === undefined
+      ? failed
+        ? 'failed'
+        : 'checking'
+      : calendarAccounts === undefined && !accounts.isError
+      ? 'checking'
+      : 'known'
 
   /*
    * §V2-02e — "Show in desktop".
@@ -243,7 +261,7 @@ function UpcomingMeetings({ meetings }: { meetings: Meeting[] }) {
     const Notif = typeof window === 'undefined' ? undefined : window.Notification
     if (!Notif || Notif.permission === 'denied') return
     const raise = () => {
-      for (const meeting of meetings) {
+      for (const meeting of meetings ?? []) {
         if (!isJoinable(meeting.startsAt) || notified.current.has(meeting.id)) continue
         notified.current.add(meeting.id)
         try {
@@ -263,12 +281,18 @@ function UpcomingMeetings({ meetings }: { meetings: Meeting[] }) {
   }, [desktopNotify, meetings, t])
 
   return (
-    <section className="space-y-2" data-testid="meetings-upcoming">
+    <section className="space-y-2" data-testid="meetings-upcoming" data-state={state}>
       <h2 className="text-sm font-medium flex items-center gap-1.5">
         <CalendarClock className="h-4 w-4 text-primary" />
         {t('meetings.upcoming')}
       </h2>
-      {meetings.length === 0 ? (
+      {meetings === undefined ? (
+        failed ? (
+          <p className="text-sm text-destructive" data-testid="meetings-upcoming-failed">{t('meetings.loadFailed')}</p>
+        ) : (
+          <ListSkeleton rows={1} />
+        )
+      ) : meetings.length === 0 ? (
         <div
           className="rounded-xl border border-dashed border-border/70 px-4 py-4 flex flex-wrap items-center justify-between gap-3"
           data-testid="meetings-upcoming-empty"

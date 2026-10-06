@@ -30,7 +30,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 8
+const EXPECTED_CHECKS = 9
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -285,6 +285,35 @@ try {
       && dDelFull.ok && rFull?.is_archived === true,
     'a doc shared at Edit is renamed and deleted, as ClickUp’s Edit deletes a Doc, and one shared at Full edit is deleted too — in a space that is view-only for the member',
     `edit: rename ${said(dRename)}, delete ${said(dDelEdit)}, now ${JSON.stringify(rEdit)}; full edit: delete ${said(dDelFull)}, now ${JSON.stringify(rFull)}`,
+  )
+
+  // ══ 9. ADDING A SUBTASK ══════════════════════════════════════════════════
+  /*
+   * `found-6-oct/adding-a-subtask-is-refused-as-deleting`, measured on lane 4: a
+   * member at Edit was refused adding a subtask under a task there — by
+   * `POST /tasks` with `parentTaskId`, and by moving their own task under it —
+   * with 403 "…which does not allow deleting its tasks". Adding a subtask is
+   * Full edit, as ClickUp's Edit "cannot create … subtasks"; the refusal now
+   * says what it refuses.
+   */
+  console.log('\n▶ the member adds a subtask under a task where the space’s default is Edit, and where it is Full edit')
+  const eParent = await EDITS.task('a parent at edit')
+  const fParent = await FULL.task('a parent at full edit')
+  const own = await M('/tasks', { method: 'POST', body: { listId: FULL.list, title: `${TAG} the member's own task` } })
+  const sub = {
+    // Made in a list they may add to, under the parent at Edit: the parent's rule decides (`assertParentInWorkspace`).
+    made: await M('/tasks', { method: 'POST', body: { listId: FULL.list, title: `${TAG} a subtask at edit`, parentTaskId: eParent.id } }),
+    moved: await M(`/tasks/${own.data?.id}`, { method: 'PATCH', body: { parentTaskId: eParent.id } }),
+    full: await M('/tasks', { method: 'POST', body: { listId: FULL.list, title: `${TAG} a subtask at full edit`, parentTaskId: fParent.id } }),
+  }
+  const [{ n: underEdit }] = await sql`select count(*)::int as n from tasks where parent_task_id = ${eParent.id}`
+  const [{ n: underFull }] = await sql`select count(*)::int as n from tasks where parent_task_id = ${fParent.id}`
+  const SUBTASK_WORDS = 'does not allow adding subtasks to its tasks'
+  chk(
+    own.ok && sub.made.status === 403 && says(sub.made, SUBTASK_WORDS) && sub.moved.status === 403 && says(sub.moved, SUBTASK_WORDS)
+      && underEdit === 0 && sub.full.status === 201 && underFull === 1,
+    'a member at Edit adds no subtask under a task there — by making one with that parent, or by moving their own task under it — and is told so, 403, “…which does not allow adding subtasks to its tasks”, none made; in a Full edit space they add one',
+    `made ${said(sub.made)}; moved ${said(sub.moved)}; ${underEdit} under the Edit space’s task; at Full edit ${said(sub.full)}, ${underFull} under its task`,
   )
 } catch (err) {
   failed += 1

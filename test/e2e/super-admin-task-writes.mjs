@@ -38,7 +38,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 6
+const EXPECTED_CHECKS = 7
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -203,6 +203,43 @@ try {
       && ownerWrite.status === 200 && after3?.title === `${TAG} renamed by the owner`,
     'and a plain member is still refused the private space’s task — its read 403, its change refused and not made (SQL) — while its owner changes it',
     `the member read ${said(memberRead)}, wrote ${said(memberWrite)} (title then ${JSON.stringify(afterMember?.title)}); the owner ${said(ownerWrite)}; title ${JSON.stringify(after3?.title)}`,
+  )
+
+  // ══ 7. BY MAIL ═══════════════════════════════════════════════════════════
+  /*
+   * `found-6-oct/mail-comments-read-the-workspace-role`, measured on lane 6: the
+   * super_admin opened the private space's task (200) and commented on it in
+   * the app (201), and the same comment mailed to the task's address was
+   * refused, `rejected_not_allowed`, nothing written; the owner's mailed
+   * comment landed. The mail comment rule asked the read rule with the
+   * workspace role. The plain member, refused the private space, is the twin.
+   */
+  console.log('\n▶ a comment the super_admin mails to the private space’s task, and one the plain member mails to it')
+  // The task's address is its list's: the owner gives the private space's list one first.
+  const minted = await O(`/lists/${PSL}/inbound-email`, { method: 'POST' })
+  if (!minted.ok) throw new Error(`could not give the private space’s list an address: ${said(minted)}`)
+  const got = (await O(`/tasks/${T2}/email-address`)).data
+  const address = (typeof got === 'string' ? got : got?.address ?? got?.replyAddress) ?? ''
+  let mails = 0
+  const mail = async (from, text) => {
+    mails += 1
+    const messageId = `<${TAG}-${mails}@mail.example.test>`
+    const res = await fetch(`${API}/inbound/email`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messageId, fromAddress: from, recipient: address, subject: 'Re: the task', textBody: `${TAG} ${text}` }),
+    }).catch(() => null)
+    const [rec] = await sql`select outcome from inbound_email_messages where message_id = ${messageId} limit 1`
+    const [c] = await sql`select u.email from task_comments c left join users u on u.id = c.author_id where c.task_id = ${T2} and c.body like ${`%${TAG} ${text}%`}`
+    return { status: res?.status ?? 0, outcome: rec?.outcome ?? null, author: c?.email ?? null }
+  }
+  const bySa = await mail(ADMIN.email, 'mailed by the super_admin')
+  const byMember = await mail(member.email, 'mailed by the plain member')
+  chk(
+    address.includes('@') && bySa.outcome === 'comment_added' && bySa.author === ADMIN.email &&
+      byMember.outcome === 'rejected_not_allowed' && byMember.author === null,
+    'and a comment they mail to that task’s address lands as theirs, as the one they made in the app — while the plain member, refused the private space, is refused by mail too and nothing of theirs is written (SQL)',
+    `the address ${JSON.stringify(address)}; the super_admin’s mail ${JSON.stringify(bySa)}; the member’s ${JSON.stringify(byMember)}`,
   )
 } catch (e) {
   failed += 1

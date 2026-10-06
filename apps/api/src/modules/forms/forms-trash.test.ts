@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 import { FormsService } from './forms.service'
-import { LIST_IN_TRASH_ASK, LIST_IN_TRASH_RESTORE, ListInTrashException } from '../../common/permissions/task-create'
+import { heldInTrashWords, LIST_IN_TRASH_ASK, LIST_IN_TRASH_RESTORE, ListInTrashException } from '../../common/permissions/task-create'
 
 /*
  * A LIST IN THE TRASH TAKES NO TASK, A FORM'S INCLUDED
@@ -38,6 +38,15 @@ describe('FormsService — a list in the trash', () => {
       (e: unknown) => e instanceof ListInTrashException && (e as Error).message === LIST_IN_TRASH_RESTORE,
     )
     assert.equal(inserts.length, 0, 'a task was made in a list in the trash')
+  })
+
+  it('nor for a submission whose list’s project is in the trash, naming it (found-6-oct/task-fallback-files-into-a-deleted-project)', async () => {
+    const { svc, inserts } = service([[{ id: LIST, workspaceId: 'w1', inTrash: false }], [{ projectInTrash: true, projectDeletedById: 'the-admin' }]])
+    await assert.rejects(
+      () => svc.createTaskForSubmission(FORM, {}, null, null),
+      (e: unknown) => e instanceof ListInTrashException && (e as Error).message === heldInTrashWords('project', true),
+    )
+    assert.equal(inserts.length, 0, 'a task was made in a list whose project is in the trash')
   })
 
   it('and makes it once the list is not in the trash', async () => {

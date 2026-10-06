@@ -169,7 +169,7 @@ export async function assertMayLinkSubtask(
   if (parent?.parentTaskId) throw new BadRequestException('Subtasks can only be nested one level deep')
   const [child] = await db.select({ id: tasks.id }).from(tasks).where(eq(tasks.parentTaskId, childId)).limit(1)
   if (child) throw new BadRequestException('A task with subtasks cannot become a subtask itself')
-  if (params.parentWasThere) await writable(db, parentId, actorId, { level: 'full' })
+  if (params.parentWasThere) await writable(db, parentId, actorId, { level: 'subtask' })
 }
 
 /**

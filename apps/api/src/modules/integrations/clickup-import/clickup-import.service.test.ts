@@ -318,6 +318,14 @@ describe('ClickUpImportService — who may import, and which tasks an import may
     assert.deepEqual(updates, [])
   })
 
+  it('a guest is refused a job’s report, 403 “Guests cannot import data into a workspace”, before the job is read; a member reads it (found-6-oct/import-history-read-by-anyone)', async () => {
+    const refused = (e: unknown) => e instanceof ForbiddenException && e.message === GUESTS_CANNOT_IMPORT
+    // Were the job read first, it would take the guest's row as the job, and the rule after it would find nobody.
+    await assert.rejects(() => serviceOn(makeDb([[{ role: 'guest' }]]).db, IMPORT_ACCESS).readJob('ws-1', 'job-1', IMPORTER), refused)
+    const job = { id: 'job-1', status: 'completed' }
+    assert.deepEqual(await serviceOn(makeDb([[{ role: 'member' }], [job]]).db, IMPORT_ACCESS).readJob('ws-1', 'job-1', IMPORTER), job)
+  })
+
   it('the preview counts duplicates among the tasks its importer may open: it asks for those as the importer (found-6-oct/import-previews-tell-what-private-places-hold)', async () => {
     // What the importer may open holds (Sprint 1, Alpha); a private list's (Hidden, Secret) is not theirs to match.
     const { db } = makeDb([[{ id: 'open-alpha', listName: 'Sprint 1', title: 'Alpha' }]])

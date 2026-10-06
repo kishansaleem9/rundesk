@@ -334,6 +334,19 @@ describe('SpreadsheetImportService — who may import, and which tasks an import
     assert.deepEqual(committed, [], 'no job row, space or task is written')
   })
 
+  it('a guest is refused the history and a job’s report, 403 “Guests cannot import data into a workspace”, before any job is read; a member reads them (found-6-oct/import-history-read-by-anyone)', async () => {
+    const guest = [{ role: 'guest' }]
+    const refused = (e: unknown) => e instanceof ForbiddenException && e.message === GUESTS_CANNOT_IMPORT
+    // Were a job read first, it would take the guest's row as the job, and the rule after it would find nobody.
+    const asGuest = serviceOn(makeDb({ selects: [guest, guest] }).db, IMPORT_ACCESS)
+    await assert.rejects(() => asGuest.listJobs('ws-1', IMPORTER), refused, 'the history')
+    await assert.rejects(() => asGuest.readJob('ws-1', 'job-1', IMPORTER), refused, 'the report')
+    const job = { id: 'job-1', status: 'completed' }
+    const asMember = serviceOn(makeDb({ selects: [[{ role: 'member' }], [job], [{ role: 'member' }], [job]] }).db, IMPORT_ACCESS)
+    assert.deepEqual(await asMember.listJobs('ws-1', IMPORTER), [job])
+    assert.deepEqual(await asMember.readJob('ws-1', 'job-1', IMPORTER), job)
+  })
+
   it('the preview counts duplicates among the tasks its importer may open: it asks for those as the importer (found-6-oct/import-previews-tell-what-private-places-hold)', async () => {
     // What the importer may open holds (Sprint 1, Alpha); a private list's (Hidden, Secret) is not theirs to match.
     const { db } = makeDb({ selects: [[{ id: 'open-alpha', listName: 'Sprint 1', title: 'Alpha' }]] })

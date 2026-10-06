@@ -68,7 +68,7 @@ const argOf = (name, fallback) => {
  * branch that silently skipped turns into a shorter run that still passes, and
  * every one of the browser sections below is a branch that can skip.
  */
-const EXPECTED_CHECKS = 25
+const EXPECTED_CHECKS = 26
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -296,7 +296,9 @@ try {
 
   // ── 4 · the catalogue, on screen ─────────────────────────────────────────
   browser = await chromium.launch(launchOptions())
-  const ctx = await browser.newContext({ viewport: { width: 1500, height: 1000 } })
+  // Service workers blocked: the provider list is held back below by a route,
+  // and a request the worker makes is one no route sees.
+  const ctx = await browser.newContext({ viewport: { width: 1500, height: 1000 }, serviceWorkers: 'block' })
   const page = await ctx.newPage()
   await page.goto(`${B}/login`, { waitUntil: 'domcontentloaded' })
   await page.fill('input[type=email]', EMAIL)
@@ -308,15 +310,83 @@ try {
   const openIntegrations = async () => {
     await page.goto(`${B}/app/${ws.id}/integrations`, { waitUntil: 'domcontentloaded' })
     await page.waitForSelector('[data-testid="integrations-page"]', { timeout: 25_000 })
-    // The tiles' state comes from the providers request; waiting for a tile
-    // that only a connectable app can draw is waiting for that answer rather
-    // than for a number of milliseconds.
+    // The tiles are drawn from the provider list, the providers' status, the
+    // connections and the reader's permissions, and the page says when all
+    // four have answered. It waited for Gmail's tile, which is drawn before
+    // any of them, so under load the checks below read tiles nobody had
+    // answered for (`found-6-oct/app-tiles-say-cannot-connect-before-the-server-answers`).
     await waitUntil(
-      () => page.locator('[data-testid="integration-card"][data-provider="gmail"]').count().then((n) => n === 1),
+      async () => (await page.getByTestId('integrations-page').getAttribute('data-state').catch(() => null)) === 'known',
       { timeoutMs: 20_000 },
     )
   }
   const tile = (id) => page.locator(`[data-testid="integration-card"][data-provider="${id}"]`)
+
+  /*
+   * BEFORE THE SERVER HAS SAID WHICH APPS IT CAN CONNECT, NO TILE SAYS IT
+   * CANNOT. The provider list is held back by a route until the tiles have
+   * been read, so this reads the waiting page rather than racing it: every
+   * tile said Rundesk had no connector for it and offered Request access,
+   * Gmail's and SharePoint's too, until the list arrived.
+   */
+  console.log('\n▶ the catalogue before the server has said which apps it can connect')
+  const PROVIDERS = '**/integrations/connections/providers'
+  let releaseProviders = () => {}
+  const providersHeld = new Promise((resolve) => { releaseProviders = resolve })
+  let heldBack = 0
+  await page.route(PROVIDERS, async (route) => {
+    heldBack += 1
+    await providersHeld
+    await route.continue().catch(() => {})
+  })
+  // Everything else the tiles are drawn from is let through, and read only
+  // once it has answered, so what is still missing is the provider list alone.
+  const answered = (end) =>
+    page.waitForResponse((r) => new URL(r.url()).pathname.endsWith(end), { timeout: 20_000 }).then(() => true).catch(() => false)
+  const othersAnswered = Promise.all([
+    answered(`/workspaces/${ws.id}/roles/me/permissions`),
+    answered(`/workspaces/${ws.id}/integrations/connections/providers/status`),
+    answered(`/workspaces/${ws.id}/integrations/connections`),
+  ])
+  await page.goto(`${B}/app/${ws.id}/integrations`, { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('[data-testid="integrations-page"]', { timeout: 25_000 })
+  const others = await othersAnswered
+  await waitUntil(async () => heldBack > 0 && (await tile('gmail').count()) === 1, { timeoutMs: 20_000 })
+  // Slack is not on the provider list: its tile waits for the permissions alone, and offers Connect once they are in.
+  await waitUntil(
+    async () => (await tile('slack').getByTestId('integration-action').getAttribute('data-actionable').catch(() => null)) === 'yes',
+    { timeoutMs: 10_000 },
+  )
+  // A page that says it knows before the list has answered says so within moments of the rest.
+  const saidKnown = await waitUntil(
+    async () => (await page.getByTestId('integrations-page').getAttribute('data-state').catch(() => null)) === 'known',
+    { timeoutMs: 1500 },
+  )
+  const whileHeld = {
+    held: heldBack,
+    others,
+    saidKnown,
+    state: await page.getByTestId('integrations-page').getAttribute('data-state').catch(() => null),
+    noConnector: await page.locator('[data-testid="integration-not-connectable"]').count(),
+    offers: {},
+  }
+  for (const id of CONNECTABLE) {
+    const action = tile(id).getByTestId('integration-action')
+    whileHeld.offers[id] = {
+      says: ((await action.filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim(),
+      actionable: await action.getAttribute('data-actionable').catch(() => null),
+    }
+  }
+  releaseProviders()
+  await page.unroute(PROVIDERS)
+  const offeredRequest = CONNECTABLE.filter((id) => whileHeld.offers[id].says === 'Request access' || whileHeld.offers[id].actionable !== 'no')
+  chk(
+    whileHeld.held > 0 && !whileHeld.saidKnown && whileHeld.state === 'checking' && whileHeld.noConnector === 0 && offeredRequest.length === 0,
+    'while the server has not said which apps it can connect, no tile says Rundesk has no connector for it, Gmail and SharePoint offer nothing to press yet, and the page says it is still checking',
+    `${whileHeld.held} provider request(s) held, the rest answered ${JSON.stringify(whileHeld.others)}; the page said ${JSON.stringify(whileHeld.state)}` +
+      `${whileHeld.saidKnown ? ' (it said known while the list was held)' : ''}; ` +
+      `${whileHeld.noConnector} tile(s) said there is no connector; the connectable tiles offered ${JSON.stringify(whileHeld.offers)}`,
+  )
 
   console.log('\n▶ `19:07` the six apps the frame draws')
   await openIntegrations()

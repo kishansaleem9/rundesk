@@ -542,6 +542,18 @@ export class PlannerService {
         .where(eq(lists.id, patch.defaultListId))
         .limit(1)
       if (!list) throw new BadRequestException('That list does not exist')
+      /*
+       * NOR ONE IN THE TRASH, or held in it, which takes no task: the picker
+       * offers none, and `PATCH` saved one (200) for `/task` to refuse
+       * (`found-6-oct/default-list-setting-takes-a-deleted-list`). Refused in
+       * the create gate's words, to somebody who may open the list; any other
+       * refusal of the gate is `defaultListFor`'s to pass over, as before.
+       */
+      try {
+        await assertCanCreateTaskIn(this.db, patch.defaultListId, userId)
+      } catch (err) {
+        if (err instanceof ListInTrashException || !(err instanceof HttpException)) throw err
+      }
     }
     const { weekStart: currentWeek, timezone: currentZone, ...currentPlanner } = await this.getSettings(userId)
     const nextPlanner = { ...currentPlanner, ...plannerOnly }

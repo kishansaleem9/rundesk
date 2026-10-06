@@ -42,7 +42,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 11
+const EXPECTED_CHECKS = 13
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -306,6 +306,62 @@ try {
       && (afterChoice === null || afterChoice === undefined) && tAfter.status < 300 && !!oldest && afterList === oldest.id,
     'and the picker it sends them to shows the deleted choice as a list in the trash, not “The first list I can add to” — which it still shows in another workspace, where /task passes that list over — and choosing that saves it, so /task lands in the oldest list again',
     `the picker showed ${JSON.stringify(shown)} (in the other workspace ${JSON.stringify(elsewhere)}); after choosing the first list the setting holds ${JSON.stringify(afterChoice)}; /task ${tAfter.status}, in ${named(afterList)}`,
+  )
+
+  // ══ 11. A LIST IN THE TRASH, CHOSEN ══════════════════════════════════════
+  /*
+   * `found-6-oct/default-list-setting-takes-a-deleted-list`, measured on lane 6:
+   * `PATCH /planner/:ws/settings` saved a list in the trash as the Default list
+   * (200), which `/task` then refused; the picker offers no such list.
+   */
+  console.log('\n▶ a list in the trash, chosen as the Default list: by the admin who deleted it, and by the member')
+  const pickedDoomed = await call(`/planner/${WS}/settings`, { method: 'PATCH', body: { defaultListId: DOOMED } })
+  const pickedMembers = await asMember(`/planner/${WS}/settings`, { method: 'PATCH', body: { defaultListId: MEMBERS } })
+  const [held] = await sql`select (select planner_settings->>'defaultListId' from users where id = ${me}) as admin`
+  const RESTORE_IT = 'This list is in the trash. Restore it from Trash before adding tasks to it.'
+  const ASK_FOR_IT = 'This list is in the trash. Ask a workspace admin, or whoever deleted it, to restore it before adding tasks to it.'
+  chk(
+    pickedDoomed.status === 409 && pickedDoomed.message === RESTORE_IT && pickedMembers.status === 409 && pickedMembers.message === ASK_FOR_IT
+      && (held?.admin ?? null) === null,
+    'a list in the trash is not saved as the Default list: refused, 409, in the create gate’s words — the admin who deleted it told to restore it, the member to ask — and the admin’s setting stays as it was',
+    `the admin ${pickedDoomed.status} ${JSON.stringify(pickedDoomed.message)}; the member ${pickedMembers.status} ${JSON.stringify(pickedMembers.message)}; the admin’s setting holds ${JSON.stringify(held?.admin ?? null)}`,
+  )
+
+  // ══ 12. A LIST WHOSE PROJECT IS IN THE TRASH ═════════════════════════════
+  /*
+   * `found-6-oct/task-fallback-files-into-a-deleted-project`, measured on lane 6:
+   * with no Default list chosen, the admin deleted the workspace's starter
+   * project and `/task` filed into its list — the project in the trash, the
+   * list's own flag untouched — while the space listed no such project;
+   * `POST /tasks` into it answered 201, and the picker still offered it.
+   */
+  console.log('\n▶ the oldest list’s project deleted into the trash, no list chosen: /task, a task made or moved into it, and the picker')
+  // No list chosen, whatever the check above left saved.
+  const unchosen = await call(`/planner/${WS}/settings`, { method: 'PATCH', body: { defaultListId: null } })
+  if (unchosen.status >= 300) throw new Error(`could not clear the Default list: ${unchosen.status}`)
+  const OTHER_PROJECT = await make('/projects', { spaceId: SPACE, name: `${TAG} another project` }, 'another project')
+  const OTHER_LIST = await make('/lists', { projectId: OTHER_PROJECT, name: `${TAG} a list in another project` }, 'a list in another project')
+  // The project that holds the oldest list — the workspace's own first, if it was made with one.
+  const [oldestHome] = await sql`select project_id from lists where id = ${oldest.id}`
+  const projectBinned = await call(`/projects/${oldestHome?.project_id}`, { method: 'DELETE' })
+  if (projectBinned.status >= 300) throw new Error(`could not delete the oldest list’s project: ${projectBinned.status}`)
+  const T_HELD = `${TAG} by slash, the oldest list's project deleted`
+  const tHeld = await call(`/chat/channels/${CHANNEL}/commands`, { method: 'POST', body: { command: 'task', text: T_HELD } })
+  const heldList = await listOf(T_HELD)
+  const T_STRAIGHT = `${TAG} straight into the deleted project's list`
+  const intoHeld = await call('/tasks', { method: 'POST', body: { listId: oldest.id, title: T_STRAIGHT } })
+  const [moving] = await sql`select id from tasks where title = ${T_HELD} limit 1`
+  const movedIn = moving ? await call(`/tasks/${moving.id}/move`, { method: 'POST', body: { listId: oldest.id, position: 0 } }) : { status: 0 }
+  const [{ n: inHeld }] = await sql`select count(*)::int as n from tasks where list_id = ${oldest.id} and title in (${T_STRAIGHT}, ${T_HELD})`
+  const offered = ((await call(`/lists/workspace/${WS}`)).data ?? []).map((l) => l.id)
+  const [heldHome] = heldList ? await sql`select p.is_archived from lists l join projects p on p.id = l.project_id where l.id = ${heldList}` : []
+  const PROJECT_IN_TRASH = "This list's project is in the trash. Restore the project from Trash before adding tasks to the list."
+  chk(
+    tHeld.status < 300 && !!heldList && heldList !== oldest.id && heldHome?.is_archived === false && intoHeld.status === 409 && intoHeld.message === PROJECT_IN_TRASH
+      && movedIn.status === 409 && movedIn.message === PROJECT_IN_TRASH && inHeld === 0
+      && !offered.includes(oldest.id) && offered.includes(OTHER_LIST),
+    'with the oldest list’s project deleted and no list chosen, /task passes that list over for one it may add to; a task made or moved straight into it is refused — 409, saying its project is in the trash and what to do — and none lands there; the picker no longer offers it',
+    `/task ${tHeld.status}, in ${heldList === OTHER_LIST ? 'the other project’s list' : named(heldList)} (its project in the trash: ${JSON.stringify(heldHome?.is_archived ?? null)}); POST /tasks ${intoHeld.status} ${JSON.stringify(intoHeld.message)}; the move ${movedIn.status} ${JSON.stringify(movedIn.message)}; ${inHeld} in the deleted project’s list; the picker offers it: ${offered.includes(oldest.id)}, the other: ${offered.includes(OTHER_LIST)}`,
   )
 } catch (e) {
   failed += 1

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 import { ForbiddenException } from '@nestjs/common'
-import { LIST_IN_TRASH_ASK, LIST_IN_TRASH_RESTORE, ListInTrashException } from '../../common/permissions/task-create'
+import { heldInTrashWords, LIST_IN_TRASH_ASK, LIST_IN_TRASH_RESTORE, ListInTrashException } from '../../common/permissions/task-create'
 import { lists, spaces, spaceMembers, tasks, users, workspaceMembers } from '@rundesk/db'
 import { TasksService } from './tasks.service'
 
@@ -149,5 +149,14 @@ describe('moving a task into a list in the trash', () => {
     const refused = await refusal(svc.moveTask('t1', 'an-admin', 'l2', 0))
     assert.equal((refused as Error)?.message, LIST_IN_TRASH_RESTORE)
     assert.equal(updates.length, 0)
+  })
+
+  // Nor into a list whose project is in the trash (`found-6-oct/task-fallback-files-into-a-deleted-project`).
+  it('refuses a list whose project is in the trash, 409, naming the project, and moves nothing', async () => {
+    const { svc, updates } = mover({ projectInTrash: true, projectDeletedById: 'the-admin' })
+    const refused = await refusal(svc.moveTask('t1', 'a-member', 'l2', 0))
+    assert.ok(refused instanceof ListInTrashException, `answered ${(refused as Error)?.constructor?.name}: ${(refused as Error)?.message}`)
+    assert.equal((refused as Error).message, heldInTrashWords('project', false))
+    assert.equal(updates.length, 0, 'the task was moved into a list whose project is in the trash')
   })
 })

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
+import { ForbiddenException } from '@nestjs/common'
 import { EmailToTaskService } from './email-to-task.service'
 
 /**
@@ -170,6 +171,20 @@ describe('EmailToTaskService — a list in the trash', () => {
     assert.equal(recorded[0][4], TRASHED_LIST)
   })
 
+  it('makes no task from mail to the address of a list whose project is in the trash, and records why (found-6-oct/task-fallback-files-into-a-deleted-project)', async () => {
+    const { svc, inserts } = queuedSvc([[{ inTrash: false, deletedById: null }], [{ projectInTrash: true, projectDeletedById: 'the-admin' }]])
+    ;(svc as any).findExistingByMessageId = async () => null
+    ;(svc as any).resolveReplyContext = async () => null
+    ;(svc as any).findAliasByLocalPart = async () => ({ id: 'alias-1', listId: TRASHED_LIST, localPart: 'abc', revokedAt: null, createdById: 'u1', defaultPriority: 'normal' })
+    const recorded: unknown[][] = []
+    ;(svc as any).recordOutcome = async (...args: unknown[]) => { recorded.push(args) }
+    const result = await svc.ingest({ messageId: '<held@example.com>', fromAddress: 'alice@example.com', recipient: 'list-abc@inbound.rundesk.local', subject: 'into a deleted project' })
+    assert.equal(result.outcome, 'rejected_not_allowed')
+    assert.equal(result.reason, "the list's project is in the trash")
+    assert.equal(inserts.length, 0, 'a task was made in a list whose project is in the trash')
+    assert.equal(recorded.length, 1)
+  })
+
   it('still reads a deleted list’s address to somebody who may add tasks to it but for the trash', async () => {
     // The create gate's selects: the list's home (in the trash), the account, the read rule's (the list, the
     // workspace role, the project's folder), then the space's level at Full edit; then the address itself.
@@ -184,5 +199,36 @@ describe('EmailToTaskService — a list in the trash', () => {
     const view = await svc.getAlias(TRASHED_LIST, 'the-admin')
     assert.ok(view, 'the address was refused, or not found')
     assert.equal(left(), 0)
+  })
+})
+
+/*
+ * THE ADDRESS THERE IS, HANDED BACK ONLY TO THOSE WHO MAY ADD TASKS TO THE LIST
+ * (`found-6-oct/list-address-given-by-post-to-those-who-may-not-add`): `POST`
+ * returned a live address to anybody who could name the list, before asking
+ * them anything, so a view-only member refused it by `GET` was given it.
+ */
+describe('EmailToTaskService.ensureAlias — the address there is', () => {
+  const ALIAS = { id: 'alias-1', listId: TRASHED_LIST, localPart: 'abc', revokedAt: null, defaultPriority: 'normal', lastUsedAt: null, createdAt: new Date() }
+  const asking = (mayManage: boolean) => {
+    const { svc } = queuedSvc([])
+    const asked: string[] = []
+    ;(svc as any).assertListExists = async () => { asked.push('the list') }
+    ;(svc as any).assertCanManageAlias = async (_list: string, actor: string) => {
+      asked.push(`may ${actor} add`)
+      if (!mayManage) throw new ForbiddenException('Only those who may add tasks to this list manage its email address')
+    }
+    ;(svc as any).findAliasByListId = async () => { asked.push('the address'); return ALIAS }
+    return { svc, asked }
+  }
+
+  it('asks its caller what minting asks before it reads the address there is: refused, it hands back nothing; allowed, the address as it is', async () => {
+    const refused = asking(false)
+    await assert.rejects(() => refused.svc.ensureAlias(TRASHED_LIST, 'a-viewer'), ForbiddenException)
+    assert.deepEqual(refused.asked, ['the list', 'may a-viewer add'], 'the address was read before its caller was asked')
+    const allowed = asking(true)
+    const view = await allowed.svc.ensureAlias(TRASHED_LIST, 'an-editor')
+    assert.equal(view.localPart, 'abc')
+    assert.deepEqual(allowed.asked, ['the list', 'may an-editor add', 'the address'])
   })
 })

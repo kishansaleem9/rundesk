@@ -5,7 +5,7 @@
 #          one it can does not"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-integrations-page.tsx'
-a = """          {!supported && (
+a = """          {supported === false && (
             <p
               className="text-[11px] text-muted-foreground mt-1 leading-relaxed"
               data-testid="integration-not-connectable"

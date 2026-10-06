@@ -37,7 +37,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 5
+const EXPECTED_CHECKS = 6
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -117,6 +117,28 @@ try {
     mv.status === 403 && !mv.holds && gf.status === 403 && !gf.holds && mf.status === 200 && mf.holds,
     'a list’s address is read by those who may add tasks to it: refused to a member of a view-only space and to a guest with a view share (403, no address in either answer), given to a member at Full edit',
     `view-only member ${JSON.stringify(mv)}; guest ${JSON.stringify(gf)}; Full edit member ${JSON.stringify(mf)}`,
+  )
+
+  /*
+   * And by `POST`, the Email panel's "Show address", which mints an address or
+   * hands back the one there is: measured on lane 6, it gave the view-only
+   * member the address `GET` refused them (201), and their mail to it made a
+   * task in the list, by them (`found-6-oct/list-address-given-by-post-to-those-who-may-not-add`).
+   */
+  console.log('\n▶ the list’s address, asked for by POST, as the Email panel’s Show address does')
+  const ask = async (who, p) => {
+    const r = await who.api(`/lists/${p.list}/inbound-email`, { method: 'POST' })
+    return { status: r.status, holds: JSON.stringify(r.data ?? null).includes(p.address.split('@')[0]), said: r.error?.message ?? null }
+  }
+  const postedView = await ask(member, VIEW)
+  const postedGuest = await ask(guest, FULL)
+  const postedFull = await ask(member, FULL)
+  const [keptAlias] = await sql`select local_part, revoked_at from list_email_aliases where list_id = ${VIEW.list}`
+  chk(
+    postedView.status === 403 && !postedView.holds && postedGuest.status === 403 && !postedGuest.holds && postedFull.status === 201 && postedFull.holds &&
+      keptAlias?.local_part === VIEW.address.split('@')[0].replace(/^list-/, '') && keptAlias?.revoked_at === null,
+    'asked for by POST, a list’s address goes as it is read: refused to a member of a view-only space and to a guest with a view share (403, no address in either answer), and the address there is handed to a member at Full edit — none minted afresh',
+    `view-only member ${JSON.stringify(postedView)}; guest ${JSON.stringify(postedGuest)}; Full edit member ${JSON.stringify(postedFull)}; the view-only list’s address now ${JSON.stringify(keptAlias ?? null)}`,
   )
 
   // ══ 2. A TASK'S ADDRESS ══════════════════════════════════════════════════

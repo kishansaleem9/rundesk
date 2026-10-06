@@ -1,4 +1,5 @@
 # A SUBTASK LINK ASKS NO LEVEL OF A TASK THAT WAS ALREADY THERE (`found-6-oct/import-merge-writes-tasks-its-importer-may-not-change`).
+# Re-aimed 6 October: a parent is asked Full edit as 'subtask', which says what it refuses (`found-6-oct/adding-a-subtask-is-refused-as-deleting`).
 # Reddens: unit: import-access.test.ts "asks edit of a child that was already there and Full edit of a parent that was already there — no level of a task the run made — and a refusal is the rule’s"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/clickup-import/import-access.ts'
@@ -7,7 +8,7 @@ a1 = "  if (params.childWasThere) await writable(db, childId, actorId, { level: 
 b1 = ''
 assert s.count(a1) == 1, f'anchor appears {s.count(a1)} times in {p}, expected exactly 1'
 s = s.replace(a1, b1)
-a2 = "  if (params.parentWasThere) await writable(db, parentId, actorId, { level: 'full' })\n"
+a2 = "  if (params.parentWasThere) await writable(db, parentId, actorId, { level: 'subtask' })\n"
 b2 = ''
 assert s.count(a2) == 1, f'anchor appears {s.count(a2)} times in {p}, expected exactly 1'
 s = s.replace(a2, b2)

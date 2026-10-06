@@ -53,9 +53,14 @@ export class ClickUpImportController {
   }
 
   @Get('jobs/:jobId')
-  @ApiOperation({ summary: 'Poll an import job — status, progress counts, and final report' })
-  job(@Param('workspaceId') workspaceId: string, @Param('jobId') jobId: string) {
-    return this.svc.getJob(workspaceId, jobId)
+  // The history and each job's report are asked what the imports ask: any
+  // member or guest read every import's report, whose errors quote the rows a
+  // private space's import refused (`found-6-oct/import-history-read-by-anyone`).
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('workspace.import')
+  @ApiOperation({ summary: 'Poll an import job (who may import) — status, progress counts, and final report' })
+  job(@Param('workspaceId') workspaceId: string, @Param('jobId') jobId: string, @CurrentUser() user: any) {
+    return this.svc.readJob(workspaceId, jobId, { id: user.id, role: user.role })
   }
 
   @Post('jobs/:jobId/enrich')

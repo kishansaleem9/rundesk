@@ -87,12 +87,32 @@ export class IntegrationConnectionsService {
       .select()
       .from(workspaceIntegrationConnections)
       .where(eq(workspaceIntegrationConnections.workspaceId, workspaceId))
+    /*
+     * A connection whose owner is no longer in the workspace — removed, or the
+     * account gone (`connected_by_id` set null) — says so, `owner_left`: a
+     * calendar's push, its pull and a task's meetings take nothing through it,
+     * and it read connected, healthy, as though it worked
+     * (`found-6-oct/calendar-pull-uses-a-leavers-connection`).
+     */
+    const owners = [...new Set(rows.map((r) => r.connectedById).filter((id): id is string => !!id))]
+    const stillIn = new Set(
+      owners.length === 0
+        ? []
+        : (
+            await this.db
+              .select({ userId: workspaceMembers.userId })
+              .from(workspaceMembers)
+              .where(and(eq(workspaceMembers.workspaceId, workspaceId), inArray(workspaceMembers.userId, owners)))
+          ).map((m) => m.userId),
+    )
     return rows.map((row) => ({
       provider: row.provider,
       status: row.status,
       health:
         row.status !== 'connected'
           ? 'disconnected'
+          : !row.connectedById || !stillIn.has(row.connectedById)
+            ? 'owner_left'
           : row.tokenExpiresAt && row.tokenExpiresAt.getTime() <= Date.now()
             ? 'expired'
             : row.tokenExpiresAt && row.tokenExpiresAt.getTime() - Date.now() <= 3 * 24 * 60 * 60 * 1000

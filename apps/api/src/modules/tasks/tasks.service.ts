@@ -111,7 +111,7 @@ import { assertCanCreateInSpace } from '../../common/permissions/container-acces
 import { assertSpaceLevel, resolveSpaceLevel, spaceLevelReaches } from '../../common/permissions/space-default-permission'
 import { assertTaskNotInBin, assertTaskWritable, taskCommentAllowed } from '../../common/permissions/task-write'
 import { assertManagerTaskScope, taskRestorable } from '../../common/permissions/task-restore'
-import { assertCanCreateTaskIn, canCreateTaskIn, ListInTrashException, mayRestoreList } from '../../common/permissions/task-create'
+import { assertCanCreateTaskIn, canCreateTaskIn, ListInTrashException, mayRestoreList, HOLDER_TRASH_COLUMNS, nearestHolderInTrash } from '../../common/permissions/task-create'
 import { assertMayShapeStatuses } from '../../common/permissions/status-access'
 import { assertMayDefineFields } from '../../common/permissions/field-access'
 import { SHARED_VIEW_LEVEL } from '../views/view-write'
@@ -684,7 +684,7 @@ export class TasksService {
   private async assertTaskWriteAccess(
     taskId: string,
     actorId: string,
-    opts: { allowArchived?: boolean; level?: 'comment' | 'edit' | 'full' } = {},
+    opts: { allowArchived?: boolean; level?: 'comment' | 'edit' | 'full' | 'subtask' } = {},
   ) {
     return assertTaskWritable(this.db, taskId, actorId, opts)
   }
@@ -874,7 +874,7 @@ export class TasksService {
    */
   private async assertParentInWorkspace(parentTaskId: string, workspaceId: string, actorId: string) {
     await this.assertTaskReference(parentTaskId, workspaceId, actorId, 'Parent task not found')
-    await this.assertTaskWriteAccess(parentTaskId, actorId, { level: 'full' })
+    await this.assertTaskWriteAccess(parentTaskId, actorId, { level: 'subtask' })
   }
 
   /**
@@ -1986,6 +1986,14 @@ export class TasksService {
            * and told what THEY may do: restore it when the Trash lets them (an
            * admin, or whoever deleted it), else ask (`ListInTrashException`).
            */
+          if (err instanceof ListInTrashException && err.heldIn) {
+            // What holds it in the trash: said, and what to restore named (`found-6-oct/task-fallback-files-into-a-deleted-project`).
+            throw new ConflictException(
+              err.mayRestore
+                ? `Your "Default list for new tasks" is in a ${err.heldIn} in the trash. Restore the ${err.heldIn} from Trash, or choose another in Calendar settings → Time blocking.`
+                : `Your "Default list for new tasks" is in a ${err.heldIn} in the trash. Ask a workspace admin, or whoever deleted the ${err.heldIn}, to restore it, or choose another in Calendar settings → Time blocking.`,
+            )
+          }
           if (err instanceof ListInTrashException) {
             throw new ConflictException(
               err.mayRestore
@@ -4600,6 +4608,7 @@ export class TasksService {
         listCreatedById: lists.createdById,
         listInTrash: lists.isArchived,
         listDeletedById: lists.archivedById,
+        ...HOLDER_TRASH_COLUMNS,
       })
       .from(lists)
       .innerJoin(projects, eq(projects.id, lists.projectId))
@@ -4641,6 +4650,11 @@ export class TasksService {
      */
     if (target.listInTrash) {
       throw new ListInTrashException(mayRestoreList(superAdmin ? 'super_admin' : membership?.role, target.listDeletedById, actorId))
+    }
+    // Nor into one whose project, folder or space is in the trash (`found-6-oct/task-fallback-files-into-a-deleted-project`).
+    const held = nearestHolderInTrash(target)
+    if (held) {
+      throw new ListInTrashException(mayRestoreList(superAdmin ? 'super_admin' : membership?.role, held.deletedById, actorId), held.where)
     }
 
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))

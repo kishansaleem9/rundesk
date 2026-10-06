@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { NotFoundException } from '@nestjs/common'
-import { assertTaskWritable } from './task-write'
+import { assertTaskWritable, taskCommentAllowed } from './task-write'
 
 /*
  * THE WRITE RULE ASKS THE READ RULE WITH THE ACCOUNT'S ROLE
@@ -67,5 +67,41 @@ describe('assertTaskWritable — the account role', () => {
     // A view-only space: the read passes, the change does not.
     const db = makeDb([[CTX], [{ role: 'member' }], [{ role: 'super_admin' }], [IN_PRIVATE_LIST], [], ...level('view'), ...level('view')])
     await assert.rejects(() => assertTaskWritable(db, 't1', 'sa'), /View only/)
+  })
+})
+
+/*
+ * AND THE MAIL COMMENT RULE ASKS IT SO TOO (`found-6-oct/mail-comments-read-the-workspace-role`):
+ * it handed `readableTask` the workspace role, so a super_admin who is a plain
+ * member commented on a private space's task in the app and was refused the
+ * same comment by mail. The selects: the task, the membership, the account,
+ * the read rule's own, then the space's level.
+ */
+describe('taskCommentAllowed — the account role', () => {
+  const MAILED = { isArchived: false, listId: 'l1', workspaceId: 'w1', spaceId: 's1', projectId: 'p1', folderId: null }
+
+  it('lets a super_admin who is a plain member comment by mail on a task in a private space they are not in, as in the app; a plain member still may not', async () => {
+    const sa = makeDb([[MAILED], [{ role: 'member' }], [{ role: 'super_admin' }], [IN_PRIVATE_SPACE], ...level('admin')])
+    assert.equal(await taskCommentAllowed(sa, 't1', 'sa'), true)
+    // The plain member: the read rule's row, their workspace role, no seat in the private space.
+    const plain = makeDb([[MAILED], [{ role: 'member' }], [{ role: 'member' }], [IN_PRIVATE_SPACE], [{ role: 'member' }], []])
+    assert.equal(await taskCommentAllowed(plain, 't1', 'm'), false)
+  })
+})
+
+/*
+ * ADDING A SUBTASK IS FULL EDIT, SAID AS WHAT IT IS
+ * (`found-6-oct/adding-a-subtask-is-refused-as-deleting`): the parent was asked
+ * Full edit with the words for deleting it.
+ */
+describe('assertTaskWritable — adding a subtask', () => {
+  it('refuses a parent where the space’s default is Edit, saying it does not allow adding subtasks to its tasks', async () => {
+    // The task, the membership, the account, the read rule's row (an open task), no assignee, then the space's level at Edit, twice.
+    const OPEN = { ...IN_PRIVATE_LIST, listVisibility: 'public' }
+    const db = makeDb([[CTX], [{ role: 'member' }], [{ role: 'member' }], [OPEN], [{ role: 'member' }], [], [], ...level('edit'), ...level('edit')])
+    await assert.rejects(
+      () => assertTaskWritable(db, 't1', 'm', { level: 'subtask' }),
+      (e: unknown) => e instanceof Error && /which does not allow adding subtasks to its tasks$/.test(e.message),
+    )
   })
 })

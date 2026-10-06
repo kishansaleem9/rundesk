@@ -209,6 +209,16 @@ export class ClickUpImportService {
     return { jobId: job.id }
   }
 
+  /**
+   * A job's report, read by somebody who may import: the route asks
+   * `workspace.import`, and a guest is refused whatever a custom role grants
+   * them, before the job is read (`found-6-oct/import-history-read-by-anyone`).
+   */
+  async readJob(workspaceId: string, jobId: string, reader: Importer) {
+    await this.access.assertMayImport(this.db, { workspaceId, actorId: reader.id })
+    return this.getJob(workspaceId, jobId)
+  }
+
   async getJob(workspaceId: string, jobId: string) {
     const [job] = await this.db
       .select()

@@ -34,6 +34,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { waitUntil } from './lib/wait.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -41,7 +42,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 5
+const EXPECTED_CHECKS = 6
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -128,9 +129,12 @@ try {
   const upcoming = async (page) => {
     await page.goto(`${B}/app/${WS}/meetings`, { waitUntil: 'domcontentloaded' })
     const box = page.getByTestId('meetings-upcoming')
-    await box.getByText(/Nothing scheduled/i).waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
-    // What the section offers is decided by a second answer (the person's calendars).
-    await page.waitForTimeout(2500)
+    // What the section says is decided by two answers, the person's meetings
+    // and their calendars, and it says when both are in. It waited 2.5 s for
+    // the calendars, which under load was not enough, and with a calendar
+    // connected read "not offered" before anything had answered
+    // (`found-6-oct/meetings-upcoming-read-after-a-fixed-wait`).
+    await waitUntil(async () => (await box.getAttribute('data-state').catch(() => null)) === 'known', { timeoutMs: 20_000 })
     const text = ((await box.filter({ visible: true }).innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim()
     const offers = (await box.getByRole('link', { name: /Connect Calendar/i }).count().catch(() => 0)) > 0
     return { text, offers }
@@ -188,6 +192,55 @@ try {
 
   // ══ 4. WHAT THE EMPTY "UPCOMING" SAYS ════════════════════════════════════
   console.log('\n▶ the member\'s empty "Upcoming", without a calendar and with one')
+  /*
+   * BEFORE ITS ANSWERS ARE IN, THE SECTION SAYS NOTHING OF THEM. The member's
+   * upcoming meetings and their calendars are each held back by a route, so
+   * the section is read while it waits rather than raced: first with neither
+   * answered — it said "Nothing scheduled" before their meetings had answered
+   * (`found-6-oct/upcoming-says-nothing-scheduled-before-it-knows`) — then
+   * with the meetings in and the calendars not, when it may say nothing is
+   * scheduled but may not yet offer a calendar.
+   */
+  const hold = (pattern) => {
+    let release = () => {}
+    const until = new Promise((resolve) => { release = resolve })
+    const held = { count: 0, release, pattern }
+    held.route = async (route) => {
+      held.count += 1
+      await until
+      await route.continue().catch(() => {})
+    }
+    return held
+  }
+  const heldMeetings = hold((u) => /\/meetings\/upcoming$/.test(u.pathname))
+  const heldCalendars = hold((u) => /\/calendar-sync\/accounts$/.test(u.pathname))
+  await mPage.route(heldMeetings.pattern, heldMeetings.route)
+  await mPage.route(heldCalendars.pattern, heldCalendars.route)
+  await mPage.goto(`${B}/app/${WS}/meetings`, { waitUntil: 'domcontentloaded' })
+  const heldBox = mPage.getByTestId('meetings-upcoming')
+  await heldBox.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
+  await waitUntil(async () => heldMeetings.count > 0 && heldCalendars.count > 0, { timeoutMs: 15_000 })
+  const readHeld = async () => ({
+    state: await heldBox.getAttribute('data-state').catch(() => null),
+    text: ((await heldBox.filter({ visible: true }).innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim(),
+    offers: (await heldBox.getByRole('link', { name: /Connect Calendar/i }).count().catch(() => 0)) > 0,
+  })
+  const neither = await readHeld()
+  heldMeetings.release()
+  await heldBox.getByText(/Nothing scheduled/i).waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
+  const meetingsOnly = await readHeld()
+  heldCalendars.release()
+  await mPage.unroute(heldMeetings.pattern)
+  await mPage.unroute(heldCalendars.pattern)
+  chk(
+    heldMeetings.count > 0 && heldCalendars.count > 0 &&
+      neither.state === 'checking' && !/Nothing scheduled/i.test(neither.text) && !neither.offers &&
+      meetingsOnly.state === 'checking' && /Nothing scheduled/i.test(meetingsOnly.text) && !meetingsOnly.offers,
+    'before the member’s meetings have answered, "Upcoming" does not say nothing is scheduled, and before their calendars have, it does not offer Connect Calendar — it says it is checking',
+    `held ${heldMeetings.count} meetings and ${heldCalendars.count} calendars request(s); with neither answered it said ${JSON.stringify(neither.state)}, ` +
+      `"${neither.text}", Connect Calendar ${neither.offers ? 'offered' : 'not offered'}; with the meetings in, ${JSON.stringify(meetingsOnly.state)}, ` +
+      `"${meetingsOnly.text}", Connect Calendar ${meetingsOnly.offers ? 'offered' : 'not offered'}`,
+  )
   const without = await upcoming(mPage)
   await sql`
     insert into user_calendar_accounts

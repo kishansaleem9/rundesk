@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
+import { BadRequestException } from '@nestjs/common'
 import { PgDialect } from 'drizzle-orm/pg-core'
-import { CalendarSyncService } from './calendar-sync.service'
+import { CalendarSyncService, LEAVERS_CALENDAR } from './calendar-sync.service'
 
 /**
  * The service is a thin shell around Drizzle + fetch. The unit tests
@@ -275,6 +276,8 @@ describe('CalendarSyncService.pullEvents', () => {
     } as any
     const svc = new CalendarSyncService(db)
     mock.method(svc as any, 'requireConnection', async () => ({ id: 'conn', workspaceId: WS, provider: 'gcal', metadata: { inboxListId: 'inbox' }, connectedById: 'admin' }))
+    // Its owner is in the workspace (`ownerIsMember`, below).
+    mock.method(svc as any, 'ownerIsMember', async () => true)
     mock.method(svc as any, 'listGoogleEvents', async () => [{ id: 'evt-shared', etag: 'e1', summary: 'Standup', start: new Date(), end: new Date() }])
 
     await svc.pullEvents(WS, 'gcal')
@@ -283,5 +286,41 @@ describe('CalendarSyncService.pullEvents', () => {
     const q = dialect.sqlToQuery(lookups[0] as never)
     assert.match(q.sql, /"task_calendar_links"\."workspace_id" = \$\d+/, `the lookup asks the workspace: ${q.sql}`)
     assert.ok(q.params.includes(WS), `and it is the pulling workspace: ${JSON.stringify(q.params)}`)
+  })
+})
+
+/*
+ * A CALENDAR IS PULLED ONLY WHILE ITS OWNER IS IN THE WORKSPACE
+ * (`found-6-oct/calendar-pull-uses-a-leavers-connection`): the pull chose a
+ * removed member's connection as readily as a member's, where a push and a
+ * task's meetings ask `ownerMayRead`. The owner's membership is asked before
+ * the calendar is read; a queued stand-in answers the selects in order.
+ */
+describe('CalendarSyncService.pullEvents — whose calendar it still is', () => {
+  const WS = '11111111-1111-4111-8111-111111111111'
+  const pulling = (membership: unknown[], connectedById: string | null) => {
+    const queue = [membership]
+    const node = (rows: unknown[]) => {
+      const p = Promise.resolve(rows) as any
+      for (const v of ['from', 'where', 'limit', 'innerJoin', 'leftJoin', 'orderBy']) p[v] = () => p
+      return p
+    }
+    const svc = new CalendarSyncService({ select: () => node(queue.shift() ?? []) } as any)
+    mock.method(svc as any, 'requireConnection', async () => ({ id: 'conn', workspaceId: WS, provider: 'gcal', metadata: { inboxListId: 'inbox' }, connectedById }))
+    const read = mock.method(svc as any, 'listGoogleEvents', async () => [])
+    return { svc, read }
+  }
+
+  it('refuses the connection of somebody no longer in the workspace, or of nobody, saying whose it is, before the calendar is read; a member’s is read', async () => {
+    const refused = (e: unknown) => e instanceof BadRequestException && e.message === LEAVERS_CALENDAR.gcal
+    const gone = pulling([], 'keeper')
+    await assert.rejects(() => gone.svc.pullEvents(WS, 'gcal'), refused, 'a removed member’s')
+    assert.equal(gone.read.mock.callCount(), 0, 'the calendar was read')
+    const nobodys = pulling([], null)
+    await assert.rejects(() => nobodys.svc.pullEvents(WS, 'gcal'), refused, 'nobody’s')
+    assert.equal(nobodys.read.mock.callCount(), 0)
+    const kept = pulling([{ userId: 'keeper' }], 'keeper')
+    assert.deepEqual(await kept.svc.pullEvents(WS, 'gcal'), { created: 0, updated: 0, skipped: 0 })
+    assert.equal(kept.read.mock.callCount(), 1, 'a member’s calendar was not read')
   })
 })

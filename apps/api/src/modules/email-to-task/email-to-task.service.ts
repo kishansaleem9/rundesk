@@ -27,7 +27,7 @@ import { sameEmail } from '../../common/sql/same-email'
 import { R2Service } from '../../common/storage/r2.service'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { taskCommentAllowed } from '../../common/permissions/task-write'
-import { canCreateTaskIn, listTrashState } from '../../common/permissions/task-create'
+import { canCreateTaskIn, heldInTrash, listTrashState } from '../../common/permissions/task-create'
 import { isUuid } from '../../common/validation/uuid'
 import { LOCAL_PART_PREFIX, TASK_TAG, inboundDomain, taskAddressMatches, taskReplyAddress } from './task-address'
 
@@ -104,8 +104,16 @@ export class EmailToTaskService {
   /**
    * Mint (or return the existing) inbound email alias for a list. Idempotent
    * so the UI can "Show address" without thinking about prior state.
+   *
+   * Asked of its caller before an address is handed back, as `GET` and a mint
+   * ask it: it returned a live address to anybody who could name the list, so a
+   * member of a view-only space, refused the address by `GET` (403), was given
+   * it by `POST` (201), and their mail to it made a task in the list
+   * (`found-6-oct/list-address-given-by-post-to-those-who-may-not-add`).
    */
   async ensureAlias(listId: string, actorId: string): Promise<AliasView> {
+    await this.assertListExists(listId)
+    await this.assertCanManageAlias(listId, actorId)
     const existing = await this.findAliasByListId(listId)
     if (existing && !existing.revokedAt) return this.aliasView(existing)
     return this.rotateAlias(listId, actorId)
@@ -267,6 +275,13 @@ export class EmailToTaskService {
     if ((await listTrashState(this.db, alias.listId))?.inTrash) {
       await this.recordOutcome(payload, totalBytes, 'rejected_not_allowed', 'the list is in the trash', alias.listId)
       return { outcome: 'rejected_not_allowed', reason: 'the list is in the trash' }
+    }
+    // Nor one whose project, folder or space is (`found-6-oct/task-fallback-files-into-a-deleted-project`).
+    const held = await heldInTrash(this.db, alias.listId)
+    if (held) {
+      const reason = `the list's ${held.where} is in the trash`
+      await this.recordOutcome(payload, totalBytes, 'rejected_not_allowed', reason, alias.listId)
+      return { outcome: 'rejected_not_allowed', reason }
     }
 
     const authorId = await this.resolveAuthorId(alias.listId, payload.fromAddress, alias.createdById)

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { ConflictException, NotFoundException } from '@nestjs/common'
-import { assertCanCreateTaskIn, canCreateTaskIn, LIST_IN_TRASH_ASK, LIST_IN_TRASH_RESTORE, ListInTrashException } from './task-create'
+import { assertCanCreateTaskIn, canCreateTaskIn, heldInTrashWords, LIST_IN_TRASH_ASK, LIST_IN_TRASH_RESTORE, ListInTrashException } from './task-create'
 
 /*
  * A LIST IN THE TRASH TAKES NO NEW TASK
@@ -91,5 +91,30 @@ describe('assertCanCreateTaskIn — what the refusal tells each person to do', (
     const db = makeDb([home(true, 'somebody-else'), [{ role: 'member' }], [OPEN_LIST], ...MEMBER_READS, ...FULL_EDIT])
     assert.equal(await canCreateTaskIn(db, LIST, 'm', { evenInTrash: true }), true)
     assert.equal(db.left(), 0, 'and still asks the space’s level')
+  })
+})
+
+/*
+ * NOR ONE WHOSE PROJECT, FOLDER OR SPACE IS IN THE TRASH
+ * (`found-6-oct/task-fallback-files-into-a-deleted-project`): deleting what
+ * holds a list leaves the list's own flag as it was, and only that was asked.
+ */
+describe('assertCanCreateTaskIn — what holds the list, in the trash', () => {
+  const held = (where: 'project' | 'folder' | 'space', deletedById = 'm') => [{ ...home(false)[0], [`${where}InTrash`]: true, [`${where}DeletedById`]: deletedById }]
+
+  it('refuses a task in a list whose project, folder or space is in the trash, 409, naming it and what to do — and tells a member who did not delete it to ask', async () => {
+    for (const where of ['project', 'folder', 'space'] as const) {
+      const db = makeDb([held(where), [{ role: 'member' }], [OPEN_LIST], ...MEMBER_READS])
+      await assert.rejects(
+        () => assertCanCreateTaskIn(db, LIST, 'm'),
+        (e: unknown) => e instanceof ListInTrashException && e.heldIn === where && (e as Error).message === heldInTrashWords(where, true),
+        `the ${where} in the trash`,
+      )
+    }
+    const db = makeDb([held('project', 'the-admin'), [{ role: 'member' }], [OPEN_LIST], ...MEMBER_READS])
+    await assert.rejects(
+      () => assertCanCreateTaskIn(db, LIST, 'm'),
+      (e: unknown) => e instanceof ListInTrashException && (e as Error).message === heldInTrashWords('project', false),
+    )
   })
 })

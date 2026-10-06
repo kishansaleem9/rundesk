@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common'
 import { eq, and, ne, asc, sql, type SQL } from 'drizzle-orm'
 import { lists, listStatuses, projects, spaces, folders, spaceStatuses } from '@rundesk/db'
+import { holdersNotInTrash } from '../../common/permissions/task-create'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer, assertCanCreateInSpace, assertCanPlaceIn } from '../../common/permissions/container-access'
@@ -286,7 +287,8 @@ export class ListsService {
       .from(lists)
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(lists.isArchived, false), visFilter))
+      // None held in the trash, which takes no task (`found-6-oct/task-fallback-files-into-a-deleted-project`).
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(lists.isArchived, false), holdersNotInTrash(), visFilter))
       .orderBy(asc(lists.name))
   }
 

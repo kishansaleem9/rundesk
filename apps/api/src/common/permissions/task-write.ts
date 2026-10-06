@@ -63,7 +63,7 @@ export async function assertTaskWritable(
   db: Db,
   taskId: string,
   actorId: string,
-  opts: { allowArchived?: boolean; level?: 'comment' | 'edit' | 'full' } = {},
+  opts: { allowArchived?: boolean; level?: 'comment' | 'edit' | 'full' | 'subtask' } = {},
 ): Promise<TaskWriteContext> {
   const [ctx] = await db
     .select({
@@ -164,7 +164,7 @@ async function assertSpaceAllowsTaskWrite(
   db: Db,
   spaceId: string,
   actorId: string,
-  wanted: 'comment' | 'edit' | 'full',
+  wanted: 'comment' | 'edit' | 'full' | 'subtask',
   isAssignee: boolean,
   /** The task and the containers above it: a grant on any of them decides first (`WithinStep`). */
   within: WithinStep[],
@@ -180,6 +180,16 @@ async function assertSpaceAllowsTaskWrite(
    */
   if (wanted === 'full') {
     await assertSpaceLevel(db, { spaceId, actorId, required: 'admin', kind: 'tasks', within, act: 'deleting its' })
+    return
+  }
+  /*
+   * AND SO IS ADDING A SUBTASK, as ClickUp's Edit "cannot create … subtasks"
+   * and Full edit "creates tasks and subtasks" — said as what it is: a member
+   * at Edit adding a subtask was refused "…which does not allow deleting its
+   * tasks" (`found-6-oct/adding-a-subtask-is-refused-as-deleting`).
+   */
+  if (wanted === 'subtask') {
+    await assertSpaceLevel(db, { spaceId, actorId, required: 'admin', kind: 'tasks', within, act: 'adding subtasks to its' })
     return
   }
   if (wanted === 'comment' && isAssignee && spaceLevelReaches(resolved.level, 'comment')) return
@@ -222,7 +232,12 @@ export async function taskCommentAllowed(db: Db, taskId: string, actorId: string
     .where(and(eq(workspaceMembers.workspaceId, ctx.workspaceId), eq(workspaceMembers.userId, actorId)))
     .limit(1)
   if (!membership) return false
-  if (!(await readableTask(db, ctx.workspaceId, taskId, { id: actorId, role: membership.role }))) return false
+  // With the account's role, as the write rule asks it (`assertTaskWritable`): a
+  // super_admin who is a plain member commented on a private space's task in the
+  // app (201) and was refused the same comment by mail, `rejected_not_allowed`
+  // (`found-6-oct/mail-comments-read-the-workspace-role`).
+  const [account] = await db.select({ role: users.role }).from(users).where(eq(users.id, actorId)).limit(1)
+  if (!(await readableTask(db, ctx.workspaceId, taskId, { id: actorId, role: account?.role }))) return false
   const resolved = await resolveSpaceLevel(db, {
     spaceId: ctx.spaceId,
     actorId,

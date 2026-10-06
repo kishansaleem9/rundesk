@@ -58,7 +58,7 @@ const argOf = (name, fallback) => {
  * run that still passes — and half of this suite is branches that only run once
  * an earlier step really happened.
  */
-const EXPECTED_CHECKS = 53
+const EXPECTED_CHECKS = 54
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -1430,6 +1430,40 @@ try {
       guestLeft.spaces === 0 && guestLeft.tasks === 0 && guestLeft.jobs === 0,
     'a guest granted workspace.import by a custom role is refused both previews, both imports and the ClickUp enrichment, 403 “Guests cannot import data into a workspace” — and no space, task or job row of theirs is made',
     `${Object.entries(guestAsked).map(([k, r]) => `${k} ${r.status} ${JSON.stringify(r.message || null)}`).join('; ')}; left behind: ${JSON.stringify(guestLeft)}`,
+  )
+
+  console.log('\n▶ who reads the import history, and an import’s report')
+  /*
+   * `found-6-oct/import-history-read-by-anyone`, measured on lane 4: a guest and
+   * a member without workspace.import read the history of every import (200,
+   * the admin's among them) and each job's report, whose errors quote the rows
+   * a private space's import refused, while the guest was refused that space.
+   * Both are asked what the imports ask now. The newest job of this workspace
+   * stands for the history, whatever its length.
+   */
+  const historyBy = async (who) => ({
+    history: await who(`/workspaces/${WT}/import/spreadsheet/jobs?source=all&limit=100`),
+    sheetReport: await who(`/workspaces/${WT}/import/spreadsheet/jobs/${capsSheet.data?.jobId}`),
+    clickupReport: await who(`/workspaces/${WT}/import/clickup/jobs/${capsClickup.data?.jobId}`),
+  })
+  const historyRead = {
+    noKeyMember: await historyBy(noKeyMember.as),
+    noKeyGuest: await historyBy(noKeyGuest.as),
+    guestImporter: await historyBy(GI),
+    member: await historyBy(M),
+  }
+  const [newestJob] = await sql`select id from clickup_import_jobs where workspace_id = ${WT} order by created_at desc limit 1`
+  const historySaid = (h) => Object.entries(h).map(([k, r]) => `${k} ${r.status} ${JSON.stringify(r.message || null)}`).join(', ')
+  const listedJobs = (historyRead.member.history.data ?? []).map((j) => j.id)
+  chk(
+    Object.values(historyRead.noKeyMember).every(keyAsked) && Object.values(historyRead.noKeyGuest).every(keyAsked) &&
+      Object.values(historyRead.guestImporter).every((r) => r.status === 403 && r.message === GUEST_WORDS) &&
+      historyRead.member.history.status === 200 && newestJob && listedJobs.includes(newestJob.id) &&
+      historyRead.member.sheetReport.status === 200 && historyRead.member.sheetReport.data?.id === capsSheet.data?.jobId &&
+      historyRead.member.clickupReport.status === 200 && historyRead.member.clickupReport.data?.id === capsClickup.data?.jobId,
+    'the import history and each import’s report are asked what the imports ask: a member and a guest without workspace.import are refused both, 403 “Missing required permission: workspace.import”, and a guest granted it “Guests cannot import data into a workspace”, while a member granted it reads the history and the admin’s reports',
+    `without the key, the member: ${historySaid(historyRead.noKeyMember)}; the guest: ${historySaid(historyRead.noKeyGuest)}; the guest granted it: ${historySaid(historyRead.guestImporter)}; ` +
+      `the member granted it: ${historySaid(historyRead.member)} (the newest job listed: ${newestJob ? listedJobs.includes(newestJob.id) : 'no job'})`,
   )
 
   console.log('\n▶ the import page, for that guest')

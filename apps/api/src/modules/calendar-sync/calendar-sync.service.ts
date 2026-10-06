@@ -42,6 +42,12 @@ import { readableTask, type ReadActor } from '../../common/permissions/read-acce
  */
 export type CalendarProvider = 'gcal' | 'outlook'
 
+/** What a pull answers when the connection's owner is no longer in the workspace (`ownerIsMember`). */
+export const LEAVERS_CALENDAR: Record<CalendarProvider, string> = {
+  gcal: 'The Google Calendar connected to this workspace belongs to somebody who is no longer in it, so nothing is pulled from it. Connect it again under your own account.',
+  outlook: 'The Outlook calendar connected to this workspace belongs to somebody who is no longer in it, so nothing is pulled from it. Connect it again under your own account.',
+}
+
 type ConnectionRow = {
   id: string
   workspaceId: string
@@ -185,6 +191,14 @@ export class CalendarSyncService {
     skipped: number
   }> {
     const conn = await this.requireConnection(workspaceId, provider)
+    // Pulled only while its owner is in the workspace, as a push and a task's
+    // meeting ask it (`ownerMayRead`): the pull chose a removed member's
+    // connection as readily as a member's, and with a token would read their
+    // calendar into the inbox list as tasks made by them
+    // (`found-6-oct/calendar-pull-uses-a-leavers-connection`).
+    if (!(await this.ownerIsMember(conn, workspaceId))) {
+      throw new BadRequestException(LEAVERS_CALENDAR[provider])
+    }
     const inboxListId = (conn.metadata as { inboxListId?: string })?.inboxListId
     if (!inboxListId) {
       throw new BadRequestException(
@@ -777,6 +791,21 @@ export class CalendarSyncService {
     if (!member) return false
     const [account] = await this.db.select({ role: users.role }).from(users).where(eq(users.id, ownerId)).limit(1)
     return (await readableTask(this.db, task.workspaceId, task.id, { id: ownerId, role: account?.role })) !== null
+  }
+
+  /**
+   * Whether this connection's owner is still a member of the workspace — the
+   * half of `ownerMayRead` that asks nothing of a task, which a pull has none
+   * of. A connection nobody owns any more is nobody's.
+   */
+  private async ownerIsMember(conn: { connectedById: string | null }, workspaceId: string): Promise<boolean> {
+    if (!conn.connectedById) return false
+    const [member] = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, conn.connectedById)))
+      .limit(1)
+    return Boolean(member)
   }
 
   private async loadConnectionsByIds(workspaceIds: string[]): Promise<ConnectionRow[]> {

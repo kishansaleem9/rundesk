@@ -20,7 +20,7 @@ import { useTranslation } from '../lib/i18n'
 type ConnectionRow = {
   provider: string
   status: 'connected' | 'disconnected' | string
-  health: 'healthy' | 'expiring' | 'expired' | 'disconnected' | string
+  health: 'healthy' | 'expiring' | 'expired' | 'disconnected' | 'owner_left' | string
   externalAccountEmail: string | null
   tokenExpiresAt: string | null
 }
@@ -105,6 +105,8 @@ export function CalendarSyncWizard({
           {CALENDAR_PROVIDERS.map((p) => {
             const conn = calendarConnections.find((c) => c.provider === p.id)
             const isConnected = conn?.status === 'connected'
+            // Its owner has left the workspace: nothing is pulled from it or pushed to it, so it is not offered a sync.
+            const ownerLeft = isConnected && conn?.health === 'owner_left'
             return (
               <div
                 key={p.id}
@@ -118,15 +120,17 @@ export function CalendarSyncWizard({
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium">{p.label}</div>
-                  <div className="text-xs text-muted-foreground truncate">
-                    {isConnected
+                  <div className={cn('text-xs text-muted-foreground', ownerLeft ? 'text-amber-700 dark:text-amber-300' : 'truncate')} data-testid={ownerLeft ? 'calendar-sync-owner-left' : undefined}>
+                    {ownerLeft
+                      ? t('calendarSync.ownerLeft')
+                      : isConnected
                       ? t('calendarSync.connectedAs', {
                           account: conn!.externalAccountEmail ?? t('calendarSync.unknownAccount'),
                         })
                       : t('calendarSync.notConnected')}
                   </div>
                 </div>
-                {isConnected ? (
+                {ownerLeft ? null : isConnected ? (
                   mayPull && <Button
                     variant="outline"
                     size="sm"

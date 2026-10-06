@@ -66,7 +66,7 @@ type Integration = {
   // simple wordmark/letter for the card
   logo: string
 }
-type ConnectionHealth = 'healthy' | 'expiring' | 'expired' | 'disconnected'
+type ConnectionHealth = 'healthy' | 'expiring' | 'expired' | 'disconnected' | 'owner_left'
 
 /**
  * §V2-11, frame `18:39` — the integration error card.
@@ -358,8 +358,8 @@ export function IntegrationsMarketplacePage() {
    * the copy went stale the moment `listSupportedProviders()` grew, and for as
    * long as the page was loading it drew every tile according to last year's
    * idea of what exists. The fallback is gone — before the answer arrives no
-   * app is connectable, which is the truthful thing to say about a question
-   * nobody has answered yet.
+   * app is connectable, and no tile says it cannot be either: that would be an
+   * answer nobody gave (`catalogueState`, below).
    */
   const oauthProviders = useMemo(
     () => new Set(providersQuery.data ?? []),
@@ -580,6 +580,23 @@ export function IntegrationsMarketplacePage() {
    */
   const mcpRequest = accessRequestByProvider.get(CUSTOM_MCP_PROVIDER)
 
+  /*
+   * THE TILES SAY NOTHING UNTIL WHAT THEY ARE DRAWN FROM HAS ANSWERED
+   * (`found-6-oct/app-tiles-say-cannot-connect-before-the-server-answers`).
+   * Until the provider list arrived, every tile but Slack's said Rundesk has no
+   * connector for it and offered Request access — Gmail's and SharePoint's
+   * too — and an admin's Connect read Request access until their permissions
+   * arrived. A tile whose answer is not in says it is checking, and the page
+   * says which it is: `known` once the provider list, the providers' status,
+   * the connections and the reader's permissions have answered; `failed`, with
+   * a way to ask again, when the provider list could not be read.
+   */
+  const catalogueState = providersQuery.isError
+    ? 'failed'
+    : providersQuery.isSuccess && mayConnect !== null && !providerStatusQuery.isPending && !connectionsQuery.isPending
+    ? 'known'
+    : 'checking'
+
   const filtered = INTEGRATIONS.filter((i) => {
     if (!matchesFacet(i, filter)) return false
     return (
@@ -631,7 +648,7 @@ export function IntegrationsMarketplacePage() {
   }
 
   return (
-    <div className="p-6 space-y-7 max-w-7xl mx-auto" data-testid="integrations-page">
+    <div className="p-6 space-y-7 max-w-7xl mx-auto" data-testid="integrations-page" data-state={catalogueState}>
       {oauthStatus?.oauth === 'success' ? (
         <Card className="p-3 border-emerald-500/30 bg-emerald-500/5 text-sm" data-testid="integrations-oauth-success">
           {t('integrations.connectedSuccess', { provider: oauthStatus.provider })}
@@ -817,6 +834,18 @@ export function IntegrationsMarketplacePage() {
         <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
       </button>
 
+      {catalogueState === 'failed' ? (
+        <Card
+          className="p-3 border-rose-500/30 bg-rose-500/5 text-sm flex items-center justify-between gap-3"
+          data-testid="integrations-catalogue-failed"
+        >
+          <span>{t('integrations.catalogueFailed')}</span>
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => void providersQuery.refetch()}>
+            {t('common.retry')}
+          </Button>
+        </Card>
+      ) : null}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3" data-testid="integrations-grid">
         {filtered.map((integration) => (
           <IntegrationCard
@@ -864,7 +893,8 @@ export function IntegrationsMarketplacePage() {
                 }
               }}
             onOpenConnect={() => setActiveIntegration(integration)}
-            supported={isSupportedIntegration(integration)}
+            // Not known until the provider list answers; Slack is not on it.
+            supported={integration.id === 'slack' || providersQuery.isSuccess ? isSupportedIntegration(integration) : null}
             connection={connectionByProvider.get(integration.id)}
             setupReason={oauthProviders.has(integration.id) ? providerAvailability.get(integration.id)?.reason : undefined}
             providerReady={isProviderReady(integration)}
@@ -1158,7 +1188,8 @@ function IntegrationCard({
   isLoading?: boolean
   onToggle: (next: boolean) => void
   onOpenConnect: () => void
-  supported: boolean
+  /** Whether Rundesk can connect it; null until the provider list answers. */
+  supported: boolean | null
   providerReady: boolean
   setupReason?: string
   accessRequest?: { status: 'pending' | 'approved' | 'rejected'; note?: string | null; updatedAt?: string }
@@ -1176,8 +1207,11 @@ function IntegrationCard({
    * member finds a workspace connection's option unavailable. Connected, there
    * is nothing for them to ask for, and nothing to press.
    */
-  const asks = !supported || (mayConnect === false && !connected)
-  const actionless = supported && mayConnect === false && connected
+  // Until the provider list and the reader's permissions answer, the tile is
+  // neither a request nor a switch: it says it is checking.
+  const known = supported !== null && mayConnect !== null
+  const asks = known && (!supported || (mayConnect === false && !connected))
+  const actionless = known && supported && mayConnect === false && connected
   return (
     <Card
       variant="glass"
@@ -1206,10 +1240,12 @@ function IntegrationCard({
                 <Badge variant="success" className="text-[9px] uppercase">{t('integrations.approved')}</Badge>
               ) : asks && accessRequest?.status === 'pending' ? (
                 <Badge variant="info" className="text-[9px] uppercase">{t('integrations.requested')}</Badge>
-              ) : !supported ? (
+              ) : supported === false ? (
                 <Badge variant="secondary" className="text-[9px] uppercase">{t('integrations.unavailable')}</Badge>
               ) : !providerReady ? (
                 <Badge variant="warning" className="text-[9px] uppercase">{t('integrations.setupRequired')}</Badge>
+              ) : connection?.health === 'owner_left' ? (
+                <Badge variant="warning" className="text-[9px] uppercase">{t('integrations.ownerLeft')}</Badge>
               ) : connection?.health === 'expired' ? (
                 <Badge variant="destructive" className="text-[9px] uppercase">{t('integrations.expired')}</Badge>
               ) : connection?.health === 'expiring' ? (
@@ -1235,7 +1271,7 @@ function IntegrationCard({
             genuinely cannot connect and cannot be left behind on one that has
             since become connectable.
           */}
-          {!supported && (
+          {supported === false && (
             <p
               className="text-[11px] text-muted-foreground mt-1 leading-relaxed"
               data-testid="integration-not-connectable"
@@ -1251,6 +1287,16 @@ function IntegrationCard({
               data-provider={integration.id}
             >
               {t('integrations.needsPermission')}
+            </p>
+          )}
+          {/* Its owner has left the workspace: say so, and what to do (`found-6-oct/calendar-pull-uses-a-leavers-connection`). */}
+          {connection?.health === 'owner_left' && (
+            <p
+              className="text-[11px] text-amber-700 dark:text-amber-300 mt-1 leading-relaxed"
+              data-testid="integration-owner-left"
+              data-provider={integration.id}
+            >
+              {t('integrations.ownerLeftWhy')}
             </p>
           )}
           {supported && !providerReady && setupReason && (
@@ -1332,6 +1378,7 @@ function IntegrationCard({
                 className="h-7 text-xs"
                 data-testid="integration-action"
                 data-actionable={
+                  !known ||
                   isLoading ||
                   (asks &&
                     (accessRequest?.status === 'pending' || accessRequest?.status === 'approved'))
@@ -1339,6 +1386,7 @@ function IntegrationCard({
                     : 'yes'
                 }
                 disabled={
+                  !known ||
                   isLoading ||
                   (asks &&
                     (accessRequest?.status === 'pending' || accessRequest?.status === 'approved'))
@@ -1351,7 +1399,9 @@ function IntegrationCard({
                   onOpenConnect()
                 }}
               >
-                {asks
+                {!known
+                  ? t('integrations.checking')
+                  : asks
                   ? accessRequest?.status === 'rejected'
                     ? t('integrations.requestAgain')
                     : accessRequest?.status === 'approved'

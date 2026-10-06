@@ -2,6 +2,7 @@
 # "coming soon" shape comes back with it: a card whose switch and whose button
 # are both dead. It photographs exactly like a working integration.
 # RE-AIMED 25 September: the tile's action button was re-indented or renamed (a tile the viewer cannot connect is now a request too, `asks`); the mistake is the same.
+# RE-AIMED 6 October: the button is also disabled while the tile's answers are not in (`!known`); the mistake is the same.
 # Reddens: app-catalogue: "every one of the N tiles offered can be acted on"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-integrations-page.tsx'
@@ -13,6 +14,7 @@ b1 = (
 )
 
 a2 = """                disabled={
+                  !known ||
                   isLoading ||
                   (asks &&
                     (accessRequest?.status === 'pending' || accessRequest?.status === 'approved'))
@@ -20,6 +22,7 @@ a2 = """                disabled={
                 onClick={() => {
 """
 b2 = """                disabled={
+                  !known ||
                   isLoading ||
                   !supported ||
                   (asks &&

@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 507 items: 41 open · 4 partly fixed · 405 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 6 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 511 items: 34 open · 4 partly fixed · 416 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 6 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8168,7 +8168,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 47, each reproduced
+## Found by the triage, 5 October, and since — 51, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -9176,13 +9176,29 @@ Whether a member's workspace.import alone may make spaces and projects through a
 
 *To close:* a has-time flag beside each date (a schema change, the owner's decision), written by every date write and read by `isDateOnly`; check it in the three zones.
 
-### `found-6-oct/import-history-read-by-anyone` — open (security, small; found closing `found-6-oct/a-guest-who-may-import-makes-a-space`) · reproduced 6 October
+### `found-6-oct/import-history-read-by-anyone` — **closed** (security, small; found closing `found-6-oct/a-guest-who-may-import-makes-a-space`) · reproduced 6 October
 
 **Any member or guest reads the import history and every import's report, whatever the import touched**
 
 *Evidence, 6 October, lane 4 (`probe-adjacent.mjs`):* the admin imported a sheet into a private space, and one row was refused by the database. A guest and a member, neither holding `workspace.import`, both got 200 from `GET /workspaces/:ws/import/spreadsheet/jobs?source=all`, which listed the admin's job, and 200 from `GET …/jobs/:id`, whose errors quote the refused row's title, while the guest's `GET /projects/space/<that private space>` answered 403 "This space or project is private". The routes carry `WorkspaceMemberGuard` alone (the ClickUp job's by code reading).
 
 *To close:* research who sees ClickUp's import history; ask the history and reports what the imports ask (`workspace.import`, no guest) or narrow them to the asker's own, and check it in `imports`.
+
+*Closed, 6 October* (lane 4). ClickUp keeps a workspace's import history in Settings → Imports / Exports, beside the imports themselves, where "all past completed, deleted, or canceled imports are visible"; importing is the owner's and admins', and a member's whose custom role grants Importing, never a guest's (help centre, "Manage imports" and "Import and export feature availability and limits", through search excerpts). So the history and each import's report are asked what the imports ask.
+
+- `GET …/import/spreadsheet/jobs`, `GET …/import/spreadsheet/jobs/:jobId` and `GET …/import/clickup/jobs/:jobId` ask `workspace.import` (`PermissionsGuard`), and the services refuse a guest granted it, "Guests cannot import data into a workspace", before any job is read (`readJob`, `listJobs` → `assertMayImport`).
+- The import page already showed the history and polled a job only inside the panels it offers a holder of the key, so it is unchanged.
+
+Measured on lane 4 with the extended `imports` suite: before, on the build these fixes went onto, a member and a guest without the key, and a guest granted it by a custom role, were each answered 200 by the history and by both importers' reports of the admin's imports (53 of 54, the new check red); after, the first two are refused 403 "Missing required permission: workspace.import", the guest granted it 403 "Guests cannot import data into a workspace", and a member granted it reads the history and the reports (54 of 54, three runs).
+
+Checks:
+- `imports` +1: a member and a guest without the key are refused the history and both importers' reports, 403 "Missing required permission: workspace.import"; a guest granted it, "Guests cannot import data into a workspace"; a member granted it reads the history and the admin's reports.
+- `spreadsheet-import.service.test.ts` +1 and `clickup-import.service.test.ts` +1: a guest is refused before any job is read, a member reads it.
+- Patches: `imports-63` (the history asks no key), `-64` and `-65` (each report asks no key), `-66`, `-67` and `-68` (the history and each report skip the guest rule) each redden the check. Unit claims `iss-17`, `iss-18` and `ics-11`.
+
+Read, not reproduced (so not counted): the ClickUp enrichment takes any job of the workspace by its id, whoever made it (recorded on `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change`).
+
+Regression on lanes 2, 4 and 6: the 76 suites these touch, 1233 checks, 69 suites green at once. `app-catalogue` and `meetings-connect-calendar` failed on races in the suites, found here and closed beside these (`found-6-oct/app-catalogue-waits-for-a-tile-drawn-before-any-answer`, `found-6-oct/meetings-upcoming-read-after-a-fixed-wait`). At a load of about 12 on four cores, `comment-recording`, `sidebar-sections`, `task-menu` and `task-depth` each gave up a 20 s wait for a sheet or a menu, and `task-sheet-fetches` counted one of its sheet's opening fetches as the change's while its second sheet missed the change; each was green when run again on its own (33, 25, 37, 92 and 2 checks). API unit tests 2135/2135, web 350/350, both typechecks clean.
 
 ### `found-6-oct/import-assigns-people-who-cannot-see-the-task` — open (security, small; found reviewing `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change`) · reproduced 6 October
 
@@ -9200,13 +9216,26 @@ Whether a member's workspace.import alone may make spaces and projects through a
 
 *To close (the owner chooses):* skip and report such a value, or write it to the task's own field of that name; then check it by SQL in `imports`.
 
-### `found-6-oct/adding-a-subtask-is-refused-as-deleting` — open (visible bug, small; found reviewing `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change`) · reproduced 6 October
+### `found-6-oct/adding-a-subtask-is-refused-as-deleting` — **closed** (visible bug, small; found reviewing `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change`) · reproduced 6 October
 
 **A member at Edit is refused adding a subtask with "…does not allow deleting its tasks"**
 
 *Evidence, 6 October, lane 4 (`probe-r1`):* a member at Edit was refused `POST /tasks` with `parentTaskId` under a task there, and `PATCH` of their own task's parent to it, with 403 "This space's default permission is "Edit", which does not allow deleting its tasks". The action was adding a subtask: `assertParentInWorkspace` asks Full edit, and `assertSpaceAllowsTaskWrite` words every Full-edit refusal as deleting.
 
 *To close:* research which level ClickUp asks to add a subtask; say what was refused ("adding a subtask"), and check it in a suite.
+
+*Closed, 6 October* (lane 4). ClickUp: Edit lets a person change a location's items but not create or delete subtasks; Full edit "creates, edits, shares and deletes" them (help centre, "Permissions in detail", through search excerpts). So the level asked was right, and only the words were wrong.
+
+- A parent is asked Full edit as `'subtask'` (`assertTaskWritable`), whose refusal says what it refuses: "…which does not allow adding subtasks to its tasks", by `POST /tasks` with a parent, a move of a task under one, and the ClickUp import's subtask links, which repeat the routes' words. Deleting keeps its own words.
+
+Measured on lane 4 with the extended `full-edit-levels` suite: before, a member at Edit making a subtask under a task there, or moving their own task under it, was refused 403 "This space's default permission is "Edit", which does not allow deleting its tasks" both ways (8 of 9, the new check red); after, "…which does not allow adding subtasks to its tasks", none made, and at Full edit the subtask is made (9 of 9, three runs).
+
+Checks:
+- `full-edit-levels` 8 → 9: a member at Edit adds no subtask under a task there — by making one with that parent, or by moving their own task under it — and is told so, 403, "…which does not allow adding subtasks to its tasks", none made; in a Full edit space they add one.
+- `task-write.test.ts` +1.
+- Patch `fel-12` (a subtask refused as deleting) reddens the check; unit claim `tws-6`. Re-aimed, the parent now asked as `'subtask'`: `otr-3`, `otr-4`, `iac-7` and `imports-56`.
+
+Regression on lanes 2, 4 and 6: the 76 suites these touch, 1233 checks, 69 suites green at once. `app-catalogue` and `meetings-connect-calendar` failed on races in the suites, found here and closed beside these (`found-6-oct/app-catalogue-waits-for-a-tile-drawn-before-any-answer`, `found-6-oct/meetings-upcoming-read-after-a-fixed-wait`). At a load of about 12 on four cores, `comment-recording`, `sidebar-sections`, `task-menu` and `task-depth` each gave up a 20 s wait for a sheet or a menu, and `task-sheet-fetches` counted one of its sheet's opening fetches as the change's while its second sheet missed the change; each was green when run again on its own (33, 25, 37, 92 and 2 checks). API unit tests 2135/2135, web 350/350, both typechecks clean.
 
 ### `found-6-oct/enrichment-files-comments-under-a-matched-name` — open (security, small; found reviewing `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change`) · reproduced 6 October
 
@@ -9216,7 +9245,7 @@ Whether a member's workspace.import alone may make spaces and projects through a
 
 *To close (the owner chooses):* email only, an explicit mapping the importer confirms, or always the importer with the author named in the text; then check it with a comment whose author matches a member only by name.
 
-### `found-6-oct/calendar-pull-uses-a-leavers-connection` — open (security, small; found closing `found-5-oct/calendar-push-ignores-who-may-read`) · reproduced 6 October
+### `found-6-oct/calendar-pull-uses-a-leavers-connection` — **closed** (security, small; found closing `found-5-oct/calendar-push-ignores-who-may-read`) · reproduced 6 October
 
 **The Calendar pull still uses a connection whose owner has left the workspace**
 
@@ -9224,7 +9253,23 @@ Whether a member's workspace.import alone may make spaces and projects through a
 
 *To close:* ask the pull what the push now asks (the owner still a member), say a leaver's connection plainly in the integrations list, and check both in `calendar-push-reach` or a pull suite.
 
-### `found-6-oct/task-fallback-files-into-a-deleted-project` — open (visible bug, small; found closing `found-5-oct/default-list-files-into-an-archived-list`) · reproduced 6 October
+*Closed, 6 October* (lane 6). ClickUp's calendar integration is its connector's own ("no one else in your Workspace can access your Google Calendar through this integration"), and a person removed from a workspace "immediately loses access to all Workspace content" (help centre, through search excerpts, as recorded on `found-5-oct/calendar-push-ignores-who-may-read`).
+
+- The pull (`POST …/calendar-sync/:provider/pull`) asks first that the connection's owner is still a member of the workspace (`ownerIsMember`, the half of `ownerMayRead` that asks nothing of a task), before its inbox list or its token: 400 "The Google Calendar connected to this workspace belongs to somebody who is no longer in it, so nothing is pulled from it. Connect it again under your own account." (or "The Outlook calendar …"). A connection nobody owns is refused the same way.
+- The integrations list says `owner_left` of a connection whose owner is no longer in the workspace, or whose account is gone, where it said connected, healthy. The App Center's tile says "Owner left" and "Connected by somebody who is no longer in this workspace. Connect it again under your own account."; Calendar settings' sync dialog says so in place of "Connected as …" and offers no Sync now. In the four locales.
+
+Measured on lane 6 with the extended `calendar-push-reach` suite: before, the keeper's Google Calendar pulled once they had left answered as it had while they were a member, 400 "No access token for gcal" — chosen; the integrations list said healthy of their Google Calendar and Zoom, and the App Center's tile said CONNECTED (7 of 10, the three new checks red); after, the pull is refused 400 in the words above and nothing is made, the list says `owner_left` of both and healthy of the admin's Outlook, and the tile says so (10 of 10, three runs).
+
+Checks:
+- `calendar-push-reach` 7 → 10: the keeper's Google Calendar, pulled while they were a member (stopped at its missing token), is refused once they have left and nothing is made from it; the integrations list says `owner_left` of their Google Calendar and Zoom and healthy of the admin's Outlook; the App Center's tile says so (browser).
+- `calendar-sync.service.test.ts` +1 (and its pull test given a member's connection); `integration-connections.health.test.ts` (1) is new.
+- Patches: `cpr-8` (the pull asks nothing of the owner) reddens the pull check; `cpr-9` (the list says healthy) the list's and the tile's; `cpr-10` (the tile says nothing) the tile's. Unit claims `cps-6` and `ich-1`.
+
+For the owner: whether the integrations list should go further for other apps, whose connections a departed admin made (a Slack or GitHub connection says `owner_left` now, and what each app still does through it is not this item's).
+
+Regression on lanes 2, 4 and 6: the 76 suites these touch, 1233 checks, 69 suites green at once. `app-catalogue` and `meetings-connect-calendar` failed on races in the suites, found here and closed beside these (`found-6-oct/app-catalogue-waits-for-a-tile-drawn-before-any-answer`, `found-6-oct/meetings-upcoming-read-after-a-fixed-wait`). At a load of about 12 on four cores, `comment-recording`, `sidebar-sections`, `task-menu` and `task-depth` each gave up a 20 s wait for a sheet or a menu, and `task-sheet-fetches` counted one of its sheet's opening fetches as the change's while its second sheet missed the change; each was green when run again on its own (33, 25, 37, 92 and 2 checks). API unit tests 2135/2135, web 350/350, both typechecks clean.
+
+### `found-6-oct/task-fallback-files-into-a-deleted-project` — **closed** (visible bug, small; found closing `found-5-oct/default-list-files-into-an-archived-list`) · reproduced 6 October
 
 **With no Default list chosen, `/task` files into a list whose project is in the trash**
 
@@ -9232,7 +9277,22 @@ Whether a member's workspace.import alone may make spaces and projects through a
 
 *To close:* ask the list's project and space as well as the list (a container in the trash takes no task), in the gate, the fallback and the picker; check it by SQL.
 
-### `found-6-oct/default-list-setting-takes-a-deleted-list` — open (visible bug, small; found closing `found-5-oct/default-list-files-into-an-archived-list`) · reproduced 6 October
+*Closed, 6 October* (lane 6). Deleting a project, a folder or a space puts it in the trash with what it holds, by its own `is_archived`; its lists' own flags stay as they were, and only those were asked. A list whose project, the project's folder or the space is in the trash now takes no task, as a list in the trash takes none:
+
+- The create gate refuses it, 409, naming what is in the trash and what to do, by the Trash's rule: "This list's project is in the trash. Restore the project from Trash before adding tasks to the list." (or "Ask a workspace admin, or whoever deleted the project, to restore it …"). The list's own trash is said first. So every way of making a task through `createTask` refuses it, and `/task`'s fallback, which asks the gate of each list it tries, passes it over; a chosen Default list held in the trash is refused naming it ('Your "Default list for new tasks" is in a project in the trash. …').
+- A move (`moveTask`), a form's submission and the form's target, and mail to the list's address refuse it too, as they refuse a list in the trash (`heldInTrash`, `HOLDER_TRASH_COLUMNS`).
+- The Default-list picker (`GET /lists/workspace/:ws`) no longer offers it (`holdersNotInTrash`).
+
+Measured on lane 6 with the extended `planner-default-list` suite: before, with the oldest list's project deleted and no list chosen, `/task` answered 201 and filed into that list (its project in the trash), `POST /tasks` and a move into it answered 201 each, two tasks stood in it, and the picker offered it (11 of 13 with the setting's check); after, `/task` files into another list, the make and the move are refused 409 "This list's project is in the trash. Restore the project from Trash before adding tasks to the list.", none lands there, and the picker leaves it out (13 of 13, three runs).
+
+Checks:
+- `planner-default-list` +1 (11 → 13 with the setting's): with the oldest list's project deleted and no list chosen, `/task` passes that list over for one it may add to, a task made or moved straight into it is refused 409 naming its project, none lands there, and the picker no longer offers it.
+- `task-create.test.ts` +1 (a project, a folder, a space; restore and ask), `task-move-target.test.ts` +1, `forms-trash.test.ts` +1, `email-to-task.service.test.ts` +1.
+- Patches: `pdl-11` (the gate asks nothing of what holds the list), `pdl-12` (a move asks nothing), `pdl-13` (the picker offers it) each redden the check. Unit claims `tcg-9`, `tmt-8`, `fmt-4`, `ett-4`. Re-aimed, a second `err.mayRestore` standing above theirs: `pdl-7` and `dlf-4`.
+
+Regression on lanes 2, 4 and 6: the 76 suites these touch, 1233 checks, 69 suites green at once. `app-catalogue` and `meetings-connect-calendar` failed on races in the suites, found here and closed beside these (`found-6-oct/app-catalogue-waits-for-a-tile-drawn-before-any-answer`, `found-6-oct/meetings-upcoming-read-after-a-fixed-wait`). At a load of about 12 on four cores, `comment-recording`, `sidebar-sections`, `task-menu` and `task-depth` each gave up a 20 s wait for a sheet or a menu, and `task-sheet-fetches` counted one of its sheet's opening fetches as the change's while its second sheet missed the change; each was green when run again on its own (33, 25, 37, 92 and 2 checks). API unit tests 2135/2135, web 350/350, both typechecks clean.
+
+### `found-6-oct/default-list-setting-takes-a-deleted-list` — **closed** (visible bug, small; found closing `found-5-oct/default-list-files-into-an-archived-list`) · reproduced 6 October
 
 **The planner's settings save a list in the trash as the Default list**
 
@@ -9240,7 +9300,17 @@ Whether a member's workspace.import alone may make spaces and projects through a
 
 *To close:* refuse a list in the trash (409 in the gate's words), and check it in `planner-default-list`.
 
-### `found-6-oct/mail-comments-read-the-workspace-role` — open (behaviour, small; found closing `found-5-oct/super-admin-cannot-write-a-task-it-reads`) · reproduced 6 October
+*Closed, 6 October* (lane 6). The picker offers no list in the trash, so the setting takes none: `PATCH /planner/:ws/settings` asks the create gate of the chosen list and refuses its trash refusal, 409 in the gate's words — a workspace admin, or whoever deleted it, told to restore it, anybody else to ask. Any other refusal of the gate is passed over by `/task` as before (`defaultListFor`), so it is not refused here.
+
+Measured on lane 6 with the extended `planner-default-list` suite: before, `PATCH` with a list in the trash answered 200 to the admin who had deleted it and to a member, and the admin's setting held the deleted list (the new check red); after, both are refused 409 in the gate's words — the admin told to restore it, the member to ask — and the setting stays as it was (13 of 13, three runs).
+
+Checks:
+- `planner-default-list` +1: a list in the trash is not saved as the Default list, refused 409 in the gate's words to the admin who deleted it and to a member, and the admin's setting stays as it was (SQL).
+- Patch `pdl-14` (the settings take a list in the trash) reddens it.
+
+Regression on lanes 2, 4 and 6: the 76 suites these touch, 1233 checks, 69 suites green at once. `app-catalogue` and `meetings-connect-calendar` failed on races in the suites, found here and closed beside these (`found-6-oct/app-catalogue-waits-for-a-tile-drawn-before-any-answer`, `found-6-oct/meetings-upcoming-read-after-a-fixed-wait`). At a load of about 12 on four cores, `comment-recording`, `sidebar-sections`, `task-menu` and `task-depth` each gave up a 20 s wait for a sheet or a menu, and `task-sheet-fetches` counted one of its sheet's opening fetches as the change's while its second sheet missed the change; each was green when run again on its own (33, 25, 37, 92 and 2 checks). API unit tests 2135/2135, web 350/350, both typechecks clean.
+
+### `found-6-oct/mail-comments-read-the-workspace-role` — **closed** (behaviour, small; found closing `found-5-oct/super-admin-cannot-write-a-task-it-reads`) · reproduced 6 October
 
 **A super_admin who is a plain member comments on a private task in the app but not by mail**
 
@@ -9248,13 +9318,37 @@ Whether a member's workspace.import alone may make spaces and projects through a
 
 *To close:* ask with the account's role, as the write and read rules now do, and check it in `mail-comments-by-level`.
 
-### `found-6-oct/list-address-given-by-post-to-those-who-may-not-add` — open (security, small; found reviewing `found-5-oct/default-list-files-into-an-archived-list`) · reproduced 6 October
+*Closed, 6 October* (lane 6). The mail comment rule (`taskCommentAllowed`) asks the read rule with the account's role, as the write rule has since `found-5-oct/super-admin-cannot-write-a-task-it-reads`; membership is still asked.
+
+Measured on lane 6 with the extended `super-admin-task-writes` suite: before, the super_admin's comment mailed to a private space's task they had opened and commented on in the app was recorded `rejected_not_allowed`, nothing written (6 of 7, the new check red); after, it lands as theirs (`comment_added`), while the plain member's mail is still refused and nothing of theirs is written (7 of 7, three runs).
+
+Checks:
+- `super-admin-task-writes` 6 → 7: a comment the super_admin mails to a private space's task they opened lands as theirs, while the plain member, refused that space, is refused by mail and nothing of theirs is written (SQL).
+- `task-write.test.ts` +1.
+- Patch `saw-7` (the mail rule reads the workspace role) reddens the check; unit claim `tws-5`. Re-aimed, their anchor now written twice: `saw-2` and `tws-4`.
+
+Regression on lanes 2, 4 and 6: the 76 suites these touch, 1233 checks, 69 suites green at once. `app-catalogue` and `meetings-connect-calendar` failed on races in the suites, found here and closed beside these (`found-6-oct/app-catalogue-waits-for-a-tile-drawn-before-any-answer`, `found-6-oct/meetings-upcoming-read-after-a-fixed-wait`). At a load of about 12 on four cores, `comment-recording`, `sidebar-sections`, `task-menu` and `task-depth` each gave up a 20 s wait for a sheet or a menu, and `task-sheet-fetches` counted one of its sheet's opening fetches as the change's while its second sheet missed the change; each was green when run again on its own (33, 25, 37, 92 and 2 checks). API unit tests 2135/2135, web 350/350, both typechecks clean.
+
+### `found-6-oct/list-address-given-by-post-to-those-who-may-not-add` — **closed** (security, small; found reviewing `found-5-oct/default-list-files-into-an-archived-list`) · reproduced 6 October
 
 **A view-only member is given a list's email address by `POST`, and mails tasks into the list**
 
 *Evidence, 6 October, lane 6 (`probe-alias-ensure.mjs`):* the admin minted an address on a list in a view-only space. The view-only member was refused `GET /lists/:id/inbound-email` (403 "Only those who may add tasks to this list see its email address") and `POST /tasks` (403), but `POST /lists/:id/inbound-email` answered them 201 with the same address, and their mail to it made a task in the list, by them. `EmailToTaskService.ensureAlias` returns an existing live address without asking `assertCanManageAlias` — `found-25-sep/list-address-read-by-those-who-may-not-add` by another route.
 
 *To close:* ask the same rule of `POST` as of `GET`, and check it in `list-address-readers`.
+
+*Closed, 6 October* (lane 6). The rule is the one `GET` asks since `found-25-sep/list-address-read-by-those-who-may-not-add`: ClickUp's Email to List address is the permission to make a task there, so it is for those who may add tasks to the list.
+
+- `EmailToTaskService.ensureAlias` (`POST /lists/:id/inbound-email`, the Email panel's Show address) asks its caller what minting asks — the list, then the create gate, in the trash too (`assertCanManageAlias`) — before it reads or hands back the address there is. It returned a live address to anybody who could name the list.
+
+Measured on lane 6 with the extended `list-address-readers` suite: before, the view-only member and a guest with a view share, refused the address by `GET`, were each handed it by `POST` (201, the address in the answer; 5 of 6, the new check red); after, both are refused 403 "Only those who may add tasks to this list manage its email address" with no address in the answer, and a member at Full edit is handed the address there is, none minted afresh (6 of 6, three runs).
+
+Checks:
+- `list-address-readers` 5 → 6: asked for by `POST`, the address is refused to a member of a view-only space and to a guest with a view share (403, no address in either answer), and the address there is handed to a member at Full edit, none minted afresh (SQL).
+- `email-to-task.service.test.ts` +1: the caller is asked before the address is read; refused, nothing is handed back.
+- Patch `lar-8` (POST hands back any address) reddens the check; unit claim `ett-3`.
+
+Regression on lanes 2, 4 and 6: the 76 suites these touch, 1233 checks, 69 suites green at once. `app-catalogue` and `meetings-connect-calendar` failed on races in the suites, found here and closed beside these (`found-6-oct/app-catalogue-waits-for-a-tile-drawn-before-any-answer`, `found-6-oct/meetings-upcoming-read-after-a-fixed-wait`). At a load of about 12 on four cores, `comment-recording`, `sidebar-sections`, `task-menu` and `task-depth` each gave up a 20 s wait for a sheet or a menu, and `task-sheet-fetches` counted one of its sheet's opening fetches as the change's while its second sheet missed the change; each was green when run again on its own (33, 25, 37, 92 and 2 checks). API unit tests 2135/2135, web 350/350, both typechecks clean.
 
 ### `found-6-oct/verify-takes-a-bundle-of-other-sources-as-fresh` — open (test tooling, small; found by the builder of `found-6-oct/import-previews-tell-what-private-places-hold`) · reproduced 6 October
 
@@ -9263,6 +9357,58 @@ Whether a member's workspace.import alone may make spaces and projects through a
 *Evidence, 6 October, lane 4:* after a before-run on HEAD's product code (its web bundle built then), the builder put the fix's files back with `cp -p`, which keeps their earlier mtimes; `verify.sh` then ran `imports` against HEAD's bundle without refusing, and the import page check went red for a reason the code under test did not have, until the bundle was rebuilt. The staleness checks compare mtimes only.
 
 *To close:* stamp each bundle with the hash of the sources it was built from (or the tree's), compare that, and add the case to the lane self-checks.
+
+### `found-6-oct/app-tiles-say-cannot-connect-before-the-server-answers` — **closed** (visible bug, small; found in the regression sweep of `found-6-oct/calendar-pull-uses-a-leavers-connection`) · reproduced 6 October
+
+**The App Center says Gmail and SharePoint cannot be connected, and offers Request access, until the server's list arrives**
+
+*Evidence, 6 October, lane 5:* with the provider list (`GET …/integrations/connections/providers`) held back by a route, 33 tiles said "Rundesk has no connector for this app yet, so there is nothing to sign in to…" under an Unavailable badge and offered Request access — Gmail's and SharePoint's too, which the server can connect (`app-catalogue`'s new check, 25 of 26). The page drew an app it had not heard about as one it cannot connect, and an admin's Connect read Request access until their permissions had answered. A person who pressed it then filed an access request for an app they could have connected.
+
+*Closed, 6 October* (lane 5). A tile whose provider list or reader's permissions have not answered claims nothing: no badge, no sentence, and its button says "Checking…" and presses nothing. The page says which it is on `data-state`: `checking`; `known` once the provider list, the providers' status, the connections and the permissions have answered; `failed` when the list could not be read, which it says ("Could not load which apps Rundesk can connect.") with Try again. In the four locales.
+
+Measured on lane 5 with the extended `app-catalogue` suite: before, on the build these fixes went onto, the list held back, the page said nothing of its state and 33 tiles said there was no connector, Gmail and SharePoint offering Request access (25 of 26); after, the list held back, the page says it is checking, no tile says there is no connector, and Gmail and SharePoint say "Checking…" with nothing to press; once the list answers they offer Connect, and Connect opens their connect flow (26 of 26, four runs).
+
+Checks:
+- `app-catalogue` 25 → 26: while the provider list is held back, no tile says Rundesk has no connector for it, Gmail and SharePoint offer nothing to press, and the page says it is checking.
+- Patches `app-catalogue-21` (the tiles answer before the server) and `-22` (the page says it knows before the list has answered) each redden it. Re-aimed, their lines changed: `app-catalogue-12` and `srg-18`.
+
+Regression on lanes 2, 4, 6 and 7: the 23 suites that open the App Center or Meetings or reach them by a link (`app-catalogue`, `calendar-pull-access`, `calendar-push-reach`, `integration-error-card`, `search-sources`, `settings-role-grants`, `a61-meeting-record`, `local-dates`, `meeting-access`, `meeting-tags`, `meetings-connect-calendar`, `object-key-boundaries`, `planner-upcoming-meeting`, `private-object-urls`, `video1-acceptance`, `ui-sweep`, `no-dead-ends`, `addressability-live`, `video-regression`, `command-palette`, `oauth-start-readiness`, `calendar-accounts` and `personal-calendar-connect`), 518 checks, all green. The web typecheck is clean.
+
+### `found-6-oct/app-catalogue-waits-for-a-tile-drawn-before-any-answer` — **closed** (test tooling, small; found in the same sweep) · reproduced 6 October
+
+**`app-catalogue` reads the tiles after waiting for one that is drawn before anything has answered**
+
+*Evidence, 6 October:* the suite waited for Gmail's tile, as "a tile that only a connectable app can draw", but the catalogue is a fixed list drawn at once; it then read the tiles' sentences and buttons, which come from the provider list and the reader's permissions. In the sweep, at a load of about 12 on 4 cores, it failed "an app Rundesk cannot connect says so in words, and one it can does not — no explanation on []; a stale one on ["gmail","sharepoint"]"; with the provider list answering 4 s late (lane 5) it failed that and "pressing Connect on Gmail opens the connect flow for Gmail", 23 of 25.
+
+*Closed, 6 October:* it waits for the page's `data-state="known"` (`found-6-oct/app-tiles-say-cannot-connect-before-the-server-answers`), and reads the waiting page with the provider list held back by a route, service workers blocked so that the route sees the request. With the provider list answering 4 s late, it passes, 26 of 26.
+
+Regression on lanes 2, 4, 6 and 7: the 23 suites that open the App Center or Meetings or reach them by a link (`app-catalogue`, `calendar-pull-access`, `calendar-push-reach`, `integration-error-card`, `search-sources`, `settings-role-grants`, `a61-meeting-record`, `local-dates`, `meeting-access`, `meeting-tags`, `meetings-connect-calendar`, `object-key-boundaries`, `planner-upcoming-meeting`, `private-object-urls`, `video1-acceptance`, `ui-sweep`, `no-dead-ends`, `addressability-live`, `video-regression`, `command-palette`, `oauth-start-readiness`, `calendar-accounts` and `personal-calendar-connect`), 518 checks, all green. The web typecheck is clean.
+
+### `found-6-oct/upcoming-says-nothing-scheduled-before-it-knows` — **closed** (visible bug, small; found fixing `found-6-oct/meetings-upcoming-read-after-a-fixed-wait`) · reproduced 6 October
+
+**Meetings' "Upcoming" says "Nothing scheduled" before the person's meetings have answered**
+
+*Evidence, 6 October, lane 5:* with the member's upcoming meetings and calendars held back by routes, "Upcoming" read "Nothing scheduled." — the page defaulted the meetings to none while they loaded (`data: upcoming = []`), so a person with a call in ten minutes was told there was none until the answer came, and one whose request failed was told so for good.
+
+*Closed, 6 October* (lane 5). The section draws a placeholder row until the meetings answer, and "Could not load meetings." when they cannot be loaded; Connect Calendar still waits for the person's calendars. It says which it is on `data-state`: `checking`; `known` once the meetings and the calendars have answered; `failed`.
+
+Measured on lane 5 with the extended `meetings-connect-calendar` suite: before, both held back, the section read "Upcoming Meetings Nothing scheduled." and said nothing of its state (5 of 6); after, with neither answered the section shows a placeholder row and says it is checking; with the meetings in and the calendars not, it says "Nothing scheduled" and offers no calendar yet; once both are in it offers Connect Calendar to the member without one, and not once one is connected (6 of 6, three runs).
+
+Checks:
+- `meetings-connect-calendar` 5 → 6: before the member's meetings have answered, "Upcoming" does not say nothing is scheduled, and before their calendars have, it does not offer Connect Calendar; it says it is checking.
+- Patches `mcc-12` (the meetings default to none while they load), `mcc-13` (Connect Calendar offered before the calendars answer) and `mcc-14` (the section says it knows without the calendars) each redden it.
+
+Regression on lanes 2, 4, 6 and 7: the 23 suites that open the App Center or Meetings or reach them by a link (`app-catalogue`, `calendar-pull-access`, `calendar-push-reach`, `integration-error-card`, `search-sources`, `settings-role-grants`, `a61-meeting-record`, `local-dates`, `meeting-access`, `meeting-tags`, `meetings-connect-calendar`, `object-key-boundaries`, `planner-upcoming-meeting`, `private-object-urls`, `video1-acceptance`, `ui-sweep`, `no-dead-ends`, `addressability-live`, `video-regression`, `command-palette`, `oauth-start-readiness`, `calendar-accounts` and `personal-calendar-connect`), 518 checks, all green. The web typecheck is clean.
+
+### `found-6-oct/meetings-upcoming-read-after-a-fixed-wait` — **closed** (test tooling, small; found in the regression sweep of `found-6-oct/calendar-pull-uses-a-leavers-connection`) · reproduced 6 October
+
+**`meetings-connect-calendar` reads "Upcoming" 2.5 s after it says "Nothing scheduled", not when the calendars have answered**
+
+*Evidence, 6 October:* whether "Upcoming" offers Connect Calendar is decided by the person's calendars, a second request, and the suite waited a fixed 2.5 s for it. In the sweep, at a load of about 12, it read "not offered" for a member without a calendar ("without a calendar: not offered"); with the calendars answering 4 s late (lane 5) it failed the same way every time, 4 of 5. With a calendar connected, the same read passed before anything had answered.
+
+*Closed, 6 October:* it waits for the section's `data-state="known"` (`found-6-oct/upcoming-says-nothing-scheduled-before-it-knows`), and reads the waiting section with the meetings and the calendars held back. With the calendars answering 4 s late, it passes, 6 of 6.
+
+Regression on lanes 2, 4, 6 and 7: the 23 suites that open the App Center or Meetings or reach them by a link (`app-catalogue`, `calendar-pull-access`, `calendar-push-reach`, `integration-error-card`, `search-sources`, `settings-role-grants`, `a61-meeting-record`, `local-dates`, `meeting-access`, `meeting-tags`, `meetings-connect-calendar`, `object-key-boundaries`, `planner-upcoming-meeting`, `private-object-urls`, `video1-acceptance`, `ui-sweep`, `no-dead-ends`, `addressability-live`, `video-regression`, `command-palette`, `oauth-start-readiness`, `calendar-accounts` and `personal-calendar-connect`), 518 checks, all green. The web typecheck is clean.
 
 ## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
 

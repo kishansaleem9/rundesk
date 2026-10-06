@@ -280,6 +280,16 @@ export class SpreadsheetImportService {
     return { jobId: job.id }
   }
 
+  /**
+   * A job's report, read by somebody who may import: the route asks
+   * `workspace.import`, and a guest is refused whatever a custom role grants
+   * them, before the job is read (`found-6-oct/import-history-read-by-anyone`).
+   */
+  async readJob(workspaceId: string, jobId: string, reader: Importer) {
+    await this.access.assertMayImport(this.db, { workspaceId, actorId: reader.id })
+    return this.getJob(workspaceId, jobId)
+  }
+
   async getJob(workspaceId: string, jobId: string) {
     const [job] = await this.db
       .select()
@@ -293,9 +303,11 @@ export class SpreadsheetImportService {
   /**
    * The import history. THE READER OF `source`: without the filter this would
    * mix the ClickUp runs into the spreadsheet importer's history and the column
-   * would be a stored value nobody honours.
+   * would be a stored value nobody honours. Read by somebody who may import,
+   * as a job's report is (`readJob`).
    */
-  async listJobs(workspaceId: string, opts: { source?: string; limit?: number } = {}) {
+  async listJobs(workspaceId: string, reader: Importer, opts: { source?: string; limit?: number } = {}) {
+    await this.access.assertMayImport(this.db, { workspaceId, actorId: reader.id })
     const where = opts.source
       ? and(eq(clickupImportJobs.workspaceId, workspaceId), eq(clickupImportJobs.source, opts.source))
       : eq(clickupImportJobs.workspaceId, workspaceId)
