@@ -203,8 +203,9 @@ function makeCaptureDb(selects: unknown[][]) {
   return { db, inserted, deletes }
 }
 
-function makeService(db: any) {
-  return new TasksService(db, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any)
+/** `calendarSync.ownerMayRead` — whether a connection's owner may open the task — answers yes unless a test says no. */
+function makeService(db: any, calendarSync: any = { ownerMayRead: mock.fn(async () => true) }) {
+  return new TasksService(db, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, calendarSync, {} as any)
 }
 
 const CTX = [{ taskId: 't1', listId: 'l1', createdById: 'u-creator', workspaceId: 'w1' }]
@@ -477,6 +478,45 @@ describe('TasksService meetings — Zoom / Google Meet', () => {
     } finally {
       fetchMock.mock.restore()
     }
+  })
+
+  /*
+   * ONLY IN THE ACCOUNT OF SOMEBODY WHO MAY OPEN THE TASK NOW
+   * (`found-5-oct/calendar-push-ignores-who-may-read`). The meeting is made in
+   * the connection's owner's own Google Calendar or Zoom, under the task's
+   * title, and nothing asked whose it was.
+   */
+  for (const provider of ['google_meet', 'zoom'] as const) {
+    it(`refuses a ${provider} meeting in the account of a connection owner who may not open the task: 400 saying so, nothing sent, nothing linked`, async () => {
+      const future = new Date(Date.now() + 3_600_000)
+      const conn = [{ id: 'conn-3', status: 'connected', accessToken: 'tok', refreshToken: null, tokenExpiresAt: future, connectedById: 'keeper' }]
+      const { db, inserted } = makeCaptureDb([CTX, ADMIN, [{ title: 'Private plans', dueDate: null }], conn])
+      const ownerMayRead = mock.fn(async () => false)
+      const svc = makeService(db, { ownerMayRead })
+      const fetchMock = mock.method(globalThis, 'fetch', async () => ({ ok: true, status: 200, json: async () => ({}) }) as any)
+      try {
+        await assert.rejects(
+          () => svc.createTaskMeeting('t1', 'u1', provider),
+          (e: unknown) => e instanceof Error && /belongs to somebody who cannot open this task/.test(e.message) && (e as any).status === 400,
+        )
+        assert.equal(fetchMock.mock.callCount(), 0, 'nothing is sent to the provider')
+        assert.equal(inserted.length, 0, 'nothing is linked')
+        const [owner, task] = ownerMayRead.mock.calls[0].arguments as any[]
+        assert.equal(owner.connectedById, 'keeper', 'the rule is asked of the connection’s owner')
+        assert.deepEqual(task, { id: 't1', workspaceId: 'w1' })
+      } finally {
+        fetchMock.mock.restore()
+      }
+    })
+  }
+
+  it('asks whose the connection is before its token: one whose owner may open the task, with no token, is still told to connect first', async () => {
+    const conn = [{ id: 'conn-4', status: 'connected', accessToken: null, refreshToken: null, tokenExpiresAt: null, connectedById: 'keeper' }]
+    const { db } = makeCaptureDb([CTX, ADMIN, [{ title: 'X', dueDate: null }], conn])
+    const ownerMayRead = mock.fn(async () => true)
+    const svc = makeService(db, { ownerMayRead })
+    await assert.rejects(() => svc.createTaskMeeting('t1', 'u1', 'google_meet'), /connect google meet first/i)
+    assert.equal(ownerMayRead.mock.callCount(), 1)
   })
 
   it('rejects with a clean "connect zoom first" 400 when the provider is not connected', async () => {

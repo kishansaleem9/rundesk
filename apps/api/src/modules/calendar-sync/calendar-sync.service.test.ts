@@ -170,6 +170,84 @@ describe('CalendarSyncService.buildIcalFeed', () => {
 })
 
 /*
+ * A PUSH WRITES A TASK ONLY INTO THE CALENDAR OF SOMEBODY WHO MAY READ IT NOW
+ * (`found-5-oct/calendar-push-ignores-who-may-read`). Every connection of the
+ * workspace was written to, whoever had made it — a member refused the task's
+ * private space, and one removed from the workspace. The provider is stood in
+ * for (no lane may reach it); what is asked is which connections are written to.
+ */
+describe('CalendarSyncService.pushTask — whose calendar', () => {
+  const TASK = {
+    id: 't-1', title: 'Private plan', description: 'the secret', startDate: null,
+    dueDate: new Date(Date.now() + 86_400_000), isArchived: false, workspaceId: 'ws-1',
+  }
+  const conn = (provider: string, connectedById: string | null) => ({
+    id: `c-${provider}`, workspaceId: 'ws-1', provider, accessToken: null, refreshToken: null,
+    tokenExpiresAt: null, externalAccountEmail: null, metadata: {}, connectedById,
+  })
+
+  it('writes into the connection whose owner may read the task, and not into the one whose owner may not', async () => {
+    const svc = new CalendarSyncService({} as any)
+    mock.method(svc as any, 'resolveTaskContext', async () => ({ task: TASK, connections: [conn('gcal', 'keeper'), conn('outlook', 'admin')] }))
+    mock.method(svc as any, 'ownerMayRead', async (c: { connectedById: string }) => c.connectedById === 'admin')
+    const google = mock.method(svc as any, 'upsertGoogleEvent', async () => undefined)
+    const outlook = mock.method(svc as any, 'upsertOutlookEvent', async () => undefined)
+
+    const res = await svc.pushTask('t-1')
+
+    assert.equal(google.mock.callCount(), 0, 'nothing is sent to the calendar of an owner who may not read the task')
+    assert.equal(outlook.mock.callCount(), 1, 'and the reader’s calendar still gets it')
+    assert.deepEqual(res, { pushed: ['outlook'], skipped: [] })
+  })
+})
+
+/*
+ * WHO MAY READ IT NOW: a member of the task's workspace — asked of a platform
+ * admin too, as the iCal feed asks it — let in by the task read rule with their
+ * account's role. A queued Drizzle stand-in answers the selects in order.
+ */
+describe('CalendarSyncService.ownerMayRead', () => {
+  const TASK = { id: 't-1', workspaceId: 'ws-1' }
+  const queued = (results: unknown[][]) => {
+    const queue = [...results]
+    const node = (rows: unknown[]) => {
+      const p = Promise.resolve(rows) as any
+      for (const v of ['from', 'where', 'limit', 'innerJoin', 'leftJoin', 'orderBy']) p[v] = () => p
+      return p
+    }
+    return { select: () => node(queue.shift() ?? []), left: () => queue.length } as any
+  }
+  /** The read rule's row: a task in a private space. */
+  const IN_PRIVATE_SPACE = {
+    taskId: 't-1', listId: 'l-1', taskVisibility: 'public', taskCreatedById: 'admin', listVisibility: 'public',
+    listCreatedById: 'admin', projectId: 'p-1', projectVisibility: 'public', spaceId: 's-1', spaceVisibility: 'private',
+  }
+  const ask = (db: any, connectedById: string | null) =>
+    (new CalendarSyncService(db) as any).ownerMayRead({ connectedById }, TASK) as Promise<boolean>
+
+  it('is no for a member refused the task’s private space', async () => {
+    // Their membership, their account, the read rule's row, their workspace role, no seat in the space.
+    const db = queued([[{ userId: 'keeper' }], [{ role: 'member' }], [IN_PRIVATE_SPACE], [{ role: 'member' }], []])
+    assert.equal(await ask(db, 'keeper'), false)
+  })
+
+  it('is no for somebody no longer in the workspace — a platform admin too', async () => {
+    const db = queued([[], [{ role: 'super_admin' }], [IN_PRIVATE_SPACE]])
+    assert.equal(await ask(db, 'gone'), false)
+    assert.equal(db.left(), 2, 'their membership is asked first, and nothing after it')
+  })
+
+  it('is yes for a member who may open it — here a platform admin, by their account’s role', async () => {
+    const db = queued([[{ userId: 'sa' }], [{ role: 'super_admin' }], [IN_PRIVATE_SPACE]])
+    assert.equal(await ask(db, 'sa'), true)
+  })
+
+  it('is no for a connection nobody owns any more', async () => {
+    assert.equal(await ask(queued([]), null), false)
+  })
+})
+
+/*
  * A pull overwrites the task linked to each event it reads. The link is looked
  * up by the provider's event id, which is not the workspace's: the same
  * calendar connected in two workspaces, or an event id a calendar's owner

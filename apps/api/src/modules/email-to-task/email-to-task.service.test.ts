@@ -115,3 +115,74 @@ describe('EmailToTaskService.ingest dedupe', () => {
     assert.equal(result.outcome, 'rejected_no_alias')
   })
 })
+
+/*
+ * A LIST IN THE TRASH TAKES NO TASK, MAILED OR NOT, AND ITS ADDRESS IS STILL ITS
+ * OWN TO MANAGE (`found-5-oct/default-list-files-into-an-archived-list`). Mail
+ * inserts its task itself, past `createTask` and its gate, so mail to a deleted
+ * list's address went on making tasks in it; and the gate's trash refusal,
+ * reaching the address's own routes as a plain no, refused its reading,
+ * rotating and revoking (403).
+ */
+const TRASHED_LIST = '33333333-3333-4333-8333-333333333333'
+
+/** A queued Drizzle stand-in: each select answers the next rows; inserts are kept by the table they write. */
+function queuedSvc(selects: unknown[][]) {
+  const queue = [...selects]
+  const inserts: Array<{ table: unknown; values: unknown }> = []
+  const node = (rows: unknown[]) => {
+    const p = Promise.resolve(rows) as any
+    for (const v of ['from', 'where', 'limit', 'innerJoin', 'leftJoin', 'orderBy']) p[v] = () => p
+    return p
+  }
+  const db = {
+    select: mock.fn(() => node(queue.shift() ?? [])),
+    insert: mock.fn((table: unknown) => ({
+      values: (values: unknown) => {
+        inserts.push({ table, values })
+        const r: any = Promise.resolve([{ id: 'made-1' }])
+        r.onConflictDoNothing = async () => undefined
+        r.onConflictDoUpdate = () => ({ returning: async () => [{ id: 'alias-1', listId: TRASHED_LIST, localPart: 'abc', revokedAt: null }] })
+        r.returning = async () => [{ id: 'made-1' }]
+        return r
+      },
+    })),
+    update: mock.fn(() => ({ set: () => ({ where: async () => undefined }) })),
+  } as any
+  const svc = new EmailToTaskService(db, { putObject: mock.fn(async () => undefined) } as any, { emitToList: mock.fn(), emitToTask: mock.fn() } as any)
+  return { svc, db, inserts, left: () => queue.length }
+}
+
+describe('EmailToTaskService — a list in the trash', () => {
+  it('makes no task from mail to the address of a list in the trash: rejected, and recorded saying why', async () => {
+    const { svc, inserts } = queuedSvc([[{ inTrash: true, deletedById: 'the-admin' }]])
+    ;(svc as any).findExistingByMessageId = async () => null
+    ;(svc as any).resolveReplyContext = async () => null
+    ;(svc as any).findAliasByLocalPart = async () => ({ id: 'alias-1', listId: TRASHED_LIST, localPart: 'abc', revokedAt: null, createdById: 'u1', defaultPriority: 'normal' })
+    const recorded: unknown[][] = []
+    ;(svc as any).recordOutcome = async (...args: unknown[]) => { recorded.push(args) }
+    const result = await svc.ingest({ messageId: '<trash@example.com>', fromAddress: 'alice@example.com', recipient: 'list-abc@inbound.rundesk.local', subject: 'into the trash' })
+    assert.equal(result.outcome, 'rejected_not_allowed')
+    assert.equal(result.reason, 'the list is in the trash')
+    assert.equal(inserts.length, 0, 'a task was made in a list in the trash')
+    assert.equal(recorded.length, 1)
+    assert.equal(recorded[0][2], 'rejected_not_allowed')
+    assert.equal(recorded[0][4], TRASHED_LIST)
+  })
+
+  it('still reads a deleted list’s address to somebody who may add tasks to it but for the trash', async () => {
+    // The create gate's selects: the list's home (in the trash), the account, the read rule's (the list, the
+    // workspace role, the project's folder), then the space's level at Full edit; then the address itself.
+    const { svc, left } = queuedSvc([
+      [{ workspaceId: 'w1', spaceId: 's1', projectId: 'p1', folderId: null, inTrash: true, deletedById: 'the-admin' }],
+      [{ role: 'member' }],
+      [{ listId: TRASHED_LIST, listVisibility: 'public', listCreatedById: 'the-admin', projectId: 'p1', projectVisibility: 'public', spaceId: 's1', spaceVisibility: 'public' }],
+      [{ role: 'workspace_admin' }],
+      [],
+      [{ id: 'alias-1', listId: TRASHED_LIST, localPart: 'abc', revokedAt: null, defaultPriority: 'normal', lastUsedAt: null, createdAt: new Date() }],
+    ])
+    const view = await svc.getAlias(TRASHED_LIST, 'the-admin')
+    assert.ok(view, 'the address was refused, or not found')
+    assert.equal(left(), 0)
+  })
+})

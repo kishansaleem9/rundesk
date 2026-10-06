@@ -1,9 +1,10 @@
-import { Injectable, Inject, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common'
+import { Injectable, Inject, BadRequestException, NotFoundException, ForbiddenException, HttpException } from '@nestjs/common'
 import { and, asc, eq, gte, lt } from 'drizzle-orm'
-import { taskTimeBlocks, tasks, users, lists, workspaces } from '@rundesk/db'
+import { taskTimeBlocks, tasks, users, lists, projects, spaces, workspaces } from '@rundesk/db'
 import type { Db, PlannerSettings } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { readableTaskIds } from '../../common/permissions/read-access'
+import { assertCanCreateTaskIn, ListInTrashException } from '../../common/permissions/task-create'
 import { isUuid } from '../../common/validation/uuid'
 import { PeopleService } from '../people/people.service'
 import { CalendarAccountsService } from '../calendar-sync/calendar-accounts.service'
@@ -349,16 +350,54 @@ export class PlannerService {
    * settings page for creating it. The page reads and writes the real columns
    * through here.
    */
-  async getSettings(userId: string): Promise<PlannerSettings & { weekStart: string; timezone: string }> {
+  async getSettings(
+    userId: string,
+    workspaceId?: string,
+  ): Promise<PlannerSettings & { weekStart: string; timezone: string; defaultListInTrash?: boolean }> {
     const [row] = await this.db
       .select({ settings: users.plannerSettings, weekStart: users.weekStart, timezone: users.timezone })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1)
-    return {
+    const settings = {
       ...(row?.settings ?? {}),
       weekStart: row?.weekStart ?? 'sunday',
       timezone: row?.timezone ?? 'UTC',
+    }
+    const chosen = (settings as PlannerSettings).defaultListId
+    if (!workspaceId || typeof chosen !== 'string' || !chosen) return settings
+    return { ...settings, defaultListInTrash: await this.defaultListInTrash(userId, workspaceId, chosen) }
+  }
+
+  /**
+   * WHETHER THE CHOSEN DEFAULT LIST IS THIS WORKSPACE'S, AND IN ITS TRASH — the
+   * one case in which `/task`, a chat message and the AI's "Create task from
+   * this" refuse, saying so, and send the person to the picker to choose
+   * another (`TasksService.defaultListFor`,
+   * `found-5-oct/default-list-files-into-an-archived-list`). The picker had no
+   * option for it and showed "The first list I can add to" as chosen, while the
+   * server held the deleted list. Asked as `defaultListFor` asks it — the
+   * list's workspace, then the create gate, whose trash refusal this is — so a
+   * list of another workspace, or one the person may no longer open, which
+   * those pass over for the oldest list they may add to, is not called so.
+   */
+  private async defaultListInTrash(userId: string, workspaceId: string, listId: string): Promise<boolean> {
+    if (!isUuid(listId)) return false
+    const [home] = await this.db
+      .select({ workspaceId: spaces.workspaceId })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(lists.id, listId))
+      .limit(1)
+    if (home?.workspaceId !== workspaceId) return false
+    try {
+      await assertCanCreateTaskIn(this.db, listId, userId)
+      return false
+    } catch (err) {
+      if (err instanceof ListInTrashException) return true
+      if (err instanceof HttpException) return false
+      throw err
     }
   }
 

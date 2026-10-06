@@ -1,7 +1,8 @@
-import { ConflictException, NotFoundException } from '@nestjs/common'
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common'
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 import { SampleDataService } from './sample-data.service'
+import { GUESTS_CANNOT_IMPORT } from '../integrations/clickup-import/import-access'
 
 /**
  * The seeder is mostly orchestration. We unit-test the two guards
@@ -14,6 +15,12 @@ import { SampleDataService } from './sample-data.service'
 function buildDb(opts: {
   // FIFO queue of result sets, one per `.select()` chain in the call.
   selectQueues?: any[][]
+  /**
+   * Who is loading it, as the importers' guest rule reads them (`assertMayImport`, a lookup of
+   * the role alone) — answered apart from the queue, which holds what the seeder itself reads.
+   * A member unless said.
+   */
+  importerRole?: string
 } = {}) {
   const queue = [...(opts.selectQueues ?? [])]
   const chainable = (rows: any[]) => ({
@@ -23,13 +30,17 @@ function buildDb(opts: {
     orderBy: mock.fn(() => chainable(rows)),
   })
   return {
-    select: mock.fn(() => ({
-      from: mock.fn(() => ({
-        where: mock.fn(() => chainable(queue.shift() ?? [])),
-        limit: mock.fn(async () => queue.shift() ?? []),
-        orderBy: mock.fn(() => chainable(queue.shift() ?? [])),
-      })),
-    })),
+    select: mock.fn((selection?: Record<string, unknown>) => {
+      const rows = () =>
+        selection && Object.keys(selection).join() === 'role' ? [{ role: opts.importerRole ?? 'member' }] : queue.shift() ?? []
+      return {
+        from: mock.fn(() => ({
+          where: mock.fn(() => chainable(rows())),
+          limit: mock.fn(async () => rows()),
+          orderBy: mock.fn(() => chainable(rows())),
+        })),
+      }
+    }),
     insert: mock.fn(() => ({
       values: mock.fn((vals: any) => ({
         // Echo back enough shape for the seeder to read names/ids
@@ -60,6 +71,19 @@ function buildSecurity() {
 
 const ACTOR = { id: '00000000-0000-0000-0000-000000000001', email: 'admin@example.com' }
 const WORKSPACE_ID = '00000000-0000-0000-0000-0000000000aa'
+
+describe('SampleDataService.seed — a guest does not load sample data (found-6-oct/a-guest-who-may-import-makes-a-space)', () => {
+  it('a guest is refused 403 “Guests cannot import data into a workspace”, whatever a custom role grants them, before anything else is read or written', async () => {
+    const db = buildDb({ importerRole: 'guest', selectQueues: [[{ value: 0 }]] })
+    const svc = new SampleDataService(db, buildSecurity())
+    await assert.rejects(
+      () => svc.seed(WORKSPACE_ID, ACTOR),
+      (e) => e instanceof ForbiddenException && (e as Error).message === GUESTS_CANNOT_IMPORT,
+    )
+    assert.equal((db.select as any).mock.calls.length, 1, 'only who is loading it was read — not how many spaces the workspace holds')
+    assert.equal((db.insert as any).mock.calls.length, 0, 'and nothing was written')
+  })
+})
 
 describe('SampleDataService.seed — empty-workspace guard', () => {
   it('refuses to seed when the workspace already has spaces', async () => {

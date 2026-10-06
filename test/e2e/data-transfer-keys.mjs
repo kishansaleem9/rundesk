@@ -32,7 +32,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 7
+const EXPECTED_CHECKS = 9
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -93,6 +93,8 @@ try {
   const manager = await person('manager', 'manager')
   const exporter = await person('exporter', 'member', ['workspace.export'])
   const importer = await person('importer', 'member', ['workspace.import'])
+  // A guest the same key is granted to by a custom role: a guest does not import, and sample data is an import.
+  const guestImporter = await person('guest-importer', 'guest', ['workspace.import'])
   const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} space` } })
   if (!space.ok) throw new Error(`could not make the space: ${said(space)}`)
 
@@ -242,13 +244,13 @@ try {
   if (!second.ok || !second.data?.id) throw new Error(`could not make the empty workspace: ${said(second)}`)
   WS2 = second.data.id
   for (const sp of (await sql`select id from spaces where workspace_id = ${WS2}`)) await sql`delete from spaces where id = ${sp.id}`
-  /** Adds `who` to the empty workspace, grants `keys` there, and answers whether they were granted. */
-  const join = async (who, role, keys = []) => {
+  /** Adds `who` to the empty workspace, grants `keys` there by a role named `roleName`, and answers whether they were granted. */
+  const join = async (who, role, keys = [], roleName = `${TAG} empty importers`) => {
     const added = await A(`/workspaces/${WS2}/members`, { method: 'POST', body: { email: who.email, role } })
     if (!added.ok) throw new Error(`could not add to the empty workspace: ${said(added)}`)
     if (keys.length === 0) return true
     const [row] = await sql`select m.id from workspace_members m join users u on u.id = m.user_id where m.workspace_id = ${WS2} and u.email = ${who.email}`
-    const r = await A(`/workspaces/${WS2}/roles`, { method: 'POST', body: { name: `${TAG} empty importers`, permissions: keys } })
+    const r = await A(`/workspaces/${WS2}/roles`, { method: 'POST', body: { name: roleName, permissions: keys } })
     const given = r.data?.id ? await A(`/workspaces/${WS2}/members/${row.id}/roles/${r.data.id}`, { method: 'POST', body: {} }) : { status: 0 }
     // Recorded, as `person` records its grants, so the check says so: a grant never
     // tried stands in as `{ status: 0 }`, and one nobody answered is 0 — neither is granted.
@@ -268,6 +270,32 @@ try {
     importerGranted && importerDemo === 1 && managerDemo === 0,
     'an empty workspace’s dashboard offers Load demo data to the member granted workspace.import, and not to the manager',
     `importer ${importerGranted ? importerDemo : 'NOT GRANTED'}; manager ${managerDemo}`,
+  )
+
+  // ══ 7. A GUEST GRANTED THE KEY ═══════════════════════════════════════════
+  /*
+   * `found-6-oct/a-guest-who-may-import-makes-a-space`, its sample-data half: a guest granted
+   * workspace.import by a custom role, whose own `POST /spaces` answered 403, seeded an empty
+   * workspace — 201, and three public spaces made by nobody — while both importers refused them
+   * (measured on lane 4). Loading sample data is an import, and ClickUp's guests "cannot import
+   * data into a Workspace" (help centre, "Import and export feature availability and limits",
+   * read through search excerpts). The dashboard is read first, while the workspace is empty.
+   */
+  console.log('\n▶ the empty workspace, for a guest granted workspace.import by a custom role')
+  const guestGranted = await join(guestImporter, 'guest', ['workspace.import'], `${TAG} empty guest importers`)
+  const guestDemo = await pageAs(guestImporter, `/app/${WS2}/dashboard`, demoOffered)
+  chk(
+    guestGranted && guestDemo === 0,
+    'an empty workspace’s dashboard offers no Load demo data to a guest granted workspace.import by a custom role',
+    `the guest ${guestGranted ? `was offered it ${guestDemo} time(s)` : 'was NOT GRANTED the key'}`,
+  )
+  const emptySpaces = async () => (await sql`select count(*)::int as n from spaces where workspace_id = ${WS2}`)[0].n
+  const guestSeeds = await guestImporter.as(`/workspaces/${WS2}/sample-data/seed`, { method: 'POST', body: {} })
+  const guestLeft = await emptySpaces()
+  chk(
+    guestGranted && guestSeeds.status === 403 && guestSeeds.message === 'Guests cannot import data into a workspace' && guestLeft === 0,
+    'a guest granted workspace.import by a custom role is refused the sample data, 403 “Guests cannot import data into a workspace”, and the workspace stays empty',
+    `the guest ${guestGranted ? said(guestSeeds) : 'was NOT GRANTED the key'}; ${guestLeft} space(s) in the empty workspace after`,
   )
 } catch (err) {
   failed += 1

@@ -1,4 +1,4 @@
-import { Injectable, Inject, Optional, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common'
+import { Injectable, Inject, Optional, NotFoundException, BadRequestException, ForbiddenException, ConflictException, HttpException } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
 import { eq, and, or, asc, desc, ilike, inArray, isNull, isNotNull, notInArray, sql, type SQL } from 'drizzle-orm'
@@ -111,7 +111,7 @@ import { assertCanCreateInSpace } from '../../common/permissions/container-acces
 import { assertSpaceLevel, resolveSpaceLevel, spaceLevelReaches } from '../../common/permissions/space-default-permission'
 import { assertTaskNotInBin, assertTaskWritable, taskCommentAllowed } from '../../common/permissions/task-write'
 import { assertManagerTaskScope, taskRestorable } from '../../common/permissions/task-restore'
-import { assertCanCreateTaskIn, canCreateTaskIn } from '../../common/permissions/task-create'
+import { assertCanCreateTaskIn, canCreateTaskIn, ListInTrashException, mayRestoreList } from '../../common/permissions/task-create'
 import { assertMayShapeStatuses } from '../../common/permissions/status-access'
 import { assertMayDefineFields } from '../../common/permissions/field-access'
 import { SHARED_VIEW_LEVEL } from '../views/view-write'
@@ -275,7 +275,8 @@ export class TasksService {
   ) {}
 
   /**
-   * Best-effort push of a task to every connected calendar in its workspace.
+   * Best-effort push of a task into the connected calendars of its workspace
+   * whose owner may read it now (`CalendarSyncService.ownerMayRead`).
    * Swallowed errors keep task writes fast; failures surface via the
    * connection's status field on the next sync poll.
    */
@@ -755,6 +756,8 @@ export class TasksService {
       .limit(1)
     if (!ctx) throw new NotFoundException('Task not found')
     const access = await this.assertContainerReadAccess(ctx, actorId)
+    // A super_admin opens every private list and task, as the read rule lets them (below).
+    if (access.superAdmin) return access
     // A guest reads only the tasks in their reach (`guest-reach.ts`), assigned or not.
     if (access.workspaceRole === 'guest' && !(await guestMayRead(this.db, actorId, 'task', taskId))) {
       throw new ForbiddenException('This task is not shared with you')
@@ -809,18 +812,33 @@ export class TasksService {
       projectId: string | null
       projectVisibility: string | null
     },
-  >(ctx: C, actorId: string): Promise<C & { workspaceRole: string }> {
+  >(ctx: C, actorId: string): Promise<C & { workspaceRole: string; superAdmin: boolean }> {
     const [membership] = await this.db
-      .select({ role: workspaceMembers.role })
+      .select({ role: workspaceMembers.role, accountRole: users.role })
       .from(workspaceMembers)
+      .innerJoin(users, eq(users.id, workspaceMembers.userId))
       .where(and(eq(workspaceMembers.workspaceId, ctx.workspaceId), eq(workspaceMembers.userId, actorId)))
       .limit(1)
     if (!membership) throw new NotFoundException('Workspace not found')
 
+    /*
+     * A SUPER_ADMIN MEMBER OPENS EVERY PRIVATE SPACE, FOLDER, PROJECT AND LIST,
+     * by the ACCOUNT's role, as the guard and the read rule (`readableTask`) let
+     * them, and as the write rule now asks it
+     * (`found-5-oct/super-admin-cannot-write-a-task-it-reads`). This asked the
+     * workspace role alone, which is never "super_admin": a super_admin who is a
+     * plain member opened and renamed a private space's task, while adding a
+     * subtask to it and following it answered 403 "This space is private", and
+     * assigning them to it 400 "That person can't see this task" — and the task
+     * sheet, offered Full edit, drew "Add subtask" for a request refused. The
+     * membership is still asked of them, as the write rule asks it.
+     */
+    if (membership.accountRole === 'super_admin') return { ...ctx, workspaceRole: membership.role as string, superAdmin: true }
+
     // The shared rule (`containerRefusal`), answered in the words of whichever
     // container refused; managers pass it. This restated the rule to keep its
     // messages, and missed a private folder the day the rule learnt one.
-    const withRole = { ...ctx, workspaceRole: membership.role as string }
+    const withRole = { ...ctx, workspaceRole: membership.role as string, superAdmin: false }
     const refusal = await containerRefusal(this.db, ctx, { userId: actorId, workspaceRole: membership.role as string })
     if (refusal === 'space') throw new ForbiddenException('This space is private')
     if (refusal === 'folder') throw new ForbiddenException('This folder is private')
@@ -940,7 +958,7 @@ export class TasksService {
         (access) =>
           canSeePrivateItem(
             { visibility: ctx.listVisibility, createdById: ctx.listCreatedById },
-            { userId, isManager: isManagerRole(access.workspaceRole) },
+            { userId, isManager: access.superAdmin || isManagerRole(access.workspaceRole) },
           ),
         () => false,
       )
@@ -1523,11 +1541,28 @@ export class TasksService {
     // Google Meet reuses the workspace's Google Calendar connection; Zoom has
     // its own OAuth connection.
     const connectionProvider = provider === 'zoom' ? 'zoom' : 'gcal'
-    const conn = await this.loadIntegrationConnection(ctx.workspaceId, connectionProvider)
-    if (!conn) {
-      const label = provider === 'zoom' ? 'Zoom' : 'Google Meet'
-      throw new BadRequestException(`Connect ${label} first`)
+    const label = provider === 'zoom' ? 'Zoom' : 'Google Meet'
+    const found = await this.loadIntegrationConnection(ctx.workspaceId, connectionProvider)
+    if (!found) throw new BadRequestException(`Connect ${label} first`)
+    /*
+     * ONLY IN THE ACCOUNT OF SOMEBODY WHO MAY OPEN THE TASK NOW — the push's rule
+     * (`CalendarSyncService.ownerMayRead`, `found-5-oct/calendar-push-ignores-who-may-read`).
+     * A connection is its owner's own account: the meeting is made in their
+     * Google Calendar or Zoom, under the task's title. Nothing asked whose it
+     * was, so the admin's Google Meet and Zoom on a private space's task were
+     * made in the calendar and the Zoom of a member refused the task (403), and
+     * went on being made there after that member had left the workspace.
+     * Refused, saying why, before anything is sent; the connection is kept.
+     */
+    if (!(await this.calendarSync.ownerMayRead(found, { id: taskId, workspaceId: ctx.workspaceId }))) {
+      throw new BadRequestException(
+        provider === 'zoom'
+          ? 'The Zoom account connected to this workspace belongs to somebody who cannot open this task, so no meeting is made in it.'
+          : 'The Google Calendar connected to this workspace belongs to somebody who cannot open this task, so no meeting is made in it.',
+      )
     }
+    if (!found.accessToken) throw new BadRequestException(`Connect ${label} first`)
+    const conn = { ...found, accessToken: found.accessToken }
 
     const created =
       provider === 'zoom'
@@ -1579,17 +1614,19 @@ export class TasksService {
   }
 
   /**
-   * Load a connected integration connection (with tokens) for a provider, or
-   * null when the provider isn't connected / has no stored access token.
+   * Load a connected integration connection (with tokens, and who connected it)
+   * for a provider, or null when the provider isn't connected. Its access token
+   * may be missing: the caller asks whose it is before it asks for that.
    */
   private async loadIntegrationConnection(
     workspaceId: string,
     provider: 'zoom' | 'gcal',
   ): Promise<{
     id: string
-    accessToken: string
+    accessToken: string | null
     refreshToken: string | null
     tokenExpiresAt: Date | null
+    connectedById: string | null
   } | null> {
     const [conn] = await this.db
       .select({
@@ -1598,6 +1635,7 @@ export class TasksService {
         accessToken: workspaceIntegrationConnections.accessToken,
         refreshToken: workspaceIntegrationConnections.refreshToken,
         tokenExpiresAt: workspaceIntegrationConnections.tokenExpiresAt,
+        connectedById: workspaceIntegrationConnections.connectedById,
       })
       .from(workspaceIntegrationConnections)
       .where(
@@ -1607,12 +1645,13 @@ export class TasksService {
         ),
       )
       .limit(1)
-    if (!conn || conn.status !== 'connected' || !conn.accessToken) return null
+    if (!conn || conn.status !== 'connected') return null
     return {
       id: conn.id,
-      accessToken: conn.accessToken,
+      accessToken: conn.accessToken ?? null,
       refreshToken: conn.refreshToken,
       tokenExpiresAt: conn.tokenExpiresAt,
+      connectedById: conn.connectedById ?? null,
     }
   }
 
@@ -1930,7 +1969,34 @@ export class TasksService {
     const chosen = (person?.settings as { defaultListId?: string | null } | null)?.defaultListId ?? null
     if (chosen) {
       const home = await this.resolveWorkspaceForList(chosen)
-      if (home?.workspaceId === workspaceId && (await this.canCreateTaskIn(chosen, actorId))) return chosen
+      if (home?.workspaceId === workspaceId) {
+        try {
+          await this.assertCanCreateTaskIn(chosen, actorId)
+          return chosen
+        } catch (err) {
+          /*
+           * A CHOSEN LIST IN THE TRASH IS REFUSED, SAYING SO
+           * (`found-5-oct/default-list-files-into-an-archived-list`). The create
+           * gate did not ask whether a list was deleted, so `/task`, a chat
+           * message and the AI filed their tasks into a deleted Default list,
+           * where nobody could find them. ClickUp files a task with no location
+           * in the person's Personal List, which Rundesk does not have; where its
+           * help does not say what becomes of a deleted Default list, the person
+           * is told rather than their task sent somewhere they did not choose —
+           * and told what THEY may do: restore it when the Trash lets them (an
+           * admin, or whoever deleted it), else ask (`ListInTrashException`).
+           */
+          if (err instanceof ListInTrashException) {
+            throw new ConflictException(
+              err.mayRestore
+                ? 'Your "Default list for new tasks" is in the trash. Restore it from Trash, or choose another in Calendar settings → Time blocking.'
+                : 'Your "Default list for new tasks" is in the trash. Ask a workspace admin, or whoever deleted it, to restore it, or choose another in Calendar settings → Time blocking.',
+            )
+          }
+          // Any other refusal passes it over, as a list in another workspace is.
+          if (!(err instanceof HttpException)) throw err
+        }
+      }
     }
     const candidates = await this.db
       .select({ id: lists.id })
@@ -4532,6 +4598,8 @@ export class TasksService {
         projectVisibility: projects.visibility,
         listVisibility: lists.visibility,
         listCreatedById: lists.createdById,
+        listInTrash: lists.isArchived,
+        listDeletedById: lists.archivedById,
       })
       .from(lists)
       .innerJoin(projects, eq(projects.id, lists.projectId))
@@ -4562,6 +4630,17 @@ export class TasksService {
       )
     ) {
       throw new ForbiddenException('This list is private')
+    }
+    /*
+     * NOR INTO A LIST IN THE TRASH, as none is made in one (`ListInTrashException`,
+     * `found-5-oct/default-list-files-into-an-archived-list`). Asked last, of
+     * somebody the read rules have let in. The create gate refused the list and
+     * this did not: a member moved their task into a list an admin had deleted
+     * (201), and a bulk "Move to list" did the same (200, nothing failed) — out of
+     * every list of lists, where the list's purge would take it.
+     */
+    if (target.listInTrash) {
+      throw new ListInTrashException(mayRestoreList(superAdmin ? 'super_admin' : membership?.role, target.listDeletedById, actorId))
     }
 
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))

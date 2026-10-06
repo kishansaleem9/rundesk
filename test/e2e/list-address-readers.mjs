@@ -13,6 +13,13 @@
  * so everybody given a task's address — in the task menu, and as the Reply-To
  * of every notification — could cut the task off and hold the list's.
  *
+ * And a list deleted into the trash, which takes no task
+ * (`found-5-oct/default-list-files-into-an-archived-list`), found by the
+ * review: mail to its address went on making tasks in it — mail inserts its
+ * task itself, past `createTask` and its gate — while its address, refused by
+ * that gate as a plain no, could no longer be read, rotated or switched off by
+ * the admin who had made it (403 each).
+ *
  * What is mailed, and what it made, are read back by SQL.
  *
  *   node test/e2e/list-address-readers.mjs --api 3021 --dist /tmp/claude-0/dist-1
@@ -30,7 +37,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 3
+const EXPECTED_CHECKS = 5
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -173,6 +180,35 @@ try {
     pv.open === 1 && !pv.address && pv.generate === 0 && pv.withheld === 1 && pf.address && pf.withheld === 0,
     'the Email panel shows the address only to those who may add: in the view-only list it says why there is none, with nothing to generate, and at Full edit it shows it',
     `view-only ${JSON.stringify(pv)}; Full edit ${JSON.stringify(pf)}`,
+  )
+
+  // ══ 4. MAIL TO A DELETED LIST ════════════════════════════════════════════
+  console.log('\n▶ a list with an address, deleted into the trash, and mailed')
+  const DELETED = await place('deleted')
+  const binned = await A(`/lists/${DELETED.list}`, { method: 'DELETE' })
+  if (!binned.ok) throw new Error(`could not delete the list: ${said(binned)}`)
+  const SUBJECT = `${TAG} mailed into the deleted list`
+  const mailed = await mail(adminRow.email, DELETED.address, SUBJECT)
+  const [{ n: mailedTasks }] = await sql`select count(*)::int as n from tasks where list_id = ${DELETED.list} and title like ${`%${SUBJECT}%`}`
+  const [record] = await sql`select outcome, reason from inbound_email_messages where subject = ${SUBJECT}`
+  chk(
+    mailed === 201 && mailedTasks === 0 && record?.outcome === 'rejected_not_allowed' && record?.reason === 'the list is in the trash',
+    'mail to the address of a list in the trash makes no task in it — the message is recorded as refused, saying the list is in the trash',
+    `mailed ${mailed}; tasks made ${mailedTasks}; recorded ${JSON.stringify(record ?? null)}`,
+  )
+
+  // ══ 5. ITS ADDRESS, STILL ITS OWN ════════════════════════════════════════
+  console.log('\n▶ the deleted list’s address: read, rotated and switched off by the admin who made it')
+  const readTrash = await A(`/lists/${DELETED.list}/inbound-email`)
+  const rotated = await A(`/lists/${DELETED.list}/inbound-email/rotate`, { method: 'POST' })
+  const revoked = await A(`/lists/${DELETED.list}/inbound-email`, { method: 'DELETE' })
+  const [aliasRow] = await sql`select revoked_at is not null as revoked from list_email_aliases where list_id = ${DELETED.list}`
+  chk(
+    readTrash.status === 200 && readTrash.data?.address === DELETED.address
+      && rotated.ok && !!rotated.data?.address && rotated.data.address !== DELETED.address
+      && revoked.ok && aliasRow?.revoked === true,
+    'and the deleted list’s address is still read, rotated and switched off by those who may add tasks to the list — the trash refuses tasks, not the address',
+    `read ${said(readTrash)}; rotated ${said(rotated)}; switched off ${said(revoked)}, revoked ${JSON.stringify(aliasRow?.revoked ?? null)}`,
   )
 } catch (err) {
   failed += 1

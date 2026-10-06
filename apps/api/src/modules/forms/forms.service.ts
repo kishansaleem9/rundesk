@@ -10,6 +10,7 @@ import { safeFileName } from '../../common/storage/file-name'
 import { WebhooksService } from '../webhooks/webhooks.service'
 import { readableList } from '../../common/permissions/read-access'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
+import { ListInTrashException, listTrashState, mayRestoreList } from '../../common/permissions/task-create'
 import { isUuid } from '../../common/validation/uuid'
 
 /** Hard cap on a single form-upload file (public intake). */
@@ -191,7 +192,7 @@ export class FormsService {
       return undefined
     }
     const [targetList] = await this.db
-      .select({ id: lists.id, workspaceId: spaces.workspaceId })
+      .select({ id: lists.id, workspaceId: spaces.workspaceId, inTrash: lists.isArchived })
       .from(lists)
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
@@ -200,6 +201,16 @@ export class FormsService {
     if (!targetList || targetList.workspaceId !== formWithFields.workspaceId) {
       throw new BadRequestException('Selected routing list is invalid for this workspace')
     }
+    /*
+     * A LIST IN THE TRASH TAKES NO TASK, A FORM'S INCLUDED (`ListInTrashException`,
+     * `found-5-oct/default-list-files-into-an-archived-list`). This inserts the
+     * task itself, past `createTask` and its gate, so a public submission to a
+     * form whose list had been deleted made its task in it (201), out of every
+     * list of lists, for the purge to take. Refused as a list this form cannot
+     * route to is: the submission is kept with its routing error, and routed
+     * again once the list is restored (`retrySubmissionRouting`).
+     */
+    if (targetList.inTrash) throw new ListInTrashException()
     const [newTask] = await this.db
       .insert(tasks)
       .values({
@@ -513,6 +524,11 @@ export class FormsService {
   private async assertMayFileInto(workspaceId: string, listId: string, actorId: string) {
     const list = isUuid(listId) ? await readableList(this.db, workspaceId, listId, { id: actorId }) : null
     if (!list) throw new NotFoundException('List not found')
+    // Nor a list in the trash, which takes no task (`ListInTrashException`), asked
+    // of somebody who may open it, as the create gate asks it: a form was made,
+    // and aimed, at a list already deleted (201).
+    const state = await listTrashState(this.db, listId)
+    if (state?.inTrash) throw new ListInTrashException(mayRestoreList(list.role, state.deletedById, actorId))
     await assertCanCreateInSpace(this.db, { spaceId: list.spaceId, actorId, kind: 'task', within: [{ type: 'list', id: listId }] })
   }
 

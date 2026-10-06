@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import { taskComments, taskAttachments } from '@rundesk/db'
 import { ClickUpImportService } from './clickup-import.service'
 import { ClickUpApiClient, type ClickUpClientLike } from './clickup-api.util'
+import type { EnrichmentRefusals } from './import-access'
 
 /**
  * §12.5 gap-closer — ClickUp API enrichment (comments + attachments the CSV
@@ -57,6 +58,27 @@ function makeDb(selects: unknown[][] = []) {
 const insertsInto = (inserts: Array<{ table: unknown; values: any }>, table: unknown) =>
   inserts.filter((r) => r.table === table).map((r) => r.values)
 
+/** Who every test enriches as. */
+const IMPORTER = { id: 'user-1' }
+
+/**
+ * The service on the stand-in, its importer allowed to write comments and files into every mapped
+ * task — or what `refusals` answers for a task (`enrichmentRefusals`, `import-access.ts`). What the
+ * rule was asked is recorded.
+ */
+function serviceOn(db: unknown, r2?: unknown, refusals: (taskId: string) => Partial<EnrichmentRefusals> = () => ({})) {
+  const svc = new ClickUpImportService(db as any, r2 as any)
+  const asked: unknown[] = []
+  svc.access = {
+    ...svc.access,
+    enrichmentRefusals: async (_db, params) => {
+      asked.push(params)
+      return { task: null, comments: null, attachments: null, ...refusals(params.taskId) }
+    },
+  }
+  return { svc, asked }
+}
+
 /** A permissive R2 stand-in that records putObject calls. */
 function makeR2(configured = true) {
   const puts: Array<{ key: string; body: Buffer; contentType: string }> = []
@@ -76,7 +98,7 @@ describe('ClickUpImportService.enrichTasks — comments', () => {
     // selects: loadWorkspaceTaskIds → valid, then loadMemberIndex → members
     const { db, inserts } = makeDb([[{ id: 'our-1' }], members])
     const { r2 } = makeR2(true)
-    const svc = new ClickUpImportService(db, r2)
+    const { svc } = serviceOn(db, r2)
 
     const client: ClickUpClientLike = {
       getTaskComments: async () => [
@@ -87,7 +109,7 @@ describe('ClickUpImportService.enrichTasks — comments', () => {
       downloadAttachment: async () => null,
     }
 
-    const summary = await svc.enrichTasks('ws-1', 'user-1', 'tok', [{ clickupTaskId: 'cu-1', taskId: 'our-1' }], {
+    const summary = await svc.enrichTasks('ws-1', IMPORTER, 'tok', [{ clickupTaskId: 'cu-1', taskId: 'our-1' }], {
       client,
     })
 
@@ -118,7 +140,7 @@ describe('ClickUpImportService.enrichTasks — attachments', () => {
   it('re-uploads bytes to R2 and rows the metadata (real client + mock fetch)', async () => {
     const { db, inserts } = makeDb([[{ id: 'our-1' }], []])
     const { r2, puts } = makeR2(true)
-    const svc = new ClickUpImportService(db, r2)
+    const { svc } = serviceOn(db, r2)
 
     const fetchImpl = async (input: string | URL) => {
       const url = String(input)
@@ -149,7 +171,7 @@ describe('ClickUpImportService.enrichTasks — attachments', () => {
       }),
     })
 
-    const summary = await svc.enrichTasks('ws-1', 'user-1', 'tok', [{ clickupTaskId: 'cu-1', taskId: 'our-1' }], {
+    const summary = await svc.enrichTasks('ws-1', IMPORTER, 'tok', [{ clickupTaskId: 'cu-1', taskId: 'our-1' }], {
       client,
     })
 
@@ -173,7 +195,7 @@ describe('ClickUpImportService.enrichTasks — attachments', () => {
   it('skips attachment bytes gracefully when R2 is not configured', async () => {
     const { db, inserts } = makeDb([[{ id: 'our-1' }], []])
     // No R2 injected at all → not configured.
-    const svc = new ClickUpImportService(db)
+    const { svc } = serviceOn(db)
 
     let downloadCalled = false
     const client: ClickUpClientLike = {
@@ -187,7 +209,7 @@ describe('ClickUpImportService.enrichTasks — attachments', () => {
       },
     }
 
-    const summary = await svc.enrichTasks('ws-1', 'user-1', 'tok', [{ clickupTaskId: 'cu-1', taskId: 'our-1' }], {
+    const summary = await svc.enrichTasks('ws-1', IMPORTER, 'tok', [{ clickupTaskId: 'cu-1', taskId: 'our-1' }], {
       client,
     })
 
@@ -205,7 +227,7 @@ describe('ClickUpImportService.enrichTasks — per-item failures are collected, 
   it('records a failing comment fetch and a failing attachment while still importing the good one', async () => {
     const { db, inserts } = makeDb([[{ id: 'our-1' }], []])
     const { r2 } = makeR2(true)
-    const svc = new ClickUpImportService(db, r2)
+    const { svc } = serviceOn(db, r2)
 
     const client: ClickUpClientLike = {
       getTaskComments: async () => {
@@ -222,7 +244,7 @@ describe('ClickUpImportService.enrichTasks — per-item failures are collected, 
     }
 
     // Must resolve, not reject.
-    const summary = await svc.enrichTasks('ws-1', 'user-1', 'tok', [{ clickupTaskId: 'cu-1', taskId: 'our-1' }], {
+    const summary = await svc.enrichTasks('ws-1', IMPORTER, 'tok', [{ clickupTaskId: 'cu-1', taskId: 'our-1' }], {
       client,
     })
 
@@ -238,7 +260,7 @@ describe('ClickUpImportService.enrichTasks — per-item failures are collected, 
     // loadWorkspaceTaskIds returns only our-1; our-evil is filtered out.
     const { db, inserts } = makeDb([[{ id: 'our-1' }], []])
     const { r2 } = makeR2(true)
-    const svc = new ClickUpImportService(db, r2)
+    const { svc } = serviceOn(db, r2)
 
     const client: ClickUpClientLike = {
       getTaskComments: async () => [{ id: 'c1', comment_text: 'hi', user: {}, date: '100' }],
@@ -248,7 +270,7 @@ describe('ClickUpImportService.enrichTasks — per-item failures are collected, 
 
     const summary = await svc.enrichTasks(
       'ws-1',
-      'user-1',
+      IMPORTER,
       'tok',
       [
         { clickupTaskId: 'cu-1', taskId: 'our-1' },
@@ -264,23 +286,80 @@ describe('ClickUpImportService.enrichTasks — per-item failures are collected, 
 
   it('no token → records a skip and imports nothing', async () => {
     const { db, inserts } = makeDb([])
-    const svc = new ClickUpImportService(db)
-    const summary = await svc.enrichTasks('ws-1', 'user-1', '', [{ clickupTaskId: 'cu-1', taskId: 'our-1' }])
+    const { svc } = serviceOn(db)
+    const summary = await svc.enrichTasks('ws-1', IMPORTER, '', [{ clickupTaskId: 'cu-1', taskId: 'our-1' }])
     assert.equal(summary.commentsImported, 0)
     assert.equal(insertsInto(inserts, taskComments).length, 0)
     assert.ok(summary.errors.some((e) => /no API token/i.test(e)))
   })
 })
 
+describe('ClickUpImportService.enrichTasks — only into what its importer may write (found-6-oct/import-merge-writes-tasks-its-importer-may-not-change)', () => {
+  it('a task its importer may not open takes nothing, and a refused comment or file rule takes nothing of its kind: each refusal is reported in its words, and ClickUp is not asked for what is refused', async () => {
+    const tasksThere = [{ id: 'task-h' }, { id: 'task-v' }, { id: 'task-c' }, { id: 'task-ok' }]
+    const { db, inserts } = makeDb([tasksThere, []])
+    const { r2 } = makeR2(true)
+    const VIEW_COMMENTS = `This space's default permission is "View only", which does not allow changing its comments`
+    const VIEW_TASKS = `This space's default permission is "View only", which does not allow changing its tasks`
+    const COMMENT_TASKS = `This space's default permission is "Comment", which does not allow changing its tasks`
+    const { svc, asked } = serviceOn(db, r2, (taskId) =>
+      taskId === 'task-h'
+        ? { task: 'You do not have access to this task', comments: 'You do not have access to this task', attachments: 'You do not have access to this task' }
+        : taskId === 'task-v'
+          ? { comments: VIEW_COMMENTS, attachments: VIEW_TASKS }
+          : taskId === 'task-c'
+            ? { attachments: COMMENT_TASKS }
+            : {},
+    )
+    const askedOf = { comments: [] as string[], attachments: [] as string[] }
+    const client: ClickUpClientLike = {
+      getTaskComments: async (id) => {
+        askedOf.comments.push(id)
+        return [{ id: `c-${id}`, comment_text: `from ${id}`, user: {}, date: '100' }]
+      },
+      getTaskAttachments: async (id) => {
+        askedOf.attachments.push(id)
+        return [{ id: `a-${id}`, title: `${id}.png`, mimetype: 'image/png', size: 2, url: `https://attachments.clickup.com/${id}.png` }]
+      },
+      downloadAttachment: async () => ({ buffer: Buffer.from('xx'), contentType: 'image/png' }),
+    }
+    const summary = await svc.enrichTasks(
+      'ws-1',
+      IMPORTER,
+      'tok',
+      [
+        { clickupTaskId: 'cu-h', taskId: 'task-h' },
+        { clickupTaskId: 'cu-v', taskId: 'task-v' },
+        { clickupTaskId: 'cu-c', taskId: 'task-c' },
+        { clickupTaskId: 'cu-ok', taskId: 'task-ok' },
+      ],
+      { client },
+    )
+    assert.deepEqual(asked, ['task-h', 'task-v', 'task-c', 'task-ok'].map((taskId) => ({ workspaceId: 'ws-1', taskId, importer: IMPORTER })))
+    assert.deepEqual(askedOf, { comments: ['cu-c', 'cu-ok'], attachments: ['cu-ok'] }, 'ClickUp is asked only for what may be written')
+    assert.deepEqual(insertsInto(inserts, taskComments).map((c) => c.taskId), ['task-c', 'task-ok'])
+    assert.deepEqual(insertsInto(inserts, taskAttachments).map((a) => a.taskId), ['task-ok'])
+    assert.deepEqual(summary.errors, [
+      'Enrich: task task-h: You do not have access to this task — skipped',
+      `Comments for ClickUp task cu-v: ${VIEW_COMMENTS}`,
+      `Attachments for ClickUp task cu-v: ${VIEW_TASKS}`,
+      `Attachments for ClickUp task cu-c: ${COMMENT_TASKS}`,
+    ])
+    assert.equal(summary.enrichment?.tasksEnriched, 2, 'the two that took something')
+  })
+})
+
 describe('ClickUpImportService.processImport — CSV-only path unchanged when no token', () => {
   it('does not enrich, keeps the not-imported note, and writes no comments/attachments', async () => {
     const csv = ['Task Name,List,Status', 'Alpha,Sprint 1,todo', 'Beta,Sprint 1,todo'].join('\n')
-    // selects: loadMemberIndex → [], loadExistingTaskIndex → []
-    const { db, inserts } = makeDb([[], []])
+    // selects: loadMemberIndex → []
+    const { db, inserts } = makeDb([[]])
     const { r2 } = makeR2(true)
     const svc = new ClickUpImportService(db, r2)
+    // Anyone may import here, and the importer may match no task (`import-access.ts`).
+    svc.access = { ...svc.access, assertMayImport: async () => {}, matchableTaskIndex: async () => new Map() }
 
-    const summary = await svc.processImport('job-x', 'ws-1', 'user-1', { csv })
+    const summary = await svc.processImport('job-x', 'ws-1', { id: 'user-1' }, { csv })
 
     assert.equal(summary.tasksCreated, 2)
     assert.equal(summary.commentsImported, 0)

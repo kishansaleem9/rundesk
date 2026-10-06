@@ -124,6 +124,33 @@ describe('TasksService.listAttachments — read-access gate (IDOR)', () => {
     const svc = makeService(db)
     await assert.rejects(() => svc.listAttachments('missing', 'u1'), /task not found/i)
   })
+
+  /*
+   * A SUPER_ADMIN WHO IS A PLAIN MEMBER reads what the read rule lets them
+   * (`readableTask`, by the account's role) — the guard, `GET /tasks/:id` and
+   * now the write rule agree (`found-5-oct/super-admin-cannot-write-a-task-it-reads`).
+   * This gate asked the workspace role, so their subtask, assignment, following
+   * and the task's files were refused (403) on a task they had opened.
+   */
+  it('lets a super_admin who is a plain member read a private space’s task, as the read rule does', async () => {
+    const { db } = makeDb([CTX({ spaceVisibility: 'private' }), [{ role: 'member', accountRole: 'super_admin' }], ATT])
+    const svc = makeService(db)
+    const out = await svc.listAttachments('t1', 'platform-admin')
+    assert.equal(out.length, 1)
+  })
+
+  it('and a task in another member’s private list', async () => {
+    const { db } = makeDb([CTX({ listVisibility: 'private', listCreatedById: 'other-member' }), [{ role: 'member', accountRole: 'super_admin' }], ATT])
+    const svc = makeService(db)
+    const out = await svc.listAttachments('t1', 'platform-admin')
+    assert.equal(out.length, 1)
+  })
+
+  it('while a plain member is still refused that private list', async () => {
+    const { db } = makeDb([CTX({ listVisibility: 'private', listCreatedById: 'other-member' }), [{ role: 'member', accountRole: 'member' }], []])
+    const svc = makeService(db)
+    await assert.rejects(() => svc.listAttachments('t1', 'ws-member'), /this list is private/i)
+  })
 })
 
 // --- 2. addAttachment storageKey prefix ------------------------------------

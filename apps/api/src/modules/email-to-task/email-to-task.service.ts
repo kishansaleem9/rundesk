@@ -27,7 +27,7 @@ import { sameEmail } from '../../common/sql/same-email'
 import { R2Service } from '../../common/storage/r2.service'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { taskCommentAllowed } from '../../common/permissions/task-write'
-import { canCreateTaskIn } from '../../common/permissions/task-create'
+import { canCreateTaskIn, listTrashState } from '../../common/permissions/task-create'
 import { isUuid } from '../../common/validation/uuid'
 import { LOCAL_PART_PREFIX, TASK_TAG, inboundDomain, taskAddressMatches, taskReplyAddress } from './task-address'
 
@@ -145,9 +145,15 @@ export class EmailToTaskService {
    * task. It was the list's maker's or a manager's, so a member with Full edit
    * could not give the admin's list an address, and one who had made a list in
    * a space since narrowed still could (`found-25-sep/sharing-asks-the-maker-not-the-level`).
+   *
+   * EVEN IN THE TRASH (`evenInTrash`): a list in the trash takes no task, mailed
+   * or not, but its address is still its own to read, rotate and switch off. The
+   * gate's trash refusal reached here as a plain no, so after `DELETE /lists/:id`
+   * the admin who had minted the address was refused all three (403), while
+   * mail to it went on making tasks.
    */
   private async assertCanManageAlias(listId: string, actorId: string) {
-    if (!(await canCreateTaskIn(this.db, listId, actorId))) {
+    if (!(await canCreateTaskIn(this.db, listId, actorId, { evenInTrash: true }))) {
       throw new ForbiddenException('Only those who may add tasks to this list manage its email address')
     }
   }
@@ -163,7 +169,8 @@ export class EmailToTaskService {
    * (`found-25-sep/list-address-read-by-those-who-may-not-add`).
    */
   async getAlias(listId: string, readerId: string): Promise<AliasView | null> {
-    if (!(await canCreateTaskIn(this.db, listId, readerId))) {
+    // In the trash too, as managing it is (`assertCanManageAlias`).
+    if (!(await canCreateTaskIn(this.db, listId, readerId, { evenInTrash: true }))) {
       throw new ForbiddenException('Only those who may add tasks to this list see its email address')
     }
     return this.liveAlias(listId)
@@ -249,6 +256,17 @@ export class EmailToTaskService {
     if (!alias || alias.revokedAt) {
       await this.recordOutcome(payload, totalBytes, 'rejected_no_alias', 'alias revoked or missing')
       return { outcome: 'rejected_no_alias', reason: 'alias revoked' }
+    }
+    /*
+     * A LIST IN THE TRASH TAKES NO TASK, MAILED OR NOT (`ListInTrashException`,
+     * `found-5-oct/default-list-files-into-an-archived-list`). This inserts the
+     * task itself, past `createTask` and its gate, so mail to a deleted list's
+     * address went on making tasks in it (201 "task_created"), out of every list
+     * of lists, for the list's purge to take. Recorded, as every refusal here is.
+     */
+    if ((await listTrashState(this.db, alias.listId))?.inTrash) {
+      await this.recordOutcome(payload, totalBytes, 'rejected_not_allowed', 'the list is in the trash', alias.listId)
+      return { outcome: 'rejected_not_allowed', reason: 'the list is in the trash' }
     }
 
     const authorId = await this.resolveAuthorId(alias.listId, payload.fromAddress, alias.createdById)

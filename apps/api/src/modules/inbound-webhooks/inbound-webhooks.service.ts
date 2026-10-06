@@ -1,4 +1,4 @@
-import { Injectable, Inject, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common'
+import { Injectable, Inject, BadRequestException, ForbiddenException, HttpException, NotFoundException } from '@nestjs/common'
 import { and, asc, eq } from 'drizzle-orm'
 import * as crypto from 'crypto'
 import { inboundWebhooks, lists, projects, spaces, workspaceMembers } from '@rundesk/db'
@@ -6,6 +6,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { TasksService } from '../tasks/tasks.service'
 import { isManagerRole } from '../../common/permissions/item-visibility'
+import { ListInTrashException } from '../../common/permissions/task-create'
 
 const PRIORITIES = new Set(['urgent', 'high', 'normal', 'low'])
 
@@ -113,8 +114,17 @@ export class InboundWebhooksService {
     // let them make it. A hook whose maker has left, lost the list, or been
     // narrowed below Full edit stops, and says so in its own words; it does not
     // keep adding tasks in their name.
-    const stillMay = await this.tasks.canCreateTaskIn(hook.listId, hook.createdById)
-    if (!stillMay) throw new ForbiddenException('This webhook’s creator can no longer add tasks to its list')
+    //
+    // A list in the trash is refused in the trash's own words (409,
+    // `ListInTrashException`): its maker may still add to it once it is restored,
+    // and the hook said they could no longer add tasks to it.
+    try {
+      await this.tasks.assertCanCreateTaskIn(hook.listId, hook.createdById)
+    } catch (err) {
+      if (err instanceof ListInTrashException) throw err
+      if (err instanceof HttpException) throw new ForbiddenException('This webhook’s creator can no longer add tasks to its list')
+      throw err
+    }
 
     const task = await this.tasks.createTask({
       listId: hook.listId,

@@ -12,6 +12,7 @@ import {
   userIcalTokens,
   workspaceIntegrationConnections,
   taskAssignees,
+  users,
   workspaceMembers,
 } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -22,8 +23,9 @@ import { readableTask, type ReadActor } from '../../common/permissions/read-acce
  * Bidirectional calendar sync for Google Calendar + Outlook.
  *
  * Outbound: when a task with a dueDate is created/updated, we upsert an
- * event on the workspace's connected calendar. Archiving / clearing the
- * dueDate deletes the event.
+ * event on each of the workspace's connected calendars whose owner may read
+ * the task now (`ownerMayRead`). Archiving / clearing the dueDate deletes the
+ * event.
  *
  * Inbound: `pullEvents` fetches recent events from the calendar and either
  * updates the linked task or creates a new task in the workspace's designated
@@ -71,7 +73,8 @@ export class CalendarSyncService {
   // ─── outbound: rundesk -> calendar ────────────────────────────────────────
 
   /**
-   * Push a single task to every connected calendar in its workspace.
+   * Push a single task to every connected calendar in its workspace whose
+   * owner may read it now (`ownerMayRead`).
    * Best-effort: failures are swallowed so a flaky calendar API doesn't
    * fail the user's task update.
    */
@@ -94,6 +97,20 @@ export class CalendarSyncService {
     }
 
     for (const conn of ctx.connections) {
+      /*
+       * ONLY INTO THE CALENDAR OF SOMEBODY WHO MAY READ THE TASK NOW
+       * (`found-5-oct/calendar-push-ignores-who-may-read`). Every connection of
+       * the workspace was written to, whoever had made it: a member granted
+       * `integrations.manage` connected the workspace's Google Calendar, and the
+       * title and description of a task in a private space they are refused
+       * (403) were sent to it, and went on being sent after they were removed
+       * from the workspace. A connection is its owner's own account, so it takes
+       * what its owner may open — the task read rule, asked now, at every push —
+       * and it stops when its owner leaves, as the iCal feed does
+       * (`resolveIcalToken`). Nothing about it is deleted: the connection is
+       * there to see and to disconnect.
+       */
+      if (!(await this.ownerMayRead(conn, ctx.task))) continue
       try {
         if (conn.provider === 'gcal') {
           await this.upsertGoogleEvent(conn, ctx.task)
@@ -111,9 +128,10 @@ export class CalendarSyncService {
 
   /**
    * The route's push, by somebody who may read the task: it writes the task's
-   * title and description into the workspace's calendars, or deletes its
-   * events there. Membership of the workspace was all it asked, and a member
-   * refused a private space pushed a task there (`found-25-sep/task-rows-changed-by-id-anywhere`).
+   * title and description into the workspace's calendars whose owner may read
+   * it now (`ownerMayRead`), or deletes its events there. Membership of the
+   * workspace was all it asked, and a member refused a private space pushed a
+   * task there (`found-25-sep/task-rows-changed-by-id-anywhere`).
    */
   async pushTaskAs(taskId: string, workspaceId: string, actor: ReadActor) {
     if (!(await readableTask(this.db, workspaceId, taskId, actor))) throw new NotFoundException('Task not found')
@@ -737,6 +755,28 @@ export class CalendarSyncService {
     if (!row) return null
     const connections = await this.loadConnectionsByIds([row.workspaceId])
     return { task: row, connections }
+  }
+
+  /**
+   * Whether this connection's owner may open this task now: still a member of
+   * the task's workspace — the iCal feed's rule, asked of a platform admin too
+   * — and let in by the task read rule (`readableTask`), asked with their
+   * account's role as every read asks it. A connection nobody owns any more
+   * (`connected_by_id` is set null when the account goes) is nobody's to read.
+   * The push asks it of every calendar, and a task's Google Meet or Zoom of
+   * the connection it is made in (`TasksService.createTaskMeeting`).
+   */
+  async ownerMayRead(conn: { connectedById: string | null }, task: { id: string; workspaceId: string }): Promise<boolean> {
+    const ownerId = conn.connectedById
+    if (!ownerId) return false
+    const [member] = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, task.workspaceId), eq(workspaceMembers.userId, ownerId)))
+      .limit(1)
+    if (!member) return false
+    const [account] = await this.db.select({ role: users.role }).from(users).where(eq(users.id, ownerId)).limit(1)
+    return (await readableTask(this.db, task.workspaceId, task.id, { id: ownerId, role: account?.role })) !== null
   }
 
   private async loadConnectionsByIds(workspaceIds: string[]): Promise<ConnectionRow[]> {

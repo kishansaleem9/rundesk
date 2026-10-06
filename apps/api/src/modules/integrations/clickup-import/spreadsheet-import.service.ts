@@ -44,6 +44,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../../common/database/database.module'
 import { dupKey } from './clickup-csv.util'
 import { assertImportTarget } from './import-target'
+import { IMPORT_ACCESS, writtenFields, type Importer } from './import-access'
 import {
   ACCEPTED_SHEET_EXTENSIONS,
   DEFAULT_STATUSES,
@@ -132,6 +133,9 @@ export type SheetImportSummary = {
 export class SpreadsheetImportService {
   constructor(@Inject(DB_TOKEN) private db: Db) {}
 
+  /** What an import asks of its importer (`import-access.ts`): who may import, which tasks it may match, and merge into. */
+  access = IMPORT_ACCESS
+
   /** The picker's catalogue — served so the UI cannot drift from the parser. */
   sources() {
     return {
@@ -175,11 +179,19 @@ export class SpreadsheetImportService {
    * starting mapping for the chosen preset, a small sample of what the rows
    * would become, and — importantly — the rows that WOULD be rejected, so the
    * refusals are visible before anything is created.
+   *
+   * Asked as the import is asked: the route asks `workspace.import`, a guest
+   * is refused (`assertMayImport`), and duplicates are counted only among the
+   * tasks the importer may open (`matchableTaskIndex`) — it told any member or
+   * guest what a private space or list held
+   * (`found-6-oct/import-previews-tell-what-private-places-hold`).
    */
   async previewSheet(
     workspaceId: string,
+    importer: Importer,
     dto: { content: string; delimiter?: SheetDelimiter; preset?: string; mapping?: ColumnMapping; defaultListName?: string },
   ) {
+    await this.access.assertMayImport(this.db, { workspaceId, actorId: importer.id })
     const source = sourceByKey(dto.preset)
     this.assertDelimitedText(dto.content)
     const table = parseSheet(dto.content ?? '', dto.delimiter)
@@ -196,8 +208,8 @@ export class SpreadsheetImportService {
           defaultListName: dto.defaultListName,
         })
 
-    // Duplicate scan against the target scope, same key the writer uses.
-    const existing = problem ? new Map<string, string>() : await this.loadExistingTaskIndex(workspaceId)
+    // Duplicate scan against the target scope, same key the writer uses — over the tasks the importer may open.
+    const existing = problem ? new Map<string, string>() : await this.access.matchableTaskIndex(this.db, { workspaceId, importer })
     const seen = new Set<string>()
     let duplicates = 0
     for (const r of rows) {
@@ -234,7 +246,10 @@ export class SpreadsheetImportService {
 
   // ── job lifecycle ──────────────────────────────────────────────────────────
 
-  async startSheetImport(workspaceId: string, userId: string, dto: SheetImportDto): Promise<{ jobId: string }> {
+  async startSheetImport(workspaceId: string, importer: Importer, dto: SheetImportDto): Promise<{ jobId: string }> {
+    const userId = importer.id
+    // Who imports, before what or where: a guest is refused, whatever a custom role grants them (`assertMayImport`).
+    await this.access.assertMayImport(this.db, { workspaceId, actorId: userId })
     if (!dto.content?.trim()) throw new BadRequestException('The uploaded file is empty.')
     this.assertDelimitedText(dto.content)
     const table = parseSheet(dto.content, dto.delimiter)
@@ -261,7 +276,7 @@ export class SpreadsheetImportService {
       })
       .returning({ id: clickupImportJobs.id })
 
-    void this.processSheetImport(job.id, workspaceId, userId, dto).catch(() => undefined)
+    void this.processSheetImport(job.id, workspaceId, importer, dto).catch(() => undefined)
     return { jobId: job.id }
   }
 
@@ -312,9 +327,10 @@ export class SpreadsheetImportService {
   async processSheetImport(
     jobId: string,
     workspaceId: string,
-    userId: string,
+    importer: Importer,
     dto: SheetImportDto,
   ): Promise<SheetImportSummary> {
+    const userId = importer.id
     const source = sourceByKey(dto.preset)
     const strategy: SheetConflictStrategy = dto.strategy ?? 'skip'
     const summary = this.emptySummary(source.key)
@@ -398,7 +414,8 @@ export class SpreadsheetImportService {
       summary.projectsCreated++
 
       const memberByKey = await this.loadMemberIndex(this.db, workspaceId)
-      const existing = await this.loadExistingTaskIndex(workspaceId, dto.targetSpaceId)
+      // A row matches only a task its importer may open (`matchableTaskIndex`).
+      const existing = await this.access.matchableTaskIndex(this.db, { workspaceId, targetSpaceId: dto.targetSpaceId, importer })
       const labelCache = new Map<string, string>()
 
       const byList = new Map<string, MappedRow[]>()
@@ -439,6 +456,15 @@ export class SpreadsheetImportService {
             if (targetId && strategy === 'skip') {
               summary.tasksSkipped++
             } else if (targetId && strategy === 'merge') {
+              // Only into a task its importer may change (`assertMayMerge`), asked
+              // before the row's transaction opens: what the write rule refuses
+              // is this row's error, in its words, and nothing of the row is written.
+              const fields = [
+                ...writtenFields(mergeSet(r, mapping)),
+                ...(r.assignees.length > 0 ? ['assignees'] : []),
+                ...(r.tags.length > 0 ? ['tags'] : []),
+              ]
+              await this.access.assertMayMerge(this.db, { taskId: targetId, actorId: userId, fields })
               await this.db.transaction(async (tx) => {
                 // Only what the file maps (`mergeSet`): a column the file
                 // lacks leaves its field as the task has it.
@@ -674,29 +700,6 @@ export class SpreadsheetImportService {
       if (m.email) byKey.set(m.email.trim().toLowerCase(), m.userId)
     }
     return byKey
-  }
-
-  private async loadExistingTaskIndex(
-    workspaceId: string,
-    targetSpaceId?: string,
-    db: Writer = this.db,
-  ): Promise<Map<string, string>> {
-    const where = targetSpaceId
-      ? and(eq(spaces.workspaceId, workspaceId), eq(spaces.id, targetSpaceId))
-      : eq(spaces.workspaceId, workspaceId)
-    const rows = await db
-      .select({ id: tasks.id, listName: lists.name, title: tasks.title })
-      .from(tasks)
-      .innerJoin(lists, eq(lists.id, tasks.listId))
-      .innerJoin(projects, eq(projects.id, lists.projectId))
-      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(where)
-    const index = new Map<string, string>()
-    for (const r of rows) {
-      const key = dupKey(r.listName, r.title)
-      if (!index.has(key)) index.set(key, r.id)
-    }
-    return index
   }
 
   private async updateProgress(jobId: string, processed: number, summary: SheetImportSummary) {

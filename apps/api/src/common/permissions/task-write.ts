@@ -1,7 +1,7 @@
 import { isManagerRole } from './workspace-roles'
 import { ConflictException, NotFoundException } from '@nestjs/common'
 import { and, eq } from 'drizzle-orm'
-import { lists, projects, spaces, taskAssignees, tasks, workspaceMembers } from '@rundesk/db'
+import { lists, projects, spaces, taskAssignees, tasks, users, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { readableTask } from './read-access'
 import { assertSpaceLevel, resolveSpaceLevel, spaceLevelReaches, type WithinStep } from './space-default-permission'
@@ -117,8 +117,18 @@ export async function assertTaskWritable(
    * to open it; without that, a task in a private list, project or folder
    * this person is not in is refused here as it is to every read — its
    * space's level is no leave to change what they cannot see.
+   *
+   * ASKED WITH THE ACCOUNT'S ROLE, as the read rule's every caller asks it
+   * (`readableTask`: "`actor.role` is the account-wide role") — the guard,
+   * `GET /tasks/:id` and the create gate. It was handed the WORKSPACE role,
+   * which is never "super_admin", so a super_admin who is a plain member made a
+   * task in a private space's list (201), opened it (200) and commented on it
+   * (201), and every change of it answered 404 "Task not found"
+   * (`found-5-oct/super-admin-cannot-write-a-task-it-reads`). The space's level
+   * below is asked of them as of any member, as the create gate asks it.
    */
-  if (!(await readableTask(db, ctx.workspaceId, taskId, { id: actorId, role: membership.role }))) {
+  const [account] = await db.select({ role: users.role }).from(users).where(eq(users.id, actorId)).limit(1)
+  if (!(await readableTask(db, ctx.workspaceId, taskId, { id: actorId, role: account?.role }))) {
     throw new NotFoundException('Task not found')
   }
   const [assignee] = await db
@@ -224,4 +234,45 @@ export async function taskCommentAllowed(db: Db, taskId: string, actorId: string
     ],
   })
   return !resolved || spaceLevelReaches(resolved.level, 'comment')
+}
+
+/**
+ * THE COMMENT RULE, ANSWERED IN ITS WORDS — what `TasksService.assertMayComment`
+ * asks behind the comment route's read rule: not in the bin, and the comment
+ * level along the task's chain. For a service outside the tasks module that
+ * reports a refusal rather than answering one: the ClickUp enrichment, which
+ * imports a task's comments from the ClickUp API
+ * (`clickup-import/import-access.ts`, `enrichmentRefusals`), and asks the read
+ * rule first itself. `taskCommentAllowed`, above, asks the same of mail as a
+ * yes or a no, the read rule with it.
+ */
+export async function assertTaskCommentable(db: Db, taskId: string, actorId: string): Promise<void> {
+  const [ctx] = await db
+    .select({
+      isArchived: tasks.isArchived,
+      listId: tasks.listId,
+      spaceId: spaces.id,
+      projectId: projects.id,
+      folderId: projects.folderId,
+    })
+    .from(tasks)
+    .innerJoin(lists, eq(lists.id, tasks.listId))
+    .innerJoin(projects, eq(projects.id, lists.projectId))
+    .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+    .where(eq(tasks.id, taskId))
+    .limit(1)
+  if (!ctx) throw new NotFoundException('Task not found')
+  assertTaskNotInBin(ctx.isArchived)
+  await assertSpaceLevel(db, {
+    spaceId: ctx.spaceId,
+    actorId,
+    required: 'comment',
+    kind: 'comments',
+    within: [
+      { type: 'task', id: taskId },
+      { type: 'list', id: ctx.listId },
+      { type: 'project', id: ctx.projectId },
+      ...(ctx.folderId ? [{ type: 'folder' as const, id: ctx.folderId }] : []),
+    ],
+  })
 }

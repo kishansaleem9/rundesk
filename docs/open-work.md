@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 494 items: 36 open · 4 partly fixed · 399 closed, and 55 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 6 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 507 items: 41 open · 4 partly fixed · 405 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 6 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8168,7 +8168,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 36, each reproduced
+## Found by the triage, 5 October, and since — 47, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -8323,7 +8323,7 @@ The line in `found-25-sep/list-page-offers-refused-edits` ("Saved views … chan
 
 *Merged, 6 October,* into the main checkout (onto `687a51d`) with the batch's other builder's work, and run again there on lanes 2, 4 and 6: 20 suites, all green — `imports` 43, `view-writes-by-level` 20 and `view-visibility` 23 among them — and the API's 2033 unit tests and the web's 326, both typechecks clean.
 
-### `found-5-oct/default-list-files-into-an-archived-list` — open (visible bug, small; found by the triage beside `found-24-sep/planner-default-list-read-by-nothing`) · reproduced 5 October
+### `found-5-oct/default-list-files-into-an-archived-list` — **closed** (visible bug, small; found by the triage beside `found-24-sep/planner-default-list-read-by-nothing`) · reproduced 5 October
 
 **A task made by /task, a chat message or the AI lands in an archived Default list, where nobody can find it**
 
@@ -8332,6 +8332,74 @@ The line in `found-25-sep/list-page-offers-refused-edits` ("Saved views … chan
 The cause: in `tasks.service.ts` `defaultListFor`, the chosen list is asked only for its workspace and `canCreateTaskIn`; the fallback alone filters out archived lists. The create gate (`common/permissions/task-create.ts`) never asks whether a list is archived.
 
 *To close:* research what ClickUp does when a Default list is archived (fall back to the personal list, or refuse and say so) and whether a task can be made in an archived list at all. Then do the same in `defaultListFor` and the create gate, and check it in a suite.
+
+*Closed, 6 October* (lane 6). ClickUp files a task made with no location in the person's Personal List ("Your Personal List is the default location for new tasks…"; help centre, "Create and add tasks to your Personal List", through search excerpts). Rundesk has no Personal List. A deleted List "moves to the Trash" with its tasks ("Restore items from the Trash"). An archived one leaves the sidebar but is "preserved and searchable" ("Archive or restore Folders, Subfolders, and Lists"). Nothing was found on what becomes of a deleted Default list, or on making a task in a deleted List. Rundesk's `DELETE /lists/:id` puts the list in the trash, so where ClickUp does not settle it, the person is refused with the reason rather than sent to a fallback.
+
+- The create gate (`assertCanCreateTaskIn`) refuses a list in the trash with 409 "This list is in the trash. Restore it from Trash before adding tasks to it." (`ListInTrashException`). Since the review fix, what it advises follows the Trash's rule (below).
+  - It is asked after the read rule, so somebody who may not open the list is still told "List not found" and learns nothing of the trash. It is asked before the space's level.
+  - Every way of making a task through `createTask` asks it: `POST /tasks`, chat, the AI, templates, a meeting's action items. Mail and inbound hooks do not go through `createTask`; the review fix (below) covers them.
+- `defaultListFor` asks the gate of the chosen list. When the refusal is the trash, `/task`, a chat message made into a task and the AI's "Create task from this" are refused with 409 'Your "Default list for new tasks" is in the trash. Restore it from Trash, or choose another in Calendar settings → Time blocking.' Since the review fix, those are the words a workspace admin, or whoever deleted the list, is given; anybody else is told to ask them (below).
+  - Any other refusal still passes the choice over to the oldest list the person may add to, as before.
+  - The three flows already show a refusal in the server's words. No new strings.
+
+Measured on lane 6 (`probe-default-list.mjs`, the skeptic's route, three runs alike):
+- Before: a member chose a list (200) and `/task` filed into it (201). The admin deleted it (200). `is_archived` was true and the settings still named it; `GET /lists/project/:id` no longer listed it. Then `/task`, message-to-task and the AI's create-task each answered 201 into the deleted list, and `POST /tasks` into it answered 201 for the member and for the admin.
+- After: the three answer 409 in the Default list's words and make nothing anywhere. `POST /tasks` into the list answers 409 in the list's words, nothing made. Restored from Trash, the list takes a task again (201).
+
+Checks:
+- `planner-default-list` 7 → 9: the three flows are refused in those words, nothing made (SQL); the chat page's Create task from message says it in the server's words (browser). On HEAD's product code 7/9; after, 9/9 four times.
+- `task-creation-access` 6 → 7: a list in the trash takes no task (409, the words, none made); restored, it does. On HEAD's product code 6/7; after, 7/7 four times.
+- `task-create.test.ts` (4) and `default-list.test.ts` (3) are new.
+- Patches:
+  - `pdl-5` reddens both new `planner-default-list` checks.
+  - `pdl-6` (the page says its own words) reddens the page check alone.
+  - `tcm-7` reddens the new `task-creation-access` check.
+  - Unit claims `tcg-1..4` and `dlf-1..3` each redden their test.
+  - Re-aimed: `pdl-3`, `pdl-4` (it now also reddens the two new checks, claimed with "or") and `gtm-1`. Each reddens its claim.
+- Run on lane 6: `undo-delete` 11/11, `trash-rules` 4/4, `guest-task-making` 3/3, `task-boundaries` 45/45.
+
+For the owner (recorded, not built): whether a deleted Default list should be refused, as built, or passed over to the oldest list the person may add to, as a choice they may no longer add to is (`planner-default-list` check 6).
+
+Found beside it:
+- `/task`'s fallback files into a list whose project is in the trash (`found-6-oct/task-fallback-files-into-a-deleted-project`).
+- The planner's settings take a deleted list as the Default list (`found-6-oct/default-list-setting-takes-a-deleted-list`).
+
+*Review fix, 6 October* (lane 6). The review found the rule unasked wherever a task reaches a list without createTask, and the refusal's advice untrue for most members.
+- A move into a list in the trash (`moveTask`, and the bulk 'Move to list' through it) is refused after the read rules: 409 in the gate's words. It was 201, and 200 with nothing failed, and the task left every list of lists.
+- A form: a public submission to a form whose list is in the trash is kept, with the trash refusal as its routing error, and makes no task (it made one there). `retrySubmissionRouting` routes it once the list is restored. A form is not made, or changed, to aim at a list in the trash (409; it was 201).
+- Mail to a deleted list's address is recorded `rejected_not_allowed`, 'the list is in the trash', and makes no task (it was `task_created`).
+- The list's address is still read, rotated and switched off in the trash (`evenInTrash`). The gate's trash refusal had reached those routes as a plain no: after `DELETE /lists/:id` its admin got 403 for all three while mail went on making tasks.
+- An inbound hook's delivery into a list in the trash is refused in the trash's words (409), not 'This webhook’s creator can no longer add tasks to its list' (403).
+- What to do follows the Trash's rule. ClickUp: 'Members and guests can only see and restore items they have deleted'; 'The Workspace owner and admins can see, restore, or permanently delete any public items' (help centre, 'Restore items from the Trash').
+  - A workspace admin, or whoever deleted the list, is told to restore it.
+  - Anybody else gets 'This list is in the trash. Ask a workspace admin, or whoever deleted it, to restore it before adding tasks to it.' and 'Your "Default list for new tasks" is in the trash. Ask a workspace admin, or whoever deleted it, to restore it, or choose another in Calendar settings → Time blocking.'
+  - Every member had been told to restore a list their Trash did not list and refused (403 'You can only manage items you deleted').
+- The picker that refusal sends them to draws the deleted choice as 'A list in the trash' (new, four locales) when `GET /planner/:ws/settings` says `defaultListInTrash`. The flag is asked as `defaultListFor` asks it: the list's workspace, then the create gate.
+  - It showed 'The first list I can add to' as chosen while the server held the deleted list, and choosing that saved nothing.
+  - In another workspace, where /task passes the list over, it still shows the first list.
+
+Measured on lane 6 with `rv-trash-siblings.mjs` and `probe-trash-collateral.mjs`, three runs alike on the builder's build and on the fixed build.
+- Before: move 201, bulk 200, submission 201 into the trash, mail `task_created`, new form 201 (4 tasks left in the deleted list). Address GET, rotate and revoke 403. Hook 403 in the creator's words. A member told to restore and then refused it.
+- After: 409, failed with the words, `createdTaskId` null, `rejected_not_allowed`, 409 (0 tasks). Address 200, 201, 200 (revoked). Hook 409. The member told to ask.
+
+Checks:
+- `planner-default-list` 9 → 11: a member told to ask; the picker in a browser, with a twin in the other workspace.
+- `task-creation-access` 7 → 9: check 7 asks the refusal, not its advice; the advice by the Trash's rule; a move, single and bulk, by SQL.
+- `form-access` 7 → 9, `list-address-readers` 3 → 5, `inbound-hook-makers` 3 → 4.
+- On the builder's product code each new check was red: 9/11, 7/9, 7/9, 3/5, 3/4. After, all green three times.
+- Unit tests: `task-create.test.ts` +4, `default-list.test.ts` +1, `task-move-target.test.ts` +2, `email-to-task.service.test.ts` +2. New: `forms-trash.test.ts` (3), `inbound-webhooks.service.test.ts` (3), `planner-default-list-trash.test.ts` (4).
+
+Patches:
+- New: `pdl-7`, `pdl-8`, `pdl-9`, `pdl-10`, `tcm-8`, `tcm-9`, `fma-12`, `fma-13`, `lar-6`, `lar-7`, `ihm-6`.
+- Re-aimed: `tcm-7` (now also claims the advice check), `gtm-1`, `lar-1`, `shl-7`, `ihm-5`, `hpa-18`, `hpa-19`.
+- Re-claimed: `pdl-1` (it reddened the new checks unclaimed, as the review found), `pdl-2`, `pdl-4`, `pdl-5`.
+- Unit claims: `tcg-5..8` (`tcg-1` and `tcg-3` re-aimed), `dlf-4`, `tmt-6`, `tmt-7`, `ett-1`, `ett-2`, `fmt-1..3`, `iws-1..3`, `ptl-1..4`.
+
+Found beside it: `found-6-oct/list-address-given-by-post-to-those-who-may-not-add`. Read, not reproduced (so not counted): an automation's create-task action and the Calendar pull's inbox list write tasks without the create gate, so neither asks whether the list is in the trash; measuring the pull needs a calendar with a token, which this machine does not have.
+
+For the owner, added: refusals that name the app's labels ("Calendar settings → Time blocking", "Trash") are in English whatever the reader's locale; localizing them is the owner's to ask for.
+
+*Merged, 6 October,* into the main checkout by hand (onto `893f8ff`) with the other builder's work, and run again there on lanes 2, 4, 5, 6 and 7: 62 suites and 1014 checks, 61 green at once; `subtask-row-actions` failed once at a load of 15, the row it reads not found, and was green twice when run again. API unit tests 2124/2124, web 344/344, both typechecks clean.
 
 ### `found-5-oct/xlsx-read-as-text` — **closed** (visible bug, small; found by the triage beside `commit-log/log-601eacc-2` and `ledger-rows/row-816`) · reproduced 5 October
 
@@ -8415,7 +8483,7 @@ The cause: `mention-text.tsx` takes its plain path whenever the text has no bloc
 
 *To close:* research how ClickUp draws a pasted address in a comment (a link, opening in a new tab). Link bare addresses on the plain path too, safely (http and https only), and check both kinds of comment in a suite.
 
-### `found-5-oct/calendar-push-ignores-who-may-read` — open (security, medium; found by the triage beside `ledger-rows/row-1962`) · reproduced 5 October as far as a push can go here
+### `found-5-oct/calendar-push-ignores-who-may-read` — **closed** (security, medium; found by the triage beside `ledger-rows/row-1962`) · reproduced 5 October as far as a push can go here
 
 **A task is pushed into the Google or Outlook calendar of a connection's owner who may not read it, and after they have left**
 
@@ -8424,6 +8492,52 @@ The cause: `mention-text.tsx` takes its plain path whenever the text has no bloc
 The cause: `calendar-sync.service.ts` `pushTask` loops over every connection and `resolveTaskContext` asks nothing of `connectedById`; `upsertGoogleEvent` sends the title and description; `fireCalendarPush` runs on every task write; `removeMember` leaves the member's connections. The iCal feed was fixed for exactly this (it applies the container rule and resolves only while its owner is a member); the Google and Outlook push does neither. A real Google write could not be made here.
 
 *To close:* push a task only into connections whose owner may read it now, and stop a connection when its owner leaves the workspace; check both in a suite with the store-and-stub harness (no real calendar). Which lists push at all is the Automations feature, `ledger-rows/row-1962`.
+
+*Closed, 6 October* (lane 6). ClickUp's calendar integration belongs to whoever connected it: "The Google Calendar integration is private, and no one else in your Workspace can access your Google Calendar through this integration" (help centre, "Google Calendar integration", through search excerpts). "When you remove someone from your ClickUp Workspace, the person immediately loses access to all Workspace content" ("Remove someone from a Workspace"). Which locations push at all is the unbuilt Automations feature (`ledger-rows/row-1962`) and was not built.
+
+`pushTask` asks `ownerMayRead` of each connection at every push: the route's, and `fireCalendarPush` on every task write. The answer is yes only when:
+- the connection's `connected_by_id` is still a member of the task's workspace — the iCal feed's rule (`resolveIcalToken`), asked of a platform admin too;
+- and the task read rule (`readableTask`) lets them in, asked with their account's role.
+
+A connection nobody owns is nobody's. A connection whose owner has left keeps its row, status and tokens, as the feed's token does, and takes no task, and no meeting is made in it.
+
+Measured on lane 6 (`probe-calendar-push.mjs`, the triage's route, three runs alike). Every connection was staged without a token, so nothing left the machine.
+- Before: a plain member granted `integrations.manage` (OAuth start 201) was refused a private space's task (403 "This space or project is private"). The admin's push of that task answered 201 `{"pushed":[],"skipped":["gcal:No access token for gcal"]}`, so the member's connection was chosen. After the member was removed (200, no member row, the connection still connected), their connection was chosen again for the open task and for the private one.
+- After: the private task's push skips nothing (`{"skipped":[]}`); the member's connection is not tried. An open task they may read is tried in their calendar. Once they have left, neither task is tried. The connection is kept, connected.
+
+Checks:
+- `calendar-push-reach` is new (3 checks, registered in ci.yml): the private task goes only to the admin's Outlook; an open task goes to both calendars; after the removal, the open task goes to the admin's alone and the connection is kept. On HEAD's product code it scored 1/3; after, 3/3 four times.
+- `calendar-sync.service.test.ts` +5 (14 tests).
+- `cpr-1`, `cpr-2` and `cpr-3` each redden exactly their check (`cpr-2`'s first draft, with an empty id, answered 400 and was re-aimed). Unit claims `cps-1..5` each redden their test.
+- Run on lane 6: `task-rows-by-id` 6/6, `calendar-pull-access` 3/3, `calendar-accounts` 37/37, `private-list-reach` 13/13, `workspace-read-access` 30/30.
+
+For the owner (recorded, not built):
+- The Calendar pull still uses a connection whose owner has left, and the integrations list says it is connected and healthy: counted as `found-6-oct/calendar-pull-uses-a-leavers-connection`. How such a connection is shown is open.
+- Events already in the calendar of an owner who may no longer read a task, or has left: `deleteEverywhere` still deletes them through that connection when the task loses its date or is binned, and an update now leaves them as they were. Whether to delete them or leave them is open. ClickUp leaves them after a disconnect: "After you delete the integration, tasks synced from ClickUp must be manually removed from your Google Calendar".
+
+*Review fix, 6 October* (lane 6). The task's Google Meet and Zoom buttons (`POST /tasks/:id/meeting`) make the meeting in the workspace's connected Google Calendar or Zoom under the task's title. They asked nothing of whose account that was.
+- Measured with `probe-meet-zoom.mjs`. For that probe only, lane 6 ran with `GOOGLE_CALENDAR_API_URL` and `ZOOM_API_URL` at a local stub, then went back to the standard environment. Three runs alike.
+- Before: the admin's Google Meet and Zoom on the private space's task the keeper is refused (403) were made with the keeper's tokens and the task's title (201, link stored). After the keeper's removal, the same on a new task.
+- Now `createTaskMeeting` asks `CalendarSyncService.ownerMayRead` (shared) of that connection, before its token and before anything is sent.
+- After: 400 'The Google Calendar connected to this workspace belongs to somebody who cannot open this task, so no meeting is made in it.' (or 'The Zoom account …'), nothing sent, no link. On a task the keeper may open, still made, 201.
+- The task sheet says it in the server's words; it said 'Could not create the meeting'.
+- ClickUp's Zoom is a personal connection: 'the data in your external app account will not be available to anyone else through ClickUp' (help centre, 'Connect an app', search excerpts).
+- The membership half of `ownerMayRead` is now pinned by an e2e check. A platform admin, plain member of a signed-up owner's workspace with a calendar connected, takes its task while a member and nothing once removed. The read rule alone lets a super_admin in anywhere, and the review's mutant left the suite green.
+
+Checks:
+- `calendar-push-reach` 3 → 7: the Meet, Zoom, task sheet (browser) and platform-admin checks. The suite now takes `--dist apps/web/dist` in ci.yml.
+- On the builder's product code 4/7: Meet, Zoom and sheet red; the platform-admin check green because it pins the builder's own line, and red with `cpr-7`. After, 7/7 three times.
+- `external-links.test.ts` +3.
+
+Patches:
+- `cpr-4` (Meet; also the sheet check), `cpr-5` (Zoom), `cpr-6` (the sheet's words, web), `cpr-7` (the membership line alone).
+- Re-claimed: `cpr-1` (1, 4, 5, 6), `cpr-2` (2, 4, 5) and `cpr-3` (3, 4, 5, 7).
+- Unit claims `els-1..3`.
+
+The comments that said every connected calendar now name the rule.
+For the owner, added: a meeting on a task its connection's owner may open is still made in that owner's account, whoever presses. ClickUp makes it in the presser's own personal connection. Not built.
+
+*Merged, 6 October,* into the main checkout by hand (onto `893f8ff`) with the other builder's work, and run again there on lanes 2, 4, 5, 6 and 7: 62 suites and 1014 checks, 61 green at once; `subtask-row-actions` failed once at a load of 15, the row it reads not found, and was green twice when run again. API unit tests 2124/2124, web 344/344, both typechecks clean.
 
 ### `found-5-oct/import-writes-into-another-workspace` — **closed** (security, HIGH; found by the triage beside `found-30-sep/spreadsheet-import-skips-task-rules`) · reproduced 5 October
 
@@ -8502,7 +8616,7 @@ For the owner: which years a date may hold, and how the Gantt and the timeline d
 
 *Merged, 6 October,* into the main checkout (onto `986c760`) with the batch's other builders' work, and run again there on lanes 2, 5 and 7: 63 suites, 60 green at once; `list-export` and `panel-collapse` failed once at a load of 14 and were green twice each when run again; `session-in-the-browser` failed 3 of 7 runs, its reconnect checks racing the server's admission of a reopened socket (fixed here: see `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), then 6 of 6. API unit tests 2063/2063, web 344/344, both typechecks clean.
 
-### `found-5-oct/super-admin-cannot-write-a-task-it-reads` — open (behaviour, small; found by the triage, reported by the revert of `found-30-sep/private-task-reads-say-403`) · reproduced 5 October
+### `found-5-oct/super-admin-cannot-write-a-task-it-reads` — **closed** (behaviour, small; found by the triage, reported by the revert of `found-30-sep/private-task-reads-say-403`) · reproduced 5 October
 
 **A super_admin who is a plain member reads a task in a private list or space and every edit of it answers 404 "Task not found"**
 
@@ -8511,6 +8625,49 @@ For the owner: which years a date may hold, and how the Gantt and the timeline d
 The cause: the task write rule (`common/permissions/task-write.ts`) hands `readableTask` the workspace role, and `read-access.ts` lets a role of "super_admin" through, which a workspace role never is; the guard, `GET /tasks/:id` and the create gate ask the account role. Committed code has it too.
 
 *To close:* ask the task write rule with the account role, as the read rule and the create gate do, and check it in a unit test and a suite (a super_admin member edits what they may open).
+
+*Closed, 6 October* (lane 6). ClickUp has no platform-wide role to compare with. Its own owners and admins "must be invited to private locations, regardless of user role" (help centre, "Make Spaces, Folders, Subfolders, Lists, and tasks private", through search excerpts). Rundesk's guard and read rule let a platform super_admin open every private location. This makes the write rule agree with them, as the item says; whether a platform admin should reach private locations at all is not revisited.
+
+- The write rule (`assertTaskWritable`) now asks the read rule with the account's role, as the guard, `GET /tasks/:id` and the create gate ask it.
+- The space's level is still asked of a super_admin who is a plain member, as of any member (`resolveSpaceLevel` on their membership), as the create gate asks it.
+- The task sheet's capabilities follow the rule, so the sheet now offers the edits. No web change.
+
+Measured on lane 6 (`probe-super-admin-write.mjs`, the triage's two routes, three runs alike):
+- Before: the super_admin, a plain member of a signed-up owner's workspace, made a task in an open list (201), moved it into a member's private list (201) and opened it there (200). Moving it back and renaming it answered 404 "Task not found", and its capabilities said edit false. A task it made in a private space's list (201) it opened (200) and commented on (201); renaming it answered 404. The owner renamed it (200).
+- After: moved back 201, renamed 200, capabilities edit, progress and full true. The private space's task renamed 200.
+
+Checks:
+- `super-admin-task-writes` is new (4 checks, registered in ci.yml). On HEAD's product code it scored 2/4; after, 4/4 six times.
+  - The private list's task is moved in, opened, renamed and moved back (SQL).
+  - The private space's task is opened, commented on and renamed (SQL), and the sheet is offered its edits.
+  - Twin: in a view-only space the super_admin member opens a task and is refused its change, 403 in the level's words.
+  - Twin: a plain member is still refused the private space's task, the change not made (SQL), while its owner changes it.
+- `task-write.test.ts` (4) is new.
+- Patches:
+  - `saw-1` (the workspace role again) reddens the first two checks.
+  - `saw-2` (a super_admin skips the level) reddens the view-only check alone.
+  - `saw-3` (every account read as a super_admin) reddens the plain-member check alone. `PATCH /tasks/:id` has no route guard, so with it a plain member renamed a private space's task (200).
+  - Unit claims `tws-1..4` each redden their test.
+  - Re-aimed, being anchored on the changed line: `gte-2` (`guest-task-edits`) and `tel-2` (`task-edit-levels`). Each reddens its claim.
+- Run on lane 6: `refused-as-forbidden` 12/12, `task-boundaries` 45/45, `guest-task-edits` 5/5, `task-edit-levels` 5/5, `task-sheet-capabilities` 5/5, `full-edit-levels` 8/8, `list-page-levels` 9/9, `mail-comments-by-level` 5/5.
+
+Found beside it:
+- The mail comment rule (`taskCommentAllowed`) still asks the read rule with the workspace role (`found-6-oct/mail-comments-read-the-workspace-role`).
+- A super_admin who is not a member makes a task and is refused its change (`found-6-oct/super-admin-outside-makes-what-it-cannot-change`, the owner's).
+- `PATCH` and move answer a task their caller may not open 404, where its read answers 403 (`found-6-oct/task-writes-answer-a-refusal-as-not-found`, the owner's).
+
+*Review fix, 6 October* (lane 6). With the write rule fixed, the task sheet offered the super_admin member Full edit and drew 'Add subtask'.
+- That answered 403 'This space is private'. So did following the task, blocking another task by it, and listing its files and linked docs. Assigning them answered 400 "That person can't see this task".
+- Each asked the tasks module's own read gate (`assertTaskReadAccess`, `assertContainerReadAccess`) with the workspace role. It now asks the account's role too, as the read rule does. Membership is still asked.
+
+Measured on lane 6 with `rv-super-admin-siblings.mjs`, three runs alike.
+- Before: 403, 400 (0 rows), owner assigning them 400, 403, 403 (while 'blocks' got 201), 403, 403.
+- After: 201, 201 (1 row), 201, 201, 201, 201, 200, 200. A plain member is still 403/404.
+
+Checks: `super-admin-task-writes` 4 → 6 (the private space's task's other edits; a task in another member's private list, and one made there assigned to themself). Builder's product code 4/6; after, 6/6 three times. `tasks-security.test.ts` +3.
+Patches: `saw-4` (container), `saw-5` (private list), `saw-6` (born assigned); `saw-1` re-claimed (it reddens all four). Unit claims `tss-1..3`.
+
+*Merged, 6 October,* into the main checkout by hand (onto `893f8ff`) with the other builder's work, and run again there on lanes 2, 4, 5, 6 and 7: 62 suites and 1014 checks, 61 green at once; `subtask-row-actions` failed once at a load of 15, the row it reads not found, and was green twice when run again. API unit tests 2124/2124, web 344/344, both typechecks clean.
 
 ### `found-5-oct/lane-scripts-build-the-main-checkout` — open (test tooling, small; found by the revert builders, reproduced by the triage) · reproduced 5 October
 
@@ -8815,7 +8972,7 @@ Found beside it: `found-6-oct/a-socket-sends-into-rooms-it-may-not-read`.
 
 *Merged, 6 October,* into the main checkout (onto `986c760`) with the batch's other builders' work, and run again there on lanes 2, 5 and 7: 63 suites, 60 green at once; `list-export` and `panel-collapse` failed once at a load of 14 and were green twice each when run again; `session-in-the-browser` failed 3 of 7 runs, its reconnect checks racing the server's admission of a reopened socket (fixed here: see `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), then 6 of 6. API unit tests 2063/2063, web 344/344, both typechecks clean.
 
-### `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change` — open (security, small; found closing `found-5-oct/import-merge-resets-fields-the-file-lacks`) · reproduced 6 October
+### `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change` — **closed** (security, small; found closing `found-5-oct/import-merge-resets-fields-the-file-lacks`) · reproduced 6 October
 
 **An import's merge rewrites tasks its importer may not change, or even open**
 
@@ -8823,7 +8980,42 @@ Found beside it: `found-6-oct/a-socket-sends-into-rooms-it-may-not-read`.
 
 *To close:* a merge updates only a task its importer may change (the task write rule), and matches only among tasks they may open; check both refusals by SQL in `imports`.
 
-### `found-6-oct/import-previews-tell-what-private-places-hold` — open (security, small; found reviewing `found-5-oct/import-writes-into-another-workspace`) · reproduced 6 October
+*Closed, 6 October.* ClickUp's importers have no merge into existing tasks. Updating tasks from a file is an open request on its feedback board ("Bulk Upload to Update Existing Tasks via Excel", through search excerpts), so nothing there says which tasks a merge may touch. The item's rule stands: the read and write rules the rest of the app uses.
+
+- Both importers now match a row only among the tasks the importer may open (`matchableTaskIndex`, `clickup-import/import-access.ts`), whether a space is named or not. That is the container and private-list rule (`taskInReachFilter`) and the private-task rule (`taskVisibilityFilter`); a platform admin reads everything, as in every read rule. A row naming only a task they may not open is no duplicate: it is imported as a new task in the import's own list, and nothing says the other task is there.
+- A merge asks the task write rule of the task it would change (`assertMayMerge` → `assertTaskWritable`) before anything of its row is written: fields, people, tags or values. It asks the importer at the level the routes ask for the same change. The assignee route also asks that the person assigned can see the task, and a merge does not ask that (`found-6-oct/import-assigns-people-who-cannot-see-the-task`). A status alone, or assignees, is "comment", as `PATCH /tasks/:id` with a status alone and the assignee routes ask. Any other field, a tag among them, is "edit". What the rule refuses becomes that row's error, in the rule's words. The spreadsheet import asks before the row's transaction opens.
+
+Measured on lane 4 with `probe-b3v2.mjs`: the item's probe, plus a project at View and a private space, with each merge run's own new tasks removed before the next step. It gives the same before as the first probe.
+- before: a member granted workspace.import was refused `PATCH` of a view-only space's task and of a task in a project they are at View on, and `GET` of a private list's and a private space's task. Their merges still set all four Done and Low beside their own task. Spreadsheet and ClickUp with no space named: 201, 5 updated each. Into the open space: 3 updated each.
+- after: the same merges update only their own task. The view-only and narrowed tasks stay In progress and High, their rows reported 'This space's default permission is "View only", which does not allow changing its tasks' and 'Your access to this project is "View only", …'. The private list's and private space's rows are imported as new tasks (2 created, or 1 into the open space), and those tasks stay as they were. Two runs alike.
+
+Checks:
+- `imports` had 43 checks and has 49. Two are this item's, each run by both importers with a space named and without. The write-rule check: a view-only space's task and a narrowed project's task stay, each row refused in the rule's words, beside the member's own task merged. The read-rule check: a private list's and a private space's task stay, and each row is imported as new with no refusal. On HEAD's product code the extended suite read 43/49 with the six new checks red; after, 49/49 three times on lane 4.
+- `import-access.test.ts` is new, with 5 tests; `mergeLevel` (2) and `writtenFields` (1) are this item's. There is one test in each of `spreadsheet-import.service.test.ts` and `clickup-import.service.test.ts`: a refused merge writes nothing of its row.
+- Patches: `imports-48` and `-49` (each importer's merge skips the write rule) redden the write-rule check; `imports-50` and `-51` (each importer matches as a platform admin) redden the read-rule check, each at 48/49. Unit claims `iac-3..5`, `iss-15` and `ics-7` redden their tests.
+
+*Review fix, 6 October* (lane 4). The review found two paths of the ClickUp import that the first fix did not ask. Each was measured on lane 4 with its probes.
+- The subtask pass treated the tasks a run merged into as its own. A member granted workspace.import, assigned a task in a space at Comment, merged its status, and the same merge put the task under a new task of the import; their `PATCH` of its parent answers 403. A new task went under a task in an Edit space; their `POST /tasks` under it answers 403, since Full edit is asked. A task with a subtask went under another task, and a new task went under a subtask, two levels deep, which both routes refuse with 400. Two rows of one list and title, one naming the other as parent, made that task its own parent; the route answers 400 "A task cannot be its own parent". Now each link asks what `PATCH /tasks/:id {parentTaskId}` and `POST /tasks {parentTaskId}` ask (`assertMayLinkSubtask`, `clickup-import/import-access.ts`). A child that was already there is asked the write rule at edit. A parent that was already there is asked the write rule at Full edit. Every link must also pass the routes' own rules: no task is its own parent, the parent is not a subtask, the child has no subtasks. A refused link is not made, and its error reads `Task "X" under "Y": <the rule's words>`. Links between the run's own new tasks ask no level, as before.
+- The enrichment imports comments and files from the ClickUp API: in the run when a token is given, and through `POST import/clickup/jobs/:jobId/enrich` with a mapping. It asked only that each task was in the workspace. The member named a private space's task they are refused and a view-only space's task whose comments they are refused, and was answered 201 with both enriched. At the service, with ClickUp answering, each took a comment. Now, before ClickUp is asked, each task is checked against the read rule ("Enrich: task <id>: You do not have access to this task — skipped"). A comment asks the comment rule (`assertTaskCommentable`, `common/permissions/task-write.ts`: the bin and the comment level, as `POST /tasks/:id/comments` asks behind its read rule). A file asks the write rule at edit, as `POST /tasks/:id/attachments` asks (`enrichmentRefusals`). Each refusal is reported in its rule's words.
+- What the review found unmeasured is now measured. A private task is in the preview and read-rule checks. An assignee at Comment shows the level a merge asks. Each run of the write-rule and read-rule checks starts from the tasks as made. The spreadsheet test's "outside the row's transaction" assertion now reads through its database.
+
+Measured on lane 4 with the review's probes and a self-parent probe:
+- before: the ClickUp merge answered 201 with 2 subtasks linked and no error. The task at Comment was under the new parent, the new child was under the task at Edit, chains were two deep, and a task was its own parent. The enrichment answered 201 with 2 tasks enriched; at the service, each took a comment.
+- after: the same merges answer 201, those links are refused in the routes' words, and none is made. The enrichment answers 201 with 0 tasks enriched and each refusal in its rule's words; at the service, nothing is written.
+
+Checks:
+- `imports` had 49 checks and has 53. Three are this fix's: subtask links by a member (Comment, Edit), one-level links by the admin (a task with a subtask, a subtask, a task as its own parent), and the enrichment naming a private space's task and a view-only space's. The fourth measures the merge level: an assignee at Comment merges a status alone and is refused a priority and a description, with both importers. On the first fix's code the extended suite read 50/53, with the three red. After, 53/53 three times on lane 4, and again after the final rebuild.
+- `import-access.test.ts` goes from 5 to 11 tests; `clickup-import.service.test.ts` from 14 to 15; `clickup-import.enrich.test.ts` from 7 to 8. One test of `spreadsheet-import.service.test.ts` is strengthened.
+- Patches: `imports-56` (links ask no level), `-57` (links skip the one-level and own-parent rules), `-58` (the enrichment asks nothing) and `-59` (every merge asks comment) each read 52/53 with only their claimed check red. Unit claims `iac-6..9`, `ics-8`, `ics-10` and `iss-16` (the rule inside the row's transaction) each turn their test red.
+- Re-aimed claims: `imports-27`, `-28`, `-48` and `-49` also turn the Comment-level check red (51/53 each) and now name it. `imports-33` (49/53) now names the NUL check, the write-rule check and the Comment-level check. `imports-46`, `-47`, `-50` and `-51` quote the new sentences of the preview and read-rule checks.
+
+For the owner (recorded, not built): what a refused merge row becomes. It is now the row's error, the path every failing row takes; importing it as new, or counting it as skipped, would be a choice. The level a merge asks is the routes' level for the same change. A task in the bin is still matched, and a merge into it is now refused 409 by the write rule. Links between a run's own new tasks still ask no level, where the routes ask Full edit of any parent. Who an imported ClickUp comment is filed under (`found-6-oct/enrichment-files-comments-under-a-matched-name`). A platform admin: with a guest row they are refused by the guest rule, which the guards would let through; with no row they pass it, and a merge answers 404 "Workspace not found" (`found-6-oct/super-admin-outside-makes-what-it-cannot-change`); as a plain member, a merge into a private task they could read answered 404 "Task not found" on this fix's own build, from the write rule that `found-5-oct/super-admin-cannot-write-a-task-it-reads` changed in the same merge (not measured again on the merged build).
+
+Found beside it: `found-6-oct/import-assigns-people-who-cannot-see-the-task`, `found-6-oct/clickup-merge-writes-values-to-fields-the-task-lacks`, `found-6-oct/adding-a-subtask-is-refused-as-deleting`, `found-6-oct/enrichment-files-comments-under-a-matched-name`. Read, not reproduced (so not counted): the enrichment (`POST import/clickup/jobs/:jobId/enrich`) takes any job of the workspace by its id and writes its counts into that job's stored result, whoever made the job.
+
+*Merged, 6 October,* into the main checkout by hand (onto `893f8ff`) with the other builder's work, and run again there on lanes 2, 4, 5, 6 and 7: 62 suites and 1014 checks, 61 green at once; `subtask-row-actions` failed once at a load of 15, the row it reads not found, and was green twice when run again. API unit tests 2124/2124, web 344/344, both typechecks clean.
+
+### `found-6-oct/import-previews-tell-what-private-places-hold` — **closed** (security, small; found reviewing `found-5-oct/import-writes-into-another-workspace`) · reproduced 6 October
 
 **Both import previews tell any member or guest whether a task with a given list and title exists in a private space or list**
 
@@ -8831,13 +9023,54 @@ Found beside it: `found-6-oct/a-socket-sends-into-rooms-it-may-not-read`.
 
 *To close:* ask `workspace.import` of the previews as of the import, and count duplicates only among tasks the asker may open; check it in `imports`.
 
-### `found-6-oct/a-guest-who-may-import-makes-a-space` — open (security, small; found reviewing `found-5-oct/import-writes-into-another-workspace`) · reproduced 6 October
+*Closed, 6 October.* ClickUp: importing is the owner's and admins', and a member's whose custom role grants Importing. That permission "permits users permission to import Workspace data (tasks, Docs, and Chats) from files and supported third-party apps" (help centre, "Import and export feature availability and limits" and "Manage Custom Role permissions", through search excerpts). Nothing was found on a preview's duplicate count, which ClickUp's importer does not have, so the item's rule stands.
+
+- Both preview routes now ask `workspace.import`, as the start routes do (`PermissionsGuard`). They refuse a guest as the imports do (`found-6-oct/a-guest-who-may-import-makes-a-space`).
+- Both previews count duplicates only among the tasks the asker may open: the merge's own index (`matchableTaskIndex`).
+- The web already offered the previews only to a holder of the key (`usePermissions`), so it is unchanged.
+
+Measured on lane 4 (`probe-b3v2.mjs`):
+- before: a member and a guest without workspace.import got 201 from both previews, with duplicates 1 for a private space's task and for a private list's task and 0 for a row naming nothing, while `GET` of those tasks answered 403. A member granted the key got the same 1s.
+- after: the member and the guest without the key are refused both previews, 403 "Missing required permission: workspace.import". The member with the key is counted 0 for the private space's and private list's tasks and 1 for their own open list's. Two runs alike.
+
+Checks:
+- `imports` +2 (43 → 49 with the other items'). First: a member and a guest without the key are refused both previews in those words. Second: a member granted the key is counted only the task they may open, by both previews. Red on HEAD's product code, green after (49/49 three times on lane 4).
+- One test each in `spreadsheet-import.service.test.ts` and `clickup-import.service.test.ts`: the preview asks the index as its importer.
+- Patches: `imports-44` and `-45` (each preview asks no key) redden the first check; `imports-46` and `-47` (each preview counts as a platform admin) redden the second, each at 48/49. Unit claims `iss-14` and `ics-6`.
+
+Re-aimed: `dtk-2`. The spreadsheet controller now asks `workspace.import` of its preview too, so the patch's anchor appeared twice. It now anchors on the start route, as `dtk-3` does, and still reddens its `data-transfer-keys` check (6/7).
+
+*Review fix, 6 October* (lane 4). Nothing measured the private-task half of the match index (`taskVisibilityFilter`): deleting it left every test green, while both previews counted a private task the member may not open (`GET` 403 "This task is private"). The preview check now holds a private task beside the private space's and private list's, counted 0. `imports-60` deletes the rule and turns this check and the read-rule check red (51/53). The guest refusal at each preview now has e2e patches, `imports-61` (spreadsheet) and `-62` (ClickUp), each turning only the guest check red (52/53). The ClickUp preview also has unit claim `ics-9`.
+
+*Merged, 6 October,* into the main checkout by hand (onto `893f8ff`) with the other builder's work, and run again there on lanes 2, 4, 5, 6 and 7: 62 suites and 1014 checks, 61 green at once; `subtask-row-actions` failed once at a load of 15, the row it reads not found, and was green twice when run again. API unit tests 2124/2124, web 344/344, both typechecks clean.
+
+### `found-6-oct/a-guest-who-may-import-makes-a-space` — **closed** (security, small; found reviewing `found-5-oct/import-writes-into-another-workspace`) · reproduced 6 October
 
 **A guest granted the import permission by a custom role imports, and with no space named makes a new public space**
 
 *Evidence, 6 October, lane 4, on the final build:* the guest's `POST /spaces` answered 403 "Missing required permission: space.create" and `POST /projects` 403 "This is not shared with you"; their import naming no space answered 201 and left a public space, created by nobody, holding their project and tasks. The ClickUp import did the same. ClickUp: "Free Forever guests, View only guests, Permission controlled guests, Limited members, and Limited members view only cannot import data into a Workspace" (help centre, "Import and export feature availability and limits", read through search excerpts).
 
 *To close:* refuse an import to a guest, whatever their role grants; whether a member's `workspace.import` alone may make spaces and projects through an import is the owner's to decide (recorded with the import items). Check the guest's refusal in `imports`.
+
+*Closed, 6 October.* ClickUp: "Free Forever guests, View only guests, Permission controlled guests, Limited members, and Limited members view only cannot import data into a Workspace" (help centre, "Import and export feature availability and limits", through search excerpts). Custom role permissions are given to members, owners and admins ("Manage Custom Role permissions").
+
+- Both importers refuse a guest, whatever a custom role grants them, before anything is read or written. The two previews, the two starts and the ClickUp import's comments-and-files enrichment answer 403 "Guests cannot import data into a workspace" (`assertMayImport`, `clickup-import/import-access.ts`).
+- The import page offers a guest neither import and says why in the server's words (`import.guestsCannot`, in the four locales). The Document tab is as it was.
+
+Measured on lane 4 (`probe-b3v2.mjs`):
+- before: a guest granted workspace.import by a custom role, whose `POST /spaces` answered 403 "Missing required permission: space.create" and whose `POST /projects` answered 403 "This is not shared with you", got 201 from both previews and from both imports naming no space. Each import completed with 1 created, leaving two public spaces created by nobody, each holding the guest's project and task, and two job rows.
+- after: 403 "Guests cannot import data into a workspace" from both previews and from both imports, named space or none; no space, task or job row is made. Two runs alike.
+
+Checks:
+- `imports` +2. First: the guest is refused both previews, both imports and the enrichment in those words, and SQL finds nothing of theirs made. Second: the import page offers that guest neither import and says why. Red on HEAD's product code, green after (49/49 three times on lane 4).
+- `import-access.test.ts`: 2 of its 5 tests (a guest is refused; a member, manager, admin and a platform admin who is no member are not). One test each in the two service tests.
+- Patches: `imports-52`, `-53` and `-54` (spreadsheet start, ClickUp start, enrichment) redden the API check; `imports-55` (the page reads nobody as a guest) reddens the page's; each at 48/49. Unit claims `iac-1`, `iac-2`, `iss-13` and `ics-5`.
+
+Whether a member's workspace.import alone may make spaces and projects through an import stays the owner's (recorded with the import items) and is unchanged.
+
+*Review fix, 6 October* (lane 4). The sample-data seed is an import. Its route asks `workspace.import`, which the permission catalog describes as "Import from ClickUp or a spreadsheet, and load sample data", and its controller calls it one. A guest granted that key by a custom role, whose `POST /spaces` answered 403, seeded an empty workspace: 201, and three public spaces made by nobody. The seed now asks the importers' guest rule first (`assertMayImport`, `SampleDataService.seed`): 403 "Guests cannot import data into a workspace", and nothing is made. The dashboard's demo-data card is not offered to a guest (`demo-data-empty-state.tsx`). `data-transfer-keys` had 7 checks and has 9: a guest is refused the seed and the empty workspace stays empty; the empty dashboard offers that guest no Load demo data. On the first fix's code the suite read 7/9 with those two red; after, 9/9 three times. Patches `dtk-11` (the seed skips the guest rule) and `dtk-12` (the card reads nobody as a guest) each read 8/9. `sample-data.service.test.ts` goes from 4 to 5 tests, with claim `sds-1`. Found beside it: the import history (`found-6-oct/import-history-read-by-anyone`).
+
+*Merged, 6 October,* into the main checkout by hand (onto `893f8ff`) with the other builder's work, and run again there on lanes 2, 4, 5, 6 and 7: 62 suites and 1014 checks, 61 green at once; `subtask-row-actions` failed once at a load of 15, the row it reads not found, and was green twice when run again. API unit tests 2124/2124, web 344/344, both typechecks clean.
 
 ### `found-6-oct/clickup-merge-writes-a-status-without-its-category` — open (visible bug, small; found closing `found-5-oct/import-merge-resets-fields-the-file-lacks`) · reproduced 6 October
 
@@ -8942,6 +9175,94 @@ Found beside it: `found-6-oct/a-socket-sends-into-rooms-it-may-not-read`.
 *Evidence, 6 October, lane 5 (`probe-la-midnight.mjs`):* typed into the task sheet's due box and accepted with Enter, then reloaded: Los Angeles 8 Oct 17:00 → stored `2026-10-09 00:00:00+00` → shown 2026-10-09T00:00, as a date with no time; Karachi 8 Oct 05:00 → stored `2026-10-08 00:00:00+00` → shown as no time; UTC 17:00 right. A timeline drag across a clock change reaches it too (Los Angeles, −2 days on a task at 2 Nov 17:00 PST stored 2026-11-01T00:00Z, drawn as a two-day bar). `isDateOnly` (`lib/task-dates.ts`) treats every UTC-midnight instant as a date picked without a time; ClickUp's API keeps a separate `due_date_time` / `start_date_time` flag.
 
 *To close:* a has-time flag beside each date (a schema change, the owner's decision), written by every date write and read by `isDateOnly`; check it in the three zones.
+
+### `found-6-oct/import-history-read-by-anyone` — open (security, small; found closing `found-6-oct/a-guest-who-may-import-makes-a-space`) · reproduced 6 October
+
+**Any member or guest reads the import history and every import's report, whatever the import touched**
+
+*Evidence, 6 October, lane 4 (`probe-adjacent.mjs`):* the admin imported a sheet into a private space, and one row was refused by the database. A guest and a member, neither holding `workspace.import`, both got 200 from `GET /workspaces/:ws/import/spreadsheet/jobs?source=all`, which listed the admin's job, and 200 from `GET …/jobs/:id`, whose errors quote the refused row's title, while the guest's `GET /projects/space/<that private space>` answered 403 "This space or project is private". The routes carry `WorkspaceMemberGuard` alone (the ClickUp job's by code reading).
+
+*To close:* research who sees ClickUp's import history; ask the history and reports what the imports ask (`workspace.import`, no guest) or narrow them to the asker's own, and check it in `imports`.
+
+### `found-6-oct/import-assigns-people-who-cannot-see-the-task` — open (security, small; found reviewing `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change`) · reproduced 6 October
+
+**An import assigns a task to somebody who cannot see it, which the assignee route refuses**
+
+*Evidence, 6 October, lane 4 (`probe-r1`, `probe-r2`):* a spreadsheet merge with an Assignees column and a ClickUp merge with an Assignee column, each naming a guest, answered 201 with `assigneesLinked` 1 and the guest on an open space's task, while `POST /tasks/:id/assignees` for the same guest answered 400 "That person can't see this task, so it can't be assigned to them", and the guest's `GET` of the task answered 403. Both importers link people by name or email without the route's rule (`assertPersonCanSeeTask`); the create path does the same, by code reading.
+
+*To close (the owner chooses):* what an import does with such a person — counted unmatched, the row's error, or not linked — then ask the assignee rule in both importers and check it in `imports`.
+
+### `found-6-oct/clickup-merge-writes-values-to-fields-the-task-lacks` — open (visible bug, small; found reviewing `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change`) · reproduced 6 October
+
+**The ClickUp merge writes custom-field values onto fields of the import's own project that the merged task does not have**
+
+*Evidence, 6 October, lane 4 (`probe-r5`):* a merge with a Budget column answered 201 with `customFieldValuesSet` 1; the value row sits on the task for the field "Budget" of the import's new project, not the task's own. `GET /tasks/:id/custom-fields` answers 200 [], and `PUT` of that field 404 "Custom field not found on this task".
+
+*To close (the owner chooses):* skip and report such a value, or write it to the task's own field of that name; then check it by SQL in `imports`.
+
+### `found-6-oct/adding-a-subtask-is-refused-as-deleting` — open (visible bug, small; found reviewing `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change`) · reproduced 6 October
+
+**A member at Edit is refused adding a subtask with "…does not allow deleting its tasks"**
+
+*Evidence, 6 October, lane 4 (`probe-r1`):* a member at Edit was refused `POST /tasks` with `parentTaskId` under a task there, and `PATCH` of their own task's parent to it, with 403 "This space's default permission is "Edit", which does not allow deleting its tasks". The action was adding a subtask: `assertParentInWorkspace` asks Full edit, and `assertSpaceAllowsTaskWrite` words every Full-edit refusal as deleting.
+
+*To close:* research which level ClickUp asks to add a subtask; say what was refused ("adding a subtask"), and check it in a suite.
+
+### `found-6-oct/enrichment-files-comments-under-a-matched-name` — open (security, small; found reviewing `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change`) · reproduced 6 October
+
+**The ClickUp enrichment files an imported comment under whichever member's name matches the ClickUp author**
+
+*Evidence, 6 October, lane 4 (the review's `probe-r3`, at the service):* a comment whose ClickUp username equalled another member's display name got that member's `author_id`. With a token for a ClickUp workspace they control, an importer can file comments in another member's name. ClickUp's Jira importer imports "comments with their authors" after a user-mapping step in which the importer chooses each user ("Import from Jira", search excerpts).
+
+*To close (the owner chooses):* email only, an explicit mapping the importer confirms, or always the importer with the author named in the text; then check it with a comment whose author matches a member only by name.
+
+### `found-6-oct/calendar-pull-uses-a-leavers-connection` — open (security, small; found closing `found-5-oct/calendar-push-ignores-who-may-read`) · reproduced 6 October
+
+**The Calendar pull still uses a connection whose owner has left the workspace**
+
+*Evidence, 6 October, lane 6 (`probe-siblings.mjs`):* the keeper's Google connection (no token, an inbox list set) was pulled by the admin: 400 "No access token for gcal" while the keeper was a member, and the same after the keeper's removal, so the connection was still chosen; with no connection at all the pull answers 404. The integrations list still says connected, healthy. With a real token, the departed member's calendar would be read into the workspace's inbox list as tasks made by them. `requireConnection` asks nothing of `connected_by_id`.
+
+*To close:* ask the pull what the push now asks (the owner still a member), say a leaver's connection plainly in the integrations list, and check both in `calendar-push-reach` or a pull suite.
+
+### `found-6-oct/task-fallback-files-into-a-deleted-project` — open (visible bug, small; found closing `found-5-oct/default-list-files-into-an-archived-list`) · reproduced 6 October
+
+**With no Default list chosen, `/task` files into a list whose project is in the trash**
+
+*Evidence, 6 October, lane 6 (`probe-deleted-project-list.mjs`):* the admin deleted the workspace's starter project (200); `/task` then answered 201 and filed into the starter list, whose project is in the trash (the list not archived, its project archived); the space lists no project. `POST /tasks` into a list of a deleted project answered 201, and the Default-list picker still offers that list. `defaultListFor`'s fallback and the create gate ask only the list's own `is_archived`.
+
+*To close:* ask the list's project and space as well as the list (a container in the trash takes no task), in the gate, the fallback and the picker; check it by SQL.
+
+### `found-6-oct/default-list-setting-takes-a-deleted-list` — open (visible bug, small; found closing `found-5-oct/default-list-files-into-an-archived-list`) · reproduced 6 October
+
+**The planner's settings save a list in the trash as the Default list**
+
+*Evidence, 6 October, lane 6 (`probe-siblings.mjs`):* `PATCH /planner/:ws/settings {defaultListId: <a list in the trash>}` answered 200 and the setting was saved; `PlannerService.updateSettings` asks only that the list exists. The picker offers no such list.
+
+*To close:* refuse a list in the trash (409 in the gate's words), and check it in `planner-default-list`.
+
+### `found-6-oct/mail-comments-read-the-workspace-role` — open (behaviour, small; found closing `found-5-oct/super-admin-cannot-write-a-task-it-reads`) · reproduced 6 October
+
+**A super_admin who is a plain member comments on a private task in the app but not by mail**
+
+*Evidence, 6 October, lane 6 (`probe-mail-comment.mjs`):* the super_admin opened a private space's task (200) and commented in the app (201); the same comment mailed to the task's address was refused (`rejected_not_allowed`, 0 comments); the owner's mailed comment landed. `taskCommentAllowed` hands `readableTask` the workspace role, the line the write rule's fix changed.
+
+*To close:* ask with the account's role, as the write and read rules now do, and check it in `mail-comments-by-level`.
+
+### `found-6-oct/list-address-given-by-post-to-those-who-may-not-add` — open (security, small; found reviewing `found-5-oct/default-list-files-into-an-archived-list`) · reproduced 6 October
+
+**A view-only member is given a list's email address by `POST`, and mails tasks into the list**
+
+*Evidence, 6 October, lane 6 (`probe-alias-ensure.mjs`):* the admin minted an address on a list in a view-only space. The view-only member was refused `GET /lists/:id/inbound-email` (403 "Only those who may add tasks to this list see its email address") and `POST /tasks` (403), but `POST /lists/:id/inbound-email` answered them 201 with the same address, and their mail to it made a task in the list, by them. `EmailToTaskService.ensureAlias` returns an existing live address without asking `assertCanManageAlias` — `found-25-sep/list-address-read-by-those-who-may-not-add` by another route.
+
+*To close:* ask the same rule of `POST` as of `GET`, and check it in `list-address-readers`.
+
+### `found-6-oct/verify-takes-a-bundle-of-other-sources-as-fresh` — open (test tooling, small; found by the builder of `found-6-oct/import-previews-tell-what-private-places-hold`) · reproduced 6 October
+
+**`verify.sh` takes a bundle built from other sources as fresh when the sources come back with older times**
+
+*Evidence, 6 October, lane 4:* after a before-run on HEAD's product code (its web bundle built then), the builder put the fix's files back with `cp -p`, which keeps their earlier mtimes; `verify.sh` then ran `imports` against HEAD's bundle without refusing, and the import page check went red for a reason the code under test did not have, until the bundle was rebuilt. The staleness checks compare mtimes only.
+
+*To close:* stamp each bundle with the hash of the sources it was built from (or the tree's), compare that, and add the case to the lane self-checks.
 
 ## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
 
@@ -9796,7 +10117,20 @@ reason (`found-30-sep/private-task-reads-say-403`, reverted). This item asked to
 so it no longer describes a defect, and it is not counted. The 400 "Doc belongs to a
 different workspace" could still be reviewed as a tenant-boundary matter of its own.
 
-#### Decisions for the owner — 11
+#### Decisions for the owner — 13
+
+### `found-6-oct/task-writes-answer-a-refusal-as-not-found` — decision, not counted (6 October; found closing `found-5-oct/super-admin-cannot-write-a-task-it-reads`)
+
+**A task its caller may not open answers 403 with its reason when read, and 404 "Task not found" when changed or moved**
+
+*Measured, 6 October, lane 6:* a plain member's `GET` of a private space's task answered 403 "This space or project is private", and their `PATCH` of it 404 "Task not found". `PATCH /tasks/:id` and `POST /tasks/:id/move` carry no `ResourceMemberGuard`, and the write rule answers a task its caller may not read as not found; this predates the owner's decision of 1 October, which named reads (403 with the reason, for tasks, lists, projects and spaces). Whether writes follow it is the owner's to say. If they do: the write rule answers 403 with the read rule's reason for a task the caller may not open, and 404 for an id naming nothing, paired in a suite. `super-admin-task-writes` takes 403 or 404 with nothing changed, so it pins neither.
+
+### `found-6-oct/super-admin-outside-makes-what-it-cannot-change` — decision, not counted (6 October; found closing `found-5-oct/super-admin-cannot-write-a-task-it-reads`)
+
+**A platform super_admin who is no member of a workspace makes a task there and is refused changing it**
+
+*Measured, 6 October, lane 6:* `admin@rundesk.internal`, with no member row in a signed-up owner's workspace, made a task in its list (`POST /tasks` 201) and opened it (200); `PATCH` of it answered 404 "Workspace not found". The create gate lets a super_admin who is no member through (the read rule by the account's role; `resolveSpaceLevel` answers nothing for a non-member), and the write rule asks membership. An import by such an account passes the importers' guest rule, and its merge answers the same 404. ClickUp has no platform-wide role to compare with. Whether a platform admin outside a workspace may make there, change there, or neither, is the owner's, beside whether a platform admin reaches private locations at all (recorded on `found-5-oct/super-admin-cannot-write-a-task-it-reads`); either way the create gate and the write rule should agree.
+
 
 ### `found-6-oct/doc-refusals-answer-not-found` — decision, not counted (6 October; found reviewing `found-6-oct/an-open-socket-outlives-its-access`)
 

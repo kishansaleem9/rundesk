@@ -33,6 +33,7 @@ import {
   type CustomFieldColumn,
 } from './clickup-csv.util'
 import { assertImportTarget } from './import-target'
+import { IMPORT_ACCESS, writtenFields, type Importer } from './import-access'
 import {
   ClickUpApiClient,
   extractCommentText,
@@ -124,16 +125,25 @@ export class ClickUpImportService {
     @Optional() private r2?: R2Service,
   ) {}
 
+  /** What an import asks of its importer (`import-access.ts`): who may import, which tasks it may match, and merge into. */
+  access = IMPORT_ACCESS
+
   // ── Preview ─────────────────────────────────────────────────────────────────
   /**
    * Parse without writing: row/list counts, a small sample, the detected
    * custom-field columns (name + inferred type), and a duplicate scan against
    * the target scope so the UI can offer a conflict strategy.
+   *
+   * Asked as the import is asked: the route asks `workspace.import`, a guest
+   * is refused (`assertMayImport`), and duplicates are counted only among the
+   * tasks the importer may open (`matchableTaskIndex`,
+   * `found-6-oct/import-previews-tell-what-private-places-hold`).
    */
-  async preview(workspaceId: string, dto: { csv: string; targetSpaceId?: string }) {
+  async preview(workspaceId: string, importer: Importer, dto: { csv: string; targetSpaceId?: string }) {
+    await this.access.assertMayImport(this.db, { workspaceId, actorId: importer.id })
     const { rows, customFieldColumns } = parseClickUpCsv(dto.csv ?? '')
 
-    const existing = await this.loadExistingTaskIndex(workspaceId, dto.targetSpaceId)
+    const existing = await this.access.matchableTaskIndex(this.db, { workspaceId, targetSpaceId: dto.targetSpaceId, importer })
     const seen = new Set<string>()
     const seenIds = new Set<string>()
     const dupSample: Array<{ title: string; list: string; reason: string }> = []
@@ -177,7 +187,10 @@ export class ClickUpImportService {
    * Create a progress row and kick off the import asynchronously. Returns the
    * job id immediately; the client polls `getJob` for a real progress bar.
    */
-  async startImport(workspaceId: string, userId: string, dto: ImportDto): Promise<{ jobId: string }> {
+  async startImport(workspaceId: string, importer: Importer, dto: ImportDto): Promise<{ jobId: string }> {
+    const userId = importer.id
+    // Who imports, before what or where: a guest is refused, whatever a custom role grants them (`assertMayImport`).
+    await this.access.assertMayImport(this.db, { workspaceId, actorId: userId })
     if (!dto.csv?.trim()) throw new BadRequestException('CSV body is empty')
     const { rows } = parseClickUpCsv(dto.csv)
     if (rows.length === 0) throw new BadRequestException('CSV contained no data rows')
@@ -192,7 +205,7 @@ export class ClickUpImportService {
       .returning({ id: clickupImportJobs.id })
 
     // Fire-and-forget: the worker updates the job row as it processes.
-    void this.processImport(job.id, workspaceId, userId, dto).catch(() => undefined)
+    void this.processImport(job.id, workspaceId, importer, dto).catch(() => undefined)
     return { jobId: job.id }
   }
 
@@ -215,9 +228,10 @@ export class ClickUpImportService {
   async processImport(
     jobId: string,
     workspaceId: string,
-    userId: string,
+    importer: Importer,
     dto: ImportDto,
   ): Promise<ImportSummary> {
+    const userId = importer.id
     const strategy: ConflictStrategy = dto.strategy ?? 'create'
     const summary = this.emptySummary()
 
@@ -270,15 +284,17 @@ export class ClickUpImportService {
 
       // Members for assignee mapping.
       const memberByKey = await this.loadMemberIndex(workspaceId)
-      // Existing tasks in the target scope for duplicate detection.
-      const existing = await this.loadExistingTaskIndex(workspaceId, dto.targetSpaceId)
+      // Existing tasks in the target scope for duplicate detection — those the importer may open (`matchableTaskIndex`).
+      const existing = await this.access.matchableTaskIndex(this.db, { workspaceId, targetSpaceId: dto.targetSpaceId, importer })
 
       const labelCache = new Map<string, string>()
       const ensureLabel = (name: string) => this.ensureLabel(workspaceId, name, labelCache, summary)
 
       // dupKey / clickup id → our task id, so merge + subtask linking can target it.
       const seenByKey = new Map<string, string>()
-      const created = new Map<string, { ourId: string; parentId?: string }>()
+      const created = new Map<string, { ourId: string; parentId?: string; title: string }>()
+      // The tasks this run made, as against those it merged into that were already there (`assertMayLinkSubtask`).
+      const madeHere = new Set<string>()
       const updateEvery = Math.max(1, Math.ceil(rows.length / 200))
 
       let processed = 0
@@ -322,9 +338,19 @@ export class ClickUpImportService {
               summary.tasksSkipped++
             } else if (isDup && strategy === 'merge') {
               const targetId = existingId ?? seenId!
+              // Only into a task its importer may change (`assertMayMerge`): what the
+              // write rule refuses is this row's error, in its words, and nothing of
+              // the row — its fields, people, tags or values — is written.
+              const fields = [
+                ...writtenFields(mergeSetOf(t, carries)),
+                ...(splitList(t.assignees).length > 0 ? ['assignees'] : []),
+                ...(splitList(t.tags).length > 0 ? ['tags'] : []),
+                ...(Object.values(t.custom).some((v) => v.trim() !== '') ? ['customFields'] : []),
+              ]
+              await this.access.assertMayMerge(this.db, { taskId: targetId, actorId: userId, fields })
               await this.mergeTask(targetId, t, carries)
               summary.tasksUpdated++
-              if (t.taskId) created.set(t.taskId, { ourId: targetId, parentId: t.parentId })
+              if (t.taskId) created.set(t.taskId, { ourId: targetId, parentId: t.parentId, title: t.title })
               seenByKey.set(key, targetId)
               await this.applyAssigneesTagsFields(targetId, t, memberByKey, ensureLabel, fieldDefs, summary)
             } else {
@@ -351,7 +377,8 @@ export class ClickUpImportService {
                 })
                 .returning()
               summary.tasksCreated++
-              if (t.taskId) created.set(t.taskId, { ourId: task.id, parentId: t.parentId })
+              madeHere.add(task.id)
+              if (t.taskId) created.set(t.taskId, { ourId: task.id, parentId: t.parentId, title: t.title })
               if (!seenByKey.has(key)) seenByKey.set(key, task.id)
               await this.applyAssigneesTagsFields(task.id, t, memberByKey, ensureLabel, fieldDefs, summary)
             }
@@ -364,11 +391,26 @@ export class ClickUpImportService {
         }
       }
 
-      // Second pass: link subtasks to their parent, one level only.
+      // Second pass: link subtasks to their parent, one level only — each link
+      // asked as the routes ask it (`assertMayLinkSubtask`): a task merged into
+      // was already there, and the link changes it or puts a subtask under it.
+      // What is refused is reported in the rule's words, and that link is not made.
       for (const [, entry] of created) {
         if (!entry.parentId) continue
         const parent = created.get(entry.parentId)
         if (!parent || parent.parentId) continue
+        try {
+          await this.access.assertMayLinkSubtask(this.db, {
+            childId: entry.ourId,
+            parentId: parent.ourId,
+            actorId: userId,
+            childWasThere: !madeHere.has(entry.ourId),
+            parentWasThere: !madeHere.has(parent.ourId),
+          })
+        } catch (e: any) {
+          summary.errors.push(`Task "${entry.title}" under "${parent.title}": ${e?.message ?? 'unknown error'}`)
+          continue
+        }
         try {
           await this.db.update(tasks).set({ parentTaskId: parent.ourId }).where(eq(tasks.id, entry.ourId))
           summary.subtasksLinked++
@@ -387,7 +429,7 @@ export class ClickUpImportService {
           taskId: entry.ourId,
         }))
         try {
-          await this.enrichTasks(workspaceId, userId, dto.apiToken, mapping, { summary })
+          await this.enrichTasks(workspaceId, importer, dto.apiToken, mapping, { summary })
         } catch (e: any) {
           summary.errors.push(`ClickUp API enrichment failed: ${e?.message ?? 'unknown error'}`)
         }
@@ -428,15 +470,18 @@ export class ClickUpImportService {
   async enrichJob(
     workspaceId: string,
     jobId: string,
-    userId: string,
+    importer: Importer,
     input: { apiToken: string; mapping: TaskIdMapping },
   ): Promise<ImportSummary> {
+    const userId = importer.id
+    // An import too — of comments and files: a guest is refused, whatever a custom role grants them (`assertMayImport`).
+    await this.access.assertMayImport(this.db, { workspaceId, actorId: userId })
     const job = await this.getJob(workspaceId, jobId)
     if (!input.apiToken?.trim()) {
       throw new BadRequestException('apiToken is required to import ClickUp comments + attachments')
     }
     const mapping = Array.isArray(input.mapping) ? input.mapping : []
-    const summary = await this.enrichTasks(workspaceId, userId, input.apiToken, mapping)
+    const summary = await this.enrichTasks(workspaceId, importer, input.apiToken, mapping)
 
     const prevResult = (job.result ?? {}) as Record<string, unknown>
     await this.db
@@ -462,14 +507,21 @@ export class ClickUpImportService {
    * in-job token path (via `processImport`) and the follow-up `enrichJob`
    * endpoint. Per-item failures are collected into `summary.errors`, never
    * thrown, so one bad comment/file can't sink the batch.
+   *
+   * Only into a task its importer may write them into (`enrichmentRefusals`,
+   * `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change`): a
+   * task they may not open takes nothing, comments ask the comment rule and
+   * files the write rule at "edit", as their routes ask — each refusal
+   * reported in its rule's words, before ClickUp is asked for anything.
    */
   async enrichTasks(
     workspaceId: string,
-    userId: string,
+    importer: Importer,
     apiToken: string,
     mapping: TaskIdMapping,
     opts: { client?: ClickUpClientLike; summary?: ImportSummary } = {},
   ): Promise<ImportSummary> {
+    const userId = importer.id
     const summary = opts.summary ?? this.emptySummary()
     if (!apiToken?.trim()) {
       summary.errors.push('ClickUp API enrichment skipped: no API token provided')
@@ -504,38 +556,51 @@ export class ClickUpImportService {
         summary.errors.push(`Enrich: task ${taskId} is not in this workspace — skipped`)
         continue
       }
+      // What its importer may write into it (`enrichmentRefusals`), asked before ClickUp is.
+      const refused = await this.access.enrichmentRefusals(this.db, { workspaceId, taskId, importer })
+      if (refused.task) {
+        summary.errors.push(`Enrich: task ${taskId}: ${refused.task} — skipped`)
+        continue
+      }
+      if (refused.comments) summary.errors.push(`Comments for ClickUp task ${clickupTaskId}: ${refused.comments}`)
+      if (refused.attachments) summary.errors.push(`Attachments for ClickUp task ${clickupTaskId}: ${refused.attachments}`)
+      if (refused.comments && refused.attachments) continue
       tasksEnriched++
 
       // Comments — a whole-task fetch failure is recorded, then we move on.
-      try {
-        const comments = await client.getTaskComments(clickupTaskId)
-        for (const c of comments) {
-          try {
-            await this.importComment(taskId, userId, c, memberByKey)
-            summary.commentsImported++
-          } catch (e: any) {
-            summary.errors.push(`Comment ${c?.id} on ClickUp task ${clickupTaskId}: ${e?.message ?? 'error'}`)
+      if (!refused.comments) {
+        try {
+          const comments = await client.getTaskComments(clickupTaskId)
+          for (const c of comments) {
+            try {
+              await this.importComment(taskId, userId, c, memberByKey)
+              summary.commentsImported++
+            } catch (e: any) {
+              summary.errors.push(`Comment ${c?.id} on ClickUp task ${clickupTaskId}: ${e?.message ?? 'error'}`)
+            }
           }
+        } catch (e: any) {
+          summary.errors.push(`Comments for ClickUp task ${clickupTaskId}: ${e?.message ?? 'error'}`)
         }
-      } catch (e: any) {
-        summary.errors.push(`Comments for ClickUp task ${clickupTaskId}: ${e?.message ?? 'error'}`)
       }
 
       // Attachments — re-upload bytes to R2, then row the metadata.
-      try {
-        const attachments = await client.getTaskAttachments(clickupTaskId)
-        for (const att of attachments) {
-          try {
-            const outcome = await this.importAttachment(workspaceId, taskId, userId, att, client, r2Ready)
-            if (outcome === 'imported') summary.attachmentsImported++
-            else summary.attachmentsSkipped++
-          } catch (e: any) {
-            summary.attachmentsSkipped++
-            summary.errors.push(`Attachment ${att?.id} on ClickUp task ${clickupTaskId}: ${e?.message ?? 'error'}`)
+      if (!refused.attachments) {
+        try {
+          const attachments = await client.getTaskAttachments(clickupTaskId)
+          for (const att of attachments) {
+            try {
+              const outcome = await this.importAttachment(workspaceId, taskId, userId, att, client, r2Ready)
+              if (outcome === 'imported') summary.attachmentsImported++
+              else summary.attachmentsSkipped++
+            } catch (e: any) {
+              summary.attachmentsSkipped++
+              summary.errors.push(`Attachment ${att?.id} on ClickUp task ${clickupTaskId}: ${e?.message ?? 'error'}`)
+            }
           }
+        } catch (e: any) {
+          summary.errors.push(`Attachments for ClickUp task ${clickupTaskId}: ${e?.message ?? 'error'}`)
         }
-      } catch (e: any) {
-        summary.errors.push(`Attachments for ClickUp task ${clickupTaskId}: ${e?.message ?? 'error'}`)
       }
     }
 
@@ -707,29 +772,6 @@ export class ClickUpImportService {
       if (m.email) byKey.set(m.email.trim().toLowerCase(), m.userId)
     }
     return byKey
-  }
-
-  /** Existing tasks in the target scope, keyed by dupKey(listName, title). */
-  private async loadExistingTaskIndex(
-    workspaceId: string,
-    targetSpaceId?: string,
-  ): Promise<Map<string, string>> {
-    const where = targetSpaceId
-      ? and(eq(spaces.workspaceId, workspaceId), eq(spaces.id, targetSpaceId))
-      : eq(spaces.workspaceId, workspaceId)
-    const rows = await this.db
-      .select({ id: tasks.id, listName: lists.name, title: tasks.title })
-      .from(tasks)
-      .innerJoin(lists, eq(lists.id, tasks.listId))
-      .innerJoin(projects, eq(projects.id, lists.projectId))
-      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(where)
-    const index = new Map<string, string>()
-    for (const r of rows) {
-      const key = dupKey(r.listName, r.title)
-      if (!index.has(key)) index.set(key, r.id)
-    }
-    return index
   }
 
   private async ensureLabel(

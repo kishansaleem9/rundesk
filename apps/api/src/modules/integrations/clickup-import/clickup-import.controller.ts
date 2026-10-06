@@ -14,12 +14,17 @@ export class ClickUpImportController {
   constructor(private readonly svc: ClickUpImportService) {}
 
   @Post('preview')
+  // Asked as the import is: its duplicate count told any member or guest what
+  // a private space or list held (`found-6-oct/import-previews-tell-what-private-places-hold`).
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('workspace.import')
   @ApiOperation({ summary: 'Preview a ClickUp CSV — rows, lists, custom fields, duplicates' })
   preview(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: any,
     @Body() body: { csv: string; targetSpaceId?: string },
   ) {
-    return this.svc.preview(workspaceId, { csv: body.csv ?? '', targetSpaceId: body.targetSpaceId })
+    return this.svc.preview(workspaceId, { id: user.id, role: user.role }, { csv: body.csv ?? '', targetSpaceId: body.targetSpaceId })
   }
 
   @Post()
@@ -44,7 +49,7 @@ export class ClickUpImportController {
       apiToken?: string
     },
   ) {
-    return this.svc.startImport(workspaceId, user.id, body)
+    return this.svc.startImport(workspaceId, { id: user.id, role: user.role }, body)
   }
 
   @Get('jobs/:jobId')
@@ -72,7 +77,7 @@ export class ClickUpImportController {
       mapping?: Array<{ clickupTaskId: string; taskId: string }>
     },
   ) {
-    return this.svc.enrichJob(workspaceId, jobId, user.id, {
+    return this.svc.enrichJob(workspaceId, jobId, { id: user.id, role: user.role }, {
       apiToken: body.apiToken,
       mapping: body.mapping ?? [],
     })

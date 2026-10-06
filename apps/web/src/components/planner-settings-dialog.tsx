@@ -138,6 +138,8 @@ type Settings = {
   upcomingQuickJoin?: boolean
   upcomingDesktopNotify?: boolean
   defaultListId?: string | null
+  /** Read, never written: the chosen Default list is this workspace's, and in its trash. */
+  defaultListInTrash?: boolean
   railSections?: string[]
   weekStart?: string
   timezone?: string
@@ -329,11 +331,25 @@ export function PlannerSettingsDialog({
    * picker is the one control here that needs the whole workspace's lists, and
    * opening Appearance should not pay for it.
    */
-  const { data: lists = [] } = useQuery({
+  const { data: lists = [], isSuccess: listsLoaded } = useQuery({
     queryKey: ['planner-lists', workspaceId],
     queryFn: () => api<ListRow[]>(`/lists/workspace/${workspaceId}`),
     enabled: open && page === 'timeBlocking',
   })
+  /*
+   * THE LIST CHOSEN, WHEN IT IS IN THIS WORKSPACE'S TRASH — the one case in
+   * which `/task`, a message and the AI refuse, saying so, and send the person
+   * here to choose another (`found-5-oct/default-list-files-into-an-archived-list`).
+   * The select had no option for it, so it showed "The first list I can add
+   * to" as chosen while the server held the deleted list, and choosing that
+   * first option, already shown as chosen, saved nothing. Drawn as what it is,
+   * as the server says (`defaultListInTrash`): a list of another workspace, or
+   * one no longer open to them, is passed over for the first list they can add
+   * to, and that is what the select shows for it, as it did.
+   */
+  const chosenInTrash =
+    listsLoaded && settings?.defaultListInTrash === true && !!settings.defaultListId
+    && !lists.some((l) => l.id === settings.defaultListId)
 
   const save = useMutation({
     mutationFn: (patch: Settings) => api(`/planner/${workspaceId}/settings`, { method: 'PATCH', body: patch }),
@@ -802,6 +818,11 @@ export function PlannerSettingsDialog({
                     className="h-8 max-w-[14rem] rounded-md border border-border bg-background px-2 text-[12px]"
                   >
                     <option value="">{t('plannerSettings.defaultListPersonal')}</option>
+                    {chosenInTrash && (
+                      <option value={settings?.defaultListId ?? ''} data-testid="planner-default-list-in-trash">
+                        {t('plannerSettings.defaultListInTrash')}
+                      </option>
+                    )}
                     {lists.map((l) => (
                       <option key={l.id} value={l.id}>{l.name}</option>
                     ))}

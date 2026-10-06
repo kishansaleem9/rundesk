@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 import { ForbiddenException } from '@nestjs/common'
+import { LIST_IN_TRASH_ASK, LIST_IN_TRASH_RESTORE, ListInTrashException } from '../../common/permissions/task-create'
 import { lists, spaces, spaceMembers, tasks, users, workspaceMembers } from '@rundesk/db'
 import { TasksService } from './tasks.service'
 
@@ -51,14 +52,14 @@ function makeDb(rows: Rows) {
   return { db, updates }
 }
 
-function mover(target: Record<string, unknown>, accountRole = 'member') {
+function mover(target: Record<string, unknown>, accountRole = 'member', workspaceRole = 'member') {
   const { db, updates } = makeDb(new Map<unknown, unknown[]>([
     [lists, [{
       workspaceId: 'w1', spaceId: 's2', spaceVisibility: 'public', projectId: 'p2', projectVisibility: null,
       listVisibility: 'public', listCreatedById: 'the-admin', ...target,
     }]],
     [spaces, [{ workspaceId: 'w1', defaultPermission: 'admin', id: 's2' }]], // Full edit: the create gate passes
-    [workspaceMembers, [{ role: 'member' }]],
+    [workspaceMembers, [{ role: workspaceRole }]],
     [spaceMembers, []],
     [users, [{ role: accountRole }]],
     // The task where it is now, read before it is moved.
@@ -124,5 +125,29 @@ describe('moving a task into a list its mover may not open (found-30-sep/private
     const moved = await refusal(svc.moveTask('t1', 'a-super-admin', 'l2', 0))
     assert.equal(moved, null, `refused: ${(moved as Error)?.message}`)
     assert.equal(updates.length, 1, 'the task was not moved')
+  })
+})
+
+/*
+ * NOR INTO A LIST IN THE TRASH (`found-5-oct/default-list-files-into-an-archived-list`).
+ * The create gate refused a deleted list and a move did not: a member moved
+ * their task into a list an admin had deleted (201), out of every list of
+ * lists, for the purge to take. Refused in the gate's words, and what to do is
+ * said by the Trash's rule: an admin, or whoever deleted it, restores it.
+ */
+describe('moving a task into a list in the trash', () => {
+  it('refuses it, 409, telling a member who did not delete it to ask for it to be restored, and moves nothing', async () => {
+    const { svc, updates } = mover({ listInTrash: true, listDeletedById: 'the-admin' })
+    const refused = await refusal(svc.moveTask('t1', 'a-member', 'l2', 0))
+    assert.ok(refused instanceof ListInTrashException, `answered ${(refused as Error)?.constructor?.name}: ${(refused as Error)?.message}`)
+    assert.equal((refused as Error).message, LIST_IN_TRASH_ASK)
+    assert.equal(updates.length, 0, 'the task was moved into a list in the trash')
+  })
+
+  it('and tells a workspace admin to restore it', async () => {
+    const { svc, updates } = mover({ listInTrash: true, listDeletedById: 'somebody-else' }, 'member', 'workspace_admin')
+    const refused = await refusal(svc.moveTask('t1', 'an-admin', 'l2', 0))
+    assert.equal((refused as Error)?.message, LIST_IN_TRASH_RESTORE)
+    assert.equal(updates.length, 0)
   })
 })

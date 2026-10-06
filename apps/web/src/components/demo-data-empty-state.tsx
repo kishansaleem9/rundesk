@@ -22,6 +22,7 @@ import {
 import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { usePermissions } from '../hooks/use-permissions'
+import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { InlineSkeleton } from './loading-skeletons'
 
 /**
@@ -42,6 +43,10 @@ export function DemoDataEmptyState({
   const { t } = useTranslation()
   const qc = useQueryClient()
   const mayImport = usePermissions(workspaceId).can('workspace.import') === true
+  // A guest does not import, whatever a custom role grants them, and loading
+  // sample data is an import: the API refuses them it
+  // (`found-6-oct/a-guest-who-may-import-makes-a-space`), so it is not offered.
+  const guest = useWorkspaceRole(workspaceId).role === 'guest'
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [dismissed, setDismissed] = useState<boolean>(() => {
     try {
@@ -89,8 +94,8 @@ export function DemoDataEmptyState({
   if (spacesQuery.isLoading) return <>{children}</>
   if ((spacesQuery.data?.length ?? 0) > 0) return <>{children}</>
   if (dismissed) return <>{children}</>
-  // Loading sample data is an import: `workspace.import`, which the API asks.
-  if (!mayImport) return <>{children}</>
+  // Loading sample data is an import: `workspace.import`, which the API asks — of a member.
+  if (!mayImport || guest) return <>{children}</>
 
   return (
     <div className="max-w-3xl mx-auto py-12 px-4">

@@ -58,7 +58,7 @@ const argOf = (name, fallback) => {
  * run that still passes — and half of this suite is branches that only run once
  * an earlier step really happened.
  */
-const EXPECTED_CHECKS = 43
+const EXPECTED_CHECKS = 53
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -1070,7 +1070,406 @@ try {
     `job ${rowAloneJob?.status ?? 'none'} (created ${rowAloneJob?.createdCount}, errors ${JSON.stringify(rowAloneErrors)}); tasks there: ${JSON.stringify(rowAloneTasks)}`,
   )
 
-  // ══ 12. IMPORTS THAT RUN WHILE EVERYTHING ELSE DOES ═════════════════════════
+  // ══ 12. WHO MAY IMPORT, AND WHICH TASKS AN IMPORT MAY MATCH AND MERGE INTO ═══
+  /*
+   * Three items of 6 October, measured on lane 4 on the build that closed the
+   * import items of the 5th:
+   *   · `found-6-oct/import-previews-tell-what-private-places-hold` — both
+   *     previews answered any member or guest, and counted a private space's
+   *     task and a private list's task as duplicates (1 each, against 0 for a
+   *     row naming nothing) while `GET` of them answered 403;
+   *   · `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change` — a
+   *     member granted workspace.import merged into a view-only space's task, a
+   *     task of a project they are at View on, a private list's and a private
+   *     space's, with a space named or not, both importers: all came out Done
+   *     and Low;
+   *   · `found-6-oct/a-guest-who-may-import-makes-a-space` — a guest granted
+   *     workspace.import imported a file naming no space, and a new public
+   *     space, made by nobody, held their project and task; both importers.
+   * And, from the review of their first fix, on lane 4: a ClickUp merge put a
+   * task the member could only Comment on under a new task, a new task under
+   * one they could not Full-edit, and made chains two deep and a task its own
+   * parent; the ClickUp enrichment wrote comments into a private space's task
+   * and a view-only space's; no check held a private task, or measured the
+   * level a merge asks of an assignee at Comment.
+   * Each answer is read off the API and each write off the database.
+   */
+  /** Somebody of this run's workspace, in `role`, holding `permissions` by a custom role of their own. */
+  const joined = async (key, role, permissions = []) => {
+    const email = `${TAG}-${key}@rundesk.invalid`
+    const password = 'ImportTargets@12345!'
+    const person = await signUpApi(API, { fullName: `${key} ${TAG}`, email, password, organizationName: `${key} ${TAG}`, organizationSlug: `${key}-${stamp}` })
+    const add = await api(`/workspaces/${WT}/members`, { method: 'POST', body: { email, role } })
+    if (!add.ok) throw new Error(`could not add the ${key}: ${add.status} ${add.message}`)
+    const [row] = await sql`select m.id, m.user_id from workspace_members m join users u on u.id = m.user_id where m.workspace_id = ${WT} and u.email = ${email}`
+    if (permissions.length > 0) {
+      const made = await api(`/workspaces/${WT}/roles`, { method: 'POST', body: { name: `${key} ${TAG}`, permissions } })
+      const given = made.data?.id ? await api(`/workspaces/${WT}/members/${row.id}/roles/${made.data.id}`, { method: 'POST', body: {} }) : null
+      if (!given?.ok) throw new Error(`could not grant the ${key} ${permissions.join(', ')}: ${made.status} ${made.message}; ${given?.status} ${given?.message}`)
+    }
+    return { email, password, userId: row.user_id, as: apiClient(API, person.accessToken) }
+  }
+  /** A list of the admin's, in a project of its own in `spaceId`, holding one task In progress and High. */
+  const placed = async (spaceId, list, title, listExtra = {}) => {
+    const project = await api('/projects', { method: 'POST', body: { spaceId, name: `${list} project` } })
+    if (!project.data?.id) throw new Error(`could not make the project of "${list}": ${project.status} ${project.message}`)
+    const made = await api('/lists', { method: 'POST', body: { projectId: project.data.id, name: list, ...listExtra } })
+    if (!made.data?.id) throw new Error(`could not make the list "${list}": ${made.status} ${made.message}`)
+    const task = await api('/tasks', { method: 'POST', body: { listId: made.data.id, title, status: 'in_progress', priority: 'high' } })
+    if (!task.data?.id) throw new Error(`could not make "${title}": ${task.status} ${task.message}`)
+    return { list, title, id: task.data.id, project: project.data.id }
+  }
+  const [memberOf] = await sql`select user_id from workspace_members where id = ${memberRow.id}`
+  const P = {
+    viewOnly: await placed(VIEW_ONLY, `Shared ${TAG}`, `View-only task ${TAG}`),
+    narrowed: await placed(OPEN, `Narrowed ${TAG}`, `Narrowed task ${TAG}`),
+    privateList: await placed(OPEN, `Secret ${TAG}`, `Private-list task ${TAG}`, { visibility: 'private' }),
+    privateSpace: await placed(PRIVATE, `Hidden ${TAG}`, `Private-space task ${TAG}`),
+    // In an open list, the admin's and made private: its creator's, its assignees' and the managers'.
+    privateTask: await placed(OPEN, `Closed ${TAG}`, `Private task ${TAG}`),
+    mine: await placed(OPEN, `Mine ${TAG}`, `Open task ${TAG}`),
+  }
+  // The member's own grant on the narrowed project: View, which reads its tasks and changes none.
+  const narrowedTo = await api(`/projects/${P.narrowed.project}/members`, { method: 'POST', body: { userId: memberOf.user_id, role: 'view' } })
+  if (!narrowedTo.ok) throw new Error(`could not set the member to View on the narrowed project: ${narrowedTo.status} ${narrowedTo.message}`)
+  const madePrivate = await api(`/tasks/${P.privateTask.id}`, { method: 'PATCH', body: { visibility: 'private' } })
+  if (!madePrivate.ok) throw new Error(`could not make the private task private: ${madePrivate.status} ${madePrivate.message}`)
+  const privateRead = await M(`/tasks/${P.privateTask.id}`)
+  if (privateRead.status !== 403) throw new Error(`the member was meant to be refused the private task, and read it: ${privateRead.status} ${privateRead.message}`)
+  const rowsOf = (head, keys, extra = '') => `${head}\n${keys.map((k) => `${P[k].title},${P[k].list}${extra}`).join('\n')}\n`
+
+  console.log('\n▶ who may preview: a member and a guest without workspace.import')
+  const noKeyMember = await joined('nokey-member', 'member')
+  const noKeyGuest = await joined('nokey-guest', 'guest')
+  const previewsBy = async (who) => ({
+    sheet: await who.as(`/workspaces/${WT}/import/spreadsheet/preview`, { method: 'POST', body: { content: rowsOf('Title,List', ['privateSpace']), preset: 'generic' } }),
+    clickup: await who.as(`/workspaces/${WT}/import/clickup/preview`, { method: 'POST', body: { csv: rowsOf('Task Name,List', ['privateSpace']) } }),
+  })
+  const byNoKeyMember = await previewsBy(noKeyMember)
+  const byNoKeyGuest = await previewsBy(noKeyGuest)
+  const KEY_WORDS = 'Missing required permission: workspace.import'
+  const keyAsked = (r) => r.status === 403 && r.message === KEY_WORDS
+  const previewSaid = (r) => `${r.status} ${JSON.stringify(r.message || null)}${r.data ? ` (duplicates ${JSON.stringify(r.data.duplicates)})` : ''}`
+  chk(
+    keyAsked(byNoKeyMember.sheet) && keyAsked(byNoKeyMember.clickup) && keyAsked(byNoKeyGuest.sheet) && keyAsked(byNoKeyGuest.clickup),
+    'a member and a guest without workspace.import are refused both previews, 403 “Missing required permission: workspace.import”, as the imports refuse them',
+    `the member: sheet ${previewSaid(byNoKeyMember.sheet)}, clickup ${previewSaid(byNoKeyMember.clickup)}; the guest: sheet ${previewSaid(byNoKeyGuest.sheet)}, clickup ${previewSaid(byNoKeyGuest.clickup)}`,
+  )
+
+  console.log('\n▶ what a preview counts for a member granted workspace.import')
+  const counted = {
+    sheet: await M(`/workspaces/${WT}/import/spreadsheet/preview`, { method: 'POST', body: { content: rowsOf('Title,List', ['privateSpace', 'privateList', 'privateTask', 'mine']), preset: 'generic' } }),
+    clickup: await M(`/workspaces/${WT}/import/clickup/preview`, { method: 'POST', body: { csv: rowsOf('Task Name,List', ['privateSpace', 'privateList', 'privateTask', 'mine']) } }),
+  }
+  const countedTitles = (counted.clickup.data?.duplicates?.sample ?? []).map((d) => d.title)
+  chk(
+    counted.sheet.status === 201 && counted.sheet.data?.duplicates === 1 &&
+      counted.clickup.status === 201 && counted.clickup.data?.duplicates?.count === 1 && countedTitles.length === 1 && countedTitles[0] === P.mine.title,
+    'for a member granted workspace.import, both previews count as a duplicate only the task they may open — not a private space’s task, a private list’s or a private task',
+    `sheet ${counted.sheet.status} ${JSON.stringify(counted.sheet.message || null)}: ${JSON.stringify(counted.sheet.data?.duplicates)} duplicate(s); ` +
+      `clickup ${counted.clickup.status} ${JSON.stringify(counted.clickup.message || null)}: ${JSON.stringify(counted.clickup.data?.duplicates)}`,
+  )
+
+  /** Each named task's status and priority, by SQL. */
+  const statesOf = async (keys) => Object.fromEntries(await Promise.all(keys.map(async (k) => {
+    const [t] = await sql`select status, priority from tasks where id = ${P[k].id}`
+    return [k, `${t?.status}/${t?.priority}`]
+  })))
+  const AS_MADE = 'in_progress/high'
+  /** A merge by the member, Done and Low on every row; `scope` names its space, or none. */
+  const mergeBy = async (kind, scope, keys, name) => {
+    const rows = rowsOf(kind === 'spreadsheet' ? 'Title,List,Status,Priority' : 'Task Name,List,Status,Priority', keys, ',Done,Low')
+    const where = { targetProjectName: name, ...(scope ? { targetSpaceId: scope } : {}) }
+    const run = await M(`/workspaces/${WT}/import/${kind}`, {
+      method: 'POST',
+      body: kind === 'spreadsheet' ? { content: rows, preset: 'generic', strategy: 'merge', ...where } : { csv: rows, strategy: 'merge', ...where },
+    })
+    return { run, job: await jobOf(M, WT, kind, run) }
+  }
+
+  console.log('\n▶ a merge by a member granted workspace.import, into tasks they may open and not change')
+  const writeRuns = []
+  /** Each named task back as it was made, so a run is read on its own and not on what an earlier one left. */
+  const asMade = async (keys) => {
+    for (const k of keys) await sql`update tasks set status = 'in_progress', status_category = 'in_progress', priority = 'high' where id = ${P[k].id}`
+  }
+  for (const [kind, scope, keys] of [
+    ['spreadsheet', null, ['viewOnly', 'narrowed', 'mine']],
+    ['clickup', null, ['viewOnly', 'narrowed', 'mine']],
+    ['spreadsheet', OPEN, ['narrowed', 'mine']],
+    ['clickup', OPEN, ['narrowed', 'mine']],
+  ]) {
+    await asMade(keys)
+    const { run, job } = await mergeBy(kind, scope, keys, `Write rule ${kind} ${scope ? 'open' : 'nowhere'} ${TAG}`)
+    const errors = job?.result?.errors ?? []
+    const refused = keys.filter((k) => k !== 'mine')
+    const tasks = await statesOf(keys)
+    writeRuns.push({
+      kind, scope: scope ? 'the open space' : 'no space', started: run.status, job: job?.status ?? 'none', updated: job?.updatedCount, errors, tasks,
+      ok: run.status === 201 && job?.status === 'completed' && job?.updatedCount === 1 && tasks.mine === 'done/low' &&
+        refused.every((k) => tasks[k] === AS_MADE) && errors.length === refused.length &&
+        refused.every((k) => errors.some((e) => e.includes(`"${P[k].title}"`) && /which does not allow changing its tasks$/.test(e))),
+    })
+  }
+  chk(
+    writeRuns.every((r) => r.ok),
+    'a merge by a member granted workspace.import changes only the task they may change — both importers, with a space named and without: a view-only space’s task and a task of a project they are at View on stay as they were, each row refused in the write rule’s words',
+    writeRuns.map((r) => `${r.kind} into ${r.scope}: ${r.started}, job ${r.job} (updated ${r.updated}); tasks ${JSON.stringify(r.tasks)}; errors ${JSON.stringify(r.errors)}`).join(' | '),
+  )
+
+  console.log('\n▶ a merge by a member granted workspace.import, into a task assigned to them in a space at Comment')
+  /*
+   * The level a merge asks is the routes' for the same change: a status alone is what an assignee
+   * at Comment may change (their `PATCH` of a status alone answers 200), and any other field asks
+   * Edit (their `PATCH` of a priority alone answers 403). The member above is no assignee, and
+   * below Edit a non-assignee is refused at either level — so a merge asking "comment" of every
+   * field passed every check (the review's mutation, measured on lane 4: a Priority and a
+   * Description merged into the assignee's task).
+   */
+  const COMMENT_SPACE = await spaceIn('Comment-level', { defaultPermission: 'comment' })
+  /** The admin's task in a list of its own in the Comment space, assigned to the member. */
+  const assignedIn = async (list, title) => {
+    const task = await placed(COMMENT_SPACE, list, title)
+    const assigned = await api(`/tasks/${task.id}/assignees`, { method: 'POST', body: { userId: memberOf.user_id } })
+    if (!assigned.ok) throw new Error(`could not assign the member "${title}": ${assigned.status} ${assigned.message}`)
+    return task
+  }
+  const assignedTask = await assignedIn(`Assigned ${TAG}`, `Assigned task ${TAG}`)
+  const COMMENT_WORDS = `This space's default permission is "Comment", which does not allow changing its tasks`
+  const levelRuns = []
+  for (const kind of ['spreadsheet', 'clickup']) {
+    for (const [what, head, cells] of [
+      ['a status alone', 'Status', 'Done'],
+      ['a priority and a description', 'Priority,Description', 'Low,Rewritten by a merge'],
+    ]) {
+      await sql`update tasks set status = 'in_progress', status_category = 'in_progress', priority = 'high', description = null where id = ${assignedTask.id}`
+      const name = `Level ${kind} ${what} ${TAG}`
+      const rows = `${kind === 'spreadsheet' ? 'Title' : 'Task Name'},List,${head}\n${assignedTask.title},${assignedTask.list},${cells}\n`
+      const run = await M(`/workspaces/${WT}/import/${kind}`, {
+        method: 'POST',
+        body: kind === 'spreadsheet' ? { content: rows, preset: 'generic', strategy: 'merge', targetProjectName: name } : { csv: rows, strategy: 'merge', targetProjectName: name },
+      })
+      const job = await jobOf(M, WT, kind, run)
+      const [task] = await sql`select status, priority, description from tasks where id = ${assignedTask.id}`
+      levelRuns.push({ kind, what, started: run.status, job: job?.status ?? 'none', updated: job?.updatedCount, errors: job?.result?.errors ?? [], task })
+    }
+  }
+  chk(
+    levelRuns.every((r) => r.started === 201 && r.job === 'completed') &&
+      levelRuns.filter((r) => r.what === 'a status alone').every((r) => r.updated === 1 && r.errors.length === 0 && r.task?.status === 'done' && r.task?.priority === 'high') &&
+      levelRuns.filter((r) => r.what !== 'a status alone').every((r) =>
+        r.updated === 0 && r.errors.length === 1 && r.errors[0].includes(`"${assignedTask.title}"`) && r.errors[0].endsWith(COMMENT_WORDS) &&
+        r.task?.status === 'in_progress' && r.task?.priority === 'high' && r.task?.description === null),
+    'a merge by a member granted workspace.import into a task assigned to them in a space at Comment writes a status alone, and refuses a priority or a description in the write rule’s words, leaving the task as it was — both importers',
+    levelRuns.map((r) => `${r.kind}, ${r.what}: ${r.started}, job ${r.job} (updated ${r.updated}); task ${JSON.stringify(r.task)}; errors ${JSON.stringify(r.errors)}`).join(' | '),
+  )
+
+  console.log('\n▶ a merge by a member granted workspace.import, naming tasks they may not open')
+  const readRuns = []
+  for (const [kind, scope, keys] of [
+    ['spreadsheet', null, ['privateList', 'privateSpace', 'privateTask']],
+    ['clickup', null, ['privateList', 'privateSpace', 'privateTask']],
+    ['spreadsheet', OPEN, ['privateList', 'privateTask']],
+    ['clickup', OPEN, ['privateList', 'privateTask']],
+  ]) {
+    await asMade(keys)
+    const name = `Read rule ${kind} ${scope ? 'open' : 'nowhere'} ${TAG}`
+    const { run, job } = await mergeBy(kind, scope, keys, name)
+    const errors = job?.result?.errors ?? []
+    const tasks = await statesOf(keys)
+    // What the run made: its rows, as new tasks in the lists of its own project — taken
+    // away again, as they are tasks the member may open, which the next run would match.
+    const made = (await sql`select t.title from tasks t join lists l on l.id = t.list_id join projects p on p.id = l.project_id where p.name = ${name} order by t.title`).map((t) => t.title)
+    await sql`delete from tasks t using lists l, projects p where t.list_id = l.id and l.project_id = p.id and p.name = ${name}`
+    readRuns.push({
+      kind, scope: scope ? 'the open space' : 'no space', started: run.status, job: job?.status ?? 'none', created: job?.createdCount, updated: job?.updatedCount, errors, tasks, made,
+      ok: run.status === 201 && job?.status === 'completed' && job?.updatedCount === 0 && job?.createdCount === keys.length && errors.length === 0 &&
+        keys.every((k) => tasks[k] === AS_MADE && made.includes(P[k].title)),
+    })
+  }
+  chk(
+    readRuns.every((r) => r.ok),
+    'a merge by a member granted workspace.import matches no task they may not open — both importers, with a space named and without: a private list’s task, a private space’s and a private task stay as they were, and each row is imported as a new task, with no refusal to say the other is there',
+    readRuns.map((r) => `${r.kind} into ${r.scope}: ${r.started}, job ${r.job} (created ${r.created}, updated ${r.updated}); tasks ${JSON.stringify(r.tasks)}; made ${JSON.stringify(r.made)}; errors ${JSON.stringify(r.errors)}`).join(' | '),
+  )
+
+  console.log('\n▶ a ClickUp merge by a member granted workspace.import, its rows naming their parents')
+  /*
+   * The second pass links a row to its Parent ID's row, and it took the tasks the run MERGED
+   * into as its own: a member assigned a task at Comment merged its status, and with it put the
+   * task under a new task of the import, which their `PATCH` of its parent was refused (403); a
+   * new task went under a task in an Edit space, which their `POST /tasks` under it was refused,
+   * Full edit being asked (measured on lane 4). A link now asks what those routes ask
+   * (`assertMayLinkSubtask`).
+   */
+  const EDIT_SPACE = await spaceIn('Edit-level', { defaultPermission: 'edit' })
+  const atComment = await assignedIn(`Linked ${TAG}`, `Assigned and linked ${TAG}`)
+  const atEdit = await placed(EDIT_SPACE, `Edited ${TAG}`, `Edit-level task ${TAG}`)
+  const linkCsv = [
+    'Task ID,Parent ID,Task Name,List,Status',
+    `cu-x,cu-np,${atComment.title},${atComment.list},complete`,
+    `cu-np,,New parent ${TAG},Links ${TAG},`,
+    `cu-y,,${atEdit.title},${atEdit.list},complete`,
+    `cu-nc,cu-y,New child ${TAG},Links ${TAG},`,
+  ].join('\n') + '\n'
+  const linkRun = await M(`/workspaces/${WT}/import/clickup`, { method: 'POST', body: { csv: linkCsv, strategy: 'merge', targetProjectName: `Links ${TAG}` } })
+  const linkJob = await jobOf(M, WT, 'clickup', linkRun)
+  const [linkedX] = await sql`select status, parent_task_id from tasks where id = ${atComment.id}`
+  const [linkedY] = await sql`select status, (select count(*)::int from tasks c where c.parent_task_id = ${atEdit.id}) as subtasks from tasks where id = ${atEdit.id}`
+  const [newChild] = await sql`select parent_task_id from tasks where title = ${`New child ${TAG}`}`
+  const linkErrors = linkJob?.result?.errors ?? []
+  chk(
+    linkRun.status === 201 && linkJob?.status === 'completed' && linkJob?.updatedCount === 2 && linkJob?.createdCount === 2 &&
+      linkedX?.status === 'done' && linkedX?.parent_task_id === null && linkedY?.status === 'done' && linkedY?.subtasks === 0 &&
+      !!newChild && newChild.parent_task_id === null && linkErrors.length === 2 &&
+      linkErrors.includes(`Task "${atComment.title}" under "New parent ${TAG}": ${COMMENT_WORDS}`) &&
+      linkErrors.some((e) => e.startsWith(`Task "New child ${TAG}" under "${atEdit.title}": This space's default permission is "Edit", which does not allow `)),
+    'a ClickUp merge by a member granted workspace.import links a subtask to or under a task that was already there only as the routes let them: their task at Comment is merged and stays where it was, and nothing goes under a task they may not Full-edit — each link refused in the rule’s words',
+    `${linkRun.status}, job ${linkJob?.status ?? 'none'} (created ${linkJob?.createdCount}, updated ${linkJob?.updatedCount}, subtasks linked ${linkJob?.result?.subtasksLinked}); ` +
+      `the task at Comment ${JSON.stringify(linkedX ?? null)}; the task at Edit ${JSON.stringify(linkedY ?? null)}; the new child ${JSON.stringify(newChild ?? null)}; errors ${JSON.stringify(linkErrors)}`,
+  )
+
+  console.log('\n▶ a ClickUp merge whose links would nest two deep, or make a task its own parent')
+  /*
+   * The pass kept one level by the file alone, and a task merged into brings what it already
+   * has: a task with a subtask went under a new task, and a new task under a subtask — two deep,
+   * where both routes refuse it — and two rows of one list and title, one naming the other its
+   * parent, made that task its own parent (measured on lane 4, the admin importing).
+   */
+  const nestTop = await placed(OPEN, `Nest ${TAG}`, `Top with a subtask ${TAG}`)
+  const [{ list_id: nestList }] = await sql`select list_id from tasks where id = ${nestTop.id}`
+  const nestTask = async (title, parentTaskId) => {
+    const made = await api('/tasks', { method: 'POST', body: { listId: nestList, title, ...(parentTaskId ? { parentTaskId } : {}) } })
+    if (!made.data?.id) throw new Error(`could not make "${title}": ${made.status} ${made.message}`)
+    return made.data.id
+  }
+  await nestTask(`Its subtask ${TAG}`, nestTop.id)
+  await nestTask(`A subtask ${TAG}`, await nestTask(`Second top ${TAG}`))
+  await nestTask(`Alone ${TAG}`)
+  const nestCsv = [
+    'Task ID,Parent ID,Task Name,List',
+    `cu-top,cu-np2,Top with a subtask ${TAG},Nest ${TAG}`,
+    `cu-sub,,A subtask ${TAG},Nest ${TAG}`,
+    `cu-s1,,Alone ${TAG},Nest ${TAG}`,
+    `cu-s2,cu-s1,Alone ${TAG},Nest ${TAG}`,
+    `cu-np2,,New top ${TAG},Deep ${TAG}`,
+    `cu-ng,cu-sub,New grandchild ${TAG},Deep ${TAG}`,
+  ].join('\n') + '\n'
+  const nestRun = await api(`/workspaces/${WT}/import/clickup`, { method: 'POST', body: { csv: nestCsv, strategy: 'merge', targetProjectName: `Deep ${TAG}` } })
+  const nestJob = await jobOf(api, WT, 'clickup', nestRun)
+  const inWT = sql`select t.id, t.title, t.parent_task_id from tasks t join lists l on l.id = t.list_id join projects pr on pr.id = l.project_id join spaces sp on sp.id = pr.space_id where sp.workspace_id = ${WT}`
+  const wtTasks = await inWT
+  const parentOf = new Map(wtTasks.map((t) => [t.id, t.parent_task_id]))
+  const twoDeep = wtTasks.filter((t) => t.parent_task_id && parentOf.get(t.parent_task_id)).map((t) => t.title)
+  const ownParent = wtTasks.filter((t) => t.parent_task_id === t.id).map((t) => t.title)
+  const nestErrors = nestJob?.result?.errors ?? []
+  const NEST_REFUSED = [
+    `Task "Top with a subtask ${TAG}" under "New top ${TAG}": A task with subtasks cannot become a subtask itself`,
+    `Task "Alone ${TAG}" under "Alone ${TAG}": A task cannot be its own parent`,
+    `Task "New grandchild ${TAG}" under "A subtask ${TAG}": Subtasks can only be nested one level deep`,
+  ]
+  chk(
+    nestRun.status === 201 && nestJob?.status === 'completed' && twoDeep.length === 0 && ownParent.length === 0 &&
+      nestErrors.length === NEST_REFUSED.length && NEST_REFUSED.every((e) => nestErrors.includes(e)),
+    'a ClickUp merge makes no task its own parent and nothing two deep: a task with a subtask goes under no other, and nothing goes under a subtask — each link refused in the routes’ words',
+    `${nestRun.status}, job ${nestJob?.status ?? 'none'} (subtasks linked ${nestJob?.result?.subtasksLinked}); two deep: ${JSON.stringify(twoDeep)}; its own parent: ${JSON.stringify(ownParent)}; errors ${JSON.stringify(nestErrors)}`,
+  )
+  // A task left its own parent would loop whatever reads up its chain; none is, after a passing run.
+  await sql`update tasks set parent_task_id = null where parent_task_id = id and id in (select t.id from tasks t join lists l on l.id = t.list_id join projects pr on pr.id = l.project_id join spaces sp on sp.id = pr.space_id where sp.workspace_id = ${WT})`
+
+  console.log('\n▶ the ClickUp enrichment, by a member granted workspace.import, naming tasks they may not open or change')
+  /*
+   * The enrichment asked only that a mapped task was in the workspace: this member named a
+   * private space's task they are refused and a view-only space's task whose comments they are
+   * refused, and was answered 201 with both enriched; given ClickUp's answer each took a comment,
+   * filed under whichever member its author's name matched (measured on lane 4, at the service:
+   * ClickUp is not reached from the lanes). The token here is no token, so nothing it refuses may
+   * reach ClickUp to fail there.
+   */
+  const enrichAsked = await M(`/workspaces/${WT}/import/clickup/jobs/${linkRun.data?.jobId}/enrich`, {
+    method: 'POST',
+    body: { apiToken: 'not-a-token', mapping: [{ clickupTaskId: 'rv-h', taskId: P.privateSpace.id }, { clickupTaskId: 'rv-v', taskId: P.viewOnly.id }] },
+  })
+  const enrichErrors = enrichAsked.data?.errors ?? []
+  const [wroteInto] = await sql`
+    select (select count(*)::int from task_comments where task_id in (${P.privateSpace.id}, ${P.viewOnly.id})) as comments,
+           (select count(*)::int from task_attachments where task_id in (${P.privateSpace.id}, ${P.viewOnly.id})) as files`
+  const ENRICH_REFUSED = [
+    `Enrich: task ${P.privateSpace.id}: You do not have access to this task — skipped`,
+    `Comments for ClickUp task rv-v: This space's default permission is "View only", which does not allow changing its comments`,
+    `Attachments for ClickUp task rv-v: This space's default permission is "View only", which does not allow changing its tasks`,
+  ]
+  chk(
+    linkRun.data?.jobId && enrichAsked.status === 201 && enrichAsked.data?.enrichment?.tasksEnriched === 0 &&
+      enrichErrors.length === ENRICH_REFUSED.length && ENRICH_REFUSED.every((e) => enrichErrors.includes(e)) &&
+      wroteInto.comments === 0 && wroteInto.files === 0,
+    'the ClickUp enrichment by a member granted workspace.import takes nothing into a private space’s task they may not open, nor into a view-only space’s task they may not comment on or change — each refused in its rule’s words, before ClickUp is asked',
+    `${enrichAsked.status} ${JSON.stringify(enrichAsked.message || null)}: enriched ${JSON.stringify(enrichAsked.data?.enrichment?.tasksEnriched)}; errors ${JSON.stringify(enrichErrors)}; on those tasks now ${JSON.stringify(wroteInto)}`,
+  )
+
+  console.log('\n▶ a guest granted workspace.import by a custom role')
+  const guestImporter = await joined('guest-importer', 'guest', ['workspace.import'])
+  const GI = guestImporter.as
+  const guestAsked = {
+    sheetPreview: await GI(`/workspaces/${WT}/import/spreadsheet/preview`, { method: 'POST', body: { content: `Title\nGuest row ${TAG}\n`, preset: 'generic' } }),
+    clickupPreview: await GI(`/workspaces/${WT}/import/clickup/preview`, { method: 'POST', body: { csv: `Task Name\nGuest row ${TAG}\n` } }),
+    sheet: await GI(`/workspaces/${WT}/import/spreadsheet`, { method: 'POST', body: { content: `Title\nGuest sheet task ${TAG}\n`, preset: 'generic', targetProjectName: `Guest sheet ${TAG}` } }),
+    clickup: await GI(`/workspaces/${WT}/import/clickup`, { method: 'POST', body: { csv: `Task Name\nGuest clickup task ${TAG}\n`, targetProjectName: `Guest clickup ${TAG}` } }),
+    // The admin's ClickUp import of section 8: its comments and files are an import too.
+    enrich: await GI(`/workspaces/${WT}/import/clickup/jobs/${capsClickup.data?.jobId}/enrich`, { method: 'POST', body: { apiToken: 'not-a-token', mapping: [] } }),
+  }
+  await jobOf(GI, WT, 'spreadsheet', guestAsked.sheet)
+  await jobOf(GI, WT, 'clickup', guestAsked.clickup)
+  const guestLeft = (await sql`
+    select (select count(*)::int from spaces where workspace_id = ${WT} and name in (${`Guest sheet ${TAG}`}, ${`Guest clickup ${TAG}`})) as spaces,
+           (select count(*)::int from tasks where title in (${`Guest sheet task ${TAG}`}, ${`Guest clickup task ${TAG}`})) as tasks,
+           (select count(*)::int from clickup_import_jobs where workspace_id = ${WT} and created_by_id = ${guestImporter.userId}) as jobs`)[0]
+  const GUEST_WORDS = 'Guests cannot import data into a workspace'
+  chk(
+    capsClickup.data?.jobId && Object.values(guestAsked).every((r) => r.status === 403 && r.message === GUEST_WORDS) &&
+      guestLeft.spaces === 0 && guestLeft.tasks === 0 && guestLeft.jobs === 0,
+    'a guest granted workspace.import by a custom role is refused both previews, both imports and the ClickUp enrichment, 403 “Guests cannot import data into a workspace” — and no space, task or job row of theirs is made',
+    `${Object.entries(guestAsked).map(([k, r]) => `${k} ${r.status} ${JSON.stringify(r.message || null)}`).join('; ')}; left behind: ${JSON.stringify(guestLeft)}`,
+  )
+
+  console.log('\n▶ the import page, for that guest')
+  const guestCtx = await browser.newContext({ viewport: { width: 1400, height: 950 }, serviceWorkers: 'block' })
+  const guestPage = await guestCtx.newPage()
+  const guestSees = {}
+  try {
+    await guestPage.goto(`${stack.base}/login`, { waitUntil: 'domcontentloaded' })
+    await guestPage.fill('input[type=email]', guestImporter.email)
+    await guestPage.fill('input[type=password]', guestImporter.password)
+    await guestPage.click('button[type=submit]')
+    await guestPage.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS })
+    await guestPage.getByRole('button', { name: /^Accept$/ }).click({ timeout: 3000 }).catch(() => {})
+    await guestPage.goto(`${stack.base}/app/${WT}/import`, { waitUntil: 'domcontentloaded' })
+    await guestPage.getByTestId('import-tabs').waitFor({ state: 'visible', timeout: 25_000 }).catch(() => {})
+    /** What the open tab says to the guest, and whether it offers `offered` (a test id). */
+    const tabSays = async (offered) => {
+      await waitUntil(
+        async () => (await guestPage.getByTestId('import-not-for-guests').count()) > 0 || (await guestPage.getByTestId(offered).count()) > 0,
+        { timeoutMs: 15_000 },
+      )
+      return {
+        said: await guestPage.getByTestId('import-not-for-guests').filter({ visible: true }).innerText({ timeout: 3000 }).catch(() => ''),
+        offered: await guestPage.getByTestId(offered).count(),
+      }
+    }
+    guestSees.sheet = await tabSays('import-sheet-file')
+    await guestPage.getByTestId('import-tab-clickup').click({ timeout: 10_000 }).catch(() => {})
+    guestSees.clickup = await tabSays('import-clickup-panel')
+  } finally {
+    await guestCtx.close().catch(() => {})
+  }
+  const PAGE_GUEST_WORDS = 'Guests cannot import data into a workspace.'
+  chk(
+    guestSees.sheet?.said === PAGE_GUEST_WORDS && guestSees.sheet?.offered === 0 && guestSees.clickup?.said === PAGE_GUEST_WORDS && guestSees.clickup?.offered === 0,
+    'the import page offers that guest neither the spreadsheet nor the ClickUp import, and says why in the server’s words: “Guests cannot import data into a workspace.”',
+    `the spreadsheet tab ${JSON.stringify(guestSees.sheet ?? null)}; the ClickUp tab ${JSON.stringify(guestSees.clickup ?? null)}`,
+  )
+
+  // ══ 13. IMPORTS THAT RUN WHILE EVERYTHING ELSE DOES ═════════════════════════
   /*
    * Measured on lane 4 against a run written as ONE transaction: it held one
    * of the API's ten pooled connections for the whole run and waited on
@@ -1177,7 +1576,7 @@ try {
     }
     // The e2e database is shared; this run takes its own fixtures away with it —
     // each statement waiting at most 10 s on a lock, which an API whose imports
-    // never ended holds for ever (section 12's last check).
+    // never ended holds for ever (section 13's last check).
     const bounded = (statement) => sql.begin(async (t) => {
       await t`set local lock_timeout = '10s'`
       await statement(t)

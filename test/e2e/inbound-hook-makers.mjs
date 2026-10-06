@@ -13,6 +13,12 @@
  * Adding a task takes Full edit (`full-edit-enforced-nowhere`), so making a hook
  * does too. The hooks and tasks are read back by SQL.
  *
+ * And a delivery into a list deleted into the trash
+ * (`found-5-oct/default-list-files-into-an-archived-list`), found by the review:
+ * it was refused as if the hook's maker had lost the list — 403 "This webhook’s
+ * creator can no longer add tasks to its list" — of a maker who still may once
+ * the list is restored. It is refused in the trash's own words.
+ *
  *   node test/e2e/inbound-hook-makers.mjs --api 3021 --dist /tmp/claude-0/dist-1
  */
 import path from 'node:path'
@@ -28,7 +34,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 3
+const EXPECTED_CHECKS = 4
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -140,6 +146,21 @@ try {
     pv.open === 1 && pv.newHook === 0 && pe.open === 1 && pe.newHook === 0 && pf.newHook === 1,
     'the Email panel offers a new webhook only where the reader may add: not in the view-only list, not in the Edit one, and in the Full edit one',
     `view-only ${JSON.stringify(pv)}; Edit ${JSON.stringify(pe)}; Full edit ${JSON.stringify(pf)}`,
+  )
+
+  // ══ 4. ITS LIST, DELETED ═════════════════════════════════════════════════
+  console.log('\n▶ the member’s hook, delivered to after the admin has deleted its list')
+  const binned = await A(`/lists/${FULL.list}`, { method: 'DELETE' })
+  if (!binned.ok) throw new Error(`could not delete the list: ${said(binned)}`)
+  const intoTrash = `${TAG} delivered into the trash`
+  const late = hook.data?.token ? await Anyone(`/inbound/webhook/${hook.data.token}`, { method: 'POST', body: { title: intoTrash } }) : { status: 0 }
+  const [{ n: lateMade }] = await sql`select count(*)::int as n from tasks where title = ${intoTrash}`
+  chk(
+    late.status === 409
+      && late.error?.message === 'This list is in the trash. Ask a workspace admin, or whoever deleted it, to restore it before adding tasks to it.'
+      && lateMade === 0,
+    'a delivery to a hook whose list is in the trash is refused in the trash’s own words (409) — not as if its maker had lost the list — and makes nothing',
+    `delivered ${said(late)}; ${lateMade} made`,
   )
 } catch (err) {
   failed += 1

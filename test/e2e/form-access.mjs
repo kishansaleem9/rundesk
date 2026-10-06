@@ -17,6 +17,12 @@
  * way there — the space's create gate lets through anyone who is not a member
  * of the space's workspace, since it has no level to read for them.
  *
+ * And a list in the trash, which takes no task (`ListInTrashException`,
+ * `found-5-oct/default-list-files-into-an-archived-list`): a form files its
+ * submissions' tasks itself, past `createTask` and its gate, so found by the
+ * review, a public submission to a form whose list had been deleted made its
+ * task there, and a form was made aimed at a list already in the trash (201).
+ *
  * Two organisations; forms and fields made through the API as the admin,
  * submissions through the public route; every refusal read back by SQL beside
  * the same call succeeding for someone it is theirs to make.
@@ -33,7 +39,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 7
+const EXPECTED_CHECKS = 9
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -235,6 +241,35 @@ try {
     refused(aimedHere.status) && refused(turned.status) && pointedHere === 0 && aimedHome.ok && homeRow?.target_list_id === ownList.id,
     'a form made in another organisation’s workspace files nothing here: aimed at this workspace’s list, made or changed to it, it is not found and none points at it — aimed at their own list, it is made',
     `made aimed here ${aimedHere.status}; changed to aim here ${turned.status}; their forms aimed here ${pointedHere}; made aimed at their own list ${aimedHome.status}, aimed at ${homeRow?.target_list_id === ownList.id ? 'their list' : JSON.stringify(homeRow?.target_list_id ?? null)}`,
+  )
+
+  // ══ 8. A SUBMISSION, THE FORM'S LIST DELETED ═════════════════════════════
+  console.log('\n▶ a public submission to a form whose list has been deleted into the trash')
+  const IN_TRASH = 'This list is in the trash. Restore it from Trash before adding tasks to it.'
+  const DOOMED = await place('to delete')
+  const doomedForm = await A(`/workspaces/${WS}/forms`, { method: 'POST', body: { title: `${TAG} files into the doomed list`, targetListId: DOOMED, isPublic: true } })
+  if (!doomedForm.ok || !doomedForm.data?.slug) throw new Error(`could not make the form for the list to delete: ${doomedForm.status}`)
+  const binned = await A(`/lists/${DOOMED}`, { method: 'DELETE' })
+  if (!binned.ok) throw new Error(`could not delete the list: ${binned.status}`)
+  const beforeTrash = await tasksIn(DOOMED)
+  const intoTrash = await anon(`/forms/${doomedForm.data.slug}/submit`, { method: 'POST', body: { data: {} } })
+  const afterTrash = await tasksIn(DOOMED)
+  const [kept] = await sql`select created_task_id, data->'__routingMeta'->'latest'->>'message' as error from form_submissions where form_id = ${doomedForm.data.id}`
+  chk(
+    intoTrash.ok && intoTrash.data?.createdTaskId === null && afterTrash === beforeTrash && kept && kept.created_task_id === null && kept.error === IN_TRASH,
+    'a public submission to a form whose list is in the trash files no task there — the submission is kept, with its routing error saying the list is in the trash',
+    `submitted ${intoTrash.status}, task ${JSON.stringify(intoTrash.data?.createdTaskId ?? null)}; tasks in the deleted list ${beforeTrash} → ${afterTrash}; the submission ${JSON.stringify(kept ?? null)}`,
+  )
+
+  // ══ 9. A FORM AIMED AT A DELETED LIST ════════════════════════════════════
+  console.log('\n▶ a form made, and one changed, to aim at the deleted list')
+  const aimedAtTrash = await A(`/workspaces/${WS}/forms`, { method: 'POST', body: { title: `${TAG} aimed at the trash`, targetListId: DOOMED, isPublic: true } })
+  const turnedToTrash = await A(`/workspaces/${WS}/forms/${FORM}`, { method: 'PATCH', body: { targetListId: DOOMED } })
+  const [{ n: aimedRows }] = await sql`select count(*)::int as n from forms where target_list_id = ${DOOMED} and id <> ${doomedForm.data.id}`
+  chk(
+    aimedAtTrash.status === 409 && aimedAtTrash.error?.message === IN_TRASH && turnedToTrash.status === 409 && aimedRows === 0,
+    'and no form is made, or changed, to aim at a list in the trash — 409 saying so, none aimed there',
+    `made ${aimedAtTrash.status} ${JSON.stringify(aimedAtTrash.error?.message ?? null)}; changed ${turnedToTrash.status}; other forms aimed there ${aimedRows}`,
   )
 } catch (e) {
   failed += 1

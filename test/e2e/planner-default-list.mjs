@@ -15,6 +15,17 @@
  * a chosen list is passed over where it cannot be used — in another workspace,
  * or where the person may not add to it.
  *
+ * And deleted after it was chosen (`found-5-oct/default-list-files-into-an-archived-list`):
+ * the list went on taking those tasks, in the trash where nobody could find
+ * them. Now each of the three is refused, saying the Default list is in the
+ * trash, and the chat page says so in those words. What to do is said by the
+ * Trash's rule: a member whose list an admin deleted is told to ask for it to
+ * be restored, not to restore it (found by the review). And the picker the
+ * refusal sends them to shows the deleted choice as what it is: it showed "The
+ * first list I can add to" as chosen, and choosing that saved nothing. In
+ * another workspace, where that list is not the workspace's and /task passes it
+ * over, the picker still shows the first list they can add to.
+ *
  *   node test/e2e/planner-default-list.mjs --api 3021
  */
 import path from 'node:path'
@@ -31,7 +42,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 7
+const EXPECTED_CHECKS = 11
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -197,6 +208,104 @@ try {
     made.status < 300 && !!oldest && refusedList === oldest.id,
     'a chosen list the person may not add to is passed over, not refused: the task lands in the oldest list they can add to',
     `/task answered ${made.status}; the task is in ${refusedList === PRIVATE_LIST ? 'THE PRIVATE LIST' : named(refusedList)}`,
+  )
+
+  // ══ 7. THE CHOSEN LIST, DELETED ══════════════════════════════════════════
+  // `found-5-oct/default-list-files-into-an-archived-list`: deleted after it was
+  // chosen, the list went on taking every task made with no list named, where
+  // nobody could find them. ClickUp's help does not say what becomes of a
+  // deleted Default list, so the person is told, not sent somewhere else.
+  console.log('\n▶ the chosen list deleted into the trash: /task, a message and the AI asked again')
+  const DOOMED = await make('/lists', { projectId: PROJECT, name: `${TAG} a list to delete` }, 'the list to delete')
+  const rechose = await call(`/planner/${WS}/settings`, { method: 'PATCH', body: { defaultListId: DOOMED } })
+  const binned = await call(`/lists/${DOOMED}`, { method: 'DELETE' })
+  if (rechose.status >= 300 || binned.status >= 300) throw new Error(`could not choose and delete the list: ${rechose.status}, ${binned.status}`)
+  const IN_TRASH = 'Your "Default list for new tasks" is in the trash. Restore it from Trash, or choose another in Calendar settings → Time blocking.'
+  const T_SLASH = `${TAG} by slash, the list deleted`
+  const T_MESSAGE = `${TAG} a message, the list deleted`
+  const T_ANSWER = `${TAG} an answer, the list deleted`
+  const tSlash = await call(`/chat/channels/${CHANNEL}/commands`, { method: 'POST', body: { command: 'task', text: T_SLASH } })
+  const tPosted = await call(`/chat/channels/${CHANNEL}/messages`, { method: 'POST', body: { body: T_MESSAGE } })
+  if (tPosted.status >= 300 || !tPosted.data?.id) throw new Error(`could not post the message: ${tPosted.status}`)
+  const tFromMessage = await call(`/chat/messages/${tPosted.data.id}/create-task`, { method: 'POST', body: {} })
+  const [tAnswer] = await sql`insert into ai_chat_messages (thread_id, role, content) values (${thread.id}, 'assistant', ${T_ANSWER}) returning id`
+  const tFromAi = await call(`/workspaces/${WS}/ai-chats/${thread.id}/messages/${tAnswer.id}/task`, { method: 'POST', body: {} })
+  const [{ n: madeAnywhere }] = await sql`select count(*)::int as n from tasks where title in (${T_SLASH}, ${T_MESSAGE}, ${T_ANSWER})`
+  const refusedInWords = (res) => res.status === 409 && res.message === IN_TRASH
+  chk(
+    refusedInWords(tSlash) && refusedInWords(tFromMessage) && refusedInWords(tFromAi) && madeAnywhere === 0,
+    'with the chosen list deleted, /task, a chat message made into a task and an AI answer made into one are each refused — 409, saying the Default list is in the trash and what to do — and no task is made, in it or anywhere',
+    `/task ${tSlash.status} ${JSON.stringify(tSlash.message)}; message ${tFromMessage.status} ${JSON.stringify(tFromMessage.message)}; AI ${tFromAi.status} ${JSON.stringify(tFromAi.message)}; ${madeAnywhere} made`,
+  )
+
+  // ══ 8. THE CHAT PAGE SAYS SO ═════════════════════════════════════════════
+  console.log('\n▶ the chat page’s "Create task from message", the list deleted')
+  const T_PAGE = `${TAG} a message on the page, the list deleted`
+  const pagePosted = await call(`/chat/channels/${CHANNEL}/messages`, { method: 'POST', body: { body: T_PAGE } })
+  if (pagePosted.status >= 300) throw new Error(`could not post the message: ${pagePosted.status}`)
+  await page.goto(`${B}/app/${WS}/chat?channel=${CHANNEL}`, { waitUntil: 'domcontentloaded' })
+  const onPage = page.getByText(T_PAGE, { exact: true }).first()
+  await onPage.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
+  await onPage.click({ button: 'right', timeout: 8000 }).catch(() => {})
+  await page.getByRole('button', { name: /Create task from message/ }).first().click({ timeout: 8000 }).catch(() => {})
+  const pageDraft = page.getByTestId('chat-task-draft')
+  await pageDraft.waitFor({ state: 'visible', timeout: 8000 }).catch(() => {})
+  await pageDraft.getByRole('button', { name: /^Create task$/ }).click({ timeout: 8000 }).catch(() => {})
+  const toldOnPage = await page.getByText(IN_TRASH, { exact: true }).first()
+    .waitFor({ state: 'visible', timeout: 10_000 }).then(() => true, () => false)
+  const [{ n: madeFromPage }] = await sql`select count(*)::int as n from tasks where title = ${T_PAGE}`
+  chk(
+    toldOnPage && madeFromPage === 0,
+    'and the chat page says why, in the server’s words, when its Create task is refused — no task made',
+    `the refusal shown: ${toldOnPage}; ${madeFromPage} made`,
+  )
+
+  // ══ 9. A MEMBER WHOSE CHOSEN LIST AN ADMIN DELETED ═══════════════════════
+  console.log('\n▶ the member’s chosen list, deleted by the admin: the member’s /task')
+  const MEMBERS = await make('/lists', { projectId: PROJECT, name: `${TAG} the member's choice, to delete` }, 'the member’s chosen list')
+  const memberChose = await asMember(`/planner/${WS}/settings`, { method: 'PATCH', body: { defaultListId: MEMBERS } })
+  const memberBinned = await call(`/lists/${MEMBERS}`, { method: 'DELETE' })
+  if (memberChose.status >= 300 || memberBinned.status >= 300) throw new Error(`could not choose and delete the member’s list: ${memberChose.status}, ${memberBinned.status}`)
+  const ASK = 'Your "Default list for new tasks" is in the trash. Ask a workspace admin, or whoever deleted it, to restore it, or choose another in Calendar settings → Time blocking.'
+  const M_SLASH = `${TAG} the member's, their list deleted`
+  const memberSlash = memberChannel.data?.id
+    ? await asMember(`/chat/channels/${memberChannel.data.id}/commands`, { method: 'POST', body: { command: 'task', text: M_SLASH } })
+    : { status: memberChannel.status }
+  const [{ n: memberMade }] = await sql`select count(*)::int as n from tasks where title = ${M_SLASH}`
+  chk(
+    memberSlash.status === 409 && memberSlash.message === ASK && memberMade === 0,
+    'and a member whose chosen list an admin deleted is told to ask a workspace admin, or whoever deleted it, to restore it — the Trash will not let them — or to choose another; no task made',
+    `the member’s /task ${memberSlash.status} ${JSON.stringify(memberSlash.message)}; ${memberMade} made`,
+  )
+
+  // ══ 10. THE PICKER THE REFUSAL SENDS THEM TO ═════════════════════════════
+  console.log('\n▶ Calendar settings → Time blocking, the chosen list deleted — in the other workspace, then in this one')
+  const picker = page.getByTestId('planner-default-list')
+  /** What the picker shows chosen in `workspaceId`, once its lists have loaded (more options than the first). */
+  const pickerShows = async (workspaceId) => {
+    await page.goto(`${B}/app/${workspaceId}/calendar?settings=timeBlocking`, { waitUntil: 'domcontentloaded' })
+    await picker.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
+    await waitUntil(async () => (await picker.locator('option').count().catch(() => 0)) > 1, { timeoutMs: 15_000 })
+    // The settings and the lists are two reads: let the second land.
+    await page.waitForTimeout(1500)
+    return picker.evaluate((el) => ({ value: el.value, text: el.options[el.selectedIndex]?.text ?? null })).catch(() => null)
+  }
+  const elsewhere = await pickerShows(WS2)
+  const shown = await pickerShows(WS)
+  await picker.selectOption('').catch(() => {})
+  let afterChoice = null
+  await waitUntil(async () => {
+    afterChoice = (await call(`/planner/${WS}/settings`)).data?.defaultListId
+    return afterChoice === null || afterChoice === undefined
+  }, { timeoutMs: 10_000 })
+  const T_AFTER = `${TAG} by slash, the first list chosen again`
+  const tAfter = await call(`/chat/channels/${CHANNEL}/commands`, { method: 'POST', body: { command: 'task', text: T_AFTER } })
+  const afterList = await listOf(T_AFTER)
+  chk(
+    shown?.value === DOOMED && shown?.text === 'A list in the trash' && elsewhere?.text === 'The first list I can add to'
+      && (afterChoice === null || afterChoice === undefined) && tAfter.status < 300 && !!oldest && afterList === oldest.id,
+    'and the picker it sends them to shows the deleted choice as a list in the trash, not “The first list I can add to” — which it still shows in another workspace, where /task passes that list over — and choosing that saves it, so /task lands in the oldest list again',
+    `the picker showed ${JSON.stringify(shown)} (in the other workspace ${JSON.stringify(elsewhere)}); after choosing the first list the setting holds ${JSON.stringify(afterChoice)}; /task ${tAfter.status}, in ${named(afterList)}`,
   )
 } catch (e) {
   failed += 1

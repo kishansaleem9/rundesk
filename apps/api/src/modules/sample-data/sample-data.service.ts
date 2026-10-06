@@ -17,6 +17,7 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
+import { assertMayImport } from '../integrations/clickup-import/import-access'
 
 type Priority = 'urgent' | 'high' | 'normal' | 'low'
 
@@ -51,6 +52,16 @@ export class SampleDataService {
   ) {}
 
   async seed(workspaceId: string, actor: { id: string; email?: string }): Promise<SeedSummary> {
+    /*
+     * LOADING SAMPLE DATA IS AN IMPORT (the route asks `workspace.import`), AND A
+     * GUEST DOES NOT IMPORT, whatever a custom role grants them — the importers'
+     * rule (`assertMayImport`, `found-6-oct/a-guest-who-may-import-makes-a-space`),
+     * asked first, so a guest learns nothing of the workspace from the answer.
+     * A guest granted the key by a custom role, whose own `POST /spaces` answered
+     * 403, seeded an empty workspace and left three public spaces made by nobody
+     * (measured on lane 4).
+     */
+    await assertMayImport(this.db, { workspaceId, actorId: actor.id })
     await this.assertEmpty(workspaceId)
     await this.requireActorMembership(workspaceId, actor.id)
     const summary: SeedSummary = {

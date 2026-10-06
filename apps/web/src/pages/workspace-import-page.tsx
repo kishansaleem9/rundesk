@@ -6,6 +6,7 @@ import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Copy, Info, KeyRo
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import { usePermissions } from '../hooks/use-permissions'
+import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import {
   SHEET_FIELDS,
   fetchSheetJob,
@@ -91,6 +92,10 @@ export function ImportPage() {
   // a member granted workspace.import "not yours" until they answered, which a
   // CI rehearsal on 1 October caught under a full run's load (data-transfer-keys).
   const mayImport = usePermissions(workspaceId).can('workspace.import')
+  // A guest does not import, whatever a custom role grants them: the API refuses
+  // them in these words (`found-6-oct/a-guest-who-may-import-makes-a-space`), so
+  // neither import is offered. The role is known at once, from the session.
+  const guest = useWorkspaceRole(workspaceId).role === 'guest'
 
   return (
     <div className="container mx-auto max-w-4xl p-6 space-y-6">
@@ -131,6 +136,10 @@ export function ImportPage() {
 
       {tab === 'doc' ? (
         <DocImportPanel />
+      ) : guest ? (
+        <p className="rounded-md border border-border/60 bg-card/40 p-4 text-sm text-muted-foreground" data-testid="import-not-for-guests">
+          {t('import.guestsCannot')}
+        </p>
       ) : mayImport === null ? (
         <div className="space-y-3" aria-busy="true" aria-live="polite" data-testid="import-asking">
           <span className="sr-only">Loading…</span>

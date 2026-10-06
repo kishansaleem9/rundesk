@@ -33,9 +33,14 @@ export class SpreadsheetImportController {
   }
 
   @Post('preview')
+  // Asked as the import is: its duplicate count told any member or guest what
+  // a private space or list held (`found-6-oct/import-previews-tell-what-private-places-hold`).
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('workspace.import')
   @ApiOperation({ summary: 'Parse without writing — headers, delimiter, suggested mapping, sample, and the rows that would be REJECTED' })
   preview(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: any,
     @Body()
     body: {
       content: string
@@ -45,7 +50,7 @@ export class SpreadsheetImportController {
       defaultListName?: string
     },
   ) {
-    return this.svc.previewSheet(workspaceId, {
+    return this.svc.previewSheet(workspaceId, { id: user.id, role: user.role }, {
       content: body.content ?? '',
       delimiter: body.delimiter,
       preset: body.preset,
@@ -75,7 +80,7 @@ export class SpreadsheetImportController {
       defaultListName?: string
     },
   ) {
-    return this.svc.startSheetImport(workspaceId, user.id, body)
+    return this.svc.startSheetImport(workspaceId, { id: user.id, role: user.role }, body)
   }
 
   @Get('jobs')

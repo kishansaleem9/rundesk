@@ -90,10 +90,14 @@ export class PlannerController {
     return this.planner.teamSchedules(workspaceId, user.id, ids, { from, to })
   }
 
-  /** Frame `14:10` — Appearance and Time blocking. Per person, not per space. */
+  /**
+   * Frame `14:10` — Appearance and Time blocking. Per person, not per space;
+   * read with this workspace beside it only to say whether the chosen Default
+   * list is in its trash (`defaultListInTrash`).
+   */
   @Get('settings')
-  getSettings(@CurrentUser() user: any) {
-    return this.planner.getSettings(user.id)
+  getSettings(@CurrentUser() user: any, @Param('workspaceId') workspaceId: string) {
+    return this.planner.getSettings(user.id, workspaceId)
   }
 
   @Patch('settings')

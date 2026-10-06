@@ -4139,7 +4139,10 @@ function LinkedWorkSection({ taskId, workspaceId }: { taskId: string; workspaceI
     mutationFn: (provider: 'zoom' | 'google_meet') =>
       api(`/tasks/${taskId}/meeting`, { method: 'POST', body: { provider } }),
     onSuccess: invalidate,
-    onError: () => toast.error(t('taskDetail.meetings.createError')),
+    // The server's own sentence when it refused — "Connect Zoom first", or that
+    // the connected account's owner cannot open this task
+    // (`found-5-oct/calendar-push-ignores-who-may-read`) — not "could not create".
+    onError: (err) => toast.error(refusalMessage(err, t('taskDetail.meetings.createError'))),
   })
   const attachRecording = useMutation({
     mutationFn: ({ linkId, recordingUrl }: { linkId: string; recordingUrl: string }) =>

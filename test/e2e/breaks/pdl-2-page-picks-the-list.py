@@ -1,6 +1,8 @@
 # THE CHAT PAGE PICKS THE LIST ITSELF AGAIN: the first list of the first project
 # of the first space, named to the server, so the default never applies.
+# Re-claimed 6 October: with the chosen list deleted, the page names a list of its own, so the refusal is never shown.
 # Reddens: planner-default-list: "a chat message made into a task lands in that list too"
+#   or "and the chat page says why, in the server’s words, when its Create task is refused — no task made"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-chat-page.tsx'
 a = "    }: { messageId: string; assigneeId?: string; dueAt?: string }) =>\n      // The server chooses the list: the person's default for new tasks, as\n      // `/task` does. This picked the first list of the first project of the\n      // first space itself, so that default never applied.\n      api(`/chat/messages/${messageId}/create-task`, {\n        method: 'POST',\n        body: { assigneeId: assigneeId || undefined, dueAt: dueAt || undefined },\n      }),\n"

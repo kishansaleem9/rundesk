@@ -14,6 +14,15 @@
  *     member made tasks through `POST /tasks` itself (201) — ClickUp's view
  *     and comment permissions make none.
  *
+ * And `found-5-oct/default-list-files-into-an-archived-list`: `POST /tasks`
+ * into a list deleted into the trash answered 201, a task nobody could find.
+ * A list in the trash takes no task, and says so (409); restored, it does. What
+ * to do is said by the Trash's rule — an admin, or whoever deleted it, restores
+ * it, and anybody else is told to ask (found by the review: every member was
+ * told to restore a list the Trash would not let them restore). And a task is
+ * not moved into one either, singly or in bulk (the review: 201, and 200 with
+ * nothing failed, the task gone into the deleted list).
+ *
  * `createTask` now asks one rule for its maker — a member who may open the
  * list, not a guest, on a space that lets them add to it — so each of these
  * is refused, and each refusal is read back from the list beside a twin that
@@ -31,7 +40,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 6
+const EXPECTED_CHECKS = 9
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -200,6 +209,60 @@ try {
     byGuest.status === 403 && guestMade === 0 && intoOpen.status === 201,
     'a guest makes no task from a message (403, none made) — the member, into the same list, does',
     `the guest ${said(byGuest)} (${guestMade} made); the member ${said(intoOpen)}`,
+  )
+
+  // ══ 7. A LIST IN THE TRASH ═══════════════════════════════════════════════
+  // `found-5-oct/default-list-files-into-an-archived-list`: the gate never asked
+  // whether a list was deleted, and `POST /tasks` into one answered 201 — a task
+  // nobody could find, which the list's purge would take.
+  console.log('\n▶ a list deleted into the trash, and the same list restored')
+  const RESTORE = 'This list is in the trash. Restore it from Trash before adding tasks to it.'
+  const ASK = 'This list is in the trash. Ask a workspace admin, or whoever deleted it, to restore it before adding tasks to it.'
+  const TRASHED = await place(A, WS, 'deleted')
+  // A task of the member's, in a list they may add to, to move into the deleted list.
+  const MOVING = await make(M, '/tasks', { listId: OPEN, title: `${TAG} to be moved` }, 'the task to move')
+  const deleted = await A(`/lists/${TRASHED}`, { method: 'DELETE' })
+  if (!deleted.ok) throw new Error(`could not delete the list: ${said(deleted)}`)
+  const intoTrash = await create(TRASHED, `${TAG} into the deleted list`)
+  const trashMade = await titled(TRASHED, `${TAG} into the deleted list`)
+  const byAdmin = await A('/tasks', { method: 'POST', body: { listId: TRASHED, title: `${TAG} the admin's, into the deleted list` } })
+  // A list of the member's own, deleted by them.
+  const [{ project_id: openProject }] = await sql`select project_id from lists where id = ${OPEN}`
+  const OWN = await make(M, '/lists', { projectId: openProject, name: `${TAG} the member's own` }, 'the member’s own list')
+  const ownDeleted = await M(`/lists/${OWN}`, { method: 'DELETE' })
+  const intoOwn = await create(OWN, `${TAG} into their own deleted list`)
+  // The member's task, moved into the deleted list — and the same, in bulk, by the admin.
+  const listOf = async (id) => (await sql`select list_id from tasks where id = ${id}`)[0]?.list_id ?? null
+  const moved = await M(`/tasks/${MOVING}/move`, { method: 'POST', body: { listId: TRASHED, position: 0 } })
+  const afterMove = await listOf(MOVING)
+  const bulk = await A('/tasks/bulk/update', { method: 'PATCH', body: { taskIds: [MOVING], patch: { listId: TRASHED } } })
+  const afterBulk = await listOf(MOVING)
+  const restored = await A(`/workspaces/${WS}/trash/list/${TRASHED}/restore`, { method: 'POST' })
+  const intoRestored = await create(TRASHED, `${TAG} into the restored list`)
+  const restoredMade = await titled(TRASHED, `${TAG} into the restored list`)
+  chk(
+    intoTrash.status === 409 && /^This list is in the trash\. /.test(intoTrash.error?.message ?? '') && trashMade === 0
+      && restored.ok && intoRestored.status === 201 && restoredMade === 1,
+    'a member makes no task in a list in the trash — 409, saying it is in the trash and how to bring it back, none made — and once it is restored, they do',
+    `into the deleted list ${said(intoTrash)} (${trashMade} made); restored ${said(restored)}; into it then ${said(intoRestored)} (${restoredMade} made)`,
+  )
+
+  // ══ 8. WHAT TO DO, BY THE TRASH'S RULE ═══════════════════════════════════
+  console.log('\n▶ what each person is told to do about it')
+  chk(
+    intoTrash.error?.message === ASK && byAdmin.status === 409 && byAdmin.error?.message === RESTORE
+      && ownDeleted.ok && intoOwn.status === 409 && intoOwn.error?.message === RESTORE,
+    'and what to do is said by the Trash’s own rule: the member, who did not delete it, is told to ask a workspace admin or whoever deleted it to restore it; the admin, and a member who deleted their own list, are told to restore it from Trash',
+    `the member ${said(intoTrash)}; the admin ${said(byAdmin)}; the member, into their own deleted list (${said(ownDeleted)}), ${said(intoOwn)}`,
+  )
+
+  // ══ 9. NOR MOVED INTO ONE ════════════════════════════════════════════════
+  console.log('\n▶ a task moved into the deleted list, singly and in bulk')
+  chk(
+    moved.status === 409 && moved.error?.message === ASK && afterMove === OPEN
+      && bulk.status === 200 && bulk.data?.failedCount === 1 && bulk.data?.failed?.[0]?.reason === RESTORE && afterBulk === OPEN,
+    'and a task is not moved into a list in the trash — 409 to the member in those words, a bulk move by the admin failing in its own — and stays where it was (SQL)',
+    `moved ${said(moved)} (now in ${afterMove === OPEN ? 'the list it was in' : afterMove === TRASHED ? 'THE DELETED LIST' : JSON.stringify(afterMove)}); bulk ${bulk.status} ${JSON.stringify(bulk.data?.failed ?? bulk.error?.message ?? null)} (now in ${afterBulk === OPEN ? 'the list it was in' : afterBulk === TRASHED ? 'THE DELETED LIST' : JSON.stringify(afterBulk)})`,
   )
 } catch (e) {
   failed += 1
