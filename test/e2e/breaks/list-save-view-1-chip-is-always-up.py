@@ -16,11 +16,12 @@
 # carries the right config. A patch that reddened those as well would be about
 # saving rather than about the chip.
 #
+# RE-AIMED 6 October: the chip is left out for a view that saves itself (`found-6-oct/autosave-switch-saves-nothing`).
 # Reddens: list-save-view: "a view you have not touched offers nothing to save"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
-a = "            {viewDirty && (selectedSavedViewId ? !!selectedSavedView && viewOffersOf(selectedSavedView).change : listAccess.views) && (\n              <button\n                type=\"button\"\n                data-testid=\"list-save-view\""
-b = "            {(selectedSavedViewId ? !!selectedSavedView && viewOffersOf(selectedSavedView).change : listAccess.views) && (\n              <button\n                type=\"button\"\n                data-testid=\"list-save-view\""
+a = '            {viewDirty && !autosaves && (selectedSavedViewId ? !!selectedSavedView && viewOffersOf(selectedSavedView).change : listAccess.views) && (\n              <button\n                type="button"\n                data-testid="list-save-view"'
+b = '            {(selectedSavedViewId ? !!selectedSavedView && viewOffersOf(selectedSavedView).change : listAccess.views) && (\n              <button\n                type="button"\n                data-testid="list-save-view"'
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

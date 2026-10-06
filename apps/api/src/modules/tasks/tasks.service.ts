@@ -2917,6 +2917,15 @@ export class TasksService {
       }),
     )
 
+    /*
+     * MAY THIS READER CHANGE EACH ROW — the write rule's answer per task, as the
+     * timeline's (`found-6-oct/list-page-offers-task-edits-by-list-level`). The
+     * page offered a row's edits by the list's level alone, so a task shared with
+     * its reader at Edit, in a list they may only view, drew no date box and took
+     * no drag, while `PATCH /tasks/:id` took the change.
+     */
+    const mayEdit = actor && rows.length > 0 ? await this.listRowsEditable(listId, rows, actor.id) : null
+
     return rows.map((r) => ({
       ...r,
       labels: byTask.get(r.id) ?? [],
@@ -2924,7 +2933,25 @@ export class TasksService {
       blocksOpenCount: blocksOpenCount.get(r.id) ?? 0,
       blockedBy: [...(blockedBy.get(r.id) ?? [])],
       coverUrl: coverUrlByTask.get(r.id) ?? null,
+      ...(mayEdit ? { mayEdit: mayEdit(r) } : {}),
     }))
+  }
+
+  /** `timelineEditable` for one list's rows: the list's project, folder and space, read once. */
+  private async listRowsEditable(listId: string, rows: Array<{ id: string }>, actorId: string) {
+    const [at] = await this.db
+      .select({ workspaceId: spaces.workspaceId, spaceId: spaces.id, projectId: projects.id, folderId: projects.folderId })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(lists.id, listId))
+      .limit(1)
+    if (!at) return null
+    return this.timelineEditable(
+      at.workspaceId,
+      rows.map((r) => ({ id: r.id, listId, projectId: at.projectId, spaceId: at.spaceId, folderId: at.folderId })),
+      actorId,
+    )
   }
 
   // Direct children (subtasks) of a task, for the task detail Subtasks tab.

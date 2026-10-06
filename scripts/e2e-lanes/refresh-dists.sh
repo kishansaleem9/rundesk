@@ -39,6 +39,10 @@ fi
 
 [ ${#LANES[@]} -eq 0 ] && { echo "no lane bundles to refresh"; exit 0; }
 echo "refreshing: ${LANES[*]}"
+# What the bundles are built from, read before any build starts: a source that
+# changes during one is then a mismatch `verify.sh` refuses, never a match
+# (`web_sources_hash`; `found-6-oct/verify-takes-a-bundle-of-other-sources-as-fresh`).
+FROM=$(web_sources_hash)
 
 for k in "${LANES[@]}"; do
   out="/tmp/claude-0/dist-$k"
@@ -47,6 +51,7 @@ for k in "${LANES[@]}"; do
     exit 1
   fi
   if pnpm -C apps/web exec vite build --outDir "$out" --emptyOutDir > "/tmp/claude-0/dist-$k.log" 2>&1; then
+    echo "$FROM" > "$out/.sources-hash"
     echo "lane $k: $out rebuilt"
   else
     echo "lane $k: BUILD FAILED"

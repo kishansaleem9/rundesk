@@ -38,7 +38,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 9
+const EXPECTED_CHECKS = 10
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -380,6 +380,64 @@ try {
     ev.shown === 1 && ev.create === 0 && ev.hint === 0 && ef.create === 1 && ef.hint === 1,
     'an empty list asks a view-only reader to add nothing — no Create task, no “press C” — and asks where the default is Full edit',
     `view-only ${JSON.stringify(ev)}; Full edit ${JSON.stringify(ef)}`,
+  )
+
+  // ══ 10. A TASK GIVEN TO THEM AT EDIT, IN THE VIEW-ONLY LIST ══════════════
+  /*
+   * A ROW'S EDITS FOLLOW ITS OWN TASK'S ANSWER
+   * (`found-6-oct/list-page-offers-task-edits-by-list-level`). The page offered
+   * a row's edits by the list's level alone, so a task shared with the reader
+   * at Edit, in a list they may only view, drew no date box and took no drag,
+   * while `PATCH /tasks/:id` took its change. Here the view-only list's first
+   * task is shared with the member at Edit, and its row, its Calendar item and
+   * its Gantt bar are read beside the second task's, shared with nobody.
+   */
+  console.log('\n▶ a task shared with the member at Edit, in the view-only list')
+  await sql`insert into object_shares (workspace_id, object_type, object_id, user_id, level) values (${WS}, 'task', ${VIEW.first.id}, ${me.id}, 'edit')`
+  const datedFirst = await A(`/tasks/${VIEW.first.id}`, { method: 'PATCH', body: { startDate: day(-3), dueDate: day(-1) } })
+  if (!datedFirst.ok) throw new Error(`could not date "${VIEW.first.title}": ${said(datedFirst)}`)
+  const listed = await M(`/tasks/list/${VIEW.list}`)
+  const mayEditOf = (t) => (listed.data ?? []).find((x) => x.id === t.id)?.mayEdit
+  const so = await offered(VIEW)
+  const rowControls = async (t) => ({
+    due: await count(so.rowOf(t).locator('input[type="date"]')),
+    priority: await count(so.rowOf(t).getByRole('button', { name: /^Change priority$/ })),
+  })
+  const sharedRow = await rowControls(VIEW.first)
+  const otherRow = await rowControls(VIEW.second)
+  await openIn(VIEW, 'calendar', VIEW.first)
+  const calItem = (t) => page.locator('[data-testid="list-calendar"] button', { hasText: t.title }).first()
+  const calShared = await calItem(VIEW.first).getAttribute('draggable', { timeout: 5000 }).catch(() => null)
+  const calOther = await calItem(VIEW.second).getAttribute('draggable', { timeout: 5000 }).catch(() => null)
+  /** As `gantt` above, for either task of the list. */
+  const ganttOf = async (p, t) => {
+    await openIn(p, 'gantt', t)
+    const bar = page.locator(`div[role="button"][aria-label="${t.title}"]`).first()
+    const box = await bar.boundingBox({ timeout: 10_000 }).catch(() => null)
+    const before = (await row(t.id))?.due_date
+    if (box) {
+      const y = box.y + box.height / 2
+      const x = box.x + Math.min(box.width / 2, 10)
+      await page.mouse.move(x, y)
+      await page.mouse.down()
+      for (let i = 1; i <= 6; i++) await page.mouse.move(x + i * 25, y)
+      await page.mouse.up()
+    }
+    await page.waitForTimeout(2500)
+    const after = (await row(t.id))?.due_date
+    const opened = await page.getByTestId('task-sheet').first().isVisible().catch(() => false)
+    await page.keyboard.press('Escape').catch(() => {})
+    return { bar: !!box, moved: String(before) !== String(after), opened }
+  }
+  const gShared = await ganttOf(VIEW, VIEW.first)
+  const gOther = await ganttOf(VIEW, VIEW.second)
+  chk(
+    mayEditOf(VIEW.first) === true && mayEditOf(VIEW.second) === false
+      && sharedRow.due === 1 && sharedRow.priority === 1 && otherRow.due === 0 && otherRow.priority === 0
+      && calShared === 'true' && calOther === 'false'
+      && gShared.bar && gShared.moved && !gShared.opened && gOther.bar && !gOther.moved && gOther.opened,
+    'a task shared with the member at Edit, in a list they may only view, is theirs to change on the list page — its row offers a due date and a priority, its Calendar item drags and its Gantt bar moves its dates — while the task beside it, shared with nobody, offers none of them, and the list says which (mayEdit)',
+    `the list's mayEdit: shared ${mayEditOf(VIEW.first)}, other ${mayEditOf(VIEW.second)}; rows: shared ${JSON.stringify(sharedRow)}, other ${JSON.stringify(otherRow)}; calendar draggable: shared ${calShared}, other ${calOther}; gantt: shared ${JSON.stringify(gShared)}, other ${JSON.stringify(gOther)}`,
   )
 } catch (err) {
   failed += 1

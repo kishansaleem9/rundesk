@@ -190,6 +190,8 @@ function TaskTypeMark({
 
 type TaskItem = {
   id: string
+  /** May this reader change the task — the write rule's answer, per row (`found-6-oct/list-page-offers-task-edits-by-list-level`). */
+  mayEdit?: boolean
   title: string
   description: string | null
   priority: TaskPriority
@@ -750,7 +752,11 @@ const ListStatusesContext = createContext<ListStatus[]>([])
  *              itself what may be done to it (`SavedViewOffers`).
  */
 type ListCaps = { add: boolean; edit: boolean; comment: boolean; statuses: boolean; fields: boolean; views: boolean }
-type ListAccess = ListCaps & { mayProgress: (task: { assignees?: Array<{ userId: string }> }) => boolean }
+type ListAccess = ListCaps & {
+  /** A row's edits, by its task's own answer where the list gives one, else the list's (`TaskItem.mayEdit`). */
+  mayEditTask: (task: { mayEdit?: boolean }) => boolean
+  mayProgress: (task: { mayEdit?: boolean; assignees?: Array<{ userId: string }> }) => boolean
+}
 const LIST_CAPS_ALL: ListCaps = { add: true, edit: true, comment: true, statuses: true, fields: true, views: true }
 const LIST_CAPS_NONE: ListCaps = { add: false, edit: false, comment: false, statuses: false, fields: false, views: false }
 const isListCaps = (x: unknown): x is ListCaps =>
@@ -782,7 +788,7 @@ const viewOffersOf = (view: SavedViewOffers) => ({
   makePrivate: view.mayMakePrivate !== false,
 })
 /* Outside the provider (a test, a story) a row offers what it always did. */
-const ListCapsContext = createContext<ListAccess>({ ...LIST_CAPS_ALL, mayProgress: () => true })
+const ListCapsContext = createContext<ListAccess>({ ...LIST_CAPS_ALL, mayEditTask: () => true, mayProgress: () => true })
 function useListCaps() {
   return useContext(ListCapsContext)
 }
@@ -1830,8 +1836,14 @@ function ListDetail() {
   const listAccess = useMemo<ListAccess>(
     () => ({
       ...listCaps,
+      /*
+       * A ROW BY ITS OWN TASK (`found-6-oct/list-page-offers-task-edits-by-list-level`):
+       * a task shared with its reader at Edit, in a list they may only view, is theirs
+       * to change, and the list says so per row (`mayEdit`), as the timeline does.
+       */
+      mayEditTask: (task) => task.mayEdit ?? listCaps.edit,
       mayProgress: (task) =>
-        listCaps.edit || (listCaps.comment && (task.assignees ?? []).some((a) => a.userId === currentUserId)),
+        (task.mayEdit ?? listCaps.edit) || (listCaps.comment && (task.assignees ?? []).some((a) => a.userId === currentUserId)),
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [listCaps.add, listCaps.edit, listCaps.comment, listCaps.statuses, listCaps.fields, listCaps.views, currentUserId],
@@ -2511,6 +2523,32 @@ function ListDetail() {
     }
   }
 
+  /*
+   * "AUTOSAVE FOR ME" SAVES (`found-6-oct/autosave-switch-saves-nothing`). The
+   * switch stored this person's flag and nothing read it: a changed grouping
+   * stayed unsaved under the Save view chip. ClickUp: Save view saves for
+   * everyone with access to the view, and Autosave saves any future changes to
+   * it automatically. So with the switch on, a layout change is saved as Save
+   * view would save it, once it has settled — by whoever may change the view;
+   * one who may only read it changes their own screen. The chip is not drawn
+   * for a change that saves itself.
+   */
+  const autosaves = !!selectedSavedView?.autosave && viewOffersOf(selectedSavedView).change
+  const unsavedConfig = autosaves && viewDirty ? configFingerprint(currentViewConfig()) : null
+  useEffect(() => {
+    if (!unsavedConfig || !selectedSavedViewId) return
+    const viewId = selectedSavedViewId
+    const timer = window.setTimeout(() => {
+      void sayingViewRefusal(async () => {
+        await api(`/views/${viewId}`, { method: 'PATCH', body: { config: currentViewConfig() } })
+        await refreshSavedViews()
+        setViewStamp((n) => n + 1)
+      })
+    }, 800)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unsavedConfig, selectedSavedViewId])
+
   /* "Autosave for me" is this user's own flag, so it has its own route. */
   const setViewAutosave = async (autosave: boolean) => {
     if (!selectedSavedView) return
@@ -2975,7 +3013,7 @@ function ListDetail() {
               Either only where this reader may: the view's own answer, or the
               list's for a new one (`found-5-oct/readers-change-shared-views`).
             */}
-            {viewDirty && (selectedSavedViewId ? !!selectedSavedView && viewOffersOf(selectedSavedView).change : listAccess.views) && (
+            {viewDirty && !autosaves && (selectedSavedViewId ? !!selectedSavedView && viewOffersOf(selectedSavedView).change : listAccess.views) && (
               <button
                 type="button"
                 data-testid="list-save-view"
@@ -3908,12 +3946,12 @@ function ListDetail() {
                       {dayTasks.slice(0, calendarView === 'week' ? 12 : 3).map((task) => (
                         <button
                           key={task.id}
-                          draggable={listAccess.edit}
-                          onDragStart={() => { if (listAccess.edit) setCalendarDragTaskId(task.id) }}
+                          draggable={listAccess.mayEditTask(task)}
+                          onDragStart={() => { if (listAccess.mayEditTask(task)) setCalendarDragTaskId(task.id) }}
                           onDragEnd={() => setCalendarDragTaskId(null)}
                           className={cn(
                             'block w-full text-left rounded bg-muted px-1 py-0.5 text-[11px] hover:bg-secondary',
-                            listAccess.edit && 'cursor-grab active:cursor-grabbing',
+                            listAccess.mayEditTask(task) && 'cursor-grab active:cursor-grabbing',
                           )}
                           onClick={() => setSelectedTaskId(task.id)}
                         >
@@ -4413,7 +4451,7 @@ function TaskRow({
   const { t, locale } = useTranslation()
   /* What the reader may change from the row (`ListCaps`); the rest is drawn, not offered. */
   const caps = useListCaps()
-  const mayEdit = !!onPatchTask && caps.edit
+  const mayEdit = !!onPatchTask && caps.mayEditTask(task)
   // statusCategory ('closed') is the post-custom-statuses signal; falling
   // back to the literal 'done' key keeps existing tasks rendering correctly
   // while the API/list-statuses caches warm up.
@@ -5235,7 +5273,7 @@ function TableView({
                     }}
                     onDoubleClick={(e) => {
                       e.stopPropagation()
-                      if (!caps.edit) return
+                      if (!caps.mayEditTask(task)) return
                       if (openClickTimer.current) {
                         clearTimeout(openClickTimer.current)
                         openClickTimer.current = null
@@ -5336,7 +5374,7 @@ function TableView({
                   <div className="w-28 px-3 flex items-center relative">
                     <button
                       type="button"
-                      disabled={!caps.edit}
+                      disabled={!caps.mayEditTask(task)}
                       data-testid="list-table-priority-button"
                       onClick={(e) => {
                         e.stopPropagation()
@@ -5474,7 +5512,7 @@ function TableView({
                     ) : (
                       <button
                         type="button"
-                        disabled={!caps.edit}
+                        disabled={!caps.mayEditTask(task)}
                         data-testid="list-table-due-button"
                         onClick={(e) => {
                           e.stopPropagation()
@@ -5505,7 +5543,7 @@ function TableView({
                   )}
 
                   {customColumns.map((field) => {
-                    const editable = INLINE_EDITABLE_TYPES.has(field.type) && caps.edit
+                    const editable = INLINE_EDITABLE_TYPES.has(field.type) && caps.mayEditTask(task)
                     const open =
                       editable && customOpen?.taskId === task.id && customOpen.fieldId === field.id
                     const current = taskCustom[field.id]
@@ -5528,7 +5566,7 @@ function TableView({
                            */
                           <span
                             data-testid={`custom-cell-readonly-${task.id}-${field.id}`}
-                            title={caps.edit ? t('list.table.cellEditOnTask') : undefined}
+                            title={caps.mayEditTask(task) ? t('list.table.cellEditOnTask') : undefined}
                             className="text-xs truncate text-left w-full text-muted-foreground"
                           >
                             {valueLabel}
@@ -6325,7 +6363,7 @@ function GanttBar({
   const [dragDx, setDragDx] = useState<number | null>(null)
   const state = useRef<{ startX: number; moved: boolean } | null>(null)
   /* A drag reschedules the task; a reader who may not change it gets the press, which opens it. */
-  const mayDrag = useListCaps().edit
+  const mayDrag = useListCaps().mayEditTask(task)
   const start = shownDay(task.startDate) ?? shownDay(task.dueDate)
   const end = shownDay(task.dueDate) ?? shownDay(task.startDate)
 

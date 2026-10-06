@@ -2,6 +2,7 @@ import { Fragment, type ReactNode } from 'react'
 import { cn } from '@rundesk/ui'
 import { parseMentionSegments } from '../lib/mentions'
 import { hasBlockMarkdown, renderInlineMarkdown, renderMarkdownBlocks } from './markdown'
+import { splitAddresses } from '../lib/link-addresses'
 
 type MentionTextProps = {
   text: string
@@ -85,6 +86,10 @@ export function MentionText({
      * accident. Everything else renders byte for byte as it always has. The
      * cost is that `**bold**` in a one-line comment stays literal; the
      * alternative was re-interpreting every comment ever written.
+     *
+     * AN ADDRESS IS A LINK HERE TOO (`found-5-oct/comment-links-not-links`):
+     * linking one adds nothing to the text and takes nothing from it, so it is
+     * not the re-interpretation above (`splitAddresses`).
      */
     return (
       <span className={cn('whitespace-pre-wrap break-words', className)}>
@@ -92,7 +97,24 @@ export function MentionText({
           seg.type === 'mention' ? (
             <Fragment key={`${seg.userId}-${i}`}>{chip(seg.label, `mi${i}`, mentionClassName)}</Fragment>
           ) : (
-            <span key={`mt-${i}`}>{seg.value}</span>
+            <span key={`mt-${i}`}>
+              {splitAddresses(seg.value).map((part, j) =>
+                'href' in part ? (
+                  <a
+                    key={j}
+                    href={part.href}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="text-accent hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {part.href}
+                  </a>
+                ) : (
+                  part.text
+                ),
+              )}
+            </span>
           ),
         )}
       </span>

@@ -89,7 +89,9 @@ fi
 # costs one rebuild. The opposite error costs a run that reports on code which
 # no longer exists, and an afternoon working out why. Hashing every source file
 # would be exact and would also read thousands of files before every suite;
-# when the two errors are that asymmetric, take the cheap one.
+# when the two errors are that asymmetric, take the cheap one. (The check after
+# this one does hash them, through git's stat cache, which reads only the files
+# whose stat moved: a twentieth of a second, for a bundle that carries a hash.)
 #
 # `find -newer`, NOT `xargs sh -c '[ {} -nt … ]'`. That spliced each path into
 # a shell string unquoted, so `$workspaceId` in a file NAME expanded to nothing
@@ -111,6 +113,26 @@ if [ -f "$DIST/index.html" ]; then
     echo "$NEWER" | sed 's/^/     /'
     echo "   rebuild it:  pnpm -C apps/web exec vite build --outDir $DIST --emptyOutDir"
     echo "   or all of them:  bash scripts/e2e-lanes/refresh-dists.sh \"1 2 3 4\""
+    exit 6
+  fi
+fi
+
+# ── AND IT WAS BUILT FROM THESE SOURCES, NOT ONLY BEFORE THEM. ─────────────
+#
+# The check above reads mtimes, and a file put back with its earlier mtime
+# (`cp -p`) passed it with a bundle of other sources: `imports` then failed
+# over code the run was not running
+# (`found-6-oct/verify-takes-a-bundle-of-other-sources-as-fresh`). A bundle
+# `refresh-dists.sh` built carries the hash of what it was built from
+# (`web_sources_hash`, lane-env.sh); one built otherwise has the check above
+# alone.
+if [ -f "$DIST/.sources-hash" ]; then
+  BUILT_FROM=$(cat "$DIST/.sources-hash")
+  NOW_FROM=$(web_sources_hash)
+  if [ "$BUILT_FROM" != "$NOW_FROM" ]; then
+    echo "== $SUITE (lane $LANE) REFUSING — $DIST was built from other sources than these"
+    echo "   built from $BUILT_FROM; the tree is $NOW_FROM"
+    echo "   rebuild it:  bash scripts/e2e-lanes/refresh-dists.sh \"$LANE\""
     exit 6
   fi
 fi
@@ -198,10 +220,14 @@ if [ -n "$LANE_PID" ]; then
   # lanes named builds without restarting anything, so every lane went on
   # serving the old process, and the schema it read from source when IT
   # started, while this said nothing.
-  LANE_START=$(date -d "$(ps -o lstart= -p "$LANE_PID" 2>/dev/null)" +%s 2>/dev/null)
-  BUILT_AT=$(stat -c %Y "$API_BUILT" 2>/dev/null)
-  if [ -n "$LANE_START" ] && [ -n "$BUILT_AT" ] && [ "$LANE_START" -lt "$BUILT_AT" ]; then
-    echo "== $SUITE (lane $LANE) REFUSING — the API on $PORT started at $(date -d "@$LANE_START" +%H:%M:%S), before the build at $(date -d "@$BUILT_AT" +%H:%M:%S)"
+  #
+  # TO THE HUNDREDTH, NOT THE SECOND. `ps -o lstart` reads up to a second
+  # early, so a lane restarted in its build stamp's second was refused as
+  # started before it (`found-6-oct/verify-refuses-a-lane-restarted-in-its-builds-second`).
+  LANE_START=$(lane_started_at "$LANE_PID")
+  BUILT_AT=$(stat -c %.2Y "$API_BUILT" 2>/dev/null)
+  if [ -n "$LANE_START" ] && [ -n "$BUILT_AT" ] && started_before "$LANE_START" "$BUILT_AT"; then
+    echo "== $SUITE (lane $LANE) REFUSING — the API on $PORT started at $(date -d "@${LANE_START%.*}" +%H:%M:%S).${LANE_START#*.}, before the build at $(date -d "@${BUILT_AT%.*}" +%H:%M:%S).${BUILT_AT#*.}"
     echo "   it is still serving the previous build; restart it onto this one:"
     echo "   bash scripts/e2e-lanes/build-api.sh \"$LANE\""
     exit 7
@@ -246,7 +272,9 @@ export E2E_PASSWORD='Admin@123!'
 # two lanes at once (a sweep beside a break baseline, or two sessions) wrote
 # into one file, and each summary below read the other's lines.
 OUT="/tmp/claude-0/run-$SUITE-lane$LANE.log"
-timeout 900 node "test/e2e/$SUITE.mjs" --api "$PORT" --dist "$DIST" > "$OUT" 2>&1
+# A KILL FOLLOWS THE TERM (`run_bounded`): a suite whose teardown hung ran on
+# past `timeout 900` (`found-6-oct/verify-timeout-ends-no-hung-suite`).
+run_bounded 900 30 node "test/e2e/$SUITE.mjs" --api "$PORT" --dist "$DIST" > "$OUT" 2>&1
 code=$?
 echo "== $SUITE (lane $LANE, dist $DIST) exit=$code"
 # EVERY FAIL LINE. This printed the last eight lines, so a run with eight

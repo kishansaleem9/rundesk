@@ -21,7 +21,7 @@ import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
-import { waitUntil } from './lib/wait.mjs'
+import { waitUntil, readText } from './lib/wait.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
@@ -30,7 +30,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 5
+const EXPECTED_CHECKS = 6
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -221,6 +221,24 @@ try {
     '"Save as template" is offered to a member only once a role grants template.manage',
     `before the grant: ${before}; the grant answered ${tplGranted.status}; after it: ${after}`,
   )
+
+  /*
+   * AND THE DIALOG IT OPENS SAYS WHAT A TEMPLATE KEEPS
+   * (`found-30-sep/save-as-template-words-promise-every-field`). It promised
+   * "custom-field values" with no exception, while a template keeps none of a
+   * Voting or Files field's, and never a Formula's or a Progress (Auto)'s,
+   * which are worked out when read (`NOT_FROM_TEMPLATES`).
+   */
+  await tplPage.getByTestId('task-sheet').getByRole('button', { name: /Save as template/ }).first().click({ timeout: 10_000 }).catch(() => {})
+  const saveDialog = tplPage.getByRole('dialog').filter({ hasText: /template/i }).filter({ visible: true }).first()
+  await saveDialog.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {})
+  const saveWords = await readText(saveDialog)
+  chk(
+    /custom-field values/.test(saveWords) && /Voting/.test(saveWords) && /Files/.test(saveWords) && /Formula/.test(saveWords) && /Progress \(Auto\)/.test(saveWords),
+    'the Save as template dialog says which fields a template does not keep — Voting, Files, Formula and Progress (Auto) — beside the custom-field values it keeps',
+    `it reads "${saveWords.replace(/\s+/g, ' ').slice(0, 300)}"`,
+  )
+  await tplPage.keyboard.press('Escape').catch(() => {})
 
   // ══ 5. FOLDERS ═══════════════════════════════════════════════════════════
   console.log('\n▶ Folder, which the API files under space.create: the member, then a guest who can see the space')

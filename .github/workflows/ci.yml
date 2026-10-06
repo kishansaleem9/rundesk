@@ -494,6 +494,13 @@ jobs:
       - name: A suite runs where its model need is met
         run: bash scripts/e2e-lanes/lane-need-selfcheck.sh --mutate
 
+      # What verify.sh asks of a lane: a start read to the hundredth, a KILL
+      # after a suite's TERM, and a bundle's sources told apart by content
+      # (verify-refuses-a-lane-restarted-in-its-builds-second,
+      # verify-timeout-ends-no-hung-suite, verify-takes-a-bundle-of-other-sources-as-fresh).
+      - name: What verify asks of a lane is read exactly, and each check bites
+        run: bash scripts/e2e-lanes/verify-guards-selfcheck.sh --mutate
+
       # A stale stub is stopped by its port before its replacement starts; the
       # model stub's command line ends at its port, and the old pattern never
       # matched it (stale-model-stub-never-replaced).
@@ -2843,6 +2850,16 @@ jobs:
       - name: The list page offers only what its reader may do
         timeout-minutes: 15
         run: node test/e2e/list-page-levels.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # "Autosave for me" saves a changed layout to the view for whoever may
+      # change it, read back by SQL, and a reader's screen changes nothing
+      # (found-6-oct/autosave-switch-saves-nothing).
+      - name: Autosave for me saves a changed layout to the view
+        timeout-minutes: 10
+        run: node test/e2e/view-autosave.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

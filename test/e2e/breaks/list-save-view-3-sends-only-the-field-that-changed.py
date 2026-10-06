@@ -14,11 +14,12 @@
 # with the rest of the layout, not just the field that changed" fails — a check
 # whose whole content is the phrase "not just".
 #
+# RE-AIMED 6 October: the autosave sends the config too (`found-6-oct/autosave-switch-saves-nothing`); this is Save view’s.
 # Reddens: list-save-view: "along with the rest of the layout, not just the field that changed"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
-a = "    await api(`/views/${viewId}`, { method: 'PATCH', body: { config: currentViewConfig() } })"
-b = "    await api(`/views/${viewId}`, { method: 'PATCH', body: { config: { groupBy: currentViewConfig().groupBy } } })"
+a = "  const updateSavedView = (viewId: string) =>\n    sayingViewRefusal(async () => {\n      await api(`/views/${viewId}`, { method: 'PATCH', body: { config: currentViewConfig() } })"
+b = "  const updateSavedView = (viewId: string) =>\n    sayingViewRefusal(async () => {\n      await api(`/views/${viewId}`, { method: 'PATCH', body: { config: { groupBy: currentViewConfig().groupBy } } })"
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

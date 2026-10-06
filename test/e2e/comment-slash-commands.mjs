@@ -39,7 +39,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 10
+const EXPECTED_CHECKS = 11
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -100,6 +100,22 @@ try {
   await sql`
     insert into task_comments (task_id, author_id, body)
     values (${task.id}, ${me.id}, ${PLAIN})`
+  /*
+   * AN ADDRESS IN A ONE-LINE COMMENT, AND ONE IN A COMMENT HOLDING A LIST
+   * (`found-5-oct/comment-links-not-links`). The second took the block path,
+   * whose autolinker made it a link; the first took the plain path, which drew
+   * every run of text as a span, so the address was text. ClickUp detects an
+   * address typed or pasted into a comment and opens it in a new tab.
+   */
+  const SPEC = `https://example.com/spec-${TAG}`
+  const NOTE = `https://example.com/note-${TAG}`
+  const LINKED = `see ${SPEC}. And (${NOTE}) too; javascript:alert(1) is not one ${TAG}-linked`
+  const LISTED = `notes ${TAG}-listed\n\n- https://example.com/list-${TAG}`
+  for (const body of [LINKED, LISTED]) {
+    await sql`
+      insert into task_comments (task_id, author_id, body)
+      values (${task.id}, ${me.id}, ${body})`
+  }
 
   const ctx = await browser.newContext({ viewport: { width: 1500, height: 1000 } })
   const page = await ctx.newPage()
@@ -141,6 +157,25 @@ try {
     shown.includes('and/or') && shown.includes('file_name_here'),
     'and reads exactly as it was written — underscores and slashes survive',
     `it rendered as "${shown}" — the markdown upgrade re-interpreted an existing comment`,
+  )
+
+  const linkTo = (href) => page.locator(`a[href="${href}"]`).filter({ visible: true })
+  await linkTo(`https://example.com/list-${TAG}`).first().waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {})
+  const anchor = async (href) => {
+    const a = linkTo(href).first()
+    return (await a.count()) === 0 ? null : { target: await a.getAttribute('target'), rel: await a.getAttribute('rel') }
+  }
+  const spec = await anchor(SPEC)
+  const note = await anchor(NOTE)
+  const listed = await anchor(`https://example.com/list-${TAG}`)
+  const scriptLinks = await page.locator('a[href^="javascript"]').count()
+  const linkedText = await readText(page.locator('p, span, div').filter({ hasText: `${TAG}-linked` }).filter({ visible: true }).last())
+  const opensApart = (a) => a?.target === '_blank' && /noopener/.test(a?.rel ?? '')
+  chk(
+    opensApart(spec) && opensApart(note) && opensApart(listed) && scriptLinks === 0 &&
+      linkedText.includes(`${SPEC}. And (${NOTE}) too; javascript:alert(1) is not one`),
+    'an address in a one-line comment is a link, as one in a comment holding a list is: each opens in a new tab, a full stop or a bracket after it is not part of it, a javascript: address is not linked, and the comment reads as written',
+    `one-line: ${JSON.stringify(spec)}, in brackets ${JSON.stringify(note)}; in a list ${JSON.stringify(listed)}; javascript links ${scriptLinks}; the comment reads "${linkedText}"`,
   )
 
   // -------------------------------------------------------------------------

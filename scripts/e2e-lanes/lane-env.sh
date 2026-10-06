@@ -845,3 +845,75 @@ lane_schema_drift () {
   printf '%s\n' "$out"
   return 1
 }
+
+# ── WHEN A LANE'S API STARTED, TO THE HUNDREDTH ─────────────────────────────
+#
+# `ps -o lstart` says whole seconds, worked out from a boot time the kernel
+# also gives in whole seconds, so it reads up to a second early. `verify.sh`
+# compared that with its build stamp's second, and refused a lane restarted in
+# the stamp's second as "started before the build"
+# (`found-6-oct/verify-refuses-a-lane-restarted-in-its-builds-second`). This
+# reads the start in clock ticks (`/proc/<pid>/stat`, its 22nd field) and the
+# boot from `/proc/uptime`, both in hundredths: the epoch second, to two places.
+lane_started_at () {
+  local pid=$1 ticks hz up now
+  ticks=$(awk '{ sub(/^.*\) /, ""); print $20 }' "/proc/$pid/stat" 2>/dev/null)
+  [ -n "$ticks" ] || return 1
+  hz=$(getconf CLK_TCK)
+  read -r up _ < /proc/uptime
+  now=$(date +%s.%N)
+  awk -v now="$now" -v up="$up" -v t="$ticks" -v hz="$hz" 'BEGIN { printf "%.2f\n", now - up + t / hz }'
+}
+# True when a start (`lane_started_at`) is before a build stamp (`stat -c %.2Y`)
+# by more than the hundredths both are read to.
+started_before () { awk -v s="$1" -v b="$2" 'BEGIN { exit !(s + 0.05 < b) }'; }
+
+# ── A SUITE THAT IGNORES ITS TERM IS KILLED ─────────────────────────────────
+#
+# `timeout` sends SIGTERM and waits for the suite to act on it. One whose
+# teardown had blocked on database locks did not, and ran twenty minutes past
+# `timeout 900` until its lane's API was restarted
+# (`found-6-oct/verify-timeout-ends-no-hung-suite`). So a KILL follows the TERM
+# by `$2` seconds: `run_bounded <seconds> <grace> <command…>`.
+run_bounded () { local secs=$1 grace=$2; shift 2; timeout -k "$grace" "$secs" "$@"; }
+
+# ── WHAT A BUNDLE WAS BUILT FROM ────────────────────────────────────────────
+#
+# `verify.sh` asked whether any source was newer than a bundle, by mtime, and a
+# builder who put files back with `cp -p`, which keeps their earlier mtimes,
+# had a bundle of other sources read as fresh
+# (`found-6-oct/verify-takes-a-bundle-of-other-sources-as-fresh`). This is the
+# content: every source's blob hash — the index's where the working copy
+# matches it (git asks its stat cache, and reads again a file whose inode,
+# size, mtime or ctime moved, as a `cp -p` moves the inode and ctime), the
+# working copy's where it does not, and each untracked file's — hashed
+# together, so staging changes nothing and a byte anywhere changes it.
+# `refresh-dists.sh` writes it into the bundle (`.sources-hash`); `verify.sh`
+# asks it again. Run in `$1` (this checkout when none is given).
+WEB_SOURCE_PATHS="apps/web/src packages/ui/src packages/feature-flags/src apps/web/index.html apps/web/vite.config.ts apps/web/tailwind.config.ts apps/web/postcss.config.js apps/web/public"
+web_sources_hash () {
+  # shellcheck disable=SC2086
+  ( cd "${1:-/home/user/rundesk}" && python3 - $WEB_SOURCE_PATHS <<'PY'
+import hashlib, subprocess, sys
+paths = sys.argv[1:]
+def git(*a):
+    return subprocess.run(['git', *a], capture_output=True, check=True).stdout
+blob = {}
+for rec in git('ls-files', '-s', '-z', '--', *paths).split(b'\0'):
+    if rec:
+        meta, path = rec.split(b'\t', 1)
+        blob[path] = meta.split()[1]
+changed = [p for p in git('diff', '--name-only', '-z', '--', *paths).split(b'\0') if p]
+untracked = [p for p in git('ls-files', '--others', '--exclude-standard', '-z', '--', *paths).split(b'\0') if p]
+for p in changed + untracked:
+    try:
+        blob[p] = git('hash-object', '--', p).strip()
+    except subprocess.CalledProcessError:
+        blob.pop(p, None)  # deleted in the working tree
+h = hashlib.sha1()
+for p in sorted(blob):
+    h.update(p + b'\0' + blob[p] + b'\n')
+print(h.hexdigest())
+PY
+  )
+}

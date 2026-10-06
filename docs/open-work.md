@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 512 items: 24 open · 4 partly fixed · 427 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 6 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 512 items: 17 open · 4 partly fixed · 434 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 6 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -3707,7 +3707,7 @@ Checks:
 - `frt-1..4` redden their checks, one or both of `custom-field-access`'s and `custom-field-types`' grid check (5/6, 4/6, 5/6, 32/33). `frt-5..11` redden the unit tests they name.
 - Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `custom-field-access` 6, `custom-field-types` 33, `create-modal-templates` 45, `template-center` 81, `ai-read-access` 5, `ai-task-reads` 4.
 
-### `found-30-sep/save-as-template-words-promise-every-field` — open (copy, small; found closing `found-30-sep/templates-null-array-field-values`) · reproduced 5 October
+### `found-30-sep/save-as-template-words-promise-every-field` — **closed** (copy, small; found closing `found-30-sep/templates-null-array-field-values`) · reproduced 5 October
 
 **The task sheet's Save as template says it captures "custom-field values", and a Voting or Files field's is left out**
 
@@ -3716,6 +3716,16 @@ Checks:
 *To close:* say which fields are not captured, in the four locales, and check the words on the sheet.
 
 *Triage, 5 October:* reproduced on a lane. Reproduced. The task sheet's Save as template dialog says it captures "custom-field values" with no exception, but a Voting value is dropped from the saved template on the lane. By the code, Files, Formula and Progress (Auto) values are dropped too. The wording is the same in all four locales. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 6 October* (lane 5). The task sheet's Save as template says what a template does not keep, in the four locales: "A Voting, Files, Formula or Progress (Auto) field’s value is not kept: votes and files are people’s own, and a formula or an automatic progress is worked out where the template is used" — `NOT_FROM_TEMPLATES` on the server.
+
+Measured on lane 5 with the extended `role-permissions-web` suite: before, on the build these fixes went onto, the dialog read "Capture this task — title, description, priority, checklists, subtasks, labels, and custom-field values — as a reusable template for this workspace." and nothing more (5 of 6, the new check red); after, it names the four fields it does not keep (6 of 6 on lane 5, and again in the regression sweep).
+
+Checks:
+- `role-permissions-web` 5 → 6: the dialog says which fields a template does not keep, beside the custom-field values it keeps.
+- Patch `rpw-10` (the words promise every field) reddens it.
+
+Regression on lanes 2, 4, 5, 6 and 7: the 42 suites the four changes to the product touch (`brain-entry-points`, `clip-created-card`, `clip-links`, `clip-setup`, `comment-plus-menu`, `comment-recording`, `comment-slash-commands`, `comment-thread`, `custom-field-types`, `full-edit-levels`, `gantt-controls`, `guest-task-edits`, `guest-task-making`, `list-assignee-filter`, `list-card-cover`, `list-customize`, `list-empty-states`, `list-export`, `list-page-levels`, `list-save-view`, `list-view-controls`, `mail-comments-by-level`, `own-capacity`, `paywall-sites`, `role-permissions-web`, `save-comment`, `sidebar-reorder`, `space-features`, `space-wizard`, `sticky-headers`, `task-ai-bar`, `task-attachments`, `task-cover`, `task-mentions`, `task-pickers-search`, `task-sheet-capabilities`, `task-values`, `team-view`, `timeline-dates`, `view-autosave`, `view-visibility` and `view-writes-by-level`), 793 checks, 40 suites green at once. `task-cover` (its second board never drew the card) and `view-writes-by-level` (a rename made from the ⋯ menu not saved) failed on lane 5 under the sweep’s load — two cores, beside the CI rehearsal — and each was green alone, twice.
 
 ### `found-30-sep/public-cdn-url-makes-every-object-public` — **closed** (security, small; found closing `resume-defects/resume-7`)
 
@@ -8516,7 +8526,7 @@ Coverage: `list-page-levels.mjs` asserts only that the due date changed, in a UT
 
 *Merged, 6 October,* into the main checkout (onto `986c760`) with the batch's other builders' work, and run again there on lanes 2, 5 and 7: 63 suites, 60 green at once; `list-export` and `panel-collapse` failed once at a load of 14 and were green twice each when run again; `session-in-the-browser` failed 3 of 7 runs, its reconnect checks racing the server's admission of a reopened socket (fixed here: see `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), then 6 of 6. API unit tests 2063/2063, web 344/344, both typechecks clean.
 
-### `found-5-oct/comment-links-not-links` — open (visible bug, small; found by the triage beside `resume-defects/s4-clip-link`) · reproduced 5 October
+### `found-5-oct/comment-links-not-links` — **closed** (visible bug, small; found by the triage beside `resume-defects/s4-clip-link`) · reproduced 5 October
 
 **A web address in a one-line comment is drawn as plain text, not a link**
 
@@ -8525,6 +8535,17 @@ Coverage: `list-page-levels.mjs` asserts only that the due date changed, in a UT
 The cause: `mention-text.tsx` takes its plain path whenever the text has no block markdown, and draws every segment as a `<span>`; `markdown.tsx`'s bare-URL autolinker is reached only on the block path. The plain path's comment explains skipping emphasis, not links.
 
 *To close:* research how ClickUp draws a pasted address in a comment (a link, opening in a new tab). Link bare addresses on the plain path too, safely (http and https only), and check both kinds of comment in a suite.
+
+*Closed, 6 October* (lane 4). An address in a one-line comment is a link, as one in a comment holding a list already was: `splitAddresses` (`lib/link-addresses.ts`) splits the plain path's text into its `http:` and `https:` addresses and the text around them, the address without the full stop, comma or bracket that ends its sentence, and every other character as typed; each opens in a new tab (`noreferrer noopener`). A `javascript:` or `data:` address stays text. ClickUp detects an address typed or pasted into a comment and opens it in a new tab ("URL links in tasks", read through search excerpts).
+
+Measured on lane 4 with the extended `comment-slash-commands` suite: before, on the build these fixes went onto, the one-line comment's two addresses were text (no anchor), while the one in the comment holding a list was a link (10 of 11, the new check red); after, both are links to exactly the address, without the full stop or the bracket, opening in a new tab, the `javascript:` one is text, and the comment reads as written (11 of 11 on lane 4, and again in the regression sweep).
+
+Checks:
+- `comment-slash-commands` 10 → 11: an address in a one-line comment is a link, as one in a comment holding a list is.
+- `link-addresses.test.ts` (3) is new.
+- Patches `csc-5` (the plain path links nothing) and `csc-6` (the sentence's stop is the address's) each redden it; unit claims `csc-7` and `csc-8` (any scheme is an address).
+
+Regression on lanes 2, 4, 5, 6 and 7: the 42 suites the four changes to the product touch (`brain-entry-points`, `clip-created-card`, `clip-links`, `clip-setup`, `comment-plus-menu`, `comment-recording`, `comment-slash-commands`, `comment-thread`, `custom-field-types`, `full-edit-levels`, `gantt-controls`, `guest-task-edits`, `guest-task-making`, `list-assignee-filter`, `list-card-cover`, `list-customize`, `list-empty-states`, `list-export`, `list-page-levels`, `list-save-view`, `list-view-controls`, `mail-comments-by-level`, `own-capacity`, `paywall-sites`, `role-permissions-web`, `save-comment`, `sidebar-reorder`, `space-features`, `space-wizard`, `sticky-headers`, `task-ai-bar`, `task-attachments`, `task-cover`, `task-mentions`, `task-pickers-search`, `task-sheet-capabilities`, `task-values`, `team-view`, `timeline-dates`, `view-autosave`, `view-visibility` and `view-writes-by-level`), 793 checks, 40 suites green at once. `task-cover` (its second board never drew the card) and `view-writes-by-level` (a rename made from the ⋯ menu not saved) failed on lane 5 under the sweep’s load — two cores, beside the CI rehearsal — and each was green alone, twice.
 
 ### `found-5-oct/calendar-push-ignores-who-may-read` — **closed** (security, medium; found by the triage beside `ledger-rows/row-1962`) · reproduced 5 October as far as a push can go here
 
@@ -9197,7 +9218,7 @@ Checks:
 
 Regression on lanes 2, 4, 6 and 7: the 25 suites the four fixes of this batch touch (`call-realtime-access`, `call-survives-navigation`, `chat-realtime-access`, `comment-plus-menu`, `create-menu-ai`, `data-transfer-keys`, `doc-boundaries`, `doc-import`, `emoji-picker`, `guest-canvas-scope`, `guest-chat-scope`, `guest-create-menu`, `guest-read-scope`, `imports`, `malformed-ids`, `object-key-boundaries`, `realtime-access-ends`, `realtime-sends-access`, `sign-in-and-password`, `space-create-menu`, `syncup-live`, `task-depth`, `task-mentions`, `video1-fast-items` and `workspace-read-access`), 612 checks, all green.
 
-### `found-6-oct/verify-refuses-a-lane-restarted-in-its-builds-second` — open (test tooling, small; found by two builders of 5 October) · reproduced 6 October
+### `found-6-oct/verify-refuses-a-lane-restarted-in-its-builds-second` — **closed** (test tooling, small; found by two builders of 5 October) · reproduced 6 October
 
 **`verify.sh` refuses a lane restarted in the same second as its build stamp, as a build older than its API**
 
@@ -9205,7 +9226,14 @@ Regression on lanes 2, 4, 6 and 7: the 25 suites the four fixes of this batch to
 
 *To close:* compare at the resolution both clocks share (or stamp the build before the restart by more than that), and add the case to the lane self-checks.
 
-### `found-6-oct/verify-timeout-ends-no-hung-suite` — open (test tooling, small; found closing `found-5-oct/xlsx-read-as-text`) · reproduced 6 October
+*Closed, 6 October.* `verify.sh` reads the API's start to the hundredth of a second (`lane_started_at`, lane-env.sh: the process's start in clock ticks from `/proc/<pid>/stat`, the boot from `/proc/uptime`) and the build stamp to the hundredth (`stat -c %.2Y`), and refuses a lane only when its API started before the build by more than that (`started_before`). `ps -o lstart` gave whole seconds worked out from a boot time the kernel also gives in whole seconds, so it read up to a second early.
+
+Measured: on 6 October it happened once more, in this batch's own runs on lane 2 ("started at 16:51:08, before the build at 16:51:09", one second after `build-api.sh` restarted the lane onto that build). The new `verify-guards-selfcheck.sh` starts a process in the second half of a second: read the old way, from `ps -o lstart`, its start was off by more than a tenth of a second and the self-check failed (its mutation "the start in whole seconds from ps -o lstart", caught); read by `lane_started_at`, it is off by a hundredth, a process started just after a stamp is not before it, and one started 1.2 s before is (every case passes, here and in preflight, and each of the three old readings is caught).
+
+Checks:
+- `verify-guards-selfcheck.sh` (new, in preflight and in CI's verify job): a start read to within a tenth of a second; just after a stamp is not before it; 1.2 s before is. With `--mutate`, the whole-second reading is caught.
+
+### `found-6-oct/verify-timeout-ends-no-hung-suite` — **closed** (test tooling, small; found closing `found-5-oct/xlsx-read-as-text`) · reproduced 6 October
 
 **A suite whose teardown hangs outlives `verify.sh`'s `timeout 900`**
 
@@ -9213,13 +9241,31 @@ Regression on lanes 2, 4, 6 and 7: the 25 suites the four fixes of this batch to
 
 *To close:* `timeout -k` (a kill after the term), and a self-check that a suite ignoring SIGTERM is ended.
 
-### `found-6-oct/autosave-switch-saves-nothing` — open (visible bug, small; found closing `found-5-oct/readers-change-shared-views`) · reproduced 6 October
+*Closed, 6 October.* A suite runs under `run_bounded 900 30` (lane-env.sh): `timeout -k 30 900`, so a KILL follows the TERM by thirty seconds, and a suite whose teardown ignores the TERM is ended.
+
+Measured with `verify-guards-selfcheck.sh`: a stand-in suite that ignores SIGTERM and sleeps twenty seconds, run with one second and one of grace, ran on past its TERM under plain `timeout` (the mutation "timeout with no KILL after its TERM", caught) and ended at 2.0 s under `run_bounded` (every case passes, here and in preflight, and each of the three old readings is caught).
+
+Checks:
+- `verify-guards-selfcheck.sh`: a suite that ignores SIGTERM is killed after its grace; with `--mutate`, `timeout` without `-k` is caught.
+
+### `found-6-oct/autosave-switch-saves-nothing` — **closed** (visible bug, small; found closing `found-5-oct/readers-change-shared-views`) · reproduced 6 October
 
 **The "Autosave for me" switch saves nothing**
 
 *Evidence, 5 October, lane 6 (`autosave-probe.mjs`):* as the admin, the switch turned on for a saved view (200, and the panel shows it on); the grouping changed to priority; six seconds later the Save view chip was still up, SQL still read the view's grouping as status, and after a reload the control read status. The switch stores `task_view_prefs.autosave`, and nothing in the web reads it, though its tooltip says it "will automatically save any layout changes you make to this view".
 
 *To close:* research ClickUp's view autosave; save a changed layout for whoever has the switch on (and may change the view), and check it by SQL.
+
+*Closed, 6 October* (lane 6). With "Autosave for me" on, a layout change is saved to the view as Save view saves it, a moment after it settles, by whoever may change the view (`viewOffersOf(view).change`); the Save view chip is not drawn for a change that saves itself, and a refused save says why, as Save view's does. One who may only read the view changes their own screen, and nothing is sent. ClickUp ("Save view changes", help centre, read through search excerpts): Save view saves for everyone with access to the view, and Autosave automatically saves any future changes to it; each person turns it on for themselves.
+
+Measured on lane 6 with the new `view-autosave` suite: before, on the build these fixes went onto, the admin's switch on, a grouping changed to priority left the view grouped by status by SQL, the Save view chip up, nothing sent, and status after a reload (the first check red; the second, a reader's change, sent nothing either); after, the view reads priority by SQL, no chip, priority after a reload, and a member who may only read the view, their switch on, changes their own screen with nothing sent and no refusal said (2 of 2 on lane 6, and again in the regression sweep).
+
+Checks:
+- `view-autosave` (2) is new, in CI.
+- Patches `vas-1` (the switch saves nothing) and `vas-2` (it writes for a reader who may not change the view) each redden their check.
+- Re-aimed at the chip and Save view's write as they read now, each reddening its check again: `list-save-view-1`, `list-save-view-3` and `vwl-10`.
+
+Regression on lanes 2, 4, 5, 6 and 7: the 42 suites the four changes to the product touch (`brain-entry-points`, `clip-created-card`, `clip-links`, `clip-setup`, `comment-plus-menu`, `comment-recording`, `comment-slash-commands`, `comment-thread`, `custom-field-types`, `full-edit-levels`, `gantt-controls`, `guest-task-edits`, `guest-task-making`, `list-assignee-filter`, `list-card-cover`, `list-customize`, `list-empty-states`, `list-export`, `list-page-levels`, `list-save-view`, `list-view-controls`, `mail-comments-by-level`, `own-capacity`, `paywall-sites`, `role-permissions-web`, `save-comment`, `sidebar-reorder`, `space-features`, `space-wizard`, `sticky-headers`, `task-ai-bar`, `task-attachments`, `task-cover`, `task-mentions`, `task-pickers-search`, `task-sheet-capabilities`, `task-values`, `team-view`, `timeline-dates`, `view-autosave`, `view-visibility` and `view-writes-by-level`), 793 checks, 40 suites green at once. `task-cover` (its second board never drew the card) and `view-writes-by-level` (a rename made from the ⋯ menu not saved) failed on lane 5 under the sweep’s load — two cores, beside the CI rehearsal — and each was green alone, twice.
 
 ### `found-6-oct/a-guest-shared-one-task-told-nothing-is-shared` — **closed** (visible bug, small; found reviewing `found-5-oct/readers-change-shared-views`) · reproduced 5 October
 
@@ -9278,13 +9324,24 @@ Regression on lanes 2, 4, 6 and 7: the 25 suites the four fixes of this batch to
 
 *To close:* the owner's decision (with the range of years a date may hold, recorded on `found-5-oct/years-below-100-read-back-wrong`): bound or virtualise the drawn range, or list an outlier apart. Then check a far-dated task leaves both views drawn in a second.
 
-### `found-6-oct/list-page-offers-task-edits-by-list-level` — open (visible bug, small; found reviewing `found-30-sep/timeline-drags-refused-silently`) · reproduced 6 October
+### `found-6-oct/list-page-offers-task-edits-by-list-level` — **closed** (visible bug, small; found reviewing `found-30-sep/timeline-drags-refused-silently`) · reproduced 6 October
 
 **The list page offers a task's row edits, Gantt drag and Calendar drag by the list's level alone, so a person given the task at Edit in a list they may only view is offered none of them**
 
 *Evidence, 6 October, lane 5 (`probe-list-share.mjs`):* a member given one task at Edit in a view-only space has task capabilities `edit: true` and list capabilities `edit: false`. On the list page that task's row draws no date boxes and its Gantt bar takes no drag, yet `PATCH /tasks/:id` accepts the change. The workspace timeline now offers it (`mayEdit`, closed with `found-30-sep/timeline-drags-refused-silently`).
 
 *To close:* offer each row's edits by the task's own answer (as the timeline's `mayEdit` and the task sheet do), and check it with a member given one task at Edit.
+
+*Closed, 6 October* (lane 2). The list answers each row's `mayEdit` — the write rule's answer per task, as the timeline's (`timelineEditable`, read once for the list's project, folder and space, `listRowsEditable`) — and the list page offers a row's edits by its task's own answer where the list gives one, else the list's (`mayEditTask`): a row's due date, priority, title and field cells, its Calendar drag and its Gantt drag; the status, the board's drag and the assignees by `mayProgress`, which reads it too. Selecting rows for the bulk bar, which changes many tasks at once, stays the list's.
+
+Measured on lane 2 with the extended `list-page-levels` suite: before, on the build these fixes went onto, a task shared with the member at Edit in the view-only list drew no due date and no priority, its Calendar item was not draggable and its Gantt bar did not move — the press opened it — exactly as for the task beside it, shared with nobody, and the list said nothing of either (9 of 10, the new check red); after, the shared task's row offers both, its Calendar item drags and its bar moves its dates, the other offers none of them, and the list says `mayEdit` true and false (10 of 10 on lane 2, and again in the regression sweep).
+
+Checks:
+- `list-page-levels` 9 → 10: a task shared at Edit in a view-only list is the member's to change on the list page, and the task beside it is not; the list says which.
+- Patches `lpl-34` (the list answers no row's own `mayEdit`), `lpl-35` (a row's edits follow the list alone), `lpl-36` (a Gantt bar drags by the list) and `lpl-37` (a Calendar item drags by the list) each redden it.
+- Re-aimed at the gates as they read now, each reddening its check again: `lpl-9`, `lpl-10`, `lpl-12`, `lpl-13`, `lpl-18`, `lpl-20`, `lpl-21`, `lpl-22` and `lpl-29`.
+
+Regression on lanes 2, 4, 5, 6 and 7: the 42 suites the four changes to the product touch (`brain-entry-points`, `clip-created-card`, `clip-links`, `clip-setup`, `comment-plus-menu`, `comment-recording`, `comment-slash-commands`, `comment-thread`, `custom-field-types`, `full-edit-levels`, `gantt-controls`, `guest-task-edits`, `guest-task-making`, `list-assignee-filter`, `list-card-cover`, `list-customize`, `list-empty-states`, `list-export`, `list-page-levels`, `list-save-view`, `list-view-controls`, `mail-comments-by-level`, `own-capacity`, `paywall-sites`, `role-permissions-web`, `save-comment`, `sidebar-reorder`, `space-features`, `space-wizard`, `sticky-headers`, `task-ai-bar`, `task-attachments`, `task-cover`, `task-mentions`, `task-pickers-search`, `task-sheet-capabilities`, `task-values`, `team-view`, `timeline-dates`, `view-autosave`, `view-visibility` and `view-writes-by-level`), 793 checks, 40 suites green at once. `task-cover` (its second board never drew the card) and `view-writes-by-level` (a rename made from the ⋯ menu not saved) failed on lane 5 under the sweep’s load — two cores, beside the CI rehearsal — and each was green alone, twice.
 
 ### `found-6-oct/a-time-on-utc-midnight-reads-as-no-time` — open (visible bug, small; found closing `found-30-sep/sheet-dates-write-as-typed`) · reproduced 6 October
 
@@ -9468,13 +9525,20 @@ Checks:
 
 Regression on lanes 2, 4 and 6: the 76 suites these touch, 1233 checks, 69 suites green at once. `app-catalogue` and `meetings-connect-calendar` failed on races in the suites, found here and closed beside these (`found-6-oct/app-catalogue-waits-for-a-tile-drawn-before-any-answer`, `found-6-oct/meetings-upcoming-read-after-a-fixed-wait`). At a load of about 12 on four cores, `comment-recording`, `sidebar-sections`, `task-menu` and `task-depth` each gave up a 20 s wait for a sheet or a menu, and `task-sheet-fetches` counted one of its sheet's opening fetches as the change's while its second sheet missed the change; each was green when run again on its own (33, 25, 37, 92 and 2 checks). API unit tests 2135/2135, web 350/350, both typechecks clean.
 
-### `found-6-oct/verify-takes-a-bundle-of-other-sources-as-fresh` — open (test tooling, small; found by the builder of `found-6-oct/import-previews-tell-what-private-places-hold`) · reproduced 6 October
+### `found-6-oct/verify-takes-a-bundle-of-other-sources-as-fresh` — **closed** (test tooling, small; found by the builder of `found-6-oct/import-previews-tell-what-private-places-hold`) · reproduced 6 October
 
 **`verify.sh` takes a bundle built from other sources as fresh when the sources come back with older times**
 
 *Evidence, 6 October, lane 4:* after a before-run on HEAD's product code (its web bundle built then), the builder put the fix's files back with `cp -p`, which keeps their earlier mtimes; `verify.sh` then ran `imports` against HEAD's bundle without refusing, and the import page check went red for a reason the code under test did not have, until the bundle was rebuilt. The staleness checks compare mtimes only.
 
 *To close:* stamp each bundle with the hash of the sources it was built from (or the tree's), compare that, and add the case to the lane self-checks.
+
+*Closed, 6 October.* A lane's bundle carries the hash of the sources it was built from: `refresh-dists.sh` writes `web_sources_hash` (lane-env.sh) into it as `.sources-hash`, read before any build starts, and `verify.sh` refuses a bundle whose hash is not the tree's ("built from other sources than these"), after the mtime check it had. The hash is of content: each source's blob hash, the index's where the working copy matches it (git's stat cache, which reads again a file whose inode, size, mtime or ctime moved, as `cp -p` moves the inode and ctime), the working copy's where it does not, and each untracked file's. Staging changes nothing; a byte anywhere changes it. It takes a twentieth of a second. A bundle built otherwise (no `.sources-hash`) has the mtime check alone.
+
+Measured with `verify-guards-selfcheck.sh`, on a stand-in tree in a repository of its own: a source put back by `cp -p` with an earlier mtime and other bytes is another tree to `web_sources_hash`, while the newest-mtime reading `verify.sh` used took it as the same (the mutation, caught); staging a change, and putting the same bytes back, are the same tree; a new file dated two days back is another (every case passes, here and in preflight, and each of the three old readings is caught). On the lanes, every bundle `refresh-dists.sh` has built since carries its hash, and this batch’s after runs and its 42-suite regression sweep ran through `verify.sh` with each bundle’s hash compared; when the break runs’ restores left four bundles older than their sources, it refused them, by mtime, until they were rebuilt.
+
+Checks:
+- `verify-guards-selfcheck.sh`: four cases on a stand-in tree; with `--mutate`, a tree told by its newest mtime is caught.
 
 ### `found-6-oct/app-tiles-say-cannot-connect-before-the-server-answers` — **closed** (visible bug, small; found in the regression sweep of `found-6-oct/calendar-pull-uses-a-leavers-connection`) · reproduced 6 October
 
