@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 469 items: 35 open · 3 partly fixed · 377 closed, and 54 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 5 October, after the revert and the triage (`docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 477 items: 36 open · 5 partly fixed · 382 closed, and 54 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 6 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -2812,7 +2812,7 @@ Checks:
 - Regression on lane 3, with the other two items': the invitation suites among the 45 (`assignee-picker`, `credential-reads`, which claims a legacy invitation, `guest-invitations`, `list-empty-states`, `no-dead-ends`, `settings-tabs-by-key`, `video-regression`) all green; 44 of 45 in all, 743 of 744 checks.
 - Merged here onto `6f8e02c` and run again on lane 3: `sign-in-and-password` 29, `session-in-the-browser` 3, `auth-route-limits` 22, `password-hash-time` 4, the socket handshake's `chat-realtime-access` 6, `call-realtime-access` 2, `workspace-read-access` 30 and `guest-chat-scope` 7, `credential-reads` 11, `guest-invitations` 2, `settings-depth` 62 and `menu-reopen` 26, all green, 204 checks; `loading-states` 25/26, its known failure (`found-30-sep/loading-states-reads-the-clip-page-loading`).
 
-### `found-30-sep/a-burst-is-compared-before-the-lock` — open (security, small; found closing `found-30-sep/password-change-guesses-600-an-hour`) · reproduced 5 October
+### `found-30-sep/a-burst-is-compared-before-the-lock` — partly-fixed (security, small; found closing `found-30-sep/password-change-guesses-600-an-hour`) · reproduced 5 October
 
 **Wrong passwords sent at once are all compared before the lockout locks the account, and a right one among them signs in**
 
@@ -2827,7 +2827,15 @@ OWASP's ASVS 2.2.1: "no more than 100 failed attempts per hour is possible on a 
 
 *Triage, 5 October:* reproduced on a lane. Twenty wrong passwords and the right one sent together still sign in (200, a session) although the burst locks the account, because the lock is read before the compare (2 of 2 runs on lane 1). Evidence: `docs/triage-2026-10-05.md`.
 
-### `found-30-sep/an-open-socket-outlives-its-session` — open (security, small; found closing `found-30-sep/revoked-sessions-keep-their-access-tokens`) · reproduced 5 October
+*Partly fixed, 5 October* (built by an agent on lane 2). ClickUp documents no count for failed sign-ins (WebSearch found none; help centre blocked); OWASP ASVS 2.2.1 allows "no more than 100 failed attempts per hour … on a single account" and the authentication cheat sheet keeps the counter on the account, not the address — the limit is on FAILED attempts. Reproduced first on lane 2, three runs alike: twenty wrong passwords and the account's right one, each from its own loopback address, sent at once — the twenty answered 401 and the right one 200 with a session, though the burst locked the account (failed_login_attempts 0, locked); the right password alone a moment later was refused 401. validateUser read the lock once (findByEmail) and compared every attempt that read it unlocked; a compare takes a hash's time and the count was written after it, so the in-flight attempts all compared before the wrong ones locked the account and the right one among them signed in — the count bounded what was counted, not whether a success stood against a lock set meanwhile. Now a successful compare clears the count ONLY IF the account is not locked, in one statement whose WHERE excludes a locked account (clearLockoutIfUnlocked), and a success that finds the account locked is refused with the same generic words, where a wrong one is counted. The lock is driven by failed attempts alone, so concurrent SUCCESSFUL sign-ins (none a failure) all stand — reserve-before-compare, the literal "To close", was not taken because it counts every in-flight attempt and would lock an account on a burst of its own correct logins (contradicting OWASP's failed-attempt scope and breaking password-hash-time's eight-concurrent-correct check). After (lane 2, three runs alike): the right one among the burst is refused 401, the account locked (count 0), its right password alone refused while the lock lasts; eight concurrent correct sign-ins all succeed (password-hash-time 4/4). Checks: sign-in-and-password (29 -> 31) — "twenty wrong passwords and the right one sent at once are all refused 401 once five have been counted…"; auth.service.test.ts — a success clears only when not locked (WHERE excludes a locked account), a success that finds the account locked is refused, a lockout-off clean success writes nothing. Break patches: sip-59 (e2e) and sip-60 (unit) revert the success-recheck; sip-61 drops the clear's lock-guard; sip-63 makes the lockout-off success write — each shown to redden exactly its check on lane 2 and restored byte for byte. sip-3 and sip-4 re-aimed onto countWrongPassword's WHERE + its own RETURNING (clearLockoutIfUnlocked now shares the WHERE line). Regression on lane 2, after the review fixes: sign-in-and-password 31 (three runs), password-hash-time 4, auth-route-limits 22, session-in-the-browser 4 (three runs), all green; the API's unit tests and the web's pass, and both typechecks are clean. Cost: one PK UPDATE (the clear-if-unlocked) per successful sign-in, negligible beside the ~hash-time compare that dominates a sign-in.
+
+*What the lock now bounds* (measured by the fixer on lane 2, three compare workers): eight attempts sent at once, seven wrong and the right one at place 1, 5, 6, 7 or 8 in the send order, three tries each: the right one signed in 10 times out of 15. A compare starts when its account read returns, not in the order sent, and a success stands if it ends before the fifth wrong password is counted. So one lock window now answers only the guesses whose compares end before the lock: at most the threshold plus the compares in flight, less one (seven here); before, it answered every guess sent at once. Counting the attempt before the compare, as "To close" says, would hold it at five, but would also refuse an account's own correct sign-ins sent at once past the fifth, which `password-hash-time`'s eight-at-once check forbids.
+
+*Why partly:* the item's named check passes (the right password among twenty wrong ones sent at once is refused once five are counted), and the burst no longer signs in; whether one window must hold strictly to five, at the price above, is the owner's to decide.
+
+*Merged, 6 October,* into the main checkout with the batch's other two builders' work (fields, clips, sign-in and sockets), and run again there on lanes 2, 5 and 7: 47 suites, all green — `password-hash-time`, which compares timings, failed once at a load of 13 on four cores and passed 4/4 twice on a quiet lane — and the API's 1984 unit tests and the web's 320, both typechecks clean.
+
+### `found-30-sep/an-open-socket-outlives-its-session` — **closed** (security, small; found closing `found-30-sep/revoked-sessions-keep-their-access-tokens`) · reproduced 5 October
 
 **A realtime socket opened before its session ended stays connected, and hears its rooms**
 
@@ -2841,6 +2849,20 @@ OWASP's ASVS 5.0, 7.4.1: when a session is terminated, "the application disallow
 *To close:* end a session's sockets when it ends: each socket joins a room named for its session (`sid`) at the handshake, and each way a session ends (a password change, a reset, "sign out other sessions", revoking one, signing out, the session cap) disconnects that room; or re-check each socket's session at an interval and on its presence ping. Check that a socket open on a session a password change ends is disconnected within seconds, and that the changer's own socket stays.
 
 *Triage, 5 October:* reproduced on a lane. A socket opened before its session was signed out stays connected and keeps receiving room events (it heard a task.created after the revoke); only new handshakes are refused. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 6 October* (built by an agent on lane 2). OWASP ASVS 5.0 7.4.1: a terminated session 'disallows any further use of the session'. ClickUp signs sessions out at once ('Log out of all sessions' in My Settings covers mobile, iPad and other browsers; changing the session duration 'will immediately sign everyone with access to your Workspace out', help centre via WebSearch). Reproduced first on lane 2, three runs alike: an account signed in twice, A and B; B opened a socket and subscribed to a list room; A signed B out ('Sign out other sessions', revoked 2). B's access token was refused at once on GET /users/me (401, since found-30-sep/revoked-sessions-keep-their-access-tokens), but B's socket stayed connected 7 s later and heard a task.created posted after the revoke; it stayed connected as long as its connection lasted, and nothing ended it when its access token ran out either. The handshake read the token's session once (admit); nothing looked at an open socket again. Now the gateway re-reads each live socket's session (sessionIsLive, the rule a route applies) on a short interval (5 s) and on its presence ping, and disconnects a revoked session's sockets with 'Session ended', as a new handshake with its token is — one read per distinct session per sweep (deduped across a person's sockets), no cache, so each process ends its own dead sockets wherever the revoke was handled (robust across replicas, as the token fix is). Of the two ways the 'To close' offered, the interval+ping re-check was taken over a per-session room disconnected on every revoke, because it is self-contained in the gateway and needs no socket.io cross-replica adapter. After (lane 2, three runs alike): B's socket is disconnected within the sweep's seconds and hears no task.created posted after the revoke, while A's socket stays up. Checks: sign-in-and-password — 'a socket open on a session that is then signed out elsewhere is disconnected within seconds with "Session ended" and hears no more of its rooms, while the session that signed it out keeps its socket'; realtime.gateway.test.ts — the sweep disconnects a revoked session's sockets and leaves a live session's, and a presence ping on a revoked session's socket disconnects it instead of recording a heartbeat. Break patches: sip-64 (e2e) and sip-65 (unit) neuter the sweep's disconnect; sip-66 drops the ping's re-read — each shown to redden exactly its check on lane 2 and restored.
+
+*Found in review and fixed with it* (lane 2, three runs alike each):
+- A failed session read ended the process: the sweep ran in a timer as `void` and awaited its reads one by one; with one socket open and the database refusing connections for eight seconds, the read failed, the rejection had no handler and the API exited. Now the reads are settled together and the tick catches whatever the sweep throws; a failed read gives no answer, so its sockets are kept and asked again at the next sweep. After: the process lived through the outage, the socket still connected.
+- Signing out and back in on one tab left it without a socket (socket.io does not reconnect after the server closes one). The tab's socket now follows who is signed in (`followSignedIn`, `apps/web/src/lib/realtime.ts`): closed on sign-out, opened on the new session's token at the next sign-in. After: a socket opens after the second sign-in and a message in the account's private channel is heard.
+
+Checks: `sign-in-and-password` gains "a socket open on a session that is then signed out elsewhere is disconnected within seconds with “Session ended” and hears no more of its rooms, while the session that signed it out keeps its socket"; `session-in-the-browser` 3 → 4 ("signing out from the menu and back in on the same tab, without a reload, opens the tab’s realtime socket again on the new session"); `realtime.gateway.test.ts` four tests; the web's `realtime.test.ts` two. Patches `sip-64..68` and `sib-4..6`, each shown to turn exactly its check red on lane 2 and restored byte for byte.
+
+Regression on lane 2: sign-in-and-password 31 (three runs), session-in-the-browser 4 (three runs), chat-realtime-access 6, call-realtime-access 2, guest-chat-scope 7, guest-canvas-scope 5, guest-read-scope 12, workspace-read-access 30, sw-api-cache 5, syncup-live 59, task-sheet-fetches 2, stale-chunk-recovery 27, password-hash-time 4, auth-route-limits 22, all green.
+
+For the owner: the interval re-check is one of the two ways "To close" offered, so a revoked socket can last up to the sweep's five seconds; a failed read keeps its sockets until the next sweep rather than ending every client's realtime. Found beside it: `found-6-oct/an-open-socket-outlives-its-access` (a removed member's open socket), `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`.
+
+*Merged, 6 October,* into the main checkout with the batch's other two builders' work (fields, clips, sign-in and sockets), and run again there on lanes 2, 5 and 7: 47 suites, all green — `password-hash-time`, which compares timings, failed once at a load of 13 on four cores and passed 4/4 twice on a quiet lane — and the API's 1984 unit tests and the web's 320, both typechecks clean.
 
 ### `found-30-sep/loading-states-reads-the-clip-page-loading` — **closed** (suite, small; found in the regression for `found-30-sep/revoked-sessions-keep-their-access-tokens`)
 
@@ -3412,7 +3434,7 @@ Checks:
 - Regression on lane 7: 17 suites and 401 checks, all green; after the review fix, `custom-field-progress` ×3 and six more suites once, all green. The API's unit tests: 1907/1907.
 - Merged here onto `f44b647` with the other three builders' batches (one clash: `create-modal-templates` took checks from two of them, 33 → 45, and a `T5_ID` both had declared; three of the fields batch's unit tests scripted one read fewer than the task-writes batch now makes, and do now) and run again on lanes 2, 4, 5 and 7, 26 suites, all green, 552 checks: among them `custom-field-access` 6, `custom-field-types` 33, `create-modal-templates` 45, `template-center` 81, `ai-read-access` 5, `ai-task-reads` 4.
 
-### `found-30-sep/field-definition-takes-a-foreign-list` — open (security, small; found closing `found-30-sep/field-route-takes-another-projects-field`) · reproduced 5 October
+### `found-30-sep/field-definition-takes-a-foreign-list` — **closed** (security, small; found closing `found-30-sep/field-route-takes-another-projects-field`) · reproduced 5 October
 
 **A field is defined with a list of another project, and a share on that list decides who may define it**
 
@@ -3425,7 +3447,52 @@ Checks:
 
 *Triage, 5 October:* reproduced on a lane. Reproduced on lane 3. An admin defines a field in one project scoped to another project's list (201, stored). A member in a view-only space is refused a field there (403) but defines one by naming a list of another space that is shared with them at edit (201). Evidence: `docs/triage-2026-10-05.md`.
 
-### `found-30-sep/merge-moves-values-onto-fields-the-target-lacks` — open (visible bug, small; found closing `found-30-sep/field-route-takes-another-projects-field`) · reproduced 5 October
+*Closed, 5 October* (built by an agent on lane 7). In ClickUp, a field made from a List view, Table view or task "is added to the Hierarchy location where the view or task is located" (help centre, "Create Custom Fields", read through search excerpts). A field belongs to its location, and a list belongs to its own project.
+
+Measured first on lane 7 with the triage's probe, three runs alike:
+- An admin defined a field in project ONE scoped to project TWO's list: 201, stored with ONE and TWO's list.
+- A member in a view-only space was refused a field there with no list and with the project's own list (403 each, the space's reason).
+- The same member defined one by naming a list of another space shared with them to edit: 201, stored.
+
+What changed:
+- `listOfProject` (`common/permissions/field-access.ts`) asks whether a list is one of the project's.
+- `assertMayDefineFields` puts the list in `within` only when it is the project's own. A list of another project is no step on the way, so the project's and the space's answer stands.
+- `createDefinition`, after the rule, refuses a `listId` that is not a list of the project, as a list that is not there: 404 "List not found in this project", nothing stored. So whoever may not define fields there hears the rule's 403 first, whatever list they name.
+- Nothing on the web offers another project's list: the create modal's scope offers the chosen project's list, the task sheet sends a scope, and the list and project pages send none. A refusal reaches the existing toasts in the server's words.
+
+After, three runs alike:
+- The admin's field on TWO's list: 404 "List not found in this project", none stored.
+- The own-list field: 201.
+- The member: 403 three times, each with the space's reason.
+- The view-only project holds no field.
+
+Checks:
+- `field-writes-by-level`, 5 → 7. The two new checks: "a member refused fields in a view-only space is refused one there with no list (403), and naming a list of another space shared with them to edit (403) — no step on the way to this project — the space’s reason both times, none made (read by SQL)" and "a field scoped to a list of another project is refused, the admin’s included, as a list that is not there (404 “List not found in this project”, none made, read by SQL) — while one scoped to the project’s own list is made, stored with that list". Before, 5/7 (201 each). After, 7/7 in three runs.
+- `field-access.test.ts` is new, with four tests. `custom-fields.service.test.ts` has two more, for `createDefinition`.
+- `fdl-1` (the rule takes the list as sent) reddens exactly the first check (6/7: the member's named list answered 404, past the space). `fdl-2` (the list stored as sent) reddens exactly the second (6/7). `fdl-3` and `fdl-4` redden the unit tests they name (3/4 and 6/7).
+- `fwl-3` (defining asks nothing) reddens the first check as well, measured 4/7. Its claim now names it.
+
+Regression on lane 7 after the review fix: 17 suites and 477 checks, all green; API unit tests 1960/1960, web unit files 36/36, both typechecks clean.
+
+*Review fix, 5 October* (lane 7). Two reviewers found the rule's list step unfinished. Each case was measured on lane 7 with their probes, then the fixer's, three runs alike:
+- Renaming and deleting asked the rule without the field's list, although `found-25-sep/field-values-written-by-readers` was closed saying they ask "on its list, for a list's field". A member shared a list to view, in a space they may edit, renamed and deleted its field, the value with it (200; 1 value → 0). One shared a view-only space's list to edit made a field there (201) and could not rename or delete it (403, the space's reason).
+- No private list was asked. A member refused one (GET 403 "This list is private") defined a field scoped to it (201), and renamed and deleted the admin's (200; 1 value → 0).
+- A list's id sent in brackets passed `listOfProject` and was taken as the list step, which no share matched: a member shared the list to view defined a field scoped to it (201).
+- No check covered the rule's own call to `listOfProject`.
+
+ClickUp (help centre, read through search excerpts): "When there are conflicting permissions for the same location, permissions set on the most specific level of the Hierarchy are applied", and "permissions on Lists override Subfolders and Folders" ("Set permissions on individual locations"); a List is made private "so only certain people can access them".
+
+What changed: `updateDefinition` and `deleteDefinition` ask the rule with the field's own list; the rule refuses a list of the project the caller may not open (`readableList`): 403 "This list is private"; `createDefinition` refuses a `listId` that is not a string, before the rule: 400 "listId must be a string or null".
+
+After, three runs alike: the viewer's rename and delete 403 with the share's reason, the field and its value kept; the view-only space's list editor renames and deletes (200); the private list: defining, renaming and deleting all 403 "This list is private", the value kept; the bracketed id 400.
+
+Checks: `field-writes-by-level` 7 → 10, three new checks (a field made as its own list says; renamed and deleted as its own list says; a list named by its id and nothing else); before 7/10, after 10/10 in five runs. `field-access.test.ts` 4 → 7, `custom-fields.service.test.ts` 7 → 8. New patches `fdl-5..10`, each reddening exactly what it names; unit claims `fdl-11..14`. Re-aimed: `fwl-3`, `fwl-4`, `fwl-5`, `cfa-4`, `fdl-1`, `fdl-3`.
+
+For the owner: definitions stored before this fix with a list of another project show on no task; moving a list with its own fields still makes them (`found-6-oct/list-move-strands-its-fields`). Whether existing ones are removed, re-scoped or left is a data change, not made.
+
+*Merged, 6 October,* into the main checkout with the batch's other two builders' work (fields, clips, sign-in and sockets), and run again there on lanes 2, 5 and 7: 47 suites, all green — `password-hash-time`, which compares timings, failed once at a load of 13 on four cores and passed 4/4 twice on a quiet lane — and the API's 1984 unit tests and the web's 320, both typechecks clean.
+
+### `found-30-sep/merge-moves-values-onto-fields-the-target-lacks` — partly-fixed (visible bug, small; found closing `found-30-sep/field-route-takes-another-projects-field`) · reproduced 5 October
 
 **Merging a task into one of another list or project moves its values onto fields the survivor does not have**
 
@@ -3440,7 +3507,35 @@ Checks:
 
 *Triage, 5 October:* reproduced on a lane. Reproduced on lane 3. A merge from another list, or from another project, answers 201 and moves the value onto a field the survivor does not have: the row is stored on the target and its fields do not show it. Evidence: `docs/triage-2026-10-05.md`.
 
-### `found-30-sep/search-finds-tasks-by-values-they-no-longer-show` — open (visible bug, small; found closing the review of `found-30-sep/template-values-find-fields-by-name-alone`) · reproduced 5 October
+*Partly fixed, 5 October* (built by an agent on lane 7).
+
+ClickUp's merge, from the help centre's "Merge tasks" page (read through search excerpts):
+- "Task A's Custom Field values are only added to task B if task B doesn't have any information in the same Custom Field."
+- "If task A has a Custom Field that isn't available on task B", it prompts to "add the Custom Field to task B" (*Add selected CFs*) or to merge "without retaining the Custom Field" (*Do nothing*).
+
+Measured first on lane 7 with the triage's probe, three runs alike: a side-list task holding Stage (scoped to its list) was merged into a task of the main list, and a task of project TWO holding Owner into one of ONE. Each answered 201 with `moved.customFields` 1; the survivor held the row (read by SQL), and its fields showed neither field.
+
+What changed:
+- `moveFieldValues` (`tasks.service.ts`): a value moves only when its field is one the survivor has (`fieldIsOnTask`: its list's project, and for a field scoped to a list, its list), and only when the survivor holds none of its own for it, as before.
+- Any other value stays on the binned task, whose fields still show it. `moveOrDrop` takes a `movable` for this.
+- Not built, and the owner's to decide: whether the merge says what stayed on the binned task, or offers before merging to add the field to the survivor's location, as ClickUp's prompt does.
+
+After, three runs alike: both merges 201, `moved.customFields` 0, no row on the survivor.
+
+Checks:
+- `task-merge`, 28 → 30, in a workspace of the run's own. The two new checks: "a task of another list merged in keeps on the binned task its value for a field scoped to its own list, which the survivor does not have, and that task still shows it — none is written onto the survivor (read by SQL) — while its value for a field of the project moves" and "and a task of another project merged in keeps its project’s field’s value on the binned task, which still shows it — the survivor holds none (read by SQL), and the merge counts no field moved". Before, 28/30. After, 30/30 twice.
+- `tasks-merge-fields.test.ts` is new, with two tests.
+- `mvf-1` (the project alone) reddens exactly the first check (29/30), and `mvf-2` (the list alone) exactly the second (29/30). `mvf-3` reddens the unit test it names (1/2).
+
+Regression on lane 7 after the review fix: 17 suites and 477 checks, all green; API unit tests 1960/1960, web unit files 36/36, both typechecks clean.
+
+*Review fix, 5 October* (lane 7). Measured, three runs alike: a task moved out of the side list kept its Stage row; merged into a task of the side list, it answered 201 with `moved.customFields` 1, and the survivor then showed the stale value. Now a value moves only when its field is on both tasks — the merged task where it is now, and the survivor (`fieldIsOnTask`), as a template's or a duplicate's snapshot takes values. After, three runs alike: 201, none moved; the survivor shows Stage empty, the row stays on the binned task. `task-merge` 30 → 31 (before 30/31, after 31/31 in five runs); `tasks-merge-fields.test.ts` 2 → 4; `mvf-4` reddens exactly the new check (30/31) and `mvf-5` its unit test; `mvf-1..3` re-aimed and still red as they claim; `frt-8` notes the two merge tests it also reddens; `task-merge.ts`'s plan now says which values move and which stay.
+
+*Why partly:* values no longer land on fields the survivor lacks. What is open is the owner's: whether the merge says what stayed on the binned task, or offers first to add those fields to the survivor's location as ClickUp's prompt does ("Add selected CFs" / "Do nothing"). Adding a field there needs rules of its own (a field here belongs to one project and at most one list). Found beside it: `found-6-oct/merge-drops-a-value-beside-an-emptied-one`, `found-6-oct/merge-moves-work-across-workspaces`.
+
+*Merged, 6 October,* into the main checkout with the batch's other two builders' work (fields, clips, sign-in and sockets), and run again there on lanes 2, 5 and 7: 47 suites, all green — `password-hash-time`, which compares timings, failed once at a load of 13 on four cores and passed 4/4 twice on a quiet lane — and the API's 1984 unit tests and the web's 320, both typechecks clean.
+
+### `found-30-sep/search-finds-tasks-by-values-they-no-longer-show` — **closed** (visible bug, small; found closing the review of `found-30-sep/template-values-find-fields-by-name-alone`) · reproduced 5 October
 
 **Search's custom-field filter finds a task by a value it holds for a field it no longer has**
 
@@ -3453,7 +3548,35 @@ Checks:
 
 *Triage, 5 October:* reproduced on a lane. Reproduced on lane 3. Search's custom-field filter finds a task moved out of a field's list, a task moved in from another project, and a merge target, each by a value it holds for a field it no longer shows. Evidence: `docs/triage-2026-10-05.md`.
 
-### `found-30-sep/fields-picker-counts-hidden-columns` — open (visible bug, small; found closing `found-30-sep/field-route-takes-another-projects-field`) · reproduced 5 October
+*Closed, 5 October* (built by an agent on lane 7).
+
+ClickUp: nothing found on what a search or filter does with a value of a field a task no longer has. Its fields belong to locations ("Custom Fields are inherited through the Hierarchy", help centre, "View and search Custom Fields in your Workspace"). A move asks what to do with "the Custom Fields in your task's current List that don't exist in the destination List" (help centre, "Move tasks between Lists"). Both read through search excerpts.
+
+Measured first on lane 7 with the triage's probe, three runs alike:
+- The filter by Stage found the task moved out of the side list and the one still in it.
+- By project TWO's Owner, it found the task moved in from TWO.
+- By the merged values, it found both merge targets.
+- The moved tasks' fields showed neither field, while their rows held the values.
+
+What changed:
+- `taskHasField` (`custom-fields.service.ts`, beside `fieldIsOnTask`) states the rule as a condition on `tasks`: the task's list is a list of the field's project, and for a field scoped to a list, that list.
+- `customFieldValueCondition` reads the field's project and list and asks this rule together with the value.
+- Not changed: the filter's field list still offers every field of every project the caller may open.
+
+After, three runs alike: Stage finds only the task in the side list, Owner finds none, and the merged values find none. Those values now stay on the binned tasks, which search leaves out.
+
+Checks:
+- `custom-field-access`, 6 → 7. The new check: "search’s custom-field filter finds a task by a value only of a field it has: not a task moved out of the field’s list, nor one moved in from another project, though each still holds the value (read by SQL) — while a task in the field’s list, and one still in the other project, are found". Before, 6/7. After, 7/7 twice.
+- `search.service.test.ts` has one more test.
+- `sfv-1` (any row of the field) reddens exactly that check (6/7). `sfv-2` and `sfv-3` (the rule without the list) each redden the unit test (51/52).
+
+Regression on lane 7 after the review fix: 17 suites and 477 checks, all green; API unit tests 1960/1960, web unit files 36/36, both typechecks clean.
+
+Found beside it, by the review: `found-6-oct/field-lists-name-a-private-lists-fields`.
+
+*Merged, 6 October,* into the main checkout with the batch's other two builders' work (fields, clips, sign-in and sockets), and run again there on lanes 2, 5 and 7: 47 suites, all green — `password-hash-time`, which compares timings, failed once at a load of 13 on four cores and passed 4/4 twice on a quiet lane — and the API's 1984 unit tests and the web's 320, both typechecks clean.
+
+### `found-30-sep/fields-picker-counts-hidden-columns` — **closed** (visible bug, small; found closing `found-30-sep/field-route-takes-another-projects-field`) · reproduced 5 October
 
 **The list page's Fields button counts hidden built-in columns as hidden fields**
 
@@ -3465,6 +3588,28 @@ Checks:
 *To close:* count the fields shown (`projectFields.filter((f) => !hiddenFields.has(f.id)).length`). Check it with a built-in column hidden.
 
 *Triage, 5 October:* reproduced on a lane. Reproduced on lane 3. Hiding Due makes the toolbar's Fields chip read 1/2 while both fields still show, and hiding every built-in column makes it negative: -1/2 on List, -3/2 on Table. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 5 October* (built by an agent on lane 7). ClickUp: nothing found on how its Fields count reads.
+
+Measured first on lane 7 with the triage's browser probe, three runs alike:
+- List: 2/2; 1/2 with Due hidden; −1/2 with all three built-in columns hidden.
+- Table: 2/2; 1/2; −3/2.
+- The Columns panel's line read 2/2 throughout, and both fields stayed drawn.
+
+What changed: `shownFieldCount` (`apps/web/src/lib/fields-shown.ts`) counts the fields whose own id is not hidden. The chip and the Columns panel's line both ask it.
+
+After, three runs alike: 2/2 throughout, on List and Table.
+
+Checks:
+- `custom-field-types`, 33 → 34. The new check: "the Fields chip counts the fields shown: with Due hidden, and with every built-in column hidden, it reads all of this list’s fields as shown — and hiding a field takes it one lower". Before, 33/34 (6/7 with Due hidden, 2/7 with every built-in column hidden). After, 34/34 three times.
+- `fields-shown.test.ts` is new, with three tests.
+- `fpc-1` (the chip's old sum) reddens exactly that check (33/34). `fpc-2` reddens the three unit tests (0/3).
+
+Regression on lane 7 after the review fix: 17 suites and 477 checks, all green; API unit tests 1960/1960, web unit files 36/36, both typechecks clean.
+
+Found beside it: `found-6-oct/columns-panel-stays-open-beside-the-fields-picker`.
+
+*Merged, 6 October,* into the main checkout with the batch's other two builders' work (fields, clips, sign-in and sockets), and run again there on lanes 2, 5 and 7: 47 suites, all green — `password-hash-time`, which compares timings, failed once at a load of 13 on four cores and passed 4/4 twice on a quiet lane — and the API's 1984 unit tests and the web's 320, both typechecks clean.
 
 ### `found-30-sep/field-route-takes-another-projects-field` — **closed** (visible bug, small; found closing `found-30-sep/template-values-written-unchecked`)
 
@@ -7991,14 +8136,14 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October — 12, each reproduced
+## Found by the triage, 5 October, and since — 20, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
 the items found closing the three reverted changes, after the revert. Their full evidence is in
 `docs/triage-2026-10-05.md` under the item they were found beside.
 
-### `found-5-oct/guests-read-and-delete-every-clip` — open (security, small; found by the triage beside `found-30-sep/guests-may-ask-for-clip-links`) · reproduced 5 October
+### `found-5-oct/guests-read-and-delete-every-clip` — **closed** (security, small; found by the triage beside `found-30-sep/guests-may-ask-for-clip-links`) · reproduced 5 October
 
 **A guest lists, downloads and deletes every clip in the workspace's library**
 
@@ -8012,6 +8157,27 @@ the items found closing the three reverted changes, after the revert. Their full
 The cause: `clips.controller.ts` is guarded by `JwtAuthGuard` and `WorkspaceMemberGuard` alone. `ClipsService.list` returns every clip with a signed URL, and `remove` checks only the key's shape, with no role and no owner. Not measured: a member deleting another person's clip goes through the same route.
 
 *To close:* research what ClickUp lets a guest do with a workspace's clips (see, delete, record), and what a member may do with another's clip. Then give the library's routes the guest read rule and an owner-or-manager rule for delete, and check both in a suite.
+
+*ClickUp* (help.clickup.com, through search excerpts; the site is blocked here). "Clips feature availability and limits": guests, like members, can record Clips and Voice Clips, "use Clips Hub" and "view Clips shared with them"; only members and admins comment on them; "Clips Hub only displays Clips, Voice Clips, and SyncUps recorded by you". "Clips Hub": a clip's ellipsis menu there offers Rename, Download and Delete. "Manage your Workspace storage": storage is freed by deleting "Clip recordings from Clips Hub". Nothing found says whether an owner or admin may delete somebody else's clip.
+
+*Measured before, lane 5, the triage's probe twice alike:* a guest was listed all 5 clips, and the admin's signed URL served its bytes (200). The guest's DELETE of the admin's clip answered 200 and the admin lost it. The guest recorded a clip (201/200) and a member listed it. A member deleted another member's clip (200), and the admin's (200). Search handed the guest the admin's clip and its storage key. With that key the guest got the clip's link (201; the anonymous watch 200). The first version of this fix left that open, and with it a share of the clip (public and to a member, 201) and a copy of it on a task shared with the guest to edit (201), which served the admin's bytes; measured on its build, twice alike. The guest's clips page drew the admin's card with Delete, and confirming deleted it. Control: the guest's whiteboards, 200 [].
+
+*Closed, 5 October.* One rule, `modules/clips/clip-access.ts`. A clip's recorder is the id its object now carries (`recordedbyid`, written at presign), or, for a clip recorded before, its address (`recordedby`). A guest reads the clips they recorded, as ClickUp's hub shows a person what they recorded. A clip somebody shares with them (Share › Member mails them its link) is watched through that link and does not join their library. Anybody else in the workspace reads every clip, as before. A clip is deleted by its recorder or by somebody who manages the workspace (`isManagerRole`). Who is asking is read one way for every route that asks (`clip-reader.ts`): their address as the users table holds it, and their role as the workspace guards give it (a platform super admin is `super_admin`). It is asked in:
+- the library: a guest's newest 200 of their own, looked for a page at a time; nothing is signed for a clip its reader may not see; each listed clip says `mayDelete`;
+- delete: 403 "Only the person who recorded this clip, or a manager or admin of the workspace, can delete it"; a key naming no clip is 404 for anybody who would have to be its recorder; a manager's delete is not looked up;
+- link, share (every mode) and a task's copy of a clip (`POST tasks/:id/attachments/from-clip`): 403 "Guests can share or attach only the clips they recorded"; a key naming no clip is still 404;
+- search's clip branch: a guest finds only the clips they recorded, their matches looked up a page at a time (they were looked up one store round trip after another).
+Recording stays everybody's, a guest's included (ClickUp: guests record Clips). The clips page offers Delete only where `mayDelete` is true. It says a refused delete in the dialog in the server's words (fallback `clips.deleteFailed`, four locales), and opens the dialog on the next clip without the last refusal. Whether a guest may make a public link at all, even of a clip they recorded, stays the owner's (`found-30-sep/guests-may-ask-for-clip-links`).
+
+The new suite `clip-library-access`, 10 checks, against the lane's real store: the library as a guest and as a member; search; a guest's delete; members' and a manager's deletes; the page as the recorder and as the guest; a delete refused after the reader's role changed; the dialog on the next clip after a refusal; a guest's link, share and task copy of another's clip and of their own; and clips stored before clips carried their recorder's id, which are listed, found, linked and deleted by their recorder and by nobody else.
+- Before: HEAD's API and bundle on lane 5, 0 of 10 (the tenth stops: at HEAD the upload names no recorder id); the first version of this fix, 9 of 10 (link, share and a task's copy open).
+- After: 10/10, five runs. Measured again with the same probes, twice alike. The guest is listed only their own, is refused the admin's clip (403, the sentence; kept), and records and deletes their own. Their link, share and task copy of the admin's clip are refused (403, "Guests can share or attach only the clips they recorded"; nothing made), and of their own are made (201); a key naming nothing answers 404. Members are refused another's clip and the admin's (403; kept) and delete their own. The manager deletes a member's. Search finds the guest nothing of the admin's. The guest's page draws no card of the admin's and no Delete. The admin's Share › Member to the guest still mails the link (201), and it plays for them (200).
+
+`clacc-1..9` and `clacc-21..26`, each reddening on lane 5 the check it names; unit claims `clacc-10..20` and `clacc-27..31`, each failing its test. Re-aimed where this moved their anchors: `clacc-2`, `clacc-20`, `clb-3`, `csl-17`, `csl-22`, each shown reddening again. Unit tests: clips 26 → 39, search.service 51 → 55; API 1962/1962, web 321/321; both typechecks clean. In CI. Regression on lane 5, 20/20 besides the new suite: `clip-links`, `clip-created-card`, `clip-library`, `object-key-boundaries`, `private-object-urls`, `public-route-limits`, `public-pages-busy`, `workspace-delete-for-good`, `settings-depth`, `search-index`, `search-read-access`, `guest-read-scope`, `guest-chat-scope`, `private-list-reach`, `private-folder-reach`, `search-sources`, `trending-sort`, `like-literal`, `video-regression`, and `clip-library-access` three times.
+
+*Not changed, for the owner:* a member's library still lists every clip of the workspace, where ClickUp's hub lists only your own. Whether a guest may make a public link of a clip they recorded (`found-30-sep/guests-may-ask-for-clip-links`): their own is linked, shared and attached as before. Whose a clip is lives only in its object's metadata, so a guest's library, and a guest's search, still look up to every clip of the workspace (200 at a time) to find their own.
+
+*Merged, 6 October,* into the main checkout with the batch's other two builders' work (fields, clips, sign-in and sockets), and run again there on lanes 2, 5 and 7: 47 suites, all green — `password-hash-time`, which compares timings, failed once at a load of 13 on four cores and passed 4/4 twice on a quiet lane — and the API's 1984 unit tests and the web's 320, both typechecks clean.
 
 ### `found-5-oct/readers-change-shared-views` — open (security, small; found by the triage beside `found-25-sep/view-only-individual-permissions`) · reproduced 5 October
 
@@ -8128,6 +8294,72 @@ The cause: the task write rule (`common/permissions/task-write.ts`) hands `reada
 *Evidence, reproduced 5 October on a scratch worktree by the triage, with no-op shims so nothing was built:* `build-api.sh` and `verify.sh` begin with `cd /home/user/rundesk`, and so does `refresh-dists.sh`; `fleet-sync.sh` and `fleet-up.sh` set the root to it. The worktree's `build-api.sh` built the main checkout and touched its build stamp. The worktree's `verify.sh` ran the main checkout's copy of the suite, so a suite that exists only in the worktree read as a failed suite ("Cannot find module '/home/user/rundesk/test/e2e/…'"). With a lane served from the worktree, as the worktree's own `fleet-restart.sh` leaves it, `verify.sh` refused (exit 8) and advised `build-api.sh`, which builds the main checkout and moves the lane back onto it. `fleet-restart.sh` alone takes its root from its own location. Both revert builders of 5 October ran into it and worked from path-rewritten copies.
 
 *To close:* take the root from each script's own location, as `fleet-restart.sh` does; let `verify.sh` accept a lane served from its own tree; and add a self-check that a worktree's `verify.sh` runs the worktree's suite against its own build.
+
+### `found-6-oct/field-lists-name-a-private-lists-fields` — open (security, small; found reviewing `found-30-sep/field-definition-takes-a-foreign-list`) · reproduced 5 October
+
+**A project's field list, and search's field filter, name a private list's fields to a member refused that list**
+
+*Evidence, 5 October, lane 7, three runs alike (the review's probe on the build that closes `found-30-sep/field-definition-takes-a-foreign-list`):* a member refused a private list (`GET /lists/:id` 403 "This list is private") was answered 200 by `GET /workspaces/:ws/projects/:p/custom-fields` with that list's field ("Private stage@<the list's id>"), and by `GET /search/:ws/custom-fields` with "Private stage". Searching by its value found nothing for them; the admin found 1. `CustomFieldsService.listForProject` reads every definition of the project, and `SearchService.listWorkspaceCustomFields` applies only the container rule; neither asks the private-list rule of a field's list.
+
+*To close:* leave out of both lists a field whose list the reader may not open (the read rule, `readableList`), and check it in `custom-field-access` by a member refused a private list.
+
+### `found-6-oct/merge-moves-work-across-workspaces` — open (security, small; found reviewing `found-30-sep/merge-moves-values-onto-fields-the-target-lacks`) · reproduced 5 October
+
+**A task of one workspace can be merged into a task of another, and its comments, files and time go with it**
+
+*Evidence, 5 October, lane 7, three runs alike (`merge-across-workspaces.mjs`):* someone who may write in two workspaces posted a comment on a task of the second (201), then `POST /tasks/<that task>/merge {targetTaskId: <a task of the first>}` answered 201 with `moved.comments` 1. By SQL the comment then sat on the first workspace's task, and the source was binned. `mergeRefusal` (`task-merge.ts`) and `mergeTask` ask write access to each task and never that both are in one workspace; across organisations this moves one organisation's comments, files and time entries into another's.
+
+*To close:* research what ClickUp allows (its merge picker offers tasks of the Workspace); refuse a merge whose two tasks are in different workspaces before anything moves, and check it in `task-merge`.
+
+### `found-6-oct/an-open-socket-outlives-its-access` — open (security, small; found reviewing `found-30-sep/an-open-socket-outlives-its-session`) · reproduced 6 October
+
+**A member removed from a workspace keeps hearing a list's events on a socket already open**
+
+*Evidence, 6 October, lane 2 (`probe-authz-socket.mjs`, on the build that closes `found-30-sep/an-open-socket-outlives-its-session`):* an owner invited a member, who claimed the invitation (201) and subscribed a socket to one of the owner's lists. The owner removed the member (`DELETE /workspaces/:id/members/:userId`, 200). Seven seconds later the member's socket was still connected (their session is live, so the revoked-session sweep leaves it) and heard the `task.created` the owner then made in the list, while the member's own read of the list's tasks was refused. A room is checked once, at `subscribe` (`canJoinRoom`); an event goes to the room with no check per reader; `WorkspacesService.removeMember` touches no socket. The same holds wherever access ends and the session does not: a guest's share removed, a role lowered to guest, a list or space made private.
+
+ClickUp: "When you remove someone from your ClickUp Workspace, the person immediately loses access to all Workspace content" (help centre, "Remove someone from a Workspace", read through search excerpts).
+
+*To close (the owner chooses the approach):* stop what an open socket hears when its person's access ends — either re-check each socket's rooms with `canJoinRoom` at the sweep and leave those it may no longer read, or have each change of access drop the affected sockets' rooms. Check that a removed member's open socket hears nothing more from the workspace, and that a member still in it keeps hearing.
+
+### `found-6-oct/list-move-strands-its-fields` — open (visible bug, small; found reviewing `found-30-sep/field-definition-takes-a-foreign-list`) · reproduced 5 October
+
+**Moving a list to another project leaves its own fields behind, and its tasks stop showing them**
+
+*Evidence, 5 October, lane 7, three runs alike:* the admin defined "Third stage" scoped to a list of project P, set it on a task, then `POST /lists/<list>/move {projectId: Q}` answered 201. By SQL the field still had project P and that list, whose project is now Q. The task's fields went from showing Third stage to none, while its value row was kept; P's field list still showed the field; a new field in P scoped to that list answered 404. `ListsService.moveList` changes `lists.project_id` alone. It is also how a definition with a list of another project is still made after `found-30-sep/field-definition-takes-a-foreign-list`.
+
+*To close:* research what ClickUp does with a List's own Custom Fields when the List moves (its move of tasks asks what to do with fields the destination lacks); the choice between moving the fields with the list, refusing the move, or asking is the owner's. Check it by SQL in a suite.
+
+### `found-6-oct/project-page-offers-field-edits-to-readers` — open (visible bug, small; found reviewing `found-30-sep/field-definition-takes-a-foreign-list`) · reproduced 5 October
+
+**The project page's Custom fields section offers every reader "Add field" and each field's delete, and says nothing when the delete is refused**
+
+*Evidence, 5 October, lane 7, three runs alike (`project-page-fields.mjs`):* a member of a view-only space opened the project page; "Add field" and the field's delete were both drawn. Pressing delete got 403 from the API; the field stayed (SQL); no toast. `CustomFieldsSection` (`workspace-project-shell-page.tsx`) has no capability gate and no `onError` on its create or remove; `ProjectCapabilities` has no fields key. Its description also says fields "appear on every task in this project" while it lists list-scoped ones.
+
+*To close:* offer Add and Delete only to whoever the define rule lets (a fields key in the project's capabilities), say a refusal in the server's words, describe list-scoped fields as theirs, and check it in a suite.
+
+### `found-6-oct/merge-drops-a-value-beside-an-emptied-one` — open (visible bug, small; found closing `found-30-sep/merge-moves-values-onto-fields-the-target-lacks`) · reproduced 5 October
+
+**A merge keeps the survivor's emptied field and drops the merged task's value**
+
+*Evidence, 5 October, lane 7, three runs alike (`merge-null-clash.mjs`):* the survivor's Note was set and then cleared (`PUT` null), leaving a row `{v: null}`; the merged task's Note was "from the merged task". `POST /tasks/:id/merge` answered 201 with `moved.customFields` 0; the survivor showed Note empty and the binned task kept the value. ClickUp: "Task A's Custom Field values are only added to task B if task B doesn't have any information in the same Custom Field" (help centre, "Merge tasks", read through search excerpts). The clash check in `moveOrDrop` treats any row of the field on the survivor as information, whatever its value.
+
+*To close:* count an emptied value (null, an empty list or text) as no information, and check it in `task-merge` by SQL.
+
+### `found-6-oct/columns-panel-stays-open-beside-the-fields-picker` — open (visible bug, small; found closing `found-30-sep/fields-picker-counts-hidden-columns`) · reproduced 5 October
+
+**On the list page the Columns panel does not close on an outside press or on Escape while the Fields picker is on the toolbar**
+
+*Evidence, 5 October, lane 7, three runs alike (`columns-dismiss.mjs`, Table view, the customFields ClickApp on):* the Columns panel stayed open after a press outside it and after Escape; the Fields picker closed on both. Both `<details>` carry the same `fieldsDetailsRef`, and `useDismissableDetails(fieldsDetailsRef)` watches only the element the ref ends on, the last one drawn.
+
+*To close:* give each panel its own ref and dismissal, and check both close on an outside press and on Escape.
+
+### `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in` — open (visible bug, small; found reviewing `found-30-sep/an-open-socket-outlives-its-session`) · reproduced 6 October
+
+**When a person signs out and back in from one tab, another tab of the same browser hears nothing until it is reloaded**
+
+*Evidence, 6 October, lane 2, three runs alike (`twotab-probe.mjs`, on the build that closes `found-30-sep/an-open-socket-outlives-its-session`):* two tabs open; the person signed out and back in from the first. The second tab's socket ended with the old session, as it now must, but its requests carried on with the new session's cookie, so no 401 led it to refresh, and it heard no event until reloaded. Before that closure the socket stayed connected on the ended session, which was the security defect.
+
+*To close:* research how ClickUp's other tabs follow a sign-in; open a tab's socket again when the session it follows changes (another tab's sign-in), and check it with two tabs.
 
 ## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
 

@@ -84,7 +84,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 29
+const EXPECTED_CHECKS = 31
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -272,6 +272,31 @@ try {
     eightAnswers.every((r) => r.status === 401) && !!afterEight?.locked_until && afterEight?.failed_login_attempts === 0 && eightRight.status === 401,
     'eight sent at once lock it at the fifth and count none past it: it has a lock, failed_login_attempts reads 0, and its right password is refused 401',
     `answered ${eightAnswers.map((r) => r.status).join(', ')}, leaving ${lockSays(afterEight)}; its right password then answered ${said(eightRight)}`,
+  )
+
+  /*
+   * A RIGHT PASSWORD IS REFUSED IF THE BURST LOCKED THE ACCOUNT WHILE IT COMPARED
+   * (`found-30-sep/a-burst-is-compared-before-the-lock`). Twenty wrong passwords
+   * and the account's right one, sent at once, each from an address of its own.
+   * Each reads an unlocked account and is compared; a wrong one is counted when
+   * its compare ends, and the fifth locks the account. Before, the right one
+   * among them signed in all the same; now a right password clears the count
+   * only if the account is not locked when its compare ends, and is refused
+   * when it is (`clearLockoutIfUnlocked`). The right one is sent last, so its
+   * compare ends after five wrong ones have been counted.
+   */
+  const burst = await account('burst')
+  const burstReqs = [...Array.from({ length: 20 }, () => signIn(burst.email, WRONG)), signIn(burst.email, PASSWORD)]
+  const burstAnswers = await Promise.all(burstReqs)
+  const burstRight = burstAnswers[burstAnswers.length - 1]
+  const burstWrong = burstAnswers.slice(0, 20)
+  const afterBurst = await lockoutOf(burst.id)
+  const burstRightAlone = await signIn(burst.email, PASSWORD)
+  chk(
+    burstWrong.every((r) => r.status === 401) && burstRight.status === 401 && !burstRight.data?.accessToken &&
+      !!afterBurst?.locked_until && afterBurst?.failed_login_attempts === 0 && burstRightAlone.status === 401,
+    'twenty wrong passwords and the right one sent at once are all refused 401 once five have been counted: the burst locks the account (failed_login_attempts 0), the right one among them signs in nobody, and its right password alone is refused while the lock lasts',
+    `the twenty wrong answered ${burstWrong.map((r) => r.status).join(', ')}; the right one among them ${said(burstRight)}; after: ${lockSays(afterBurst)}; its right password alone then ${said(burstRightAlone)}`,
   )
 
   // -------------------------------------------------------------------------
@@ -643,6 +668,17 @@ try {
     sock.on('connect_error', (e) => heard.push(`connect_error ${e?.message ?? ''}`.trim()))
     setTimeout(() => { const up = sock.connected; sock.close(); resolve({ up, heard }) }, 2_500)
   })
+  /* A socket kept open, tracking the events and errors it hears; the caller closes it. */
+  const liveSocketOf = (token) => new Promise((resolve) => {
+    const sock = io(`http://127.0.0.1:${API_PORT}/realtime`, { auth: { token }, transports: ['websocket'], reconnection: false })
+    const events = []
+    const heard = []
+    sock.on('event', (ev) => events.push(ev?.type ?? 'event'))
+    sock.on('error', (e) => heard.push(e?.message ?? String(e)))
+    sock.on('connect_error', (e) => heard.push(`connect_error ${e?.message ?? ''}`.trim()))
+    sock.on('connect', () => resolve({ sock, events, heard }))
+    setTimeout(() => resolve({ sock, events, heard }), 3_000)
+  })
   const endedSocket = await socketOf(revB.accessToken)
   // The live one is a sign-in of its own, made after the change, so this check stands on the handshake alone.
   const liveAfter = (await signIn(revoked.email, passwordOf.get(revoked.email) ?? PASSWORD)).data
@@ -651,6 +687,53 @@ try {
     !endedSocket.up && endedSocket.heard.includes('Session ended') && liveSocket.up,
     'a session that has ended opens no realtime socket: its access token’s handshake is ended with "Session ended", while the live session’s socket stays up',
     `the ended session’s socket ${endedSocket.up ? 'STAYED UP' : 'was closed'}${endedSocket.heard.length ? ` (${endedSocket.heard.join('; ')})` : ''}; the live session’s ${liveSocket.up ? 'stayed up' : 'was closed'}${liveSocket.heard.length ? ` (${liveSocket.heard.join('; ')})` : ''}`,
+  )
+
+  /*
+   * A SOCKET ALREADY OPEN STOPS HEARING ITS ROOMS WHEN ITS SESSION ENDS
+   * (`found-30-sep/an-open-socket-outlives-its-session`). The handshake above
+   * refuses a token whose session has ended; this is the socket that was open
+   * before the session ended. Measured on a lane before: it stayed connected and
+   * heard a task.created after the revoke. Each live socket's session is re-read
+   * now, so a revoked session's socket is closed within seconds and hears no
+   * more, while the session that signed it out keeps its socket.
+   */
+  const socketLife = await account('socketlife')
+  const SL = apiAs(socketLife.token)
+  const slSpace = await SL('/spaces', { method: 'POST', body: { workspaceId: socketLife.workspaceId, name: 'Socket life' } })
+  const slProject = await SL('/projects', { method: 'POST', body: { spaceId: slSpace.data?.id, name: 'Socket life project' } })
+  const slList = await SL('/lists', { method: 'POST', body: { projectId: slProject.data?.id, name: 'Socket life list' } })
+  if (!slList.data?.id) throw new Error(`could not make a list for the socket-life check: ${said(slSpace)} / ${said(slProject)} / ${said(slList)}`)
+  // The session that signs the other out (kept live), and the one signed out.
+  const keeper = (await signIn(socketLife.email, PASSWORD)).data
+  const doomed = (await signIn(socketLife.email, PASSWORD)).data
+  if (!keeper?.accessToken || !doomed?.accessToken) throw new Error('could not sign the socket-life account in twice')
+  const keeperSock = await liveSocketOf(keeper.accessToken)
+  const doomedSock = await liveSocketOf(doomed.accessToken)
+  const doomedAck = await new Promise((resolve) => {
+    if (!doomedSock.sock.connected) return resolve({ ok: false, note: 'not connected' })
+    doomedSock.sock.emit('subscribe', { rooms: [`list:${slList.data.id}`] }, (a) => resolve(a))
+    setTimeout(() => resolve({ ok: false, note: 'no ack' }), 2_000)
+  })
+  // "Sign out other sessions" from the keeper ends the doomed session (and the
+  // sign-up one), keeping the keeper's.
+  const signedOutElsewhere = await visit('/auth/sessions/revoke-others', { method: 'POST', token: keeper.accessToken, body: { currentRefreshToken: keeper.refreshToken } })
+  // Past the gateway's revoked-session sweep, so a fixed build has closed the socket.
+  await sleep(7_000)
+  const doomedDown = !doomedSock.sock.connected
+  const keeperUp = keeperSock.sock.connected
+  const heardBefore = doomedSock.events.length
+  // Made by the keeper (its session is live; the sign-up one was signed out too).
+  const slTask = await apiAs(keeper.accessToken)('/tasks', { method: 'POST', body: { listId: slList.data.id, title: 'Socket life task' } })
+  await sleep(1_500)
+  const doomedHeardAfter = doomedSock.events.length - heardBefore
+  keeperSock.sock.close()
+  doomedSock.sock.close()
+  chk(
+    doomedAck?.ok && signedOutElsewhere.status === 201 && doomedDown && doomedSock.heard.includes('Session ended') &&
+      keeperUp && slTask.status === 201 && doomedHeardAfter === 0,
+    'a socket open on a session that is then signed out elsewhere is disconnected within seconds with "Session ended" and hears no more of its rooms, while the session that signed it out keeps its socket',
+    `the doomed socket subscribed ${JSON.stringify(doomedAck?.joined ?? doomedAck?.note)}; revoke-others ${signedOutElsewhere.status}; after the sweep the doomed socket ${doomedDown ? 'was closed' : 'STAYED UP'}${doomedSock.heard.length ? ` (${doomedSock.heard.join('; ')})` : ''}, the keeper’s ${keeperUp ? 'stayed up' : 'was CLOSED'}; a task made after it (${slTask.status}) was heard ${doomedHeardAfter} time(s) by the doomed socket`,
   )
 
   const toRevoked = await O('/invitations', { method: 'POST', body: { email: revoked.email, workspaceId: owner.workspaceId, role: 'member' } })

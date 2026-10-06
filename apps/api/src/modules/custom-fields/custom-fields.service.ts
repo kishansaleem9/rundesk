@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
-import { and, eq, asc, isNotNull, inArray } from 'drizzle-orm'
+import { and, eq, asc, isNotNull, inArray, type SQL } from 'drizzle-orm'
 import {
   customFieldDefinitions,
   customFieldValues,
@@ -18,7 +18,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { readableProject, readableTask, type ReadActor } from '../../common/permissions/read-access'
 import { assertTaskWritable } from '../../common/permissions/task-write'
-import { assertMayDefineFields } from '../../common/permissions/field-access'
+import { assertMayDefineFields, listOfProject } from '../../common/permissions/field-access'
 import { computeProgress, toProgressConfig, type ProgressInputs } from './progress'
 import {
   evaluateFormula,
@@ -78,6 +78,25 @@ export function fieldIsOnTask(
   task: { projectId: string; listId: string },
 ): boolean {
   return field.projectId === task.projectId && fieldIsOnList(field, task.listId)
+}
+
+/**
+ * `fieldIsOnTask`, as a condition on a query of `tasks`: the task's list is a
+ * list of the field's project, and for a field scoped to a list, that list. For
+ * a reader that asks of many tasks at once. Search's custom-field filter
+ * matched every value row of the field, and a move leaves a task's rows, so a
+ * task moved out of the field's list, or in from another project, was found by
+ * a value its fields do not show
+ * (`found-30-sep/search-finds-tasks-by-values-they-no-longer-show`).
+ */
+export function taskHasField(db: Db, field: { projectId: string; listId?: string | null }): SQL {
+  return inArray(
+    tasks.listId,
+    db
+      .select({ id: lists.id })
+      .from(lists)
+      .where(and(eq(lists.projectId, field.projectId), field.listId != null ? eq(lists.id, field.listId) : undefined)),
+  )
 }
 
 /**
@@ -203,7 +222,27 @@ export class CustomFieldsService {
     reader?: ReadActor,
   ) {
     await this.assertProjectOpenTo(workspaceId, projectId, reader)
+    /*
+     * A LIST IS NAMED BY ITS ID, a string, before the rule asks it of anybody:
+     * `["<a list's id>"]` was asked as that list and stored as it, and the
+     * shares never matched it, so it slipped past a share on the list
+     * (`found-30-sep/field-definition-takes-a-foreign-list`, `listOfProject`).
+     */
+    if (dto.listId != null && typeof dto.listId !== 'string') {
+      throw new BadRequestException('listId must be a string or null')
+    }
     if (reader) await this.assertMayDefineFields(workspaceId, projectId, reader, dto.listId)
+    /*
+     * A LIST OF THIS PROJECT, OR NONE (`listOfProject`). The `listId` was stored
+     * as sent: an admin defined a field in one project scoped to a list of
+     * another (201), which no task can have, since a task has its own project's
+     * fields (`fieldIsOnTask`) (`found-30-sep/field-definition-takes-a-foreign-list`).
+     * Refused as a list that is not there, after the rule above, so somebody who
+     * may not define fields here hears that first, whatever list they name.
+     */
+    if (dto.listId != null && !(await listOfProject(this.db, projectId, dto.listId))) {
+      throw new NotFoundException('List not found in this project')
+    }
     /*
      * The TYPE is validated here, and it was not before.
      *
@@ -389,7 +428,14 @@ export class CustomFieldsService {
   ) {
     const def = await this.getDefOwnedBy(workspaceId, fieldId)
     await this.assertProjectOpenTo(workspaceId, def.projectId, reader)
-    if (reader) await this.assertMayDefineFields(workspaceId, def.projectId, reader)
+    /*
+     * The field's own list decides, as it does when the field is made: it was
+     * asked without it, so a member shared that list to view, in a space they
+     * may edit, renamed the field (200), and one shared a view-only space's list
+     * to edit could not rename the field they had made there (403)
+     * (`found-30-sep/field-definition-takes-a-foreign-list`).
+     */
+    if (reader) await this.assertMayDefineFields(workspaceId, def.projectId, reader, def.listId)
     if (patch.options != null && !Array.isArray(patch.options)) {
       throw new BadRequestException('Custom field "options" must be an array')
     }
@@ -453,7 +499,8 @@ export class CustomFieldsService {
   async deleteDefinition(workspaceId: string, fieldId: string, reader?: ReadActor) {
     const def = await this.getDefOwnedBy(workspaceId, fieldId)
     await this.assertProjectOpenTo(workspaceId, def.projectId, reader)
-    if (reader) await this.assertMayDefineFields(workspaceId, def.projectId, reader)
+    // The field's own list decides, as for a rename: deleting it takes every value in it.
+    if (reader) await this.assertMayDefineFields(workspaceId, def.projectId, reader, def.listId)
     // Cascade deletes the values automatically via FK.
     await this.db.delete(customFieldDefinitions).where(eq(customFieldDefinitions.id, def.id))
     return { ok: true }

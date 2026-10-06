@@ -26,6 +26,15 @@
  * caller may not open (OWASP ASVS 4.2.1: no "creating or updating someone else's
  * record"). The member asks, on the open task they may change.
  *
+ * AND SEARCH FINDS A TASK ONLY BY A VALUE OF A FIELD IT HAS
+ * (`found-30-sep/search-finds-tasks-by-values-they-no-longer-show`). A move
+ * changes a task's list and leaves its value rows, and search's custom-field
+ * filter matched every row of the field: measured on lane 7, a task moved out
+ * of a field's list and one moved in from another project were each found by a
+ * value their fields, read back, do not show. The filter asks the rule the
+ * readers ask (`fieldIsOnTask`): the task's project is the field's, and for a
+ * field scoped to a list, the task is in it.
+ *
  *   node test/e2e/custom-field-access.mjs --api 3021
  */
 import { signInApi, signUpApi } from './lib/signin.mjs'
@@ -38,7 +47,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 6
+const EXPECTED_CHECKS = 7
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -211,6 +220,49 @@ try {
     'and a value for a field scoped to another list of the task’s project is refused (404, nothing written) — while a field scoped to the task’s own list is set, and the task’s fields read it back',
     `the second list’s field answered ${said(elsewherePut)} and the task holds ${elsewhereHeld} value(s) for it; ` +
       `the task’s own list’s field answered ${said(herePut)}, and the task’s fields (${said(shown)}) read ${JSON.stringify(shownHere)}`,
+  )
+
+  // ══ 7. SEARCH, BY A FIELD THE TASK HAS ═══════════════════════════════════
+  console.log('\n▶ search’s custom-field filter, after a move')
+  /*
+   * `found-30-sep/search-finds-tasks-by-values-they-no-longer-show`. Four tasks
+   * of the admin's, each given a value where it is: two in the second list
+   * (its field), two in the other project (its Text field). Then one of each
+   * moves into the open list, where neither field is one the task has. Each
+   * search is the admin's, who may open everything here.
+   */
+  const elsewhereList = await make(A, '/lists', { projectId: elsewhere, name: `${TAG} elsewhere list` }, 'the other project’s list')
+  const adminTask = (list, title) => make(A, '/tasks', { listId: list, title: `${TAG} ${title}` }, title)
+  const movedOut = await adminTask(secondList, 'moved out of the second list')
+  const staysOut = await adminTask(secondList, 'stays in the second list')
+  const movedIn = await adminTask(elsewhereList, 'moved in from the other project')
+  const staysIn = await adminTask(elsewhereList, 'stays in the other project')
+  const STAGE = `${TAG} stage value`
+  const OWNER = `${TAG} owner value`
+  for (const [task, field, value] of [[movedOut, scopedElsewhere, STAGE], [staysOut, scopedElsewhere, STAGE], [movedIn, foreignText, OWNER], [staysIn, foreignText, OWNER]]) {
+    const set = await A(`/workspaces/${WS}/tasks/${task}/custom-fields/${field}`, { method: 'PUT', body: { value } })
+    if (!set.ok) throw new Error(`could not set a value for the search: ${said(set)}`)
+  }
+  for (const task of [movedOut, movedIn]) {
+    const moved = await A(`/tasks/${task}/move`, { method: 'POST', body: { listId: open.list, position: 0 } })
+    if (!moved.ok) throw new Error(`could not move a task into the open list: ${said(moved)}`)
+  }
+  const found = async (field, value) => {
+    const res = await A(`/search/${WS}?q=&types=task&limit=50&customFieldId=${field}&customFieldValue=${encodeURIComponent(value)}`)
+    return { status: res.status, ids: (Array.isArray(res.data) ? res.data : []).map((h) => h.id) }
+  }
+  const byStage = await found(scopedElsewhere, STAGE)
+  const byOwner = await found(foreignText, OWNER)
+  const stillHeld = { out: await valueOf(movedOut, scopedElsewhere), in: await valueOf(movedIn, foreignText) }
+  const has = (res, task) => res.ids.includes(`task-${task}`)
+  chk(
+    byStage.status === 200 && byOwner.status === 200 &&
+      !has(byStage, movedOut) && !has(byOwner, movedIn) && has(byStage, staysOut) && has(byOwner, staysIn) &&
+      JSON.stringify(stillHeld.out).includes(STAGE) && JSON.stringify(stillHeld.in).includes(OWNER),
+    'search’s custom-field filter finds a task by a value only of a field it has: not a task moved out of the field’s list, nor one moved in from another project, though each still holds the value (read by SQL) — while a task in the field’s list, and one still in the other project, are found',
+    `by the second list’s field (${byStage.status}): the moved-out task found ${has(byStage, movedOut)}, the one that stayed ${has(byStage, staysOut)}; ` +
+      `by the other project’s field (${byOwner.status}): the moved-in task found ${has(byOwner, movedIn)}, the one that stayed ${has(byOwner, staysIn)}; ` +
+      `the moved tasks hold ${JSON.stringify(stillHeld)}`,
   )
 } catch (e) {
   failed += 1

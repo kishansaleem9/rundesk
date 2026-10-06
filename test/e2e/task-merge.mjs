@@ -21,6 +21,18 @@
  * the checks below would catch that as a 500, and would also catch the opposite
  * mistake of dropping rows that were not actually duplicates.
  *
+ * AND A VALUE MOVES ONLY ONTO A FIELD THE SURVIVOR HAS
+ * (`found-30-sep/merge-moves-values-onto-fields-the-target-lacks`). Every value
+ * row of the merged task went to the survivor: measured on lane 7, a task of
+ * another list holding a value in a field scoped to its list, and a task of
+ * another project holding its project's field, were each merged in (201), and
+ * the survivor then held both rows while its fields, read back, showed neither.
+ * ClickUp's merge prompts "to either add the Custom Field to task B or merge the
+ * tasks without retaining the Custom Field" (help centre, "Merge tasks", read
+ * through search excerpts). The value of a field the survivor does not have
+ * stays on the binned task, where it is still shown; what the merge says of it,
+ * or whether it offers to add the field, is the owner's to decide.
+ *
  *   node test/e2e/task-merge.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
@@ -28,7 +40,8 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, must } from './lib/fixture.mjs'
+import { openDb } from './lib/db.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -37,7 +50,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 28
+const EXPECTED_CHECKS = 31
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -68,10 +81,14 @@ const stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
 const browser = await chromium.launch(launchOptions())
 /** What a cleanup DELETE did not remove, said above the totals. */
 const leftBehind = []
+/** The merges across lists and projects run in a workspace of their own, deleted in `finally`. */
+let fieldsWorkspaceId = null
+let A = null
+let sql = null
 
 try {
   const auth = await signInApi(API, ME.email, ME.password)
-  const A = apiAs(auth.accessToken)
+  A = apiAs(auth.accessToken)
   const me = (await A('/users/me')).data
   const workspaces = (await A('/workspaces')).data ?? []
   const workspaceId = workspaces[0]?.workspace?.id ?? workspaces[0]?.id
@@ -334,6 +351,89 @@ try {
       'and the generic archived-write refusal is standing in for it',
   )
 
+  // ── Across lists and projects: a value moves only onto a field the survivor has ──
+  console.log('\n▶ a merge from another list or project moves only the values of fields the survivor has')
+  /*
+   * `found-30-sep/merge-moves-values-onto-fields-the-target-lacks`. In a
+   * workspace of this run's own: project ONE with a main list and a side list,
+   * a field scoped to the side list (Stage) and one of the whole project
+   * (Note); project TWO with a field of its own (Owner). Each value row is read
+   * by SQL, since the survivor's fields, read back, show no field it lacks
+   * whether a row for it was written or not.
+   */
+  sql = await openDb()
+  if (!sql) throw new Error('no DATABASE_URL — which task holds each value row is read by SQL')
+  const fw = must(await A('/workspaces', { method: 'POST', body: { name: `Merge fields ${stamp}` } }), 'make the workspace for the merges across lists')
+  fieldsWorkspaceId = fw.id
+  const fSpace = must(await A('/spaces', { method: 'POST', body: { workspaceId: fw.id, name: `Merge fields ${stamp}` } }), 'make its space')
+  const madeIn = async (route, body, what) => must(await A(route, { method: 'POST', body }), what).id
+  const one = await madeIn('/projects', { spaceId: fSpace.id, name: `ONE ${stamp}` }, 'make project ONE')
+  const oneMain = await madeIn('/lists', { projectId: one, name: `ONE main ${stamp}` }, 'make ONE’s main list')
+  const oneSide = await madeIn('/lists', { projectId: one, name: `ONE side ${stamp}` }, 'make ONE’s side list')
+  const two = await madeIn('/projects', { spaceId: fSpace.id, name: `TWO ${stamp}` }, 'make project TWO')
+  const twoList = await madeIn('/lists', { projectId: two, name: `TWO list ${stamp}` }, 'make TWO’s list')
+  const fieldOf = (project, body, what) => madeIn(`/workspaces/${fw.id}/projects/${project}/custom-fields`, { type: 'text', ...body }, what)
+  const stage = await fieldOf(one, { name: 'Stage', listId: oneSide }, 'define Stage on ONE’s side list')
+  const note = await fieldOf(one, { name: 'Note' }, 'define Note on project ONE')
+  const owner = await fieldOf(two, { name: 'Owner' }, 'define Owner on project TWO')
+  const taskIn = (listId, title) => madeIn('/tasks', { listId, title: `${title} ${stamp}` }, `make ${title}`)
+  const put = async (taskId, fieldId, value) =>
+    must(await A(`/workspaces/${fw.id}/tasks/${taskId}/custom-fields/${fieldId}`, { method: 'PUT', body: { value } }), `set a value on ${taskId}`)
+  /** The fields a task holds a value row for, by name, read by SQL. */
+  const rowsOf = async (taskId) =>
+    (await sql`select d.name from custom_field_values v join custom_field_definitions d on d.id = v.field_id where v.task_id = ${taskId} order by d.name`).map((r) => r.name)
+  /** What the task's own fields show, by name — the binned task's too. */
+  const shownOn = async (taskId) =>
+    Object.fromEntries(((await A(`/workspaces/${fw.id}/tasks/${taskId}/custom-fields`)).data ?? []).map((r) => [r.definition?.name, r.value]))
+
+  const fromSide = await taskIn(oneSide, 'From the side list')
+  const intoMain = await taskIn(oneMain, 'Survivor in the main list')
+  await put(fromSide, stage, `stage ${stamp}`)
+  await put(fromSide, note, `note ${stamp}`)
+  const sideMerge = await A(`/tasks/${fromSide}/merge`, { method: 'POST', body: { targetTaskId: intoMain } })
+  const [sideKept, sideOnSurvivor, sideShown] = [await rowsOf(fromSide), await rowsOf(intoMain), await shownOn(fromSide)]
+  chk(
+    sideMerge.ok && JSON.stringify(sideOnSurvivor) === '["Note"]' && JSON.stringify(sideKept) === '["Stage"]' &&
+      sideShown.Stage === `stage ${stamp}` && sideMerge.data?.moved?.customFields === 1,
+    'a task of another list merged in keeps on the binned task its value for a field scoped to its own list, which the survivor does not have, and that task still shows it — none is written onto the survivor (read by SQL) — while its value for a field of the project moves',
+    `the merge answered ${sideMerge.status} ${JSON.stringify(sideMerge.error?.message ?? null)} and counted ${JSON.stringify(sideMerge.data?.moved?.customFields)} field(s) moved; ` +
+      `the survivor holds rows for ${JSON.stringify(sideOnSurvivor)}, the binned task for ${JSON.stringify(sideKept)}, and shows Stage = ${JSON.stringify(sideShown.Stage ?? null)}`,
+  )
+
+  const fromTwo = await taskIn(twoList, 'From project TWO')
+  const intoOne = await taskIn(oneMain, 'Second survivor in the main list')
+  await put(fromTwo, owner, `owner ${stamp}`)
+  const twoMerge = await A(`/tasks/${fromTwo}/merge`, { method: 'POST', body: { targetTaskId: intoOne } })
+  const [twoKept, twoOnSurvivor, twoShown] = [await rowsOf(fromTwo), await rowsOf(intoOne), await shownOn(fromTwo)]
+  chk(
+    twoMerge.ok && twoOnSurvivor.length === 0 && JSON.stringify(twoKept) === '["Owner"]' &&
+      twoShown.Owner === `owner ${stamp}` && twoMerge.data?.moved?.customFields === 0,
+    'and a task of another project merged in keeps its project’s field’s value on the binned task, which still shows it — the survivor holds none (read by SQL), and the merge counts no field moved',
+    `the merge answered ${twoMerge.status} ${JSON.stringify(twoMerge.error?.message ?? null)} and counted ${JSON.stringify(twoMerge.data?.moved?.customFields)} field(s) moved; ` +
+      `the survivor holds rows for ${JSON.stringify(twoOnSurvivor)}, the binned task for ${JSON.stringify(twoKept)}, and shows Owner = ${JSON.stringify(twoShown.Owner ?? null)}`,
+  )
+
+  /*
+   * The review of the item, measured on lane 7: a value the merged task no
+   * longer showed — it had moved out of the field's list, and a move keeps a
+   * task's rows — went onto a survivor in that list (201, one field moved),
+   * where it then showed. A merge carries the merged task's values, the fields
+   * it has where it is now, as a template or a duplicate takes them.
+   */
+  const movedOut = await taskIn(oneSide, 'Moved out of the side list')
+  await put(movedOut, stage, `stale ${stamp}`)
+  must(await A(`/tasks/${movedOut}/move`, { method: 'POST', body: { listId: oneMain, position: 0 } }), 'move it to the main list')
+  const intoSide = await taskIn(oneSide, 'Survivor in the side list')
+  const staleMerge = await A(`/tasks/${movedOut}/merge`, { method: 'POST', body: { targetTaskId: intoSide } })
+  const [staleKept, staleOnSurvivor, survivorShown] = [await rowsOf(movedOut), await rowsOf(intoSide), await shownOn(intoSide)]
+  chk(
+    staleMerge.ok && staleOnSurvivor.length === 0 && JSON.stringify(staleKept) === '["Stage"]' &&
+      'Stage' in survivorShown && survivorShown.Stage === null && staleMerge.data?.moved?.customFields === 0,
+    'and a task moved out of a field’s list, which no longer shows its value there, merged into a task of that list keeps the value on the binned task — the survivor, which has the field, holds none and shows it empty (read by SQL), and the merge counts no field moved',
+    `the merge answered ${staleMerge.status} ${JSON.stringify(staleMerge.error?.message ?? null)} and counted ${JSON.stringify(staleMerge.data?.moved?.customFields)} field(s) moved; ` +
+      `the survivor holds rows for ${JSON.stringify(staleOnSurvivor)} and shows Stage = ${JSON.stringify(survivorShown.Stage)}, the binned task holds rows for ${JSON.stringify(staleKept)}`,
+  )
+
   // ── On screen ────────────────────────────────────────────────────────────
   console.log('\n▶ frame `15:32` — merging from the menu')
   const live = await makeTask(`Merge from UI ${stamp}`, { description: 'ui source' })
@@ -389,6 +489,11 @@ try {
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${lines[0]}${where ? `\n         ${where.trim()}` : ''}`)
 } finally {
   await browser.close().catch(() => {})
+  if (fieldsWorkspaceId && A) {
+    const gone = await A(`/workspaces/${fieldsWorkspaceId}`, { method: 'DELETE' }).catch(() => ({ status: 0 }))
+    if (![200, 204, 404].includes(gone.status)) leftBehind.push(`DELETE /workspaces/${fieldsWorkspaceId} answered ${gone.status || 'nothing'}`)
+  }
+  await sql?.end?.({ timeout: 5 })
   stack?.close()
   for (const line of leftBehind) console.log(`  cleanup left behind: ${line}`)
   const ran = passed + failed

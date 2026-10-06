@@ -30,6 +30,9 @@ import { containerVisibilityFilter, spaceVisibilityFilter, taskInReachFilter } f
 import { hiddenDocIds } from '../../common/permissions/doc-access'
 import { readableChannelsFilter } from '../chat/channel-read-filter'
 import { likeContaining } from '../../common/sql/like'
+import { taskHasField } from '../custom-fields/custom-fields.service'
+import { mayReadClip, readsOnlyOwnClips } from '../clips/clip-access'
+import { clipReaderOf } from '../clips/clip-reader'
 
 // Every entity the search can return. The Postgres-only ones (user, comment,
 // channel, message) belong here too — leaving them out meant a filter naming
@@ -120,6 +123,9 @@ export type SearchFilters = {
 // Free-text custom-field types get a case-insensitive "contains" match; every
 // other type (dropdown, number, money, rating, date, checkbox) matches exactly.
 const TEXT_LIKE_FIELD_TYPES = new Set(['text', 'url', 'email', 'phone'])
+
+/** How many of a guest's clip matches are looked up together: the library's page (`ClipsService.list`). */
+const CLIP_LOOKUPS_AT_ONCE = 200
 
 // The Meilisearch index schema is intentionally light-weight.
 //
@@ -496,7 +502,7 @@ export class SearchService implements OnModuleInit {
     if (safeMeili) {
       const extras = await this.searchExtras(workspaceId, userId, likeContaining(trimmed), limit, isManager, filters.types)
       // Clips live in R2, never in Meili, so they're queried separately.
-      const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
+      const clipHits = wantFiles ? await this.searchClips(workspaceId, userId, trimmed, limit) : []
       const driveHits = wantDrive ? await this.searchDrive(workspaceId, trimmed, limit, userId) : []
       const gmailHits = wantGmail ? await this.searchGmail(workspaceId, trimmed, limit, userId) : []
       const sharePointHits = wantSharePoint
@@ -604,7 +610,7 @@ export class SearchService implements OnModuleInit {
     const fileHits = wantFiles
       ? await this.searchTaskAttachments(workspaceId, userId, isManager, like, limit, Boolean(filters.includeArchived))
       : []
-    const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
+    const clipHits = wantFiles ? await this.searchClips(workspaceId, userId, trimmed, limit) : []
     const driveHits = wantDrive ? await this.searchDrive(workspaceId, trimmed, limit, userId) : []
     const gmailHits = wantGmail ? await this.searchGmail(workspaceId, trimmed, limit, userId) : []
     const sharePointHits = wantSharePoint
@@ -1586,45 +1592,68 @@ export class SearchService implements OnModuleInit {
   /**
    * Search uploaded screen-recording "clips" (Plan §11.1). Clips are stored as
    * R2 objects under `workspaces/<id>/clips/`, not in the DB, so we match on the
-   * file name embedded in each object key. The workspace prefix is the entire
-   * access boundary — a clip is only ever listed under its own workspace, so it
-   * cannot cross workspaces. Best-effort: any storage error (or R2 not being
+   * file name embedded in each object key. The workspace prefix bounds the
+   * search to the workspace — a clip is only ever listed under its own
+   * workspace, so it cannot cross workspaces — and the clip rule narrows it
+   * within (below). Best-effort: any storage error (or R2 not being
    * configured) yields no clip hits rather than failing the whole search.
+   *
+   * WITHIN IT, A GUEST FINDS ONLY THE CLIPS THEY RECORDED, as their library
+   * lists them (`found-5-oct/guests-read-and-delete-every-clip`,
+   * `clips/clip-access.ts`). Every clip's name and storage key were a guest's
+   * to find here. Whose a clip is lives in its metadata, so a guest's matches
+   * are looked up before they are answered; nobody else's are. The searcher is
+   * read as the library reads them (`clips/clip-reader.ts`).
+   *
+   * A GUEST'S MATCHES ARE LOOKED UP A PAGE AT A TIME, the page's together, as
+   * the library looks up a guest's clips. They were looked up one after
+   * another until enough of the guest's own were found, so a query every
+   * clip's name holds ("webm") walked the workspace's clips one store round
+   * trip at a time inside one search.
    */
   private async searchClips(
     workspaceId: string,
+    userId: string,
     query: string,
     limit: number,
   ): Promise<Array<{ id: string; entityType: string; title: string; content: string; url: string }>> {
     const r2 = this.r2
     const needle = query.trim().toLowerCase()
     if (!needle || !r2 || !r2.configured) return []
-    const hits: Array<{ id: string; entityType: string; title: string; content: string; url: string }> = []
+    // Keys are `<timestamp>-<sanitizedFileName>`; drop the timestamp prefix
+    // so the searchable label matches what the recorder named the clip.
+    const labelOf = (key: string) => (key.split('/').pop() ?? '').replace(/^\d+-/, '')
+    const hitOf = (key: string) => ({
+      id: `file-${key}`,
+      entityType: 'file',
+      title: labelOf(key),
+      content: 'Clip',
+      url: `/app/${workspaceId}/clips`,
+    })
     try {
       // Every clip, newest first: one page of 200 was the workspace's OLDEST
       // 200, so a clip made after them was never found
       // (`found-23-sep/clip-library-lists-the-oldest-200`).
-      const listed = (await r2.listAllObjects(`workspaces/${workspaceId}/clips/`)).reverse()
-      for (const obj of listed) {
-        if (!obj.Key) continue
-        const fileName = obj.Key.split('/').pop() ?? ''
-        // Keys are `<timestamp>-<sanitizedFileName>`; drop the timestamp prefix
-        // so the searchable label matches what the recorder named the clip.
-        const label = fileName.replace(/^\d+-/, '')
-        if (!label.toLowerCase().includes(needle)) continue
-        hits.push({
-          id: `file-${obj.Key}`,
-          entityType: 'file',
-          title: label,
-          content: 'Clip',
-          url: `/app/${workspaceId}/clips`,
+      const matches = (await r2.listAllObjects(`workspaces/${workspaceId}/clips/`))
+        .reverse()
+        .map((obj) => obj.Key)
+        .filter((key): key is string => !!key && labelOf(key).toLowerCase().includes(needle))
+      if (matches.length === 0) return []
+      const reader = await clipReaderOf(this.db, workspaceId, userId)
+      if (!readsOnlyOwnClips(reader.role)) return matches.slice(0, limit).map(hitOf)
+      const own: string[] = []
+      for (let from = 0; from < matches.length && own.length < limit; from += CLIP_LOOKUPS_AT_ONCE) {
+        const page = matches.slice(from, from + CLIP_LOOKUPS_AT_ONCE)
+        const metas = await Promise.all(page.map((key) => r2.headObject(key).then((head) => head.Metadata, () => undefined)))
+        page.forEach((key, i) => {
+          if (own.length < limit && mayReadClip(metas[i], reader)) own.push(key)
         })
-        if (hits.length >= limit) break
       }
+      return own.map(hitOf)
     } catch {
       // Storage is best-effort; a listing failure just yields no clip hits.
+      return []
     }
-    return hits
   }
 
   // ── Custom-field value filter (Plan §11.2) ──────────────────────────────────
@@ -1660,10 +1689,15 @@ export class SearchService implements OnModuleInit {
    * type decides the operator: free-text types use a case-insensitive contains
    * (ILIKE), everything else uses exact equality on the JSON scalar (`value->>'v'`).
    * An unknown/foreign field id matches nothing, keeping results workspace-scoped.
+   *
+   * AND ONLY A TASK THAT HAS THE FIELD (`taskHasField`, the rule `fieldIsOnTask`
+   * states): a move changes a task's list and leaves its value rows, so a task
+   * moved out of the field's list, or in from another project, was found by a
+   * value its fields do not show (`found-30-sep/search-finds-tasks-by-values-they-no-longer-show`).
    */
   private async customFieldValueCondition(workspaceId: string, fieldId: string, value: string): Promise<SQL> {
     const [def] = await this.db
-      .select({ type: customFieldDefinitions.type })
+      .select({ type: customFieldDefinitions.type, projectId: customFieldDefinitions.projectId, listId: customFieldDefinitions.listId })
       .from(customFieldDefinitions)
       .innerJoin(projects, eq(projects.id, customFieldDefinitions.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
@@ -1674,13 +1708,16 @@ export class SearchService implements OnModuleInit {
     const match = TEXT_LIKE_FIELD_TYPES.has(def.type)
       ? sql`${valueExpr} ILIKE ${likeContaining(value)}`
       : sql`${valueExpr} = ${value}`
-    return inArray(
-      tasks.id,
-      this.db
-        .select({ taskId: customFieldValues.taskId })
-        .from(customFieldValues)
-        .where(and(eq(customFieldValues.fieldId, fieldId), match)),
-    )
+    return and(
+      taskHasField(this.db, def),
+      inArray(
+        tasks.id,
+        this.db
+          .select({ taskId: customFieldValues.taskId })
+          .from(customFieldValues)
+          .where(and(eq(customFieldValues.fieldId, fieldId), match)),
+      ),
+    ) as SQL
   }
 
   // ── Saved search presets (Plan §11.2) ───────────────────────────────────────

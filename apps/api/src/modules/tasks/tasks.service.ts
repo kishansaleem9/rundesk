@@ -19,6 +19,7 @@ import {
   reminders,
   sprintTasks,
   customFieldValues,
+  customFieldDefinitions,
   taskCommentReactions,
   taskCommentSaves,
   taskAttachments,
@@ -114,9 +115,11 @@ import { assertMayDefineFields } from '../../common/permissions/field-access'
 import { checkContainerAccess, containerRefusal, containerVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
 import { attachmentKind, isLinkAttachmentKey, isTaskOwnObjectKey, isTaskUploadKey } from './task-object-keys'
 import { isWorkspaceClipKey } from '../clips/clip-keys'
+import { CLIP_READ_REFUSAL, mayReadClip } from '../clips/clip-access'
+import { clipReaderOf } from '../clips/clip-reader'
 import { pickUpdatable } from './task-update-fields'
 import { planLabelsByName, uniqueLabelNames, type LabelByName } from './task-values'
-import { CustomFieldsService } from '../custom-fields/custom-fields.service'
+import { CustomFieldsService, fieldIsOnTask } from '../custom-fields/custom-fields.service'
 import { guestMayRead } from '../../common/permissions/guest-reach'
 import { likeContaining } from '../../common/sql/like'
 
@@ -3533,6 +3536,13 @@ export class TasksService {
    * (`clip-keys.ts`), the caller must be able to write to the task, and the
    * size is the stored object's, so the attachment limit holds as it does for
    * an upload.
+   *
+   * AND THE CALLER MUST BE ABLE TO READ THE CLIP (`found-5-oct/guests-read-and-delete-every-clip`,
+   * `clips/clip-access.ts`). The copy is the task's, signed for whoever reads
+   * the task, so a guest holding somebody else's key copied a clip their
+   * library does not show them onto a task shared with them, and downloaded
+   * it there. A guest attaches the clips they recorded; anybody else in the
+   * workspace any clip, as before.
    */
   async attachClip(taskId: string, actorId: string, data: { storageKey: string; fileName?: string }) {
     const ctx = await this.assertTaskWriteAccess(taskId, actorId)
@@ -3547,6 +3557,9 @@ export class TasksService {
       const name = (err as { name?: string } | null)?.name
       if (name === 'NotFound' || name === 'NoSuchKey') throw new NotFoundException('Clip not found')
       throw err
+    }
+    if (!mayReadClip(head.Metadata, await clipReaderOf(this.db, ctx.workspaceId, actorId))) {
+      throw new ForbiddenException(CLIP_READ_REFUSAL)
     }
     const sizeBytes = Number(head.ContentLength ?? 0)
     this.assertAttachmentSize(sizeBytes)
@@ -4991,13 +5004,10 @@ export class TasksService {
      * Custom fields collide on (task, field), and here a collision means the
      * two tasks disagree about the same field. The TARGET's value is kept: it
      * describes the task that continues, and silently overwriting it with the
-     * binned task's answer would change data nobody asked to change.
+     * binned task's answer would change data nobody asked to change. And only
+     * the values of fields both tasks have move (`moveFieldValues`).
      */
-    moved.customFields = await this.moveOrDrop(
-      customFieldValues, taskId, targetTaskId,
-      (r) => and(eq(customFieldValues.taskId, targetTaskId), eq(customFieldValues.fieldId, r.fieldId)),
-      { taskId: customFieldValues.taskId, id: customFieldValues.id, fieldId: customFieldValues.fieldId },
-    )
+    moved.customFields = await this.moveFieldValues({ id: taskId, listId: source.listId }, { id: targetTaskId, listId: target.listId })
 
     /*
      * Dependencies point both ways and can turn into self-links. "A blocks B",
@@ -5029,12 +5039,60 @@ export class TasksService {
   }
 
   /**
+   * A merge's custom-field values: each moves onto the survivor when it is a
+   * value of a field the survivor has — its project's, and for a field scoped
+   * to a list, its list's (`fieldIsOnTask`) — and the survivor holds none of
+   * its own for that field. Every value row of the merged task went: measured
+   * on lane 7, a task of another list holding a value in a field scoped to its
+   * list, and a task of another project holding its project's field, were each
+   * merged in (201), and the survivor held both rows while its fields, read
+   * back, showed neither (`found-30-sep/merge-moves-values-onto-fields-the-target-lacks`).
+   * A value of any other field stays on the binned task, whose fields still
+   * show it. ClickUp asks first whether to add such a field to the survivor or
+   * merge without it (help centre, "Merge tasks"); which of those this merge
+   * should offer, or what it should say of what stayed, is the owner's call.
+   *
+   * AND ONLY A VALUE THE MERGED TASK SHOWS: a field it has where it is now, as
+   * a template or a duplicate takes only those (`fieldIsOnTask`). ClickUp adds
+   * "Task A's Custom Field values" (help centre, "Merge tasks"). A move leaves
+   * a task's rows, so a task moved out of a field's list kept a value it no
+   * longer showed, and merged into a task of that list it gave the survivor
+   * that value (201, measured on lane 7), where it then showed. Such a row
+   * stays on the binned task, as it was.
+   */
+  private async moveFieldValues(from: { id: string; listId: string }, to: { id: string; listId: string }): Promise<number> {
+    const homeOf = async (listId: string) =>
+      (await this.db.select({ projectId: lists.projectId }).from(lists).where(eq(lists.id, listId)).limit(1))[0]
+    const there = await homeOf(from.listId)
+    const home = await homeOf(to.listId)
+    const held = await this.db
+      .select({ id: customFieldDefinitions.id, projectId: customFieldDefinitions.projectId, listId: customFieldDefinitions.listId })
+      .from(customFieldValues)
+      .innerJoin(customFieldDefinitions, eq(customFieldDefinitions.id, customFieldValues.fieldId))
+      .where(eq(customFieldValues.taskId, from.id))
+    type HeldField = (typeof held)[number]
+    const mergedShows = (field: HeldField) => !!there && fieldIsOnTask(field, { projectId: there.projectId, listId: from.listId })
+    const survivorHas = (field: HeldField) => !!home && fieldIsOnTask(field, { projectId: home.projectId, listId: to.listId })
+    const movable = new Set(held.filter((field) => mergedShows(field) && survivorHas(field)).map((field) => field.id))
+    return this.moveOrDrop(
+      customFieldValues, from.id, to.id,
+      (r) => and(eq(customFieldValues.taskId, to.id), eq(customFieldValues.fieldId, r.fieldId)),
+      { taskId: customFieldValues.taskId, id: customFieldValues.id, fieldId: customFieldValues.fieldId },
+      (r) => movable.has(r.fieldId),
+    )
+  }
+
+  /**
    * Move rows one at a time, dropping any the target already has.
    *
    * Every join table here is unique on (task, something), so a bulk UPDATE
    * throws as soon as the two tasks share a label or an assignee — which is
    * the normal case for duplicates, not an edge case. Dropping rather than
    * failing is right because the row carried nothing the target lacks.
+   *
+   * `movable`, where given, keeps a row it refuses where it is, on the merged
+   * task, as a clash is kept: the custom-field values of fields the two tasks
+   * do not both have (`moveFieldValues`).
    */
   private async moveOrDrop<T extends { taskId: unknown }>(
     table: T,
@@ -5044,12 +5102,15 @@ export class TasksService {
     existing: (row: any) => any,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     columns: any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    movable?: (row: any) => boolean,
   ): Promise<number> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const t = table as any
     const rows = await this.db.select(columns).from(t).where(eq(t.taskId, fromTaskId))
     let movedCount = 0
     for (const row of rows) {
+      if (movable && !movable(row)) continue
       const [clash] = await this.db.select({ id: t.id }).from(t).where(existing(row)).limit(1)
       if (clash) continue
       await this.db.update(t).set({ taskId: toTaskId }).where(eq(t.id, row.id))

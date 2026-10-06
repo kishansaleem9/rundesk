@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common'
+import { BadRequestException, NotFoundException } from '@nestjs/common'
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 import { CustomFieldsService, fieldIsOnTask } from './custom-fields.service'
@@ -78,6 +78,45 @@ describe('CustomFieldsService.setValue — only a field the task has (found-30-s
       await new CustomFieldsService(db).setValue(WS, TASK, 'F', 'words', ACTOR)
       assert.deepEqual(written, [{ op: 'insert', arg: { taskId: TASK, fieldId: 'F', value: { v: 'words' } } }])
     }
+  })
+})
+
+/*
+ * `found-30-sep/field-definition-takes-a-foreign-list` — `createDefinition`
+ * stored the `listId` it was sent: an admin defined a field in one project
+ * scoped to a list of another (201), a field no task can have.
+ */
+describe('CustomFieldsService.createDefinition — a list of the project, or none (found-30-sep/field-definition-takes-a-foreign-list)', () => {
+  const PROJECT = '00000000-0000-4000-8000-0000000000b1'
+  const LIST = '00000000-0000-4000-8000-0000000000c1'
+
+  it('refuses a field scoped to a list of another project, as a list that is not there, and stores nothing', async () => {
+    // The project in the workspace; then the list, asked within the project (it is not there).
+    const { db, written } = scriptedDb([[{ id: PROJECT }], []])
+    await assert.rejects(
+      new CustomFieldsService(db).createDefinition(WS, PROJECT, { name: 'Stage', type: 'text', listId: LIST }),
+      (e) => e instanceof NotFoundException && /List not found in this project/.test((e as Error).message),
+    )
+    assert.equal(written.length, 0)
+  })
+
+  it('refuses a list named by anything but its id, before it is asked of anybody, and stores nothing (400)', async () => {
+    // The project in the workspace — and nothing more is asked.
+    const { db, written } = scriptedDb([[{ id: PROJECT }], [{ id: LIST }], []])
+    await assert.rejects(
+      new CustomFieldsService(db).createDefinition(WS, PROJECT, { name: 'Stage', type: 'text', listId: [LIST] as unknown as string }),
+      (e) => e instanceof BadRequestException && (e as Error).message === 'listId must be a string or null',
+    )
+    assert.equal(written.length, 0)
+    assert.equal(db.select.mock.callCount(), 1)
+  })
+
+  it('stores a field scoped to a list of the project, with that list', async () => {
+    // The project; the list, found within it; then the project's fields, for the next position (none).
+    const { db, written } = scriptedDb([[{ id: PROJECT }], [{ id: LIST }], []])
+    await new CustomFieldsService(db).createDefinition(WS, PROJECT, { name: 'Stage', type: 'text', listId: LIST })
+    assert.equal(written.length, 1)
+    assert.equal((written[0].arg as { listId?: string }).listId, LIST)
   })
 })
 

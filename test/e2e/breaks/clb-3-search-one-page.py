@@ -2,8 +2,8 @@
 # Reddens: clip-library: "search finds the newest clip by its name"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/search/search.service.ts'
-a = '      const listed = (await r2.listAllObjects(`workspaces/${workspaceId}/clips/`)).reverse()\n'
-b = '      const listed = (await r2.listAllObjects(`workspaces/${workspaceId}/clips/`)).slice(0, 200)\n'
+a = '      const matches = (await r2.listAllObjects(`workspaces/${workspaceId}/clips/`))\n        .reverse()\n'
+b = '      const matches = (await r2.listAllObjects(`workspaces/${workspaceId}/clips/`))\n        .slice(0, 200)\n'
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

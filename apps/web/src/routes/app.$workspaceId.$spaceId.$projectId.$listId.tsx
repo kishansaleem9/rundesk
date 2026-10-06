@@ -121,6 +121,7 @@ import { addDays, addMonths, differenceInCalendarDays, endOfMonth, endOfWeek, fo
 import { ListSkeleton } from '../components/loading-skeletons'
 import { relativeTime } from '../lib/relative-time'
 import { fieldsOfList } from '../lib/field-scope'
+import { shownFieldCount } from '../lib/fields-shown'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 // Status is now a free-text key validated against the list's list_statuses.
@@ -3188,7 +3189,7 @@ function ListDetail() {
                     <div data-testid="list-fields-panel" className="border-t border-border/60 pt-1.5">
                       <p className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                         {t('list.table.fields', {
-                          shown: projectFields.filter((f) => !hiddenFields.has(f.id)).length,
+                          shown: shownFieldCount(projectFields, hiddenFields),
                           total: projectFields.length,
                         })}
                       </p>
@@ -3268,7 +3269,7 @@ function ListDetail() {
             {spaceFeatures.customFields && (activeView === 'table' || activeView === 'list') && (
               <details ref={fieldsDetailsRef} className="relative">
                 <summary className="list-none h-8 px-2.5 flex items-center rounded-md border border-border/80 bg-card text-[12px] cursor-pointer select-none hover:bg-muted/40">
-                  {t('list.table.fields', { shown: projectFields.length - hiddenFields.size, total: projectFields.length })}
+                  {t('list.table.fields', { shown: shownFieldCount(projectFields, hiddenFields), total: projectFields.length })}
                 </summary>
                 <div className="absolute z-20 mt-1 w-56 rounded-md border border-border bg-card p-1.5 shadow-lg">
                   {/* ClickUp's Fields panel leads with a search box — with more

@@ -39,6 +39,12 @@
  * value the row never showed. It is drawn nowhere on this list now, and the
  * route refuses the value.
  *
+ * AND THE FIELDS CHIP COUNTS THE FIELDS SHOWN
+ * (`found-30-sep/fields-picker-counts-hidden-columns`). It read `fields − hidden`,
+ * and the hidden set holds the built-in columns the Columns panel hides too:
+ * measured on lane 7, hiding Due made it read 1/2 while both fields still
+ * showed, and hiding every built-in column made it −3/2 on Table.
+ *
  *   node test/e2e/custom-field-types.mjs --api 3029 --dist /tmp/claude-0/dist-9
  */
 import path from 'node:path'
@@ -56,7 +62,7 @@ const argOf = (name, fallback) => {
 }
 
 /** Exact, never `<`: a branch that silently skipped is a shorter run. */
-const EXPECTED_CHECKS = 33
+const EXPECTED_CHECKS = 34
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3029))
@@ -636,6 +642,46 @@ try {
     'the grid draws a column for a field scoped to this list, and none — no cell, no header, nothing in its Fields picker — for one scoped to another list of the project, which this list’s tasks do not have',
     `the field of this list has ${await hereCell.count()} cell(s) in the subject's row; the other list's field has ${awayCells} cell(s) ` +
       `and its name is on the page ${awayNamed} time(s)`,
+  )
+
+  // =========================================================================
+  console.log('\n▶ THE FIELDS CHIP — the fields shown, whatever columns are hidden')
+  /*
+   * `found-30-sep/fields-picker-counts-hidden-columns`. The chip's own total is
+   * the number of fields this list draws (which fields those are is the grid
+   * check's above), so the count is read against it: every one of them shown,
+   * whatever built-in columns the Columns panel hides — and one fewer once a
+   * field is hidden in the chip's own picker, so the count is seen to move for
+   * a field as well.
+   */
+  /* The chip is the `<summary>` of the Fields picker, and reads "Fields (shown/total)". */
+  const chipOf = () => page.locator('summary').filter({ hasText: /^Fields \(/ })
+  const fieldsChip = chipOf().filter({ visible: true }).first()
+  const fieldsPicker = page.locator('details').filter({ has: chipOf() }).first()
+  const chipNow = async () => ((await fieldsChip.innerText({ timeout: 2000 }).catch(() => '')) ?? '').trim()
+  await waitUntil(async () => /^Fields \(\d+\/\d+\)$/.test(await chipNow()), { timeoutMs: 20_000 })
+  const listFields = Number((await chipNow()).match(/\/(\d+)\)$/)?.[1] ?? 0)
+  /** The chip's reading once it says `want`, or what it says when it never does. */
+  const chipSettlesOn = async (want) =>
+    (await waitUntil(async () => (await chipNow()) === want, { timeoutMs: 8_000 })) ? want : chipNow()
+  const all = `Fields (${listFields}/${listFields})`
+  const oneHidden = `Fields (${listFields - 1}/${listFields})`
+  const readings = { before: await chipSettlesOn(all) }
+  await page.getByTestId('list-columns').locator('summary').click({ timeout: 8000 }).catch(() => {})
+  await page.getByTestId('list-column-due').uncheck({ timeout: 8000 }).catch(() => {})
+  readings.dueHidden = await chipSettlesOn(all)
+  const builtIns = await page.locator('[data-testid^="list-column-"]').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')))
+  for (const id of builtIns) await page.getByTestId(id).uncheck({ timeout: 8000 }).catch(() => {})
+  readings.allHidden = await chipSettlesOn(all)
+  await page.getByTestId('list-columns').evaluate((el) => { el.open = false }, undefined, { timeout: 5000 }).catch(() => {})
+  await fieldsChip.click({ timeout: 8000 }).catch(() => {})
+  await fieldsPicker.locator('label').filter({ hasText: /^Budget$/ }).locator('input[type="checkbox"]').uncheck({ timeout: 8000 }).catch(() => {})
+  readings.fieldHidden = await chipSettlesOn(oneHidden)
+  chk(
+    listFields > 1 && readings.before === all && readings.dueHidden === all && readings.allHidden === all && readings.fieldHidden === oneHidden,
+    'the Fields chip counts the fields shown: with Due hidden, and with every built-in column hidden, it reads all of this list’s fields as shown — and hiding a field takes it one lower',
+    `the chip read ${JSON.stringify(readings)} for the ${listFields} fields of this list, where ${JSON.stringify(all)} and then ${JSON.stringify(oneHidden)} were due ` +
+      `(built-in columns hidden: ${JSON.stringify(builtIns)})`,
   )
 } catch (err) {
   failed += 1

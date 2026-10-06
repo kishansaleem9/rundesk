@@ -16,6 +16,14 @@ type Overrides = {
   usersService?: any
   securitySettings?: any
   db?: any
+  /**
+   * What a `.returning()` UPDATE yields. On a successful sign-in this is
+   * `clearLockoutIfUnlocked`'s result (`found-30-sep/a-burst-is-compared-before-the-lock`):
+   * a row means the account was not locked (the success stands); `[]` means it
+   * was locked while the password compared (the success is refused). Default: a
+   * row (not locked).
+   */
+  returning?: any[]
 }
 
 function makeService(overrides: Overrides = {}) {
@@ -31,15 +39,17 @@ function makeService(overrides: Overrides = {}) {
         settings: { lockoutEnabled: true, lockoutThreshold: 5, lockoutDurationMinutes: 30 },
       })),
     }
+  const returning = overrides.returning ?? [{ id: 'u1' }]
   const setCalls: any[] = []
   const db =
     overrides.db ?? {
       update: () => ({
         set: (v: any) => {
           setCalls.push(v)
-          // A wrong password's count answers what it left (`countWrongPassword`).
+          // The post-compare count and the clear-if-unlocked both read a row
+          // back; the rehash awaits the same handle with none.
           const done: any = Promise.resolve(undefined)
-          done.returning = async () => []
+          done.returning = async () => returning
           return { where: () => done }
         },
       }),
@@ -283,6 +293,93 @@ describe('AuthService.validateUser — every wrong password is counted, however 
 })
 
 /*
+ * A RIGHT PASSWORD IS REFUSED IF THE ACCOUNT LOCKED WHILE IT COMPARED
+ * (`found-30-sep/a-burst-is-compared-before-the-lock`).
+ *
+ * A compare takes a hash's time and the lock is read once, so a burst of wrong
+ * passwords and the account's right one, sent at once, each read an unlocked
+ * account; each was compared; the wrong ones locked the account as they
+ * finished, and the right one among them signed in. A success now clears the
+ * count ONLY IF the account is not locked (`clearLockoutIfUnlocked`, its WHERE
+ * excludes a locked account), and is refused when it is — so the right one
+ * among a burst that locks is refused, while concurrent SUCCESSFUL sign-ins,
+ * none a failure, all stand. The lane sends the burst and the concurrent
+ * successes (`sign-in-and-password.mjs`, `password-hash-time.mjs`); here the
+ * decision and the writes are pinned.
+ */
+describe('AuthService.validateUser — a success is refused if the account locked while it compared', () => {
+  const settings = {
+    getEffectiveForUser: async () => ({
+      settings: { lockoutEnabled: true, lockoutThreshold: 5, lockoutDurationMinutes: 30 },
+    }),
+  }
+  const settingsOff = {
+    getEffectiveForUser: async () => ({
+      settings: { lockoutEnabled: false, lockoutThreshold: 5, lockoutDurationMinutes: 30 },
+    }),
+  }
+  /** Records each UPDATE's SET and WHERE; a `.returning()` UPDATE reads `returning` back. */
+  function recordingDb(returning: any[] = [{ id: 'u1' }]) {
+    const dialect = new PgDialect()
+    const sets: any[] = []
+    const wheres: string[] = []
+    const db = {
+      update: () => ({
+        set: (s: any) => ({
+          where: (cond: unknown) => {
+            sets.push(s)
+            try { wheres.push(dialect.sqlToQuery(cond as never).sql) } catch { wheres.push('') }
+            const done: any = Promise.resolve(undefined)
+            done.returning = async () => returning
+            return done
+          },
+        }),
+      }),
+    }
+    return { db, sets, wheres }
+  }
+  // At today's cost, so a successful sign-in writes no new hash and the only
+  // write these tests see is the lockout's clear-on-success.
+  const account = (over: Record<string, unknown> = {}) => ({
+    id: 'u1',
+    email: 'a@b.com',
+    passwordHash: hashSync('correct-horse', PASSWORD_HASH_COST),
+    failedLoginAttempts: 0,
+    lockedUntil: null,
+    isActive: true,
+    ...over,
+  })
+  /** The columns each recorded SET touches — safe to print (a SQL fragment is circular). */
+  const touched = (sets: any[]) => sets.map((s) => Object.keys(s).sort().join('+')).join(', ')
+  const refusedAsInvalid = (err: any) => err instanceof UnauthorizedException && err.message === 'Invalid credentials'
+
+  it('a right password clears the count only when the account is not locked, in one statement whose WHERE excludes a locked account', async () => {
+    const { db, sets, wheres } = recordingDb([{ id: 'u1' }])
+    const { svc } = makeService({ db, usersService: { findByEmail: async () => account({ failedLoginAttempts: 2 }) }, securitySettings: settings })
+    assert.equal((await svc.validateUser('a@b.com', 'correct-horse')).id, 'u1')
+    // The one write on success is the conditional clear: count and lock to zero,
+    // guarded by "not locked".
+    assert.equal(sets.length, 1, `expected one write on success (the clear), got ${touched(sets)}`)
+    assert.ok(sets[0].failedLoginAttempts === 0 && sets[0].lockedUntil === null, `the success write is not the clear: ${touched(sets)}`)
+    assert.match(wheres[0], /locked_until.*is null or.*locked_until.*<=/is, `the clear is not guarded by "not locked": ${wheres[0]}`)
+  })
+
+  it('a right password that finds the account locked (a burst of wrong passwords locked it while this one compared) is refused, not signed in', async () => {
+    // The conditional clear matches no row: the account is locked now.
+    const { db } = recordingDb([])
+    const { svc } = makeService({ db, usersService: { findByEmail: async () => account() }, securitySettings: settings })
+    await assert.rejects(() => svc.validateUser('a@b.com', 'correct-horse'), refusedAsInvalid)
+  })
+
+  it('with the lockout off, a successful sign-in on a clean account writes nothing to the lockout', async () => {
+    const { db, sets } = recordingDb()
+    const { svc } = makeService({ db, usersService: { findByEmail: async () => account() }, securitySettings: settingsOff })
+    assert.equal((await svc.validateUser('a@b.com', 'correct-horse')).id, 'u1')
+    assert.deepEqual(sets, [], `the lockout was written although it is off: ${touched(sets)}`)
+  })
+})
+
+/*
  * EVERY REFUSED SIGN-IN TAKES ONE HASH (`found-30-sep/sign-in-time-tells-an-account`).
  *
  * The compares are counted on the one hasher the service uses; each refusal
@@ -425,7 +522,10 @@ describe('AuthService.validateUser — every refusal takes one hash, whether or 
     const user = { id: 'u1', email: 'a@b.com', passwordHash: hashSync('correct-horse', PASSWORD_HASH_COST), failedLoginAttempts: 0, lockedUntil: null, isActive: true }
     const { svc, setCalls } = makeService({ usersService: { findByEmail: async () => user }, securitySettings: settings })
     assert.equal((await svc.validateUser('a@b.com', 'correct-horse')).id, 'u1')
-    assert.deepEqual(setCalls, [])
+    // The success writes the conditional clear to the lockout columns
+    // (`clearLockoutIfUnlocked`), but no new password hash: the stored one is
+    // already at today's cost.
+    assert.ok(!setCalls.some((set) => 'passwordHash' in set), `a new hash was written: ${JSON.stringify(setCalls)}`)
   })
 })
 

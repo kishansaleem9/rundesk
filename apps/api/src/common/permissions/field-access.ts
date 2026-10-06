@@ -1,13 +1,42 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common'
 import { and, eq } from 'drizzle-orm'
-import { projects, spaces, workspaceMembers } from '@rundesk/db'
+import { lists, projects, spaces, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
-import type { ReadActor } from './read-access'
+import { readableList, type ReadActor } from './read-access'
 import { assertSpaceLevel, type WithinStep } from './space-default-permission'
+import { isUuid } from '../validation/uuid'
+
+/*
+ * IS THIS A LIST OF THE PROJECT? A field belongs to a project and, when it is
+ * scoped, to one of the project's own lists: ClickUp adds a field "to the
+ * Hierarchy location where the view or task is located" (help centre, "Create
+ * Custom Fields", read through search excerpts). The `listId` a definition was
+ * sent was stored and asked of the rule below as sent, so an admin defined a
+ * field in one project scoped to a list of another (201, a field no task can
+ * have), and a member refused fields in a view-only space defined one there by
+ * naming a list of another space shared with them to edit (201)
+ * (`found-30-sep/field-definition-takes-a-foreign-list`).
+ *
+ * A STRING, or no list. `isUuid` tests the text of what it is handed, and
+ * `["<a list's id>"]` reads as that id: the query matched, the rule took the
+ * array as its list step, and the shares, matched by id, never matched it — so
+ * a member shared a list to view, in a space they may edit, defined a field
+ * scoped to it by sending its id in brackets (201, measured on lane 7).
+ */
+export async function listOfProject(db: Db, projectId: string, listId: unknown): Promise<boolean> {
+  if (typeof listId !== 'string' || !isUuid(listId)) return false
+  const [row] = await db
+    .select({ id: lists.id })
+    .from(lists)
+    .where(and(eq(lists.id, listId), eq(lists.projectId, projectId)))
+    .limit(1)
+  return !!row
+}
 
 /*
  * WHO MAY DEFINE, RENAME OR DELETE A PROJECT'S FIELDS — somebody who may
- * change the project, and not a guest (`found-25-sep/field-values-written-by-readers`).
+ * change the project, or for a field scoped to one of its lists that list, and
+ * not a guest (`found-25-sep/field-values-written-by-readers`).
  * Opening the project was enough: measured on lane 5, a member in a view-only
  * space defined a field from a task there (201), and so did a guest with only
  * a view share on one; deleting a field takes every task's value in it.
@@ -35,8 +64,39 @@ export async function assertMayDefineFields(
     .limit(1)
   if (!row) throw new NotFoundException('Project not found in this workspace')
   if (row.role === 'guest') throw new ForbiddenException('Guests cannot define custom fields')
+  /*
+   * The list a field is scoped to is the most specific step, so a share on it
+   * decides — when it is one of this project's lists. A list of another
+   * project is no step on the way to this one: it is left out, as a list that
+   * is not there, and the project's own answer stands. `createDefinition`
+   * refuses such a list to whoever this rule lets through.
+   *
+   * Asked of a field being renamed or deleted as of one being made: the list
+   * it is scoped to is where it is (`updateDefinition`, `deleteDefinition`).
+   * Those asked without it, measured on lane 7: a member shared a list to view,
+   * in a space they may edit, renamed and deleted a field scoped to it, its
+   * values with it (200); one shared a view-only space's list to edit made a
+   * field scoped to it (201) and could not rename it (403, the space's reason).
+   * ClickUp: "When there are conflicting permissions for the same location,
+   * permissions set on the most specific level of the Hierarchy are applied",
+   * and "permissions on Lists override Subfolders and Folders" (help centre,
+   * "Set permissions on individual locations", read through search excerpts).
+   */
+  const ownList = listId != null && (await listOfProject(db, projectId, listId)) ? listId : null
+  /*
+   * A PRIVATE LIST IS ITS OWN PEOPLE'S, its fields with it: one the caller may
+   * not open (`readableList`, the read rule) is refused in its own words, as
+   * every route refuses it. A member refused a private list defined a field
+   * scoped to it (201), and renamed and deleted the admin's, its values with
+   * it (200, measured on lane 7). ClickUp makes a List private "so only
+   * certain people can access them" (help centre, "Make Spaces, Folders,
+   * Subfolders, Lists, and tasks private", read through search excerpts).
+   */
+  if (ownList && !(await readableList(db, workspaceId, ownList, reader))) {
+    throw new ForbiddenException('This list is private')
+  }
   const within: WithinStep[] = [
-    ...(listId ? [{ type: 'list' as const, id: listId }] : []),
+    ...(ownList ? [{ type: 'list' as const, id: ownList }] : []),
     { type: 'project', id: projectId },
     ...(row.folderId ? [{ type: 'folder' as const, id: row.folderId }] : []),
   ]

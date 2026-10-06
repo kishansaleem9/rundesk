@@ -14,45 +14,53 @@ import { ClipsService } from './clips.service'
 export class ClipsController {
   constructor(private readonly clips: ClipsService) {}
 
+  /**
+   * The library, as its reader may see it: a guest's is the clips they
+   * recorded. Every route here asks the clip rule (`clip-access.ts`) about the
+   * reader `ClipsService.readerOf` reads, the one search and a task's copy read.
+   */
   @Get()
-  list(@Param('workspaceId') workspaceId: string) {
-    return this.clips.list(workspaceId)
+  async list(@Param('workspaceId') workspaceId: string, @CurrentUser() user: { id: string }) {
+    return this.clips.list(workspaceId, await this.clips.readerOf(workspaceId, user.id))
   }
 
   @Post('presign')
   presign(
     @Param('workspaceId') workspaceId: string,
-    @CurrentUser() user: { email: string },
+    @CurrentUser() user: { id: string; email: string },
     @Body() body: { fileName: string; contentType: string; durationSeconds?: number; title?: string },
   ) {
-    return this.clips.createUploadUrl(workspaceId, user.email, body)
+    return this.clips.createUploadUrl(workspaceId, { id: user.id, email: user.email }, body)
   }
 
+  /** By its recorder, or by somebody who manages the workspace; anybody else is refused, and told who may. */
   @Delete()
-  remove(
-    @Param('workspaceId') workspaceId: string,
-    @Body() body: { storageKey: string },
-  ) {
-    return this.clips.remove(workspaceId, body.storageKey)
-  }
-
-  /**
-   * The clip's link, `{ token, path, audience }`: the same one every time
-   * (`resume-defects/resume-7`). Any member who can list the clips may ask,
-   * as any member could sign one before.
-   */
-  @Post('link')
-  @ApiOperation({ summary: 'The clip’s stable link (/clips/<token>)' })
-  link(
+  async remove(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: { id: string },
     @Body() body: { storageKey: string },
   ) {
-    return this.clips.link(workspaceId, user.id, body?.storageKey)
+    return this.clips.remove(workspaceId, body.storageKey, await this.clips.readerOf(workspaceId, user.id))
+  }
+
+  /**
+   * The clip's link, `{ token, path, audience }`: the same one every time
+   * (`resume-defects/resume-7`). Anybody who may read the clip may ask: a
+   * member any clip they can list, a guest the clips they recorded
+   * (`found-5-oct/guests-read-and-delete-every-clip`).
+   */
+  @Post('link')
+  @ApiOperation({ summary: 'The clip’s stable link (/clips/<token>)' })
+  async link(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string },
+    @Body() body: { storageKey: string },
+  ) {
+    return this.clips.link(workspaceId, await this.clips.readerOf(workspaceId, user.id), body?.storageKey)
   }
 
   @Post('share')
-  share(
+  async share(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: { id: string; email: string; role?: string },
     @Body()
@@ -63,7 +71,7 @@ export class ClipsController {
       email?: string
     },
   ) {
-    return this.clips.share(workspaceId, user.id, user.email, body)
+    return this.clips.share(workspaceId, await this.clips.readerOf(workspaceId, user.id), user.email, body)
   }
 }
 

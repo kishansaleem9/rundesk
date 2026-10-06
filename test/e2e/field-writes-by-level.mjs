@@ -14,6 +14,30 @@
  * "Edit"; guests with edit change values and create no fields; anybody who can
  * see a task may vote on it. Every value and definition is read back by SQL.
  *
+ * AND A FIELD'S LIST IS ONE OF ITS PROJECT'S
+ * (`found-30-sep/field-definition-takes-a-foreign-list`). The `listId` a field
+ * was defined with was stored as sent and asked of the rule as its most
+ * specific step: measured on lane 7, an admin defined a field in one project
+ * scoped to another project's list (201, a field no task can have), and a
+ * member refused fields in a view-only space (403) defined one there by naming
+ * a list of another space shared with them to edit (201). ClickUp adds a field
+ * "to the Hierarchy location where the view or task is located" (help centre,
+ * "Create Custom Fields", search excerpts). Such a list is refused as a list
+ * that is not there, and the space's answer stands for whoever names it.
+ *
+ * AND THE FIELD'S OWN LIST DECIDES, for making, renaming and deleting it, and
+ * a private one is its own people's — the review of that item, measured on
+ * lane 7: renaming and deleting asked without the field's list, so a member
+ * shared it to view, in a space they may edit, renamed and deleted its field,
+ * the values with it (200), and one shared a view-only space's list to edit
+ * could not rename the field they had made there (403); a member refused a
+ * private list defined a field scoped to it (201) and renamed and deleted the
+ * admin's (200); a list's id sent in brackets slipped past its share (201).
+ * ClickUp: "permissions set on the most specific level of the Hierarchy are
+ * applied" ("Set permissions on individual locations"), and a private List is
+ * for "only certain people" ("Make Spaces, Folders, Subfolders, Lists, and
+ * tasks private"; help centre, search excerpts).
+ *
  *   node test/e2e/field-writes-by-level.mjs --api 3021
  */
 import { signInApi, signUpApi } from './lib/signin.mjs'
@@ -26,7 +50,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 5
+const EXPECTED_CHECKS = 10
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -157,6 +181,118 @@ try {
     g1.status === 403 && gn1 === 0 && g2.status === 403 && gn2 === 0 && g3.status === 403 && gv === null,
     'a guest defines no field, even on a project shared with them to edit (403, none made), and sets no value on a task shared with them to view (403, none written)',
     `on the project ${said(g1)}, made ${gn1}; from a task ${said(g2)}, ${gn2}; a value where shared to view ${said(g3)}, now ${JSON.stringify(gv)}`,
+  )
+
+  // ══ 6–7. A LIST OF ANOTHER PROJECT ═══════════════════════════════════════
+  console.log('\n▶ a field scoped to a list of another project')
+  /*
+   * `found-30-sep/field-definition-takes-a-foreign-list`. The open space's list
+   * is shared with the member to edit: a list of another space, and of another
+   * project than the view-only one's. Naming it was the member's way past the
+   * view-only space (201); the space's answer is theirs either way now.
+   */
+  const shared = await A(`/shares/list/${OPEN.list}`, { method: 'POST', body: { userId: member.id, level: 'edit' } })
+  if (!shared.ok) throw new Error(`could not share the open list with the member: ${said(shared)}`)
+  const defineOnView = (C, name, listId) =>
+    C(`/workspaces/${WS}/projects/${VIEW.project}/custom-fields`, { method: 'POST', body: { name, type: 'text', ...(listId ? { listId } : {}) } })
+  const plain = await defineOnView(M, `${TAG} the viewer's field, no list`)
+  const viaShare = await defineOnView(M, `${TAG} the viewer's field on a shared list`, OPEN.list)
+  const [pn, sn] = [await fieldsNamed(`${TAG} the viewer's field, no list`), await fieldsNamed(`${TAG} the viewer's field on a shared list`)]
+  const spaceSays = (res) => /"View only"/.test(String(res.error?.message ?? ''))
+  chk(
+    plain.status === 403 && viaShare.status === 403 && spaceSays(plain) && spaceSays(viaShare) && pn === 0 && sn === 0,
+    'a member refused fields in a view-only space is refused one there with no list (403), and naming a list of another space shared with them to edit (403) — no step on the way to this project — the space’s reason both times, none made (read by SQL)',
+    `with no list ${said(plain)}, made ${pn}; naming the shared list of the open space ${said(viaShare)}, made ${sn}`,
+  )
+
+  const foreign = await defineOnView(A, `${TAG} the admin's field on another project's list`, OPEN.list)
+  const own = await defineOnView(A, `${TAG} the admin's field on the project's own list`, VIEW.list)
+  const fn = await fieldsNamed(`${TAG} the admin's field on another project's list`)
+  const [ownRow] = own.data?.id ? await sql`select list_id from custom_field_definitions where id = ${own.data.id}` : []
+  chk(
+    foreign.status === 404 && /List not found in this project/.test(String(foreign.error?.message ?? '')) && fn === 0 &&
+      own.status === 201 && ownRow?.list_id === VIEW.list,
+    'a field scoped to a list of another project is refused, the admin’s included, as a list that is not there (404 “List not found in this project”, none made, read by SQL) — while one scoped to the project’s own list is made, stored with that list',
+    `another project's list ${said(foreign)}, made ${fn}; the project's own list ${said(own)}, stored with ${JSON.stringify(ownRow?.list_id ?? null)}`,
+  )
+
+  // ══ 8–10. THE FIELD'S OWN LIST: ITS SHARE, ITS PRIVACY, ITS ID ═══════════
+  console.log('\n▶ a field scoped to one of the project’s lists, made, renamed and deleted as that list says')
+  /*
+   * The review of `found-30-sep/field-definition-takes-a-foreign-list`. Made
+   * last: a share on the view-only space's list lets the member change its
+   * tasks, which the first check says they may not. In the open space, which
+   * the member may edit: a side list shared with them to view, and a private
+   * list of the admin's they may not open, each with a field the admin scoped
+   * to it and a value on a task in it.
+   */
+  const madeBy = async (C, route, body, what) => {
+    const r = await C(route, { method: 'POST', body })
+    if (!r.ok || !r.data?.id) throw new Error(`could not make ${what}: ${said(r)}`)
+    return r.data.id
+  }
+  const side = await madeBy(A, '/lists', { projectId: OPEN.project, name: `${TAG} open side` }, 'the open space’s side list')
+  const secret = await madeBy(A, '/lists', { projectId: OPEN.project, name: `${TAG} open private`, visibility: 'private' }, 'the open space’s private list')
+  for (const [list, level] of [[VIEW.list, 'edit'], [side, 'view']]) {
+    const s = await A(`/shares/list/${list}`, { method: 'POST', body: { userId: member.id, level } })
+    if (!s.ok) throw new Error(`could not share a list with the member at ${level}: ${said(s)}`)
+  }
+  const defineIn = (C, project, name, listId) =>
+    C(`/workspaces/${WS}/projects/${project}/custom-fields`, { method: 'POST', body: { name, type: 'text', listId } })
+  const scopedField = (project, listId, fname) => madeBy(A, `/workspaces/${WS}/projects/${project}/custom-fields`, { name: `${TAG} ${fname}`, type: 'text', listId }, fname)
+  const valuedTaskIn = async (listId, fieldId, title) => {
+    const task = await madeBy(A, '/tasks', { listId, title: `${TAG} ${title}` }, title)
+    const v = await A(`/workspaces/${WS}/tasks/${task}/custom-fields/${fieldId}`, { method: 'PUT', body: { value: `${TAG} ${title}` } })
+    if (!v.ok) throw new Error(`could not set a value on ${title}: ${said(v)}`)
+  }
+  const valuesIn = async (fieldId) => (await sql`select count(*)::int as n from custom_field_values where field_id = ${fieldId}`)[0].n
+  const rename = (C, fieldId, name) => C(`/workspaces/${WS}/custom-fields/${fieldId}`, { method: 'PATCH', body: { name } })
+  const remove = (C, fieldId) => C(`/workspaces/${WS}/custom-fields/${fieldId}`, { method: 'DELETE' })
+  const privateSays = (res) => res.error?.message === 'This list is private'
+  const viewShareSays = (res) => /^What is shared with you here is "View only"/.test(String(res.error?.message ?? ''))
+
+  const onShared = await defineIn(M, VIEW.project, `${TAG} the member's field on the list shared to edit`, VIEW.list)
+  const [onSharedRow] = onShared.data?.id ? await sql`select list_id from custom_field_definitions where id = ${onShared.data.id}` : []
+  const onSecret = await defineIn(M, OPEN.project, `${TAG} the member's field on the private list`, secret)
+  const secretMade = await fieldsNamed(`${TAG} the member's field on the private list`)
+  chk(
+    onShared.status === 201 && onSharedRow?.list_id === VIEW.list && onSecret.status === 403 && privateSays(onSecret) && secretMade === 0,
+    'a field is made as its own list says: a member refused fields in a view-only space makes one there scoped to the project’s list shared with them to edit (201, stored with that list, read by SQL) — and none scoped to a private list of an open space that they may not open (403 “This list is private”, none made)',
+    `on the list shared to edit ${said(onShared)}, stored with ${JSON.stringify(onSharedRow?.list_id ?? null)}; on the private list ${said(onSecret)}, made ${secretMade}`,
+  )
+
+  const sideField = await scopedField(OPEN.project, side, 'side stage')
+  await valuedTaskIn(side, sideField, 'side task')
+  const secretField = await scopedField(OPEN.project, secret, 'private stage')
+  await valuedTaskIn(secret, secretField, 'private task')
+  const viewListField = await scopedField(VIEW.project, VIEW.list, 'view list stage')
+  const sideRen = await rename(M, sideField, `${TAG} side stage renamed by a viewer`)
+  const sideDel = await remove(M, sideField)
+  const secretRen = await rename(M, secretField, `${TAG} private stage renamed by an outsider`)
+  const secretDel = await remove(M, secretField)
+  const [sideName, sideValues, secretName, secretValues] = [await fieldName(sideField), await valuesIn(sideField), await fieldName(secretField), await valuesIn(secretField)]
+  const viewRen = await rename(M, viewListField, `${TAG} view list stage renamed by its editor`)
+  const viewRenamed = await fieldName(viewListField)
+  const viewDel = await remove(M, viewListField)
+  const viewLeft = await fieldName(viewListField)
+  chk(
+    sideRen.status === 403 && sideDel.status === 403 && viewShareSays(sideRen) && viewShareSays(sideDel) && sideName === `${TAG} side stage` && sideValues === 1 &&
+      secretRen.status === 403 && secretDel.status === 403 && privateSays(secretRen) && privateSays(secretDel) && secretName === `${TAG} private stage` && secretValues === 1 &&
+      viewRen.status === 200 && viewRenamed === `${TAG} view list stage renamed by its editor` && viewDel.status === 200 && viewLeft === null,
+    'and renamed and deleted as its own list says: a member shared a list to view, in a space they may edit, renames and deletes none of its fields (403, the share’s reason), nor those of a private list they may not open (403 “This list is private”) — each field, its name and its value as they were (read by SQL) — while one shared a view-only space’s list to edit renames and deletes a field scoped to it (200, read by SQL)',
+    `the viewed list's field: rename ${said(sideRen)}, delete ${said(sideDel)}, now "${sideName}" with ${sideValues} value(s); ` +
+      `the private list's: rename ${said(secretRen)}, delete ${said(secretDel)}, now "${secretName}" with ${secretValues} value(s); ` +
+      `the list shared to edit: rename ${said(viewRen)}, now "${viewRenamed}"; delete ${said(viewDel)}, now ${JSON.stringify(viewLeft)}`,
+  )
+
+  const bracketedByMember = await defineIn(M, OPEN.project, `${TAG} the member's field on [the side list]`, [side])
+  const bracketedByAdmin = await defineIn(A, OPEN.project, `${TAG} the admin's field on [the project's list]`, [OPEN.list])
+  const [bm, ba] = [await fieldsNamed(`${TAG} the member's field on [the side list]`), await fieldsNamed(`${TAG} the admin's field on [the project's list]`)]
+  const shapeSays = (res) => res.error?.message === 'listId must be a string or null'
+  chk(
+    bracketedByMember.status === 400 && bracketedByAdmin.status === 400 && shapeSays(bracketedByMember) && shapeSays(bracketedByAdmin) && bm === 0 && ba === 0,
+    'a list is named by its id and nothing else: a member shared a list to view, in a space they may edit, sending it as [that list] is refused before any rule is asked, and so is the admin sending the project’s own list so (400 “listId must be a string or null”, none made, read by SQL)',
+    `the member's [side list] ${said(bracketedByMember)}, made ${bm}; the admin's [the project's list] ${said(bracketedByAdmin)}, made ${ba}`,
   )
 } catch (err) {
   failed += 1

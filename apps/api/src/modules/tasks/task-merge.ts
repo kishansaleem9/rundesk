@@ -27,14 +27,23 @@
  * What moves, and what stays.
  *
  * MOVED, because it is work: comments and their attachments, checklists,
- * subtasks, assignees, watchers, time entries, dependencies, labels, custom
- * field values, linked docs, external links, sprint membership, reminders and
- * planner blocks.
+ * subtasks, assignees, watchers, time entries, dependencies, labels, linked
+ * docs, external links, sprint membership, reminders and planner blocks. And
+ * custom field values, of the fields both tasks have — the source's where it
+ * is now, and the survivor's (`fieldIsOnTask`) — where the survivor holds no
+ * value of its own (`TasksService.moveFieldValues`).
  *
  * LEFT ON THE SOURCE, because it is a record of what happened TO the source and
  * moving it would rewrite history: its activity log, its description history,
  * and its provenance rows (the email that created it, the form that submitted
  * it, the calendar event it came from). Those stay readable on the binned task.
+ *
+ * And three kinds of custom field value, which stay as they were: the value
+ * of a field the survivor lacks, which the binned task still shows; a value
+ * the source itself no longer showed; and one where the survivor holds its own
+ * (`found-30-sep/merge-moves-values-onto-fields-the-target-lacks`). ClickUp
+ * asks before such a merge whether to add the field to the survivor (help
+ * centre, "Merge tasks"); whether this one should is the owner's to decide.
  */
 export const MERGE_MOVES = [
   'comments',

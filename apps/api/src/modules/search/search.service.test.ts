@@ -121,6 +121,35 @@ describe('SearchService custom-field value filter (§11.2)', () => {
     assert.ok(!fromTables.includes('docs'), 'docs excluded when the custom-field filter is active')
   })
 
+  /*
+   * `found-30-sep/search-finds-tasks-by-values-they-no-longer-show` — the filter
+   * matched every value row of the field, and a move leaves a task's rows: a
+   * task moved out of the field's list, or in from another project, was found
+   * by a value its fields do not show.
+   */
+  it('finds a task only where it has the field: in a list of the field’s project, and for a field scoped to a list, in that list', async () => {
+    /** The lists the task query asks its task to be in, for this field. */
+    const listsAskedFor = async (def: Record<string, unknown>) => {
+      const { db, wheres } = makeDb({ custom_field_definitions: [def], custom_field_values: [], tasks: [] })
+      await new SearchService(db, config).search('w1', 'u1', '', 10, { customFieldId: 'f1', customFieldValue: 'draft' })
+      const q = sqlFor(wheres, 'tasks')
+      assert.ok(q, 'no predicate captured for the task query')
+      return subqueriesOf(q.params)
+        .filter((w) => w.table === 'lists' && w.condition != null)
+        .map((w) => dialect.sqlToQuery(w.condition as never))
+        .filter((s) => s.params.includes('p-field'))
+    }
+    const scoped = await listsAskedFor({ type: 'text', projectId: 'p-field', listId: 'l-field' })
+    assert.equal(scoped.length, 1, 'the task query does not ask that the task is in a list of the field’s project')
+    assert.match(scoped[0].sql, /"lists"\."project_id" = \$\d+/, `not the field's project: ${scoped[0].sql}`)
+    assert.match(scoped[0].sql, /"lists"\."id" = \$\d+/, `a field scoped to a list is not held to it: ${scoped[0].sql}`)
+    assert.ok(scoped[0].params.includes('l-field'), `not the field's own list: ${JSON.stringify(scoped[0].params)}`)
+
+    const projectWide = await listsAskedFor({ type: 'text', projectId: 'p-field', listId: null })
+    assert.equal(projectWide.length, 1, 'a project-wide field is not held to its project')
+    assert.ok(!/"lists"\."id"/.test(projectWide[0].sql), `a project-wide field was held to one list: ${projectWide[0].sql}`)
+  })
+
   it('does not touch custom_field_values when no custom-field filter is set', async () => {
     const { db, fromTables } = makeDb({
       tasks: [],
@@ -209,6 +238,104 @@ describe('SearchService file search (§11.1 uploaded files)', () => {
     }
     assert.match(await ask({}), /"tasks"\."is_archived"/, 'the file search does not ask whether its task is archived')
     assert.doesNotMatch(await ask({ includeArchived: true }), /"tasks"\."is_archived"/, 'a search for archived work still withholds archived files')
+  })
+})
+
+/*
+ * `found-5-oct/guests-read-and-delete-every-clip`: search handed a guest every
+ * clip's name and storage key, as the library listed them every clip. A guest
+ * finds the clips they recorded (`clips/clip-access.ts`); anybody else in the
+ * workspace finds every clip. The searcher is read as the library reads them,
+ * by `clips/clip-reader.ts`: one query on `users`, their address from its row
+ * and their role from their `workspace_members` row through its join (a
+ * platform super admin reads as one). This fake ignores joins and answers the
+ * query with the `users` rows it is given, which carry all three.
+ */
+describe('SearchService clip search', () => {
+  const store = () => {
+    const meta: Record<string, Record<string, string>> = {
+      'workspaces/w1/clips/100-invoice-walkthrough.webm': { recordedbyid: 'admin-1', recordedby: 'admin@rundesk.dev' },
+      'workspaces/w1/clips/200-invoice-question.webm': { recordedbyid: 'u1', recordedby: 'guest@rundesk.dev' },
+    }
+    return {
+      configured: true,
+      listAllObjects: async () => Object.keys(meta).map((Key) => ({ Key })),
+      headObject: async (key: string) => ({ Metadata: meta[key] }),
+    } as any
+  }
+  const clipHits = async (role: string) => {
+    const { db } = makeDb({ users: [{ email: 'guest@rundesk.dev', role }], task_attachments: [] })
+    const res = await new SearchService(db, config, store()).search('w1', 'u1', 'invoice', 10, { types: ['file'] })
+    return res.filter((h) => h.content === 'Clip').map((h) => h.id).sort()
+  }
+
+  it('a guest finds the clips they recorded and nobody else’s; a member finds every clip', async () => {
+    assert.deepEqual(await clipHits('guest'), ['file-workspaces/w1/clips/200-invoice-question.webm'])
+    assert.deepEqual(await clipHits('member'), [
+      'file-workspaces/w1/clips/100-invoice-walkthrough.webm',
+      'file-workspaces/w1/clips/200-invoice-question.webm',
+    ])
+  })
+
+  /** Clip hits for a searcher whose `users` row (with its joined membership) is `row`, over a store of `meta`. */
+  const hitsOver = async (meta: Record<string, Record<string, string>>, row: Record<string, unknown>) => {
+    const r2 = {
+      configured: true,
+      listAllObjects: async () => Object.keys(meta).sort().map((Key) => ({ Key })),
+      headObject: async (key: string) => ({ Metadata: meta[key] }),
+    } as any
+    const { db } = makeDb({ users: [row], task_attachments: [] })
+    const res = await new SearchService(db, config, r2).search('w1', 'u1', 'invoice', 10, { types: ['file'] })
+    return res.filter((h) => h.content === 'Clip').map((h) => h.id).sort()
+  }
+
+  it('a guest finds a clip from before its recorder’s id by the address their users row holds now', async () => {
+    // Recorded before a clip carried its recorder's id: whose it is, is its address.
+    const meta = {
+      'workspaces/w1/clips/100-invoice-admins-old.webm': { recordedby: 'admin@rundesk.dev' },
+      'workspaces/w1/clips/200-invoice-guests-old.webm': { recordedby: 'guest@rundesk.dev' },
+    }
+    assert.deepEqual(await hitsOver(meta, { email: 'GUEST@rundesk.dev', role: 'guest' }), [
+      'file-workspaces/w1/clips/200-invoice-guests-old.webm',
+    ])
+    // The address is the one the users row holds now, not one they once had.
+    assert.deepEqual(await hitsOver(meta, { email: 'renamed@rundesk.dev', role: 'guest' }), [])
+  })
+
+  it('a platform super admin holding a guest membership finds every clip, as the library lists them every clip', async () => {
+    const meta = {
+      'workspaces/w1/clips/100-invoice-walkthrough.webm': { recordedbyid: 'admin-1', recordedby: 'admin@rundesk.dev' },
+      'workspaces/w1/clips/200-invoice-question.webm': { recordedbyid: 'someone-1', recordedby: 'someone@rundesk.dev' },
+    }
+    assert.deepEqual(await hitsOver(meta, { email: 'ops@rundesk.dev', role: 'guest', platformRole: 'super_admin' }), [
+      'file-workspaces/w1/clips/100-invoice-walkthrough.webm',
+      'file-workspaces/w1/clips/200-invoice-question.webm',
+    ])
+  })
+
+  it('a guest’s matches are looked up a page at a time, together, not one store round trip after another', async () => {
+    // Thirty newer clips of somebody else's match before the guest's own.
+    const meta: Record<string, Record<string, string>> = {
+      'workspaces/w1/clips/1000-invoice-guests.webm': { recordedbyid: 'u1', recordedby: 'guest@rundesk.dev' },
+    }
+    for (let i = 0; i < 30; i++) meta[`workspaces/w1/clips/${2000 + i}-invoice-${i}.webm`] = { recordedbyid: 'admin-1' }
+    let inFlight = 0
+    let most = 0
+    const r2 = {
+      configured: true,
+      listAllObjects: async () => Object.keys(meta).sort().map((Key) => ({ Key })),
+      headObject: async (key: string) => {
+        inFlight += 1
+        most = Math.max(most, inFlight)
+        await new Promise((resolve) => setTimeout(resolve, 1))
+        inFlight -= 1
+        return { Metadata: meta[key] }
+      },
+    } as any
+    const { db } = makeDb({ users: [{ email: 'guest@rundesk.dev', role: 'guest' }], task_attachments: [] })
+    const res = await new SearchService(db, config, r2).search('w1', 'u1', 'invoice', 10, { types: ['file'] })
+    assert.deepEqual(res.filter((h) => h.content === 'Clip').map((h) => h.id), ['file-workspaces/w1/clips/1000-invoice-guests.webm'])
+    assert.equal(most, 31, `at most ${most} looked up at once`)
   })
 })
 

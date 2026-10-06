@@ -30,7 +30,7 @@ import {
   Share2,
   Copy,
 } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, refusalMessage } from '../lib/api'
 import { matchesClipKind } from '../lib/clip-kind'
 import { useAuthStore } from '../store/auth'
 import { useTranslation } from '../lib/i18n'
@@ -48,6 +48,12 @@ type Clip = {
   sizeBytes: number
   url: string
   storageKey: string
+  /*
+   * Whether the server would delete it for this reader: its recorder, or
+   * somebody who manages the workspace (`found-5-oct/guests-read-and-delete-every-clip`).
+   * Every card offered Delete, a guest's included, and the server asked nobody.
+   */
+  mayDelete?: boolean
 }
 
 type WorkspaceMember = {
@@ -454,6 +460,7 @@ export function ClipsPage() {
               clip={c}
               onDelete={() => {
                 setDeleteClip(c)
+                removeClip.reset()
                 setDeleteOpen(true)
               }}
               onShare={() => {
@@ -586,6 +593,16 @@ export function ClipsPage() {
                 : t('clips.deleteBodyGeneric')}
             </DialogDescription>
           </DialogHeader>
+          {/*
+            A refused delete said nothing: the dialog stayed open and the clip
+            stayed put. The server's own sentence says who may delete it — a
+            page opened before somebody's role changed still offers Delete.
+          */}
+          {removeClip.isError ? (
+            <p className="text-xs text-rose-500" data-testid="clip-delete-error">
+              {refusalMessage(removeClip.error, t('clips.deleteFailed'))}
+            </p>
+          ) : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteOpen(false)}>
               {t('common.cancel')}
@@ -664,9 +681,17 @@ function ClipCard({
               <Clock className="h-3 w-3" />
               {clip.createdAt ? new Date(clip.createdAt).toLocaleDateString() : t('clips.now')}
             </span>
-            <button className="text-muted-foreground hover:text-destructive" onClick={onDelete}>
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
+            {/* Only where the server would delete it for this reader (`mayDelete`). */}
+            {clip.mayDelete === true && (
+              <button
+                className="text-muted-foreground hover:text-destructive"
+                data-testid="clip-card-delete"
+                aria-label={t('clips.deleteClip')}
+                onClick={onDelete}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
             <button
               className="text-muted-foreground hover:text-foreground"
               data-testid="clip-card-share"

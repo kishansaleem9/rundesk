@@ -7,8 +7,8 @@
 # Reddens: clip-links: "and the link is the server’s, for the clip the card uploaded: one row, naming that clip in this workspace"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/clips/clips.service.ts'
-a = "        .values({ workspaceId, storageKey: key, token, createdById: actorId })\n"
-b = "        .values({ workspaceId, storageKey: `${key}.link`, token, createdById: actorId })\n"
+a = "        .values({ workspaceId, storageKey: key, token, createdById: reader.id })\n"
+b = "        .values({ workspaceId, storageKey: `${key}.link`, token, createdById: reader.id })\n"
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

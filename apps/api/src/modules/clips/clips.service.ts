@@ -15,7 +15,10 @@ import { R2Service } from '../../common/storage/r2.service'
 import { safeFileName } from '../../common/storage/file-name'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { EmailService } from '../email/email.service'
+import { isManagerRole } from '../../common/permissions/workspace-roles'
 import { clipPrefix, isWorkspaceClipKey } from './clip-keys'
+import { CLIP_DELETE_REFUSAL, CLIP_READ_REFUSAL, mayDeleteClip, mayReadClip, type ClipReader } from './clip-access'
+import { clipReaderOf } from './clip-reader'
 
 /** How many clips the library lists: the newest, whatever the workspace holds. */
 const CLIPS_LISTED = 200
@@ -69,9 +72,17 @@ export class ClipsService {
     this.appUrl = (config.get<string>('APP_URL') ?? 'http://localhost:5173').replace(/\/$/, '')
   }
 
+  /**
+   * Who is asking, as the clip rule reads them (`clip-reader.ts`): read for
+   * every library route the one way search and a task's copy read it.
+   */
+  readerOf(workspaceId: string, userId: string): Promise<ClipReader> {
+    return clipReaderOf(this.db, workspaceId, userId)
+  }
+
   async createUploadUrl(
     workspaceId: string,
-    actorEmail: string,
+    actor: { id: string; email: string },
     body: {
       fileName: string
       contentType: string
@@ -88,13 +99,16 @@ export class ClipsService {
       {
         title: (body.title ?? fileName).slice(0, 120),
         durationseconds: String(body.durationSeconds ?? 0),
-        recordedby: actorEmail,
+        recordedby: actor.email,
+        // Who recorded it, by who they are: the clip is theirs to see and to
+        // delete, and an address can change (`clip-access.ts`).
+        recordedbyid: actor.id,
       },
     )
     return { uploadUrl, storageKey: key }
   }
 
-  async list(workspaceId: string) {
+  async list(workspaceId: string, reader: ClipReader) {
     if (!this.r2.configured) return []
     const prefix = clipPrefix(workspaceId)
     /*
@@ -102,15 +116,25 @@ export class ClipsService {
      * with the moment it was made, so its first page of 200 was the
      * workspace's 200 OLDEST clips: from the 201st on, a new clip never
      * appeared here (`found-23-sep/clip-library-lists-the-oldest-200`). Every
-     * page is read, and the newest kept; only those are looked up one by one.
+     * page of the listing is read, and sorted newest first; how many of them
+     * are then looked up is the reader's (below).
      */
     const objects = (await this.r2.listAllObjects(prefix))
       .filter((o) => !!o.Key)
       .sort((a, b) => (b.LastModified?.getTime() ?? 0) - (a.LastModified?.getTime() ?? 0) || (a.Key! < b.Key! ? 1 : a.Key! > b.Key! ? -1 : 0))
-      .slice(0, CLIPS_LISTED)
-    const results = await Promise.all(objects.map(async (obj) => {
+    /*
+     * A GUEST'S LIBRARY IS THE CLIPS THEY RECORDED
+     * (`found-5-oct/guests-read-and-delete-every-clip`, `clip-access.ts`). It
+     * was every clip of the workspace, each signed. Whose a clip is lives in its
+     * metadata, so each is looked up before anything is signed, and one the
+     * reader may not see is neither listed nor signed. A guest's newest 200 are
+     * looked for a page at a time, newest first, until 200 are found or none is
+     * left; anybody else's library is the newest 200, one page, as before.
+     */
+    const read = async (obj: (typeof objects)[number]) => {
       const key = obj.Key!
       const head = await this.r2.headObject(key)
+      if (!mayReadClip(head.Metadata, reader)) return null
       const fileName = key.split('/').pop() ?? 'clip.webm'
       const title = head.Metadata?.title ?? fileName
       const durationSeconds = Number(head.Metadata?.durationseconds ?? 0)
@@ -126,8 +150,16 @@ export class ClipsService {
         sizeBytes: obj.Size ?? 0,
         createdAt: obj.LastModified?.toISOString() ?? null,
         url,
+        // So the page offers Delete only where the server would do it.
+        mayDelete: mayDeleteClip(head.Metadata, reader),
       }
-    }))
+    }
+    const results: Array<NonNullable<Awaited<ReturnType<typeof read>>>> = []
+    for (let from = 0; from < objects.length && results.length < CLIPS_LISTED; from += CLIPS_LISTED) {
+      for (const clip of await Promise.all(objects.slice(from, from + CLIPS_LISTED).map(read))) {
+        if (clip && results.length < CLIPS_LISTED) results.push(clip)
+      }
+    }
     return results.sort((a, b) => {
       const left = a.createdAt ? new Date(a.createdAt).getTime() : 0
       const right = b.createdAt ? new Date(b.createdAt).getTime() : 0
@@ -135,12 +167,22 @@ export class ClipsService {
     })
   }
 
-  async remove(workspaceId: string, storageKey: string) {
+  async remove(workspaceId: string, storageKey: string, reader: ClipReader) {
     // By shape, not prefix: a prefix check let `..` delete another
     // workspace's object (clip-keys.ts). A non-string is refused with the rest.
     if (!isWorkspaceClipKey(storageKey, workspaceId)) {
       throw new BadRequestException('Invalid clip key for workspace')
     }
+    /*
+     * WHO MAY DELETE IT: whoever recorded it, or somebody who manages the
+     * workspace (`found-5-oct/guests-read-and-delete-every-clip`,
+     * `clip-access.ts`). Nobody was asked: a guest deleted the admin's clip and
+     * a member another member's. Somebody who manages the workspace needs no
+     * look at the clip; for anybody else it is looked up, so a clip that is not
+     * there is not found, and one that is not theirs is refused, saying who may.
+     */
+    const head = isManagerRole(reader.role) ? undefined : await this.headOrMissing(storageKey)
+    if (!mayDeleteClip(head?.Metadata, reader)) throw new ForbiddenException(CLIP_DELETE_REFUSAL)
     await this.r2.deleteObject(storageKey)
     // The clip's link goes with it: ClickUp keeps a clip "forever, unless
     // manually deleted", and a deleted clip has nothing left to link to.
@@ -163,14 +205,23 @@ export class ClipsService {
    * The key's shape first, as for every key a client hands back, and then the
    * clip itself: a link to nothing would be a Copy link that reports success
    * and plays nothing.
+   *
+   * AND WHETHER ITS ASKER MAY READ IT (`found-5-oct/guests-read-and-delete-every-clip`,
+   * `clip-access.ts`). A link plays the clip to whoever holds it, so a guest
+   * who was handed somebody else's key got a link to a clip their library
+   * does not show them (201), and it played signed out (200). They are
+   * refused, told which clips are theirs; a key naming no clip is still not
+   * found. Whether a guest may make a public link at all, even of their own,
+   * is the owner's open question (`found-30-sep/guests-may-ask-for-clip-links`).
    */
-  async link(workspaceId: string, actorId: string, clipKey: unknown) {
+  async link(workspaceId: string, reader: ClipReader, clipKey: unknown) {
     if (!isWorkspaceClipKey(clipKey, workspaceId)) {
       throw new BadRequestException('Invalid clip key for workspace')
     }
     const key = clipKey as string
     if (!this.r2.configured) throw new BadRequestException('R2 is not configured')
-    await this.headOrMissing(key)
+    const head = await this.headOrMissing(key)
+    if (!mayReadClip(head.Metadata, reader)) throw new ForbiddenException(CLIP_READ_REFUSAL)
     const audience = await this.audienceOf(workspaceId)
     const [existing] = await this.db
       .select({ token: clipLinks.token })
@@ -184,7 +235,7 @@ export class ClipsService {
       const token = randomBytes(24).toString('base64url')
       const [row] = await this.db
         .insert(clipLinks)
-        .values({ workspaceId, storageKey: key, token, createdById: actorId })
+        .values({ workspaceId, storageKey: key, token, createdById: reader.id })
         .onConflictDoNothing()
         .returning({ token: clipLinks.token })
       if (row) return this.linkView(row.token, audience)
@@ -249,7 +300,7 @@ export class ClipsService {
 
   async share(
     workspaceId: string,
-    actorId: string,
+    reader: ClipReader,
     actorEmail: string,
     body: {
       storageKey: string
@@ -264,9 +315,10 @@ export class ClipsService {
      * `expiresInMinutes` (an hour from the clips page), showed the URL with no
      * word of when it would die, and only the email said so. The link does not
      * expire, so nothing is asked for and nothing is signed here: `link`
-     * checks the key's shape and the clip, for all three modes.
+     * checks the key's shape, the clip, and whether its asker may read it, for
+     * all three modes.
      */
-    const made = await this.link(workspaceId, actorId, body.storageKey)
+    const made = await this.link(workspaceId, reader, body.storageKey)
     const shareUrl = `${this.appUrl}${made.path}`
     const clipName = body.storageKey.split('/').pop() ?? 'clip.webm'
 

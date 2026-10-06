@@ -2493,6 +2493,17 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # A guest was listed every clip of the workspace, signed, found them all
+      # in search, and deleted the admin's; a member deleted anybody's, and the
+      # page offered Delete on every card. A guest reads what they recorded; a
+      # clip is deleted by its recorder or somebody who manages the workspace.
+      - name: A guest reads the clips they recorded, and a clip is deleted by its recorder or a manager
+        timeout-minutes: 15
+        run: node test/e2e/clip-library-access.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # Two headers declared sticky inside boxes with no height, which never
       # scroll, so both went with the page.
       - name: A sticky header stays at the top of what scrolls under it

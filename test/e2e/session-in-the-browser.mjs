@@ -1,10 +1,12 @@
 /**
  * A SESSION IN THE BROWSER: KEPT ACROSS A RELOAD AFTER ACCEPTING AN INVITATION,
- * ENDED AT ONCE WHEN A PASSWORD CHANGE ELSEWHERE ENDS IT, AND ONE MISTYPED
- * CURRENT PASSWORD COUNTED ONCE
+ * ENDED AT ONCE WHEN A PASSWORD CHANGE ELSEWHERE ENDS IT, ONE MISTYPED
+ * CURRENT PASSWORD COUNTED ONCE, AND THE TAB'S SOCKET OPENED AGAIN WHEN ITS
+ * PERSON SIGNS OUT AND BACK IN
  * (`found-30-sep/an-accepted-invitation-sets-no-cookies`,
  * `found-30-sep/revoked-sessions-keep-their-access-tokens`,
- * `found-30-sep/password-change-guesses-600-an-hour`).
+ * `found-30-sep/password-change-guesses-600-an-hour`,
+ * `found-30-sep/an-open-socket-outlives-its-session`).
  *
  * Measured first in a browser on lane 3, three runs alike (`9b5ced3`'s API
  * and web):
@@ -48,7 +50,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 3
+const EXPECTED_CHECKS = 4
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -194,6 +196,67 @@ try {
     changed.status === 201 && afterChange.signedOut,
     'a browser whose session a password change made elsewhere has ended is signed out at its next reload: /users/me and the refresh are refused, no user is held, and /app sends it to the sign-in page',
     `the change answered ${said(changed)}; the browser, reloaded at once: ${seenSays(afterChange)}`,
+  )
+
+  // -------------------------------------------------------------------------
+  console.log('\n▶ signing out and back in on one tab, without a reload')
+  /*
+   * THE TAB'S SOCKET FOLLOWS WHO IS SIGNED IN
+   * (`found-30-sep/an-open-socket-outlives-its-session`). The server ends a
+   * socket whose session has ended, and signing out ends it; socket.io does
+   * not reconnect after the server closes a socket, and the tab keeps one
+   * socket for its life. Measured in a browser on lane 2 once the server ended
+   * such sockets: signed in through the form, the tab's socket heard a message
+   * in the account's own private channel; signed out from the menu and in again
+   * on the same tab, no socket opened in ten seconds and the next message went
+   * unheard until a reload. What the tab hears is read off its sockets' frames;
+   * the messages are posted by a session of the account's own made by sign-up.
+   */
+  const rejoin = await account('rejoin')
+  const R = apiAs(rejoin.token)
+  const ownChannel = await R(`/workspaces/${rejoin.workspaceId}/chat/channels`, { method: 'POST', body: { name: `own-${TAG}`, isPrivate: true } })
+  if (!ownChannel.data?.id) throw new Error(`could not make the account a private channel: ${said(ownChannel)}`)
+  const sayInOwn = (text) => R(`/chat/channels/${ownChannel.data.id}/messages`, { method: 'POST', body: { body: text } })
+  const tab = await newPage()
+  const sockets = []
+  tab.on('websocket', (ws) => {
+    if (!ws.url().includes('/socket.io/')) return
+    const s = { closed: false, frames: [] }
+    sockets.push(s)
+    ws.on('framereceived', (f) => s.frames.push(String(f.payload)))
+    ws.on('close', () => { s.closed = true })
+  })
+  const heardOn = (list, text) => list.some((s) => s.frames.some((f) => f.includes(text)))
+  const within = async (ms, cond) => {
+    for (const end = Date.now() + ms; Date.now() < end; await sleep(250)) if (cond()) return true
+    return cond()
+  }
+  await signInForm(tab, rejoin.email)
+  // Marked, so the second sign-in is known to be on this page and not a reload of it.
+  await tab.evaluate(() => { window.__sameTab = 'the first sign-in' })
+  const firstOpen = await within(15_000, () => sockets.some((s) => !s.closed))
+  const beforeText = `${TAG}-heard-before`
+  const saidBefore = await sayInOwn(beforeText)
+  const heardBefore = await within(10_000, () => heardOn(sockets, beforeText))
+  await tab.locator('[data-testid=user-menu]').click()
+  await tab.getByRole('menuitem', { name: 'Sign out' }).click()
+  await tab.waitForURL(/\/login/, { timeout: 30_000 })
+  const firstCount = sockets.length
+  // The sign-in page the menu left the tab on: no page.goto, which would load the page anew.
+  await tab.fill('input[type=email]', rejoin.email)
+  await tab.fill('input[type=password]', PASSWORD)
+  await tab.click('button[type=submit]')
+  await tab.waitForURL(/\/app\//, { timeout: LOGIN_NAV_TIMEOUT_MS })
+  const sameTab = await tab.evaluate(() => window.__sameTab === 'the first sign-in')
+  const reopened = () => sockets.slice(firstCount).filter((s) => !s.closed)
+  const secondOpen = await within(15_000, () => reopened().length > 0)
+  const afterText = `${TAG}-heard-after`
+  const saidAfter = await sayInOwn(afterText)
+  const heardAfter = await within(10_000, () => heardOn(sockets.slice(firstCount), afterText))
+  chk(
+    firstOpen && saidBefore.status === 201 && heardBefore && sameTab && secondOpen && saidAfter.status === 201 && heardAfter,
+    'signing out from the menu and back in on the same tab, without a reload, opens the tab’s realtime socket again on the new session: a message in the account’s own private channel is heard after it, as one was before',
+    `before signing out, ${firstOpen ? 'a socket opened' : 'NO socket opened'} and the message (${saidBefore.status}) was ${heardBefore ? 'heard' : 'NOT heard'}; signed in again ${sameTab ? 'on the same page' : 'after the page was LOADED ANEW (this measured nothing)'}: ${reopened().length} socket(s) open since, and the message (${saidAfter.status}) was ${heardAfter ? 'heard' : 'NOT heard'}`,
   )
 } catch (err) {
   failed += 1

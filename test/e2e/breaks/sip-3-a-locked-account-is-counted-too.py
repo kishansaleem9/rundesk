@@ -9,12 +9,23 @@
 # (`found-30-sep/password-change-guesses-600-an-hour`), so a password change
 # counts with it too; the line and the edit are the same.
 #
+# Re-anchored 5 October: `clearLockoutIfUnlocked`
+# (`found-30-sep/a-burst-is-compared-before-the-lock`) is a second UPDATE in
+# this file with the same "not locked" WHERE, so the anchor now carries
+# `countWrongPassword`'s own RETURNING to stay unique and aimed at its WHERE.
+#
 # Reddens: sign-in-and-password:
 #   "eight sent at once lock it at the fifth and count none past it: it has a lock, failed_login_attempts reads 0, and its right password is refused 401"
 import io
 p = '/home/user/rundesk/apps/api/src/common/security/lockout.ts'
-a = "    .where(and(eq(users.id, userId), or(isNull(users.lockedUntil), lte(users.lockedUntil, now))))\n"
-b = "    .where(eq(users.id, userId))\n"
+a = (
+    "    .where(and(eq(users.id, userId), or(isNull(users.lockedUntil), lte(users.lockedUntil, now))))\n"
+    "    .returning({ failedLoginAttempts: users.failedLoginAttempts, lockedUntil: users.lockedUntil })\n"
+)
+b = (
+    "    .where(eq(users.id, userId))\n"
+    "    .returning({ failedLoginAttempts: users.failedLoginAttempts, lockedUntil: users.lockedUntil })\n"
+)
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

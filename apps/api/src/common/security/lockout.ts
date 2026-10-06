@@ -48,6 +48,29 @@ export async function countWrongPassword(db: Db, userId: string, policy: Lockout
 }
 
 /**
+ * A RIGHT PASSWORD CLEARS THE COUNT ONLY IF THE ACCOUNT IS NOT LOCKED NOW
+ * (`found-30-sep/a-burst-is-compared-before-the-lock`). A compare takes a hash's
+ * time and the lock is read once, so a burst of wrong passwords and the right
+ * one sent at once each read an unlocked account; the wrong ones locked it as
+ * they finished and the right one among them signed in. This clears the count
+ * and the lock in one statement whose WHERE excludes a locked account, and
+ * answers whether it did: at sign-in a success that finds the account locked —
+ * by its own burst's wrong passwords, or a prior window — is refused instead of
+ * standing, where a wrong password is counted. The lock is driven by failed
+ * attempts alone, so concurrent SUCCESSFUL sign-ins (none a failure) all clear
+ * and stand. By primary key; the row's `locked_until` outlives its lock, so a
+ * time already past is no lock (as `lockedUntilNow` reads it).
+ */
+export async function clearLockoutIfUnlocked(db: Db, userId: string, now: Date): Promise<boolean> {
+  const cleared = await db
+    .update(users)
+    .set({ failedLoginAttempts: 0, lockedUntil: null })
+    .where(and(eq(users.id, userId), or(isNull(users.lockedUntil), lte(users.lockedUntil, now))))
+    .returning({ id: users.id })
+  return cleared.length > 0
+}
+
+/**
  * When the account's lock lifts, if the policy locks accounts and this one is
  * locked now; otherwise null. The row's `locked_until` outlives its lock (it is
  * cleared by the next right password, not when it passes), so a time already

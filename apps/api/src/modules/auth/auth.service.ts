@@ -9,7 +9,7 @@ import { signupFeatureRows } from './signup-features'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { NO_ACCOUNT_HASH, passwords } from '../../common/security/password-hash'
 import { hashRefreshToken } from '../../common/security/refresh-token'
-import { countWrongPassword, type LockoutPolicy } from '../../common/security/lockout'
+import { clearLockoutIfUnlocked, countWrongPassword, type LockoutPolicy } from '../../common/security/lockout'
 import { UsersService } from '../users/users.service'
 import { WorkspacesService } from '../workspaces/workspaces.service'
 import { FeatureFlagsService } from '../feature-flags/feature-flags.service'
@@ -105,8 +105,33 @@ export class AuthService {
 
     if (!user.isActive) throw new UnauthorizedException('Account is disabled')
 
-    // Successful login clears any failed-attempt state.
-    if ((user.failedLoginAttempts ?? 0) > 0 || user.lockedUntil) {
+    /*
+     * A RIGHT PASSWORD IS REFUSED IF THE ACCOUNT LOCKED WHILE IT COMPARED
+     * (`found-30-sep/a-burst-is-compared-before-the-lock`).
+     *
+     * A compare takes a hash's time, and the lock is read once (above) from the
+     * account as it was read. So a burst of wrong passwords and the account's
+     * right one, sent at once, each read an unlocked account; each was compared;
+     * the wrong ones locked the account as they finished, and the right one
+     * among them — read unlocked, compared true — signed in although the burst
+     * had locked it. Measured on a lane: twenty wrong and the right one sent at
+     * once signed in (200), the right one among them. The lockout counts the
+     * wrong passwords (`countWrongPassword`, atomic), but the count bounded what
+     * was counted, not whether a success stands against a lock set meanwhile.
+     *
+     * So a successful password clears the count ONLY IF the account is not locked
+     * now, in one statement (`clearLockoutIfUnlocked`, its WHERE excludes a
+     * locked account): a right password that finds the account locked — by this
+     * very burst, or a prior window — is refused with the same generic words,
+     * where a wrong one is counted. The lock is driven by FAILED attempts alone
+     * (OWASP's ASVS 2.2.1: "no more than 100 failed attempts per hour … on a
+     * single account"), so concurrent SUCCESSFUL sign-ins, however many at once,
+     * all stand: none is a failure, so none locks the account.
+     */
+    if (settings.lockoutEnabled) {
+      const cleared = await clearLockoutIfUnlocked(this.db, user.id, now)
+      if (!cleared) throw new UnauthorizedException('Invalid credentials')
+    } else if ((user.failedLoginAttempts ?? 0) > 0 || user.lockedUntil) {
       await this.db.update(users).set({ failedLoginAttempts: 0, lockedUntil: null }).where(eq(users.id, user.id))
     }
 

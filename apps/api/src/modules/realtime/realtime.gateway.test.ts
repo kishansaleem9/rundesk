@@ -76,3 +76,156 @@ describe('RealtimeGateway.handleConnection — a token whose session has ended o
     }
   })
 })
+
+/*
+ * A SOCKET STOPS HEARING ITS ROOMS WHEN ITS SESSION ENDS
+ * (`found-30-sep/an-open-socket-outlives-its-session`). The handshake read the
+ * token's session once; nothing looked at an open socket again, so a socket
+ * opened before its session was revoked stayed connected and heard its rooms
+ * for as long as its connection lasted (nothing ended it when its access token
+ * ran out either). Each live socket's session is re-read
+ * (`sessionIsLive`) on a short interval and on its presence ping, and a revoked
+ * one's sockets are disconnected with "Session ended", as a new handshake is.
+ * `sign-in-and-password.mjs` opens a socket, revokes its session and watches it
+ * go on a lane.
+ */
+const LIVE = 'a1111111-1111-4111-8111-111111111111'
+const REVOKED = 'b2222222-2222-4222-8222-222222222222'
+
+type SessionRow = { userId: string; isRevoked: boolean; expiresAt: Date }
+function gatewayWithSessions(rows: Record<string, SessionRow>) {
+  const db = {
+    select: () => ({
+      from: () => ({
+        where: (cond: any) => {
+          const id = (cond?.queryChunks ?? []).find((c: any) => c?.constructor?.name === 'Param')?.value as string
+          return { limit: async () => (rows[id] ? [rows[id]] : []) }
+        },
+      }),
+    }),
+  }
+  return new RealtimeGateway(
+    {} as any,
+    { getOrThrow: () => 'test-access-secret' } as any,
+    db as any,
+    { recordHeartbeat: async () => undefined } as any,
+  )
+}
+/** A fake connected socket carrying a session id, recording what it was told and whether it was closed. */
+function connected(userId: string, sid: string) {
+  const said: Array<[string, unknown]> = []
+  let disconnected = false
+  const client = {
+    id: `c-${sid}`,
+    data: { userId, sid } as Record<string, unknown>,
+    emit: (event: string, body: unknown) => { said.push([event, body]) },
+    disconnect: () => { disconnected = true },
+    join: () => undefined,
+  }
+  return { client, said, disconnected: () => disconnected }
+}
+
+describe('RealtimeGateway — a socket whose session has ended is disconnected', () => {
+  it('the sweep disconnects a revoked session’s sockets with “Session ended” and leaves a live session’s untouched', async () => {
+    const later = new Date(Date.now() + 60_000)
+    const gateway = gatewayWithSessions({
+      [LIVE]: { userId: 'u1', isRevoked: false, expiresAt: later },
+      [REVOKED]: { userId: 'u2', isRevoked: true, expiresAt: later },
+    })
+    const liveSock = connected('u1', LIVE)
+    const revokedSock = connected('u2', REVOKED)
+    // The namespace's local sockets are a Map keyed by socket id.
+    ;(gateway as any).server = { sockets: new Map([[liveSock.client.id, liveSock.client], [revokedSock.client.id, revokedSock.client]]) }
+    await (gateway as any).disconnectRevokedSockets()
+    assert.equal(revokedSock.disconnected(), true, 'the revoked session’s socket stayed connected')
+    assert.deepEqual(revokedSock.said, [['error', { message: 'Session ended' }]])
+    assert.equal(liveSock.disconnected(), false, 'the live session’s socket was disconnected')
+    assert.deepEqual(liveSock.said, [])
+  })
+
+  it('a presence ping on a revoked session’s socket disconnects it instead of recording a heartbeat', async () => {
+    const beats: string[] = []
+    const gateway = gatewayWithSessions({ [REVOKED]: { userId: 'u2', isRevoked: true, expiresAt: new Date(Date.now() + 60_000) } })
+    ;(gateway as any).presence = { recordHeartbeat: async (id: string) => { beats.push(id) } }
+    const s = connected('u2', REVOKED)
+    await gateway.handlePresencePing(s.client as any)
+    assert.equal(s.disconnected(), true, 'the revoked session’s socket was not disconnected on its ping')
+    assert.deepEqual(s.said, [['error', { message: 'Session ended' }]])
+    assert.deepEqual(beats, [], 'a revoked session’s ping was still counted as a heartbeat')
+  })
+})
+
+/*
+ * A SWEEP WHOSE READ FAILS ENDS NOTHING, AND NOT THE PROCESS. The sweep runs in
+ * a timer, where a rejection nobody hears ends the process (Node's default):
+ * measured on a lane, its database refused connections for eight seconds while
+ * a socket was open, the sweep's read failed, and the API exited and stayed
+ * down after the database came back. A read that fails answers nothing, so its
+ * sockets are kept and asked about at the next sweep; the reads are settled
+ * together, and the timer catches what the sweep throws. Each rejection that
+ * would go unheard is collected here (a listener of the test's own, beside the
+ * runner's) instead of being left to end the run.
+ */
+async function unheardRejectionsDuring(run: () => Promise<void>): Promise<unknown[]> {
+  const unheard: unknown[] = []
+  const listen = (reason: unknown) => { unheard.push(reason) }
+  process.on('unhandledRejection', listen)
+  try {
+    await run()
+    // Node reports an unheard rejection once the microtasks it was made in have run out.
+    for (let i = 0; i < 3; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  } finally {
+    process.off('unhandledRejection', listen)
+  }
+  return unheard
+}
+
+describe('RealtimeGateway — a sweep whose session read fails', () => {
+  it('a sweep whose session reads fail resolves, ends no socket, and leaves no rejection unheard', async () => {
+    // One read answers after a moment (live), the other fails at once: awaited
+    // one by one, the failure has nobody listening while the first is awaited.
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: (cond: any) => {
+            const id = (cond?.queryChunks ?? []).find((c: any) => c?.constructor?.name === 'Param')?.value as string
+            return {
+              limit: async () => {
+                if (id === REVOKED) throw new Error('database "rundesk" is not currently accepting connections')
+                await new Promise((resolve) => setTimeout(resolve, 30))
+                return [{ userId: 'u1', isRevoked: false, expiresAt: new Date(Date.now() + 60_000) }]
+              },
+            }
+          },
+        }),
+      }),
+    }
+    const gateway = new RealtimeGateway({} as any, { getOrThrow: () => 'test-access-secret' } as any, db as any, { recordHeartbeat: async () => undefined } as any)
+    const answered = connected('u1', LIVE)
+    const unanswered = connected('u2', REVOKED)
+    ;(gateway as any).server = { sockets: new Map([[answered.client.id, answered.client], [unanswered.client.id, unanswered.client]]) }
+    let threw: unknown = null
+    const unheard = await unheardRejectionsDuring(async () => {
+      try { await (gateway as any).disconnectRevokedSockets() } catch (err) { threw = err }
+    })
+    assert.equal(threw, null, `the sweep threw: ${String((threw as Error | null)?.message ?? threw)}`)
+    assert.deepEqual(unheard.map((r) => String((r as Error)?.message ?? r)), [], 'a failed session read went unheard (it would end the process)')
+    assert.equal(answered.disconnected(), false, 'a live session’s socket was ended')
+    assert.equal(unanswered.disconnected(), false, 'a socket whose session read failed was ended (it is asked about again at the next sweep)')
+  })
+
+  it('the sweep’s timer hears a sweep that fails: no rejection is left to end the process', async (t) => {
+    t.mock.timers.enable({ apis: ['setInterval'] })
+    const gateway = gatewayWithSessions({})
+    ;(gateway as any).disconnectRevokedSockets = async () => { throw new Error('the database did not answer') }
+    const unheard = await unheardRejectionsDuring(async () => {
+      gateway.afterInit()
+      try {
+        t.mock.timers.tick((RealtimeGateway as any).REVOKED_SWEEP_MS)
+      } finally {
+        gateway.onModuleDestroy()
+      }
+    })
+    assert.deepEqual(unheard.map((r) => String((r as Error)?.message ?? r)), [], 'the timer left a failed sweep unheard (it would end the process)')
+  })
+})

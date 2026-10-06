@@ -3,12 +3,13 @@ import {
   WebSocketServer,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   SubscribeMessage,
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets'
 import { Server, Socket } from 'socket.io'
-import { Logger, Inject } from '@nestjs/common'
+import { Logger, Inject, OnModuleDestroy } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { ConfigService } from '@nestjs/config'
 import { and, eq } from 'drizzle-orm'
@@ -115,8 +116,18 @@ export type RealtimeEvent =
     credentials: true,
   },
 })
-export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit, OnModuleDestroy {
   private readonly logger = new Logger('RealtimeGateway')
+
+  /**
+   * HOW OFTEN A LIVE SOCKET'S SESSION IS RE-READ
+   * (`found-30-sep/an-open-socket-outlives-its-session`). "Within seconds" of
+   * a session ending its sockets go; the presence ping (every ~60s) re-reads
+   * too, between sweeps. A read per distinct session per sweep, so the cost is
+   * the live sessions holding a socket, not the sockets.
+   */
+  private static readonly REVOKED_SWEEP_MS = 5_000
+  private revokedSweep?: ReturnType<typeof setInterval>
 
   @WebSocketServer()
   server!: Server
@@ -127,6 +138,111 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     @Inject(DB_TOKEN) private readonly db: Db,
     private readonly presence: PresenceService,
   ) {}
+
+  /**
+   * Start the revoked-session sweep once the namespace is up. Not in the
+   * constructor: the unit tests build the gateway directly and never init it,
+   * so nothing starts a timer there.
+   *
+   * A SWEEP THAT FAILS IS SAID, AND THE NEXT ONE ASKS AGAIN. A rejection left
+   * unheard in a timer ends the process (Node's default for an unhandled
+   * rejection), and with it every socket and request it holds: measured on a
+   * lane, the lane's database refused connections for eight seconds while one
+   * socket was open, the sweep's read failed, and the API exited and stayed
+   * down after the database came back — where a request in the same outage
+   * answers 500 and the process goes on. So the tick catches what the sweep
+   * throws (`disconnectRevokedSockets` already keeps a failed read from
+   * throwing; this is for anything else).
+   */
+  afterInit() {
+    if (this.revokedSweep) return
+    this.revokedSweep = setInterval(() => {
+      this.disconnectRevokedSockets().catch((err: unknown) =>
+        this.logger.warn(`revoked-session sweep failed: ${err instanceof Error ? err.message : String(err)}`),
+      )
+    }, RealtimeGateway.REVOKED_SWEEP_MS)
+    // Does not hold the process open on its own.
+    this.revokedSweep.unref?.()
+  }
+
+  onModuleDestroy() {
+    if (this.revokedSweep) {
+      clearInterval(this.revokedSweep)
+      this.revokedSweep = undefined
+    }
+  }
+
+  /**
+   * The sockets connected to THIS process's `/realtime` namespace. `this.server`
+   * is that namespace (its `to(room)` reaches these sockets), and a namespace's
+   * `sockets` is a Map of its local sockets; the fallback covers a binding that
+   * hands the root server instead.
+   */
+  private localSockets(): Socket[] {
+    const s = this.server as unknown as { sockets?: unknown }
+    if (s?.sockets instanceof Map) return [...s.sockets.values()] as Socket[]
+    const nested = (s?.sockets as { sockets?: unknown } | undefined)?.sockets
+    if (nested instanceof Map) return [...nested.values()] as Socket[]
+    return []
+  }
+
+  /**
+   * A SOCKET STOPS HEARING ITS ROOMS WHEN ITS SESSION ENDS
+   * (`found-30-sep/an-open-socket-outlives-its-session`).
+   *
+   * The handshake reads the token's session once (`admit`); nothing looked at
+   * an open socket again, so a socket opened before its session was revoked (a
+   * password change, a reset, "sign out other sessions", revoking one, signing
+   * out, the session cap) stayed connected and heard every room event for as
+   * long as its connection lasted — nothing ended it when its access token ran
+   * out either. Measured on a lane, it heard a task.created after the revoke. A
+   * revoked session's token is refused on every route at once (`sessionIsLive`,
+   * `found-30-sep/revoked-sessions-keep-their-access-tokens`); this closes the
+   * one door that read a token only at the handshake.
+   *
+   * Each live socket's session is re-read by the rule a route applies
+   * (`sessionIsLive`) and a revoked one's sockets are disconnected with
+   * "Session ended", as a new handshake with its token is. One read per distinct
+   * session (deduped across a person's several sockets), no cache — as the
+   * route's check is — so each process ends its own dead sockets wherever the
+   * revoke was handled.
+   *
+   * A READ THAT FAILS ANSWERS NOTHING, so its sockets are neither ended nor
+   * passed: they are asked about again at the next sweep, seconds later. The
+   * reads are settled together — awaited one by one, a read that failed while
+   * an earlier one was awaited had nobody listening, and that rejection alone
+   * ended the process (`afterInit`).
+   */
+  private async disconnectRevokedSockets(): Promise<void> {
+    const sockets = this.localSockets()
+    if (sockets.length === 0) return
+    const users = new Map<string, string>()
+    for (const client of sockets) {
+      const data = client.data as { userId?: string; sid?: string }
+      if (!data?.userId || !data?.sid) continue
+      if (!users.has(data.sid)) users.set(data.sid, data.userId)
+    }
+    const sids = [...users.keys()]
+    const answers = await Promise.allSettled(sids.map((sid) => sessionIsLive(this.db, { sub: users.get(sid), sid })))
+    const ended = new Set<string>()
+    let unanswered = 0
+    answers.forEach((answer, i) => {
+      if (answer.status === 'rejected') unanswered += 1
+      else if (!answer.value) ended.add(sids[i])
+    })
+    if (unanswered > 0) this.logger.warn(`revoked-session sweep: ${unanswered} of ${sids.length} session reads failed; their sockets are asked about again at the next sweep`)
+    if (ended.size === 0) return
+    for (const client of sockets) {
+      const data = client.data as { sid?: string }
+      if (data?.sid && ended.has(data.sid)) this.endSocket(client, 'Session ended')
+    }
+  }
+
+  /** Tell a socket why it is being closed, then close it, as the handshake does. */
+  private endSocket(client: Socket, message: string): void {
+    client.emit('error', { message })
+    client.disconnect(true)
+  }
 
   /** Resolve the owning workspace for a room key, or null if it can't be resolved. */
   private async resolveWorkspaceForRoom(kind: string, id: string): Promise<string | null> {
@@ -303,9 +419,12 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         client.disconnect(true)
         return
       }
-      ;(client.data as { userId: string; email: string; role: string }).userId = payload.sub
-      ;(client.data as { userId: string; email: string; role: string }).email = payload.email
-      ;(client.data as { userId: string; email: string; role: string }).role  = payload.role
+      ;(client.data as { userId: string; email: string; role: string; sid?: string }).userId = payload.sub
+      ;(client.data as { userId: string; email: string; role: string; sid?: string }).email = payload.email
+      ;(client.data as { userId: string; email: string; role: string; sid?: string }).role  = payload.role
+      // The session the socket was admitted on, re-read while it stays open so
+      // a revoked session's sockets are disconnected (`disconnectRevokedSockets`).
+      ;(client.data as { sid?: string }).sid = typeof payload.sid === 'string' ? payload.sid : undefined
       // Auto-join the user's private channel.
       client.join(`user:${payload.sub}`)
       // Presence heartbeat: mark online as soon as the socket authenticates.
@@ -339,9 +458,18 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   /** Keep-alive heartbeat from the client (~every 60s) so presence stays fresh. */
   @SubscribeMessage('presence.ping')
-  handlePresencePing(@ConnectedSocket() client: Socket) {
-    const userId = (client.data as { userId?: string })?.userId
-    if (userId) void this.presence.recordHeartbeat(userId).catch(() => undefined)
+  async handlePresencePing(@ConnectedSocket() client: Socket) {
+    const data = client.data as { userId?: string; sid?: string }
+    if (!data?.userId) return
+    // A ping is a cheap moment to re-read the session, so a revoked one's socket
+    // goes here too, between sweeps (`disconnectRevokedSockets`). A read that
+    // fails throws into Nest's message handler, which answers the ping as an
+    // error and keeps the socket, as the sweep keeps it.
+    if (data.sid && !(await sessionIsLive(this.db, { sub: data.userId, sid: data.sid }))) {
+      this.endSocket(client, 'Session ended')
+      return
+    }
+    void this.presence.recordHeartbeat(data.userId).catch(() => undefined)
   }
 
   @SubscribeMessage('subscribe')
