@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import { ForbiddenException } from '@nestjs/common'
 import { getTableName } from 'drizzle-orm'
 import { PgDialect } from 'drizzle-orm/pg-core'
-import { assertMayDefineFields, listOfProject } from './field-access'
+import { assertMayDefineFields, fieldsOnReadableLists, listOfProject } from './field-access'
 
 /*
  * `found-30-sep/field-definition-takes-a-foreign-list` — the list a field is
@@ -115,6 +115,31 @@ describe('assertMayDefineFields — a list of another project is no step on the 
       assertMayDefineFields(db, { workspaceId: WS, projectId: PROJECT, reader: MEMBER, listId: OWN_LIST }),
       (e) => e instanceof ForbiddenException && (e as Error).message === 'This list is private',
     )
+  })
+})
+
+describe('fieldsOnReadableLists — a field scoped to a list is read with its list (found-6-oct/field-lists-name-a-private-lists-fields)', () => {
+  const PRIVATE_LIST = '00000000-0000-4000-8000-0000000000c3'
+  const OPEN_LIST = '00000000-0000-4000-8000-0000000000c4'
+  /** The read rule's row for a list of PROJECT in an open space (`readableList`). */
+  const rowOf = (listId: string, visibility: 'public' | 'private') => ({ ...listRow(visibility), listId })
+
+  it('leaves out a field of a private list the reader may not open, and keeps the project’s own field and an open list’s — asking each list once', async () => {
+    const { db, askedOf } = dbByTable({
+      lists: [[rowOf(PRIVATE_LIST, 'private')], [rowOf(OPEN_LIST, 'public')]],
+      workspace_members: [[{ role: 'member' }], [{ role: 'member' }]],
+      // The project's folder, asked by the container rule for each list (none).
+      projects: [[], []],
+    })
+    const fields = [
+      { id: 'f-project', listId: null },
+      { id: 'f-private', listId: PRIVATE_LIST },
+      { id: 'f-open', listId: OPEN_LIST },
+      { id: 'f-private-again', listId: PRIVATE_LIST },
+    ]
+    const kept = await fieldsOnReadableLists(db, WS, fields, MEMBER)
+    assert.deepEqual(kept.map((f) => f.id), ['f-project', 'f-open'])
+    assert.equal(askedOf('lists').length, 2)
   })
 })
 

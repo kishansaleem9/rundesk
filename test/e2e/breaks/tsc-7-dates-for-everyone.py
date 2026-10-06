@@ -3,8 +3,10 @@
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 s = io.open(p, encoding='utf-8').read()
-a = '            onChange={(e) => patchTask.mutate({ dueDate: fromDateTimeInput(e.target.value) })}\n            disabled={patchTask.isPending || !caps.edit}\n'
-b = '            onChange={(e) => patchTask.mutate({ dueDate: fromDateTimeInput(e.target.value) })}\n            disabled={patchTask.isPending}\n'
+# Re-aimed 6 October: the due box is a `DateTimeBox`, written when a date is accepted and closed only
+# to whoever may not change the task (`found-30-sep/sheet-dates-write-as-typed`).
+a = '            onCommit={(dueDate) => patchTask.mutateAsync({ dueDate })}\n            disabled={!caps.edit}\n'
+b = '            onCommit={(dueDate) => patchTask.mutateAsync({ dueDate })}\n            disabled={false}\n'
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 s = s.replace(a, b)
 io.open(p, 'w', encoding='utf-8').write(s)

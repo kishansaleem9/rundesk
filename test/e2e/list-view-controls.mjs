@@ -51,7 +51,9 @@ const argOf = (name, fallback) => {
 // 50 since 22 September: `b2-cluster` gives the wrapper `display: contents` and
 // ran green — the chips stay adjacent at this viewport, so only the wrapper's
 // own BOX can tell a cluster from three things side by side.
-const EXPECTED_CHECKS = 50
+// 51 since 6 October: the Columns panel and the Fields picker each dismissed
+// (`found-6-oct/columns-panel-stays-open-beside-the-fields-picker`).
+const EXPECTED_CHECKS = 51
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -409,6 +411,44 @@ try {
   chk(await page.locator('[data-testid="list-columns"] [data-testid="list-fields-panel"]').count() === 1,
     'the custom-fields section still lives inside this panel',
     'the customFields read site is no longer in the Columns panel — clickapps-plan reads it there')
+
+  /*
+   * `found-6-oct/columns-panel-stays-open-beside-the-fields-picker`. The
+   * Columns panel and the Fields picker (drawn here: the customFields ClickApp
+   * is on, as the check above reads) carried one ref, and a ref ends on the
+   * last element drawn with it — the picker — so the panel stayed open after a
+   * press outside it and after Escape (lane 7). Each is opened and dismissed
+   * both ways. The press lands on a point that is no control, found on the page.
+   */
+  const fieldsPicker = page.locator('details').filter({ has: page.locator('summary', { hasText: /^Fields \(/ }) }).first()
+  const blank = await page.evaluate(() => {
+    const control = 'a,button,input,select,textarea,summary,details,label,[role="button"],[role="menuitem"],[role="tab"],[contenteditable="true"],[data-testid="list-task-row"]'
+    for (let y = 80; y < window.innerHeight - 20; y += 40) {
+      for (let x = window.innerWidth - 30; x > 320; x -= 50) {
+        const el = document.elementFromPoint(x, y)
+        if (el && !el.closest(control)) return { x, y }
+      }
+    }
+    return null
+  })
+  const dismissed = {}
+  for (const [name, d] of [['Columns', page.getByTestId('list-columns')], ['Fields', fieldsPicker]]) {
+    const isOpen = () => d.evaluate((el) => el.open).catch(() => null)
+    if ((await isOpen()) !== true) await d.locator('summary').click({ timeout: 5000 }).catch(() => {})
+    const opened = await isOpen()
+    if (blank) await page.mouse.click(blank.x, blank.y)
+    const outside = await waitUntil(async () => (await isOpen()) === false, { timeoutMs: 3000 })
+    if (!outside) await d.evaluate((el) => { el.open = false }).catch(() => {})
+    await d.locator('summary').click({ timeout: 5000 }).catch(() => {})
+    const reopened = await isOpen()
+    await page.keyboard.press('Escape')
+    const escaped = await waitUntil(async () => (await isOpen()) === false, { timeoutMs: 3000 })
+    if (!escaped) await d.evaluate((el) => { el.open = false }).catch(() => {})
+    dismissed[name] = { opened, outside, reopened, escaped }
+  }
+  chk(!!blank && Object.values(dismissed).every((s) => s.opened && s.outside && s.reopened && s.escaped),
+    'the Columns panel and the Fields picker beside it each close on a press outside it and on Escape',
+    `a blank point ${JSON.stringify(blank)}; ${JSON.stringify(dismissed)}`)
   await page.getByTestId('list-columns').evaluate((el) => { el.open = false })
 
   console.log('\n▶ the table draws five, and hiding one moves the heading AND the cells')

@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Card, EmptyState, Badge, cn } from '@rundesk/ui'
+import { Card, EmptyState, Badge, cn, toast } from '@rundesk/ui'
 import {
   GanttChart,
   Diamond,
@@ -14,8 +14,10 @@ import {
   ChevronRight,
   CalendarRange,
 } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { dayAsDateOnly, shiftByDays, shownDay, toDateInput } from '../lib/task-dates'
+import { GANTT_DRAG_THRESHOLD } from '../lib/gantt'
 import { InlineSkeleton } from '../components/loading-skeletons'
 
 type TimelineTask = {
@@ -32,9 +34,18 @@ type TimelineTask = {
   projectName: string
   spaceId: string
   spaceName: string
+  /**
+   * May this reader change the task — the write rule's answer, task share
+   * first (`TasksService.timelineEditable`); absent from an API that does not
+   * say, which offers the drag as it always did.
+   */
+  mayEdit?: boolean
 }
 
 type Zoom = 'day' | 'week' | 'month'
+
+/** What a drag changes: only the dates it moved. */
+type DatePatch = { startDate?: string | null; dueDate?: string | null }
 
 const DAY_PX: Record<Zoom, number> = { day: 56, week: 28, month: 14 }
 const TASK_COL_WIDTH = 260
@@ -193,13 +204,23 @@ function csvCell(value: string | null | undefined): string {
   return `"${guarded.replace(/"/g, '""')}"`
 }
 
+/**
+ * The days a bar is drawn from and to: each date on the day it is SHOWN as
+ * (`shownDay`, `lib/task-dates.ts`), so a date-only day is that day in any zone.
+ * This drew `startOfDay` of the instant, the local day of a UTC midnight, and
+ * west of UTC every date-only bar sat a day early
+ * (`found-5-oct/timeline-press-moves-dates`).
+ */
+function barSpan(task: TimelineTask): { from: Date; to: Date } {
+  const from = shownDay(task.startDate) ?? shownDay(task.dueDate)!
+  const to = shownDay(task.dueDate) ?? shownDay(task.startDate)!
+  return { from, to }
+}
+
 /** Inclusive day span of a bar, the number the Gantt actually draws. */
 function barDays(task: TimelineTask): number {
-  const start = task.startDate ? new Date(task.startDate).getTime() : null
-  const due = task.dueDate ? new Date(task.dueDate).getTime() : null
-  const a = startOfDay(start ?? due!)
-  const b = startOfDay(due ?? start!)
-  return Math.max(1, Math.round((b - a) / 86400_000) + 1)
+  const { from, to } = barSpan(task)
+  return Math.max(1, Math.round((to.getTime() - from.getTime()) / 86400_000) + 1)
 }
 
 export function TimelinePage() {
@@ -228,14 +249,28 @@ export function TimelinePage() {
     queryKey: ['timeline', workspaceId],
     queryFn: () => api<TimelineTask[]>(`/tasks/workspace/${workspaceId}/timeline`),
   })
+  /*
+   * A DRAG'S CHANGE, AND THE SERVER'S WORDS WHEN IT IS REFUSED
+   * (`found-30-sep/timeline-drags-refused-silently`). This had a refetch and no
+   * `onError`, and its caller dropped the rejection, so a refused drag put the
+   * bar back — or, for a task binned meanwhile, took it away — without a word:
+   * the reason reached only the console. It is said now in the server's words,
+   * as the list page says a refused row edit (`patchTaskSaying`); the rows are
+   * read again either way, and only then is the bar's own patch dropped.
+   */
   const persistDates = useMutation({
-    mutationFn: ({ taskId, startDate, dueDate }: { taskId: string; startDate: string | null; dueDate: string | null }) =>
-      api(`/tasks/${taskId}`, {
-        method: 'PATCH',
-        body: { startDate, dueDate },
-      }),
-    onSettled: async () => {
+    mutationFn: ({ taskId, patch }: { taskId: string; patch: DatePatch }) =>
+      api(`/tasks/${taskId}`, { method: 'PATCH', body: patch }),
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotUpdateTask'))
+    },
+    onSettled: async (_data, _err, { taskId }) => {
       await qc.invalidateQueries({ queryKey: ['timeline', workspaceId] })
+      setLocalPatches((prev) => {
+        const copy = { ...prev }
+        delete copy[taskId]
+        return copy
+      })
     },
   })
 
@@ -270,8 +305,8 @@ export function TimelinePage() {
     }
     const allDates: number[] = []
     for (const t of tasks) {
-      if (t.startDate) allDates.push(new Date(t.startDate).getTime())
-      if (t.dueDate) allDates.push(new Date(t.dueDate).getTime())
+      const { from, to } = barSpan(t)
+      allDates.push(from.getTime(), to.getTime())
     }
     /*
      * WHAT `Today` DOES WHEN TODAY IS NOWHERE ON THE CHART.
@@ -485,8 +520,9 @@ export function TimelinePage() {
             csvCell(g.title ?? ''),
             csvCell(task.status),
             csvCell(task.priority),
-            csvCell(task.startDate ? localIsoDate(new Date(task.startDate).getTime()) : ''),
-            csvCell(task.dueDate ? localIsoDate(new Date(task.dueDate).getTime()) : ''),
+            // The day each date is drawn on (`shownDay`), so the file says what the chart shows.
+            csvCell(toDateInput(task.startDate)),
+            csvCell(toDateInput(task.dueDate)),
             csvCell(String(barDays(task))),
             csvCell(task.listName),
             csvCell(task.projectName),
@@ -887,22 +923,16 @@ export function TimelinePage() {
                           startMs={startMs}
                           dayPx={dayPx}
                           totalWidth={totalWidth}
-                          onPatchDates={(next) => setLocalPatches((prev) => ({ ...prev, [task.id]: next }))}
-                          onPersistDates={(next) => {
-                            void persistDates
-                              .mutateAsync({
-                                taskId: task.id,
-                                startDate: next.startDate ?? null,
-                                dueDate: next.dueDate ?? null,
-                              })
-                              .finally(() => {
-                                setLocalPatches((prev) => {
-                                  const copy = { ...prev }
-                                  delete copy[task.id]
-                                  return copy
-                                })
-                              })
-                          }}
+                          editable={task.mayEdit !== false}
+                          onPreview={(next) =>
+                            setLocalPatches((prev) => {
+                              const copy = { ...prev }
+                              if (next) copy[task.id] = next
+                              else delete copy[task.id]
+                              return copy
+                            })
+                          }
+                          onCommit={(patch) => persistDates.mutate({ taskId: task.id, patch })}
                         />
                       ))}
                     </div>
@@ -980,33 +1010,100 @@ function DateHeader({
   )
 }
 
+/** `n` calendar days after a local midnight, DST-safe (see `addDays`). */
+function daysAfter(day: Date, n: number): Date {
+  const next = new Date(day.getTime())
+  next.setDate(next.getDate() + n)
+  return next
+}
+
 function TaskBar({
   task,
   startMs,
   dayPx,
   totalWidth,
-  onPatchDates,
-  onPersistDates,
+  editable,
+  onPreview,
+  onCommit,
 }: {
   task: TimelineTask
   startMs: number
   dayPx: number
   totalWidth: number
-  onPatchDates: (next: { startDate?: string | null; dueDate?: string | null }) => void
-  onPersistDates: (next: { startDate?: string | null; dueDate?: string | null }) => void
+  /** May this reader change the task — the write rule's answer (`TimelineTask.mayEdit`). */
+  editable: boolean
+  /** The dates to draw while a drag is under way; null draws the task's own. */
+  onPreview: (next: DatePatch | null) => void
+  /** The dates a finished drag moved, to save. */
+  onCommit: (patch: DatePatch) => void
 }) {
   const { t } = useTranslation()
-  const start = task.startDate ? new Date(task.startDate).getTime() : null
-  const due = task.dueDate ? new Date(task.dueDate).getTime() : null
-  const barStartMs = start ?? due!
-  const barEndMs = due ?? start!
-  const left = ((startOfDay(barStartMs) - startMs) / 86400_000) * dayPx
+  const { from, to } = barSpan(task)
+  const left = ((from.getTime() - startMs) / 86400_000) * dayPx
   // Min visible width — 14px so a one-day task is still visible at month zoom
-  const width = Math.max(
-    14,
-    ((startOfDay(barEndMs) - startOfDay(barStartMs)) / 86400_000 + 1) * dayPx,
-  )
+  const width = Math.max(14, ((to.getTime() - from.getTime()) / 86400_000 + 1) * dayPx)
+  const spanDays = Math.round((to.getTime() - from.getTime()) / 86400_000)
   const [isDragging, setIsDragging] = useState(false)
+
+  /*
+   * A DRAG MOVES DATES BY WHOLE DAYS AND KEEPS THEIR TIME; A PRESS MOVES NOTHING
+   * (`found-5-oct/timeline-press-moves-dates`). Every mouseup saved `startOfDay`
+   * of each date, moved or not: a press on a task due at 17:30 left it due at
+   * midnight, and in Los Angeles a press on a date-only task moved it a day
+   * earlier. Now `move(days)` is the change a drag of so many days makes —
+   * `shiftByDays`, the day it is drawn on plus `days`, at the time it carried —
+   * and a drag that ends where it began (`days` nought) saves nothing.
+   *
+   * A PRESS IS A PRESS UNTIL THE MOUSE HAS TRAVELLED, as on the list's Gantt
+   * (`GANTT_DRAG_THRESHOLD`): every pixel of travel was rounded to days, so at
+   * Auto fit, three pixels a day, a press with a two-pixel tremor moved the
+   * task a day (measured on lane 5).
+   */
+  const dragWith = (e: React.MouseEvent, move: (days: number) => DatePatch | null) => {
+    if (e.button !== 0) return
+    setIsDragging(true)
+    const startX = e.clientX
+    let moved = false
+    let days = 0
+    const onMove = (evt: MouseEvent) => {
+      const dx = evt.clientX - startX
+      if (Math.abs(dx) > GANTT_DRAG_THRESHOLD) moved = true
+      if (!moved) return
+      const next = Math.round(dx / dayPx)
+      if (next === days) return
+      days = next
+      onPreview(days === 0 ? null : move(days))
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      setIsDragging(false)
+      const patch = days === 0 ? null : move(days)
+      if (patch) onCommit(patch)
+      else onPreview(null)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+  // The whole bar: each date the task has, and only those.
+  const moveBar = (days: number): DatePatch => ({
+    ...(task.startDate ? { startDate: shiftByDays(task.startDate, days) } : {}),
+    ...(task.dueDate ? { dueDate: shiftByDays(task.dueDate, days) } : {}),
+  })
+  // The left handle: the start, no later than the day the bar ends on. A task
+  // with no start is given one on the day dragged to, with no time.
+  const moveStart = (days: number): DatePatch | null => {
+    const d = Math.min(days, spanDays)
+    if (d === 0) return null
+    return { startDate: task.startDate ? shiftByDays(task.startDate, d) : dayAsDateOnly(daysAfter(from, d)) }
+  }
+  // The right handle: the due date, no earlier than the day the bar starts on.
+  const moveDue = (days: number): DatePatch | null => {
+    const d = Math.max(days, -spanDays)
+    if (d === 0) return null
+    return { dueDate: task.dueDate ? shiftByDays(task.dueDate, d) : dayAsDateOnly(daysAfter(to, d)) }
+  }
+  const mayMove = editable
 
   return (
     <div
@@ -1016,6 +1113,7 @@ function TaskBar({
       <div
         data-testid="timeline-bar"
         data-task-id={task.id}
+        data-may-edit={String(editable)}
         className={cn(
           'group/bar absolute top-1/2 -translate-y-1/2 h-7 rounded-md text-[11px] text-white px-2.5 flex items-center gap-1 font-medium shadow-md ring-1 ring-white/10',
           task.isMilestone ? 'bg-amber-500' : (PRIORITY_BG[task.priority] ?? 'bg-brand-gradient'),
@@ -1024,94 +1122,40 @@ function TaskBar({
         )}
         style={{ left, width }}
         title={`${task.isMilestone ? t('timeline.milestonePrefix') : ''}${task.title} · ${task.startDate ?? '?'} → ${task.dueDate ?? '?'}`}
-        onMouseDown={(e) => {
-          if (e.button !== 0) return
-          const target = e.target as HTMLElement
-          if (target.dataset.handle) return
-          setIsDragging(true)
-          const startX = e.clientX
-          const baseStart = startOfDay(barStartMs)
-          const baseEnd = startOfDay(barEndMs)
-          let finalDiffDays = 0
-          const move = (evt: MouseEvent) => {
-            const diffDays = Math.round((evt.clientX - startX) / dayPx)
-            finalDiffDays = diffDays
-            const nextStart = new Date(baseStart + diffDays * 86400_000).toISOString()
-            const nextEnd = new Date(baseEnd + diffDays * 86400_000).toISOString()
-            onPatchDates({ startDate: nextStart, dueDate: nextEnd })
-          }
-          const up = () => {
-            const finalStart = new Date(baseStart + finalDiffDays * 86400_000).toISOString()
-            const finalEnd = new Date(baseEnd + finalDiffDays * 86400_000).toISOString()
-            onPersistDates({ startDate: finalStart, dueDate: finalEnd })
-            setIsDragging(false)
-            window.removeEventListener('mousemove', move)
-            window.removeEventListener('mouseup', up)
-          }
-          window.addEventListener('mousemove', move)
-          window.addEventListener('mouseup', up)
-        }}
+        onMouseDown={
+          mayMove
+            ? (e) => {
+                const target = e.target as HTMLElement
+                if (target.dataset.handle) return
+                dragWith(e, moveBar)
+              }
+            : undefined
+        }
       >
-        {/* Left resize handle — adjusts start date */}
-        <div
-          data-handle="start"
-          className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize opacity-0 group-hover/bar:opacity-100 bg-white/30 rounded-l-md transition-opacity"
-          onMouseDown={(e) => {
-            e.stopPropagation()
-            if (e.button !== 0) return
-            setIsDragging(true)
-            const startX = e.clientX
-            const baseStart = startOfDay(barStartMs)
-            const baseEnd = startOfDay(barEndMs)
-            let finalDiffDays = 0
-            const move = (evt: MouseEvent) => {
-              const diffDays = Math.round((evt.clientX - startX) / dayPx)
-              finalDiffDays = diffDays
-              const nextStartMs = Math.min(baseStart + diffDays * 86400_000, baseEnd)
-              onPatchDates({ startDate: new Date(nextStartMs).toISOString(), dueDate: task.dueDate })
-            }
-            const up = () => {
-              const finalStartMs = Math.min(baseStart + finalDiffDays * 86400_000, baseEnd)
-              onPersistDates({ startDate: new Date(finalStartMs).toISOString(), dueDate: task.dueDate })
-              setIsDragging(false)
-              window.removeEventListener('mousemove', move)
-              window.removeEventListener('mouseup', up)
-            }
-            window.addEventListener('mousemove', move)
-            window.addEventListener('mouseup', up)
-          }}
-        />
+        {/* Left resize handle — adjusts start date. Offered only where the reader may change the task. */}
+        {mayMove && (
+          <div
+            data-handle="start"
+            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize opacity-0 group-hover/bar:opacity-100 bg-white/30 rounded-l-md transition-opacity"
+            onMouseDown={(e) => {
+              e.stopPropagation()
+              dragWith(e, moveStart)
+            }}
+          />
+        )}
         {task.isMilestone && <Diamond className="h-3 w-3 shrink-0 fill-white/90" />}
         <span className="truncate flex-1">{task.title}</span>
         {/* Right resize handle — adjusts due date */}
-        <div
-          data-handle="end"
-          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize opacity-0 group-hover/bar:opacity-100 bg-white/30 rounded-r-md transition-opacity"
-          onMouseDown={(e) => {
-            e.stopPropagation()
-            if (e.button !== 0) return
-            setIsDragging(true)
-            const startX = e.clientX
-            const baseStart = startOfDay(barStartMs)
-            const baseEnd = startOfDay(barEndMs)
-            let finalDiffDays = 0
-            const move = (evt: MouseEvent) => {
-              const diffDays = Math.round((evt.clientX - startX) / dayPx)
-              finalDiffDays = diffDays
-              const nextEndMs = Math.max(baseEnd + diffDays * 86400_000, baseStart)
-              onPatchDates({ startDate: task.startDate, dueDate: new Date(nextEndMs).toISOString() })
-            }
-            const up = () => {
-              const finalEndMs = Math.max(baseEnd + finalDiffDays * 86400_000, baseStart)
-              onPersistDates({ startDate: task.startDate, dueDate: new Date(finalEndMs).toISOString() })
-              setIsDragging(false)
-              window.removeEventListener('mousemove', move)
-              window.removeEventListener('mouseup', up)
-            }
-            window.addEventListener('mousemove', move)
-            window.addEventListener('mouseup', up)
-          }}
-        />
+        {mayMove && (
+          <div
+            data-handle="end"
+            className="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize opacity-0 group-hover/bar:opacity-100 bg-white/30 rounded-r-md transition-opacity"
+            onMouseDown={(e) => {
+              e.stopPropagation()
+              dragWith(e, moveDue)
+            }}
+          />
+        )}
       </div>
     </div>
   )

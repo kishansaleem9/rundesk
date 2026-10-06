@@ -24,6 +24,7 @@ import type { PlanFeature } from '../plans/plans.constants'
 import { EmailToTaskService } from '../email-to-task/email-to-task.service'
 import { CreateTaskDto, AddAttachmentDto, AttachClipDto } from './dto/task.dto'
 import { unknownUpdateFields } from './task-update-fields'
+import { taskDateFrom } from './task-date-input'
 import type { CurrentUserPayload } from './types'
 import { downloadName } from '../../common/export/download-name'
 
@@ -317,8 +318,9 @@ export class TasksController {
       priority: body.priority,
       status: body.status,
       position: body.position,
-      startDate: body.startDate ? new Date(body.startDate) : undefined,
-      dueDate: body.dueDate ? new Date(body.dueDate) : undefined,
+      // A date Postgres cannot take as sent is refused in words, not a 500 (`taskDateFrom`).
+      startDate: taskDateFrom('startDate', body.startDate) ?? undefined,
+      dueDate: taskDateFrom('dueDate', body.dueDate) ?? undefined,
       timeEstimate: body.timeEstimate,
       parentTaskId: body.parentTaskId,
       assigneeIds: body.assigneeIds,
@@ -377,12 +379,6 @@ export class TasksController {
           (unknown.includes('listId') ? ' To move a task to another list, use POST /tasks/:taskId/move.' : ''),
       )
     }
-    const toDate = (label: string, value: string | null | undefined) => {
-      if (!value) return null
-      const d = new Date(value)
-      if (Number.isNaN(d.getTime())) throw new BadRequestException(`${label} is not a valid date`)
-      return d
-    }
     // Type-check the non-string fields before they reach the DB. The body is an
     // untyped inline shape (no DTO), so e.g. `position: true` would otherwise hit
     // the integer column and 500 with a Postgres type error instead of a 400.
@@ -401,8 +397,9 @@ export class TasksController {
       throw new BadRequestException('visibility must be public or private')
     }
     const patch: Record<string, unknown> = { ...body }
-    if ('startDate' in body) patch.startDate = toDate('startDate', body.startDate)
-    if ('dueDate'   in body) patch.dueDate   = toDate('dueDate', body.dueDate)
+    // Not a date, or one Postgres cannot take as sent (year 0, before it, past 9999): 400 with the reason (`taskDateFrom`).
+    if ('startDate' in body) patch.startDate = taskDateFrom('startDate', body.startDate)
+    if ('dueDate'   in body) patch.dueDate   = taskDateFrom('dueDate', body.dueDate)
     return this.tasks.updateTask(taskId, user.id, patch)
   }
 
@@ -443,8 +440,9 @@ export class TasksController {
       throw new BadRequestException('patch object is required')
     }
     const patch: Record<string, unknown> = { ...body.patch }
-    if ('startDate' in body.patch) patch.startDate = body.patch.startDate ? new Date(body.patch.startDate) : null
-    if ('dueDate' in body.patch) patch.dueDate = body.patch.dueDate ? new Date(body.patch.dueDate) : null
+    // The one date for every task: refused whole, in words, when it cannot be written (`taskDateFrom`).
+    if ('startDate' in body.patch) patch.startDate = taskDateFrom('startDate', body.patch.startDate)
+    if ('dueDate' in body.patch) patch.dueDate = taskDateFrom('dueDate', body.patch.dueDate)
     return this.tasks.bulkUpdateTasks(body.taskIds, user.id, patch)
   }
 

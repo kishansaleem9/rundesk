@@ -699,6 +699,9 @@ try {
       set.call(e, '2026-10-05T16:45')
       e.dispatchEvent(new Event('change', { bubbles: true }))
     })
+    // A typed date is written when it is accepted — Enter, or leaving the box
+    // (`found-30-sep/sheet-dates-write-as-typed`) — not at each value typed.
+    await dueEl.press('Enter').catch(() => {})
     await page.waitForTimeout(2500)
     const after = new Date((await A(`/tasks/${datedId}`)).data?.dueDate)
     dates.step(

@@ -103,10 +103,11 @@ import {
   UNASSIGNED_FILTER,
 } from '../lib/task-filters'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
-import { toDateInput, withDatePart } from '../lib/task-dates'
-import { criticalPath } from '../lib/gantt'
+import { toDateInput, withDatePart, shownDay, shiftByDays } from '../lib/task-dates'
+import { criticalPath, GANTT_DRAG_THRESHOLD } from '../lib/gantt'
 import { SPACE_VIEW_KEYS, type SpaceViewKey } from '../lib/space-views'
 import { TaskDetailSheet } from '../components/task-detail-sheet'
+import { DayBox } from '../components/date-time-box'
 import { FreshnessControls, useRefreshInterval } from '../components/freshness-controls'
 import { ListStatusesManager } from '../components/list-statuses-manager'
 import { ListEmailAliasPanel } from '../components/list-email-alias-panel'
@@ -1711,8 +1712,17 @@ function ListDetail() {
   // The Table "Fields" popover is a native <details>; native <details> doesn't
   // close on an outside click, so wire one up to match the other toolbar popovers.
   const fieldsDetailsRef = useRef<HTMLDetailsElement | null>(null)
+  /*
+   * The Columns panel's own ref and dismissal. It carried `fieldsDetailsRef`
+   * too, and a ref ends on the last element drawn with it — the Fields picker,
+   * where the customFields ClickApp is on — so the Columns panel stayed open
+   * after a press outside it and after Escape (lane 7,
+   * `found-6-oct/columns-panel-stays-open-beside-the-fields-picker`).
+   */
+  const columnsDetailsRef = useRef<HTMLDetailsElement | null>(null)
   const subtaskDetailsRef = useRef<HTMLDetailsElement | null>(null)
   useDismissableDetails(fieldsDetailsRef)
+  useDismissableDetails(columnsDetailsRef)
   useDismissableDetails(subtaskDetailsRef)
   // §V2-07 frame `11:30` — the `⚇ Assignee` picker.
   const assigneeDetailsRef = useRef<HTMLDetailsElement | null>(null)
@@ -1834,7 +1844,8 @@ function ListDetail() {
   /*
    * THIS LIST'S FIELDS: the project's, less those scoped to another list of it
    * (`found-30-sep/field-route-takes-another-projects-field`). The project's
-   * list holds every field, and a field scoped to another list was drawn here as
+   * list holds every field the reader may see, those scoped to other lists
+   * among them, and a field scoped to another list was drawn here as
    * a column, filter and sort whose cells took a value (200) that the row, read
    * back through the task's own fields, never showed. The server now refuses it.
    */
@@ -2255,7 +2266,10 @@ function ListDetail() {
         : visibleTasks.filter((task) => (task.assignees ?? []).some((a) => a.userId === calendarAssignee))
     const map = new Map<string, TaskItem[]>()
     for (const task of source) {
-      const key = task.dueDate ? format(new Date(task.dueDate), 'yyyy-MM-dd') : 'No due date'
+      // The day the due date is SHOWN as (`toDateInput`): a date-only day is that
+      // day in any zone, where the local day of its UTC midnight drew it a day
+      // early west of UTC (`found-5-oct/timeline-press-moves-dates`).
+      const key = task.dueDate ? toDateInput(task.dueDate) : 'No due date'
       const arr = map.get(key) ?? []
       arr.push(task)
       map.set(key, arr)
@@ -2638,18 +2652,27 @@ function ListDetail() {
     }
     await refetch()
   }
-  // Reschedule a task's due date onto a calendar day (drag-drop / click-create).
+  // Reschedule a task's due date onto a calendar day (drag-drop / click-create):
+  // that day, at the time the date carries (`withDatePart`), where `yyyy-MM-dd`
+  // saved a task due at 17:30 as due at midnight
+  // (`found-5-oct/timeline-press-moves-dates`, as the Gantt's drag did).
   const rescheduleTask = async (taskId: string, day: Date) => {
-    await patchTaskSaying(taskId, { dueDate: format(day, 'yyyy-MM-dd') })
+    const current = tasks.find((task) => task.id === taskId)?.dueDate ?? null
+    await patchTaskSaying(taskId, { dueDate: withDatePart(current, format(day, 'yyyy-MM-dd')) })
   }
   // Shift a task's whole span by `deltaDays` (Gantt bar drag, Plan §5.4). Reuses
   // the same PATCH /tasks/:id path as the calendar reschedule above, moving
   // whichever of start/due the task actually has so the duration is preserved.
+  // Each by whole days from the day it is drawn on, keeping its time
+  // (`shiftByDays`; `found-5-oct/timeline-press-moves-dates`): `yyyy-MM-dd`
+  // saved a task due at 15:00 as due at midnight.
   const rescheduleTaskSpan = async (task: TaskItem, deltaDays: number) => {
     if (deltaDays === 0) return
     const patch: Record<string, string> = {}
-    if (task.startDate) patch.startDate = format(addDays(new Date(task.startDate), deltaDays), 'yyyy-MM-dd')
-    if (task.dueDate) patch.dueDate = format(addDays(new Date(task.dueDate), deltaDays), 'yyyy-MM-dd')
+    const start = shiftByDays(task.startDate, deltaDays)
+    const due = shiftByDays(task.dueDate, deltaDays)
+    if (start) patch.startDate = start
+    if (due) patch.dueDate = due
     if (Object.keys(patch).length === 0) return
     await patchTaskSaying(task.id, patch)
   }
@@ -3219,7 +3242,7 @@ function ListDetail() {
                 customFields ClickApp, which meant switching that off took away
                 the ability to hide Due date.
               */
-              <details ref={fieldsDetailsRef} className="relative" data-testid="list-columns">
+              <details ref={columnsDetailsRef} className="relative" data-testid="list-columns">
                 <summary className="list-none h-8 px-2.5 flex items-center gap-1.5 rounded-full border border-border/80 bg-card text-[12px] cursor-pointer select-none hover:bg-muted/40">
                   <Columns3 className="h-3.5 w-3.5" aria-hidden />
                   {t('list.columns.chip')}
@@ -4595,13 +4618,15 @@ function TaskRow({
 
       {/* Coarse on purpose — this is a nudge from a row, not the place you set
           a deadline. It may change the day; it may not quietly drop a time the
-          row is carrying, which sending a bare YYYY-MM-DD did. */}
+          row is carrying, which sending a bare YYYY-MM-DD did (`DayBox`, which
+          writes the day when it is accepted, not at each one typed on the way:
+          `found-30-sep/sheet-dates-write-as-typed`). */}
       {showCol('col:due') && (mayEdit ? (
-        <input
-          type="date"
-          value={toDateInput(task.dueDate)}
+        <DayBox
+          testId="list-row-due-date"
+          stored={task.dueDate}
           onClick={(e) => e.stopPropagation()}
-          onChange={(e) => void onPatchTask?.(task.id, { dueDate: withDatePart(task.dueDate, e.target.value) })}
+          onCommit={async (dueDate) => onPatchTask?.(task.id, { dueDate })}
           title={t('list.setDueDateTitle')}
           className="h-6 w-[7.5rem] shrink-0 rounded border border-transparent bg-transparent px-1 text-xs text-muted-foreground hover:border-border focus:border-border focus:bg-card focus:outline-none"
         />
@@ -4609,7 +4634,7 @@ function TaskRow({
         task.dueDate && (
           <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
             <CalendarIcon className="h-3 w-3" />
-            {shortDate(new Date(task.dueDate), locale)}
+            {shortDate(shownDay(task.dueDate)!, locale)}
           </div>
         )
       ))}
@@ -4693,7 +4718,7 @@ function SubtaskRow({
       {subtask.dueDate && (
         <div className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
           <CalendarIcon className="h-3 w-3" />
-          {shortDate(new Date(subtask.dueDate), locale)}
+          {shortDate(shownDay(subtask.dueDate)!, locale)}
         </div>
       )}
     </div>
@@ -5433,19 +5458,17 @@ function TableView({
                   {showCol('col:due') && (
                   <div className="w-28 px-3 flex items-center relative">
                     {dateOpenFor === task.id ? (
-                      <input
+                      /* The day it is shown as, written when it is accepted — Enter,
+                         or the cell left — with the time it carries kept (`DayBox`).
+                         Its first key wrote that day at midnight and closed the cell
+                         (`found-30-sep/sheet-dates-write-as-typed`). */
+                      <DayBox
                         autoFocus
-                        type="date"
-                        defaultValue={task.dueDate ? format(new Date(task.dueDate), 'yyyy-MM-dd') : ''}
+                        testId="list-table-due-date"
+                        stored={task.dueDate}
                         onClick={(e) => e.stopPropagation()}
-                        onBlur={() => setDateOpenFor(null)}
-                        onChange={async (e) => {
-                          const val = e.target.value
-                          setDateOpenFor(null)
-                          await onPatchTask(task.id, {
-                            dueDate: val ? new Date(val).toISOString() : null,
-                          })
-                        }}
+                        onCommit={async (dueDate) => onPatchTask(task.id, { dueDate })}
+                        onDone={() => setDateOpenFor(null)}
                         className="h-6 text-xs bg-card border border-border rounded px-1 outline-none focus:ring-1 focus:ring-brand-500 tabular-nums"
                       />
                     ) : (
@@ -5464,7 +5487,7 @@ function TableView({
                         {task.dueDate ? (
                           <>
                             <CalendarIcon className="h-3 w-3 text-muted-foreground" />
-                            <span>{shortDate(new Date(task.dueDate), locale)}</span>
+                            <span>{shortDate(shownDay(task.dueDate)!, locale)}</span>
                           </>
                         ) : (
                           <span className="text-muted-foreground">—</span>
@@ -6106,7 +6129,7 @@ function BoardTaskCard({
             node: due ? (
               <span className={cn('inline-flex items-center gap-1', overdue && 'text-red-500 font-medium')}>
                 <CalendarIcon className="h-3 w-3" />
-                {shortDate(due, locale)}
+                {shortDate(shownDay(task.dueDate)!, locale)}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 opacity-60">
@@ -6266,8 +6289,8 @@ type GanttZoom = 'day' | 'week' | 'month'
 const GANTT_DAY_WIDTHS: Record<GanttZoom, number> = { day: 36, week: 18, month: 7 }
 // Below this column width the per-day number labels are dropped (too cramped).
 const GANTT_DAYNUM_MIN_W = 16
-// Pointer travel (px) before a bar press is treated as a drag rather than a click.
-const GANTT_DRAG_THRESHOLD = 4
+// Pointer travel before a bar press is a drag rather than a click: `GANTT_DRAG_THRESHOLD`
+// (`lib/gantt.ts`), the workspace timeline's too.
 const GANTT_ROW_H = 34
 const GANTT_LABEL_W = 220
 const GANTT_HEADER_H = 44
@@ -6303,16 +6326,8 @@ function GanttBar({
   const state = useRef<{ startX: number; moved: boolean } | null>(null)
   /* A drag reschedules the task; a reader who may not change it gets the press, which opens it. */
   const mayDrag = useListCaps().edit
-  const start = task.startDate
-    ? startOfDay(new Date(task.startDate))
-    : task.dueDate
-      ? startOfDay(new Date(task.dueDate))
-      : null
-  const end = task.dueDate
-    ? startOfDay(new Date(task.dueDate))
-    : task.startDate
-      ? startOfDay(new Date(task.startDate))
-      : null
+  const start = shownDay(task.startDate) ?? shownDay(task.dueDate)
+  const end = shownDay(task.dueDate) ?? shownDay(task.startDate)
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
@@ -6562,11 +6577,14 @@ function GanttView({
   const dayW = GANTT_DAY_WIDTHS[zoom]
 
   // Each task's [start,end]; a task needs at least a due or start date to plot.
+  // On the day each is SHOWN as (`shownDay`): a date-only day is that day in
+  // any zone, where the local day of its UTC midnight drew it a day early west
+  // of UTC (`found-5-oct/timeline-press-moves-dates`).
   const scheduled = useMemo(() => {
     return tasks
       .map((task) => {
-        const s = task.startDate ? startOfDay(new Date(task.startDate)) : null
-        const d = task.dueDate ? startOfDay(new Date(task.dueDate)) : null
+        const s = shownDay(task.startDate)
+        const d = shownDay(task.dueDate)
         if (!s && !d) return null
         const start = s ?? d!
         const end = d ?? s!

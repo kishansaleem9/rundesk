@@ -17,10 +17,10 @@ export class ProjectMembersController {
     return this.members.listProjectMembers(projectId)
   }
 
-  /** What this person may do on the project's page, as each route would answer (`?lists=` the lists it shows). */
+  /** What this person may do on the project's page, as each route would answer (`?lists=` the lists it shows and those its fields are kept to). */
   @Get('capabilities')
   capabilities(@Param('projectId') projectId: string, @CurrentUser() user: any, @Query('lists') listsParam?: string) {
-    return this.members.projectCapabilities(projectId, user.id, (listsParam ?? '').split(',').filter(Boolean))
+    return this.members.projectCapabilities(projectId, user.id, (listsParam ?? '').split(',').filter(Boolean), user.role)
   }
 
   @Post('members')

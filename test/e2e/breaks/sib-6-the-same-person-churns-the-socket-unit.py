@@ -2,8 +2,9 @@
 #
 # The tab's socket follows who is signed in: it is closed at sign-out and opened
 # at sign-in, and a store change that keeps the same person (a refresh, a
-# profile change) leaves it be. Drop that and every such change drops the
-# socket's rooms and opens it anew.
+# profile change) leaves it be. Drop that and every such change closes the
+# socket and opens it again: a handshake, and every room its pages hold asked
+# for anew (`roomLedger`), at each refresh.
 #
 # Reddens: unit: realtime.test.ts "the same person staying signed in (a refresh, a profile change) leaves the tab’s socket as it is"
 import io

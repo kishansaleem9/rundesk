@@ -23,6 +23,26 @@
  * and the Gantt shift send through too) say a refused change in the server's
  * words.
  *
+ * `found-30-sep/sheet-dates-write-as-typed`. The sheet's date boxes write a date
+ * when it is accepted — on Enter, or when the box is left — and stay open while
+ * the write is out: a day typed "2" then "5" is the 25th, written once, never
+ * the 2nd; a year typed digit by digit is written once, as typed. ClickUp:
+ * "Press Return or Enter to accept the validated date and time" (help centre,
+ * "Natural language processing for dates and times"). Typed in UTC and in Los
+ * Angeles.
+ *
+ * `found-5-oct/years-below-100-read-back-wrong`. A date with a year below 100 is
+ * read back as it was written, by every route, and the sheet shows it so.
+ *
+ * And what the review of that work found, measured on lane 5 on 6 October: the
+ * box's write could be overtaken — Enter on the 25th, then the 8th it held
+ * typed back before that write landed, kept the 25th; nothing checked that the
+ * box stays open while its write is out; year 0, the year before it and one past
+ * 9999 answered 500 (`PATCH`, `POST`) or the database's own error (the bulk
+ * editor); and the sheet's subtask rows and date fields, and the list page's row
+ * box and Table cell, still wrote a day at each key — the Table cell at
+ * midnight, closing at the first key.
+ *
  * EVERY WRITE IS READ BACK FROM THE ROW, not from the answer alone.
  *
  *   node test/e2e/task-values.mjs --api 3011 --dist apps/web/dist
@@ -41,7 +61,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 16
+const EXPECTED_CHECKS = 24
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -303,6 +323,8 @@ try {
   }
   const patched = page.waitForResponse((r) => r.request().method() === 'PATCH' && new URL(r.url()).pathname.endsWith(`/tasks/${S}`), { timeout: 15_000 }).catch(() => null)
   await startBox.fill(dayAt(10, 9), { timeout: 5000 }).catch(() => {})
+  // Accepted with Enter, as a typed date is (`found-30-sep/sheet-dates-write-as-typed`).
+  await startBox.press('Enter', { timeout: 5000 }).catch(() => {})
   const sheetAnswer = (await patched)?.status() ?? null
   let sheetRow = null
   await waitUntil(async () => ms((sheetRow = await rowOf(S))?.start_date) === ms(new Date(dayAt(10, 9)).toISOString()), { timeoutMs: 10_000 })
@@ -390,6 +412,7 @@ try {
   await binBySql(SB)
   const sbPatch = nextPatchOf(SB)
   await startBox.fill(dayAt(2, 9), { timeout: 5000 }).catch(() => {})
+  await startBox.press('Enter', { timeout: 5000 }).catch(() => {})
   const sbAnswer = await sbPatch
   let sbToast = ''
   await waitUntil(async () => (sbToast = (sbAnswer.words && (await toasts()).find((s) => s.includes(sbAnswer.words))) || '').length > 0, { timeoutMs: 10_000 })
@@ -420,6 +443,306 @@ try {
     'a row edit on the list page says a refused change in the server’s words: a priority picked in the Table view on a task put in the bin meanwhile is refused (409), the toast carries the server’s sentence, and the task keeps its priority (read by SQL)',
     `the row showed ${rbShown}, its menu ${rbMenu}; the PATCH answered ${rbAnswer.status ?? 'nothing'} saying ${JSON.stringify(rbAnswer.words)}; the toasts read ${JSON.stringify(await toasts())}; the task holds ${rbRow?.priority ?? null}`,
   )
+
+  // ══ 5. A DATE TYPED INTO THE SHEET IS WRITTEN WHEN IT IS ACCEPTED ════════
+  console.log('\n▶ found-30-sep/sheet-dates-write-as-typed — the sheet writes a typed date once, when it is accepted, in UTC and in Los Angeles')
+  /** A wall-clock time in October 2026 in `zone` (UTC, or Los Angeles at UTC−7), as an instant. */
+  const octoberAt = (zone, d, hour) => new Date(Date.UTC(2026, 9, d, hour + (zone === 'UTC' ? 0 : 7))).toISOString()
+  const typedDue = []
+  const typedYear = []
+  for (const zone of ['UTC', 'America/Los_Angeles']) {
+    const zctx = await browser.newContext({ viewport: { width: 1500, height: 1100 }, timezoneId: zone, locale: 'en-US', serviceWorkers: 'block' })
+    const zpage = await zctx.newPage()
+    const sent = []
+    zpage.on('request', (r) => {
+      if (r.method() === 'PATCH' && /\/tasks\/[0-9a-f-]{36}$/.test(new URL(r.url()).pathname)) sent.push(r.postData())
+    })
+    await zpage.goto(`${B}/login`, { waitUntil: 'domcontentloaded' })
+    await zpage.fill('input[type=email]', ADMIN.email, { timeout: 15_000 }).catch(() => {})
+    await zpage.fill('input[type=password]', ADMIN.password, { timeout: 15_000 }).catch(() => {})
+    await zpage.click('button[type=submit]', { timeout: 15_000 }).catch(() => {})
+    await zpage.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS }).catch(() => {})
+    await zpage.getByRole('button', { name: /^Accept$/ }).click({ timeout: 3000 }).catch(() => {})
+    // Starting 6 October 09:00 and due 8 October 16:00, there.
+    const T = await makeTask(`Typed ${zone} ${TAG}`, { startDate: octoberAt(zone, 6, 9), dueDate: octoberAt(zone, 8, 16) })
+    await zpage.goto(`${B}/app/${WS}/${SPACE}/${PROJECT}/${LIST}?task=${T}`, { waitUntil: 'domcontentloaded' })
+    const zdue = zpage.getByTestId('task-due-date')
+    const zstart = zpage.getByTestId('task-start-date')
+    const ready = await waitUntil(async () => (await zdue.inputValue({ timeout: 1000 }).catch(() => '')) === '2026-10-08T16:00', { timeoutMs: 20_000 })
+    const boxState = (box) => box.evaluate((e) => ({ disabled: e.disabled, focused: document.activeElement === e })).catch(() => null)
+    // The due day, "2" then "5", as a person types it; then Enter.
+    await zdue.focus({ timeout: 5000 }).catch(() => {})
+    await zpage.keyboard.press('ArrowRight')
+    await zpage.keyboard.type('2')
+    const afterTwo = await boxState(zdue)
+    await zpage.waitForTimeout(150)
+    await zpage.keyboard.type('5')
+    // Long enough for a write the box should not make to have gone out.
+    await zpage.waitForTimeout(800)
+    const whileTyped = sent.length
+    const afterFive = await boxState(zdue)
+    await zpage.keyboard.press('Enter')
+    let dueRow = null
+    await waitUntil(async () => ms((dueRow = await rowOf(T))?.due_date) === ms(octoberAt(zone, 25, 16)), { timeoutMs: 10_000 })
+    await zpage.waitForTimeout(500)
+    const dueWrites = sent.length
+    const dueEntries = (await sql`select count(*)::int as n from task_activity where task_id = ${T} and action = 'due_date_changed'`)[0]?.n ?? -1
+    typedDue.push({ zone, ready, afterTwo, afterFive, whileTyped, dueWrites, due: dueRow?.due_date ? new Date(dueRow.due_date).toISOString() : null, dueEntries })
+    // The start's year, 2, 0, 2, 7, digit by digit; then the box is left for the due date's.
+    const before = sent.length
+    await zstart.focus({ timeout: 5000 }).catch(() => {})
+    await zpage.keyboard.press('ArrowRight')
+    await zpage.keyboard.press('ArrowRight')
+    for (const digit of '2027') {
+      await zpage.keyboard.type(digit)
+      await zpage.waitForTimeout(150)
+    }
+    await zpage.waitForTimeout(650)
+    const yearWhileTyped = sent.slice(before)
+    await zdue.focus({ timeout: 5000 }).catch(() => {})
+    let startRow = null
+    await waitUntil(async () => ms((startRow = await rowOf(T))?.start_date) === ms(new Date(Date.UTC(2027, 9, 6, 9 + (zone === 'UTC' ? 0 : 7))).toISOString()), { timeoutMs: 10_000 })
+    await zpage.waitForTimeout(500)
+    typedYear.push({ zone, yearWhileTyped, yearWrites: sent.slice(before), start: startRow?.start_date ? new Date(startRow.start_date).toISOString() : null })
+    await zctx.close()
+  }
+  chk(
+    typedDue.length === 2 && typedDue.every((t) => t.ready && t.afterTwo?.disabled === false && t.afterTwo?.focused && t.afterFive?.focused
+      && t.whileTyped === 0 && t.dueWrites === 1 && t.due === octoberAt(t.zone, 25, 16) && t.dueEntries === 1),
+    'the task sheet writes a due date typed key by key once, when it is accepted: the day typed “2” then “5” sends nothing while it is typed, the box stays open and keeps its focus, and Enter writes the 25th at 16:00 — one PATCH, one due-date entry in the activity — in UTC and in Los Angeles (read by SQL)',
+    JSON.stringify(typedDue),
+  )
+  chk(
+    typedYear.length === 2 && typedYear.every((t) => t.yearWhileTyped.length === 0 && t.yearWrites.length === 1 && t.yearWrites[0]?.includes('"startDate":"2027-10-06')
+      && t.start === new Date(Date.UTC(2027, 9, 6, 9 + (t.zone === 'UTC' ? 0 : 7))).toISOString()),
+    'a year typed digit by digit is written once, as typed, when the box is left: 2, 0, 2, 7 into the start’s year sends nothing — never year 2 or 20 — until the box is left, and then 6 October 2027 09:00, in UTC and in Los Angeles (read by SQL)',
+    JSON.stringify(typedYear),
+  )
+
+  // ══ 6. A YEAR BELOW 100 IS READ BACK AS IT WAS WRITTEN ═══════════════════
+  console.log('\n▶ found-5-oct/years-below-100-read-back-wrong — a date in year 2 or 99 is answered as it was written')
+  const YEAR_TWO = '0002-10-06T09:00:00.000Z'
+  const YEAR_NINETY_NINE = '0099-10-06T09:00:00.000Z'
+  const Y = await makeTask(`Year two ${TAG}`)
+  const yPatched = await A(`/tasks/${Y}`, { method: 'PATCH', body: { startDate: YEAR_TWO } })
+  const yGot = await A(`/tasks/${Y}`)
+  const yListed = await A(`/tasks/list/${LIST}`)
+  const yDrawn = await A(`/tasks/workspace/${WS}/timeline`)
+  const NINETY_NINE = `Year ninety-nine ${TAG}`
+  const yMade = await A('/tasks', { method: 'POST', body: { listId: LIST, title: NINETY_NINE, dueDate: YEAR_NINETY_NINE } })
+  const yMadeGot = yMade.data?.id ? await A(`/tasks/${yMade.data.id}`) : { status: 0, data: null }
+  const yHeld = (await sql`select start_date::text as s from tasks where id = ${Y}`)[0]?.s ?? null
+  const yMadeHeld = (await sql`select due_date::text as d from tasks where list_id = ${LIST} and title = ${NINETY_NINE}`)[0]?.d ?? null
+  const answers = {
+    patch: yPatched.data?.startDate ?? null,
+    get: yGot.data?.startDate ?? null,
+    list: (yListed.data ?? []).find((t) => t.id === Y)?.startDate ?? null,
+    timeline: (yDrawn.data ?? []).find((t) => t.id === Y)?.startDate ?? null,
+    post: yMade.data?.dueDate ?? null,
+    postGet: yMadeGot.data?.dueDate ?? null,
+  }
+  chk(
+    yPatched.status === 200 && yGot.status === 200 && yListed.status === 200 && yDrawn.status === 200 && yMade.status === 201 && yMadeGot.status === 200
+      && ['patch', 'get', 'list', 'timeline'].every((k) => answers[k] === YEAR_TWO) && answers.post === YEAR_NINETY_NINE && answers.postGet === YEAR_NINETY_NINE
+      && yHeld === '0002-10-06 09:00:00+00' && yMadeHeld === '0099-10-06 09:00:00+00',
+    'a date with a year below 100 is read back as it was written: a start of 0002-10-06 09:00 and a due date of 0099-10-06 09:00 are answered so by the PATCH, POST /tasks, GET /tasks/:id, the list and the timeline, and Postgres holds them so',
+    `the answers ${JSON.stringify(answers)} (PATCH ${said(yPatched)}, POST ${said(yMade)}); Postgres holds ${JSON.stringify([yHeld, yMadeHeld])}`,
+  )
+  // Shown in a browser in UTC, where 09:00Z is 09:00.
+  const uctx = await browser.newContext({ viewport: { width: 1500, height: 1100 }, timezoneId: 'UTC', locale: 'en-US', serviceWorkers: 'block' })
+  const upage = await uctx.newPage()
+  await upage.goto(`${B}/login`, { waitUntil: 'domcontentloaded' })
+  await upage.fill('input[type=email]', ADMIN.email, { timeout: 15_000 }).catch(() => {})
+  await upage.fill('input[type=password]', ADMIN.password, { timeout: 15_000 }).catch(() => {})
+  await upage.click('button[type=submit]', { timeout: 15_000 }).catch(() => {})
+  await upage.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS }).catch(() => {})
+  await upage.goto(`${B}/app/${WS}/${SPACE}/${PROJECT}/${LIST}?task=${Y}`, { waitUntil: 'domcontentloaded' })
+  let yShown = ''
+  await waitUntil(async () => (yShown = await upage.getByTestId('task-start-date').inputValue({ timeout: 1000 }).catch(() => '')) === '0002-10-06T09:00', { timeoutMs: 20_000 })
+  await uctx.close()
+  chk(
+    yShown === '0002-10-06T09:00',
+    'and the task sheet shows that start as 0002-10-06 09:00, the date it holds, not 10 February 2006 or an empty box',
+    `the start box held ${JSON.stringify(yShown)}`,
+  )
+
+  /** A browser in UTC, signed in as the admin, recording each write of a date it sends. */
+  const utcPage = async () => {
+    const c = await browser.newContext({ viewport: { width: 1500, height: 1100 }, timezoneId: 'UTC', locale: 'en-US', serviceWorkers: 'block' })
+    const p = await c.newPage()
+    const writes = []
+    p.on('request', (r) => {
+      const at = new URL(r.url()).pathname
+      if ((r.method() === 'PATCH' && /\/tasks\/[0-9a-f-]{36}$/.test(at)) || (r.method() === 'PUT' && /\/custom-fields\/[0-9a-f-]{36}$/.test(at))) {
+        writes.push({ at, body: r.postData() })
+      }
+    })
+    await p.goto(`${B}/login`, { waitUntil: 'domcontentloaded' })
+    await p.fill('input[type=email]', ADMIN.email, { timeout: 15_000 }).catch(() => {})
+    await p.fill('input[type=password]', ADMIN.password, { timeout: 15_000 }).catch(() => {})
+    await p.click('button[type=submit]', { timeout: 15_000 }).catch(() => {})
+    await p.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS }).catch(() => {})
+    await p.getByRole('button', { name: /^Accept$/ }).click({ timeout: 3000 }).catch(() => {})
+    return { ctx: c, page: p, writesTo: (suffix) => writes.filter((w) => w.at.endsWith(suffix)).map((w) => w.body) }
+  }
+  const octUtc = (d, hour) => new Date(Date.UTC(2026, 9, d, hour)).toISOString()
+  const boxState = (box) => box.evaluate((e) => ({ disabled: e.disabled, focused: document.activeElement === e, value: e.value })).catch(() => null)
+  const dueEntriesOf = async (id) => (await sql`select count(*)::int as n from task_activity where task_id = ${id} and action = 'due_date_changed'`)[0]?.n ?? -1
+
+  // ══ 7. A DATE BOX IS OPEN WHILE ITS WRITE IS OUT ══════════════════════════
+  console.log('\n▶ found-30-sep/sheet-dates-write-as-typed — the sheet’s due box stays open while its write is out, and a date corrected meanwhile is written after it')
+  {
+    const H = await makeTask(`Held write ${TAG}`, { dueDate: octUtc(8, 16) })
+    const { ctx: hctx, page: hpage, writesTo } = await utcPage()
+    // Each PATCH of the task is held a second and a half on its way, so "while the write is out" lasts long enough to look at.
+    await hpage.route(`**/api/v1/tasks/${H}`, async (route) => {
+      if (route.request().method() === 'PATCH') await new Promise((res) => setTimeout(res, 1500))
+      await route.continue().catch(() => {})
+    })
+    await hpage.goto(`${B}/app/${WS}/${SPACE}/${PROJECT}/${LIST}?task=${H}`, { waitUntil: 'domcontentloaded' })
+    const hdue = hpage.getByTestId('task-due-date')
+    const ready = await waitUntil(async () => (await hdue.inputValue({ timeout: 1000 }).catch(() => '')) === '2026-10-08T16:00', { timeoutMs: 20_000 })
+    await hdue.focus({ timeout: 5000 }).catch(() => {})
+    await hpage.keyboard.press('ArrowRight')
+    await hpage.keyboard.type('25')
+    await hpage.keyboard.press('Enter')
+    await hpage.waitForTimeout(300)
+    const whileOut = await boxState(hdue)
+    const sentWhileOut = writesTo(`/tasks/${H}`).length
+    // The 8th it held, typed back before the 25th has landed, and accepted.
+    await hpage.keyboard.press('ArrowLeft')
+    await hpage.keyboard.type('08')
+    const typedBack = await hdue.inputValue({ timeout: 1000 }).catch(() => null)
+    await hpage.keyboard.press('Enter')
+    const sentBeforeLanding = writesTo(`/tasks/${H}`).length
+    let held = null
+    await waitUntil(async () => writesTo(`/tasks/${H}`).length >= 2 && ms((held = await rowOf(H))?.due_date) === ms(octUtc(8, 16)), { timeoutMs: 15_000 })
+    await hpage.waitForTimeout(500)
+    const sent = writesTo(`/tasks/${H}`)
+    const shownAtEnd = await hdue.inputValue({ timeout: 1000 }).catch(() => null)
+    await hctx.close()
+    chk(
+      ready && whileOut?.disabled === false && whileOut?.focused === true && whileOut?.value === '2026-10-25T16:00' && sentWhileOut === 1
+        && typedBack === '2026-10-08T16:00' && sentBeforeLanding === 1
+        && sent.length === 2 && String(sent[0]).includes('2026-10-25T16:00') && String(sent[1]).includes('2026-10-08T16:00')
+        && ms(held?.due_date) === ms(octUtc(8, 16)) && shownAtEnd === '2026-10-08T16:00',
+      'the sheet’s due box stays open while its write is out, and a date corrected meanwhile is written after it: Enter on the 25th, and while that write is held the box is enabled and keeps its focus; the 8th typed back then is kept, and Enter writes it once the 25th has landed — two PATCHes, in that order — so the task holds the 8th (read by SQL)',
+      JSON.stringify({ ready, whileOut, sentWhileOut, typedBack, sentBeforeLanding, sent, held: held?.due_date ?? null, shownAtEnd }),
+    )
+  }
+
+  // ══ 8. A YEAR POSTGRES CANNOT HOLD AS SENT IS REFUSED IN WORDS ════════════
+  console.log('\n▶ found-5-oct/years-below-100-read-back-wrong — year 0, a year before it and one past 9999 are refused in words, not a 500')
+  {
+    const KEEP = { startDate: '2026-10-06T09:00:00.000Z', dueDate: '2026-10-08T16:00:00.000Z' }
+    const E = await makeTask(`Year edges ${TAG}`, KEEP)
+    const answers = []
+    for (const sent of ['0000-10-06T09:00:00.000Z', '-000001-10-06T09:00:00.000Z', '+010000-01-01T00:00:00.000Z']) {
+      const patch = await A(`/tasks/${E}`, { method: 'PATCH', body: { startDate: sent } })
+      const bulk = await A('/tasks/bulk/update', { method: 'PATCH', body: { taskIds: [E], patch: { dueDate: sent } } })
+      const madeTitle = `Due in ${sent} ${TAG}`
+      const post = await A('/tasks', { method: 'POST', body: { listId: LIST, title: madeTitle, dueDate: sent } })
+      answers.push({ sent, patch: said(patch), bulk: said(bulk), post: said(post), made: (await rowsTitled(madeTitle)).length })
+    }
+    const kept = await rowOf(E)
+    const inWords = (answer) => /^400 /.test(answer) && answer.includes('must fall between the years 1 and 9999')
+    chk(
+      answers.length === 3 && answers.every((a) => inWords(a.patch) && inWords(a.bulk) && /^400 /.test(a.post) && a.made === 0) && inWords(answers[0].post)
+        && ms(kept?.start_date) === ms(KEEP.startDate) && ms(kept?.due_date) === ms(KEEP.dueDate),
+      'a date Postgres cannot hold as sent is refused in words and nothing is written: year 0, the year before it and one past 9999 are each answered 400 by PATCH /tasks/:id, the bulk editor and POST /tasks — “must fall between the years 1 and 9999” where the route reads the date itself — the task keeps its dates and no task is made (read by SQL)',
+      `answers ${JSON.stringify(answers)}; the task holds ${JSON.stringify(kept)}`,
+    )
+  }
+
+  /** Focus a date box, move to its day and type "2" then "5", as a person does; what it did meanwhile. */
+  const typeTwentyFifth = async (p, box, writes) => {
+    const before = writes().length
+    await box.focus({ timeout: 5000 }).catch(() => {})
+    await p.keyboard.press('ArrowRight')
+    await p.keyboard.type('2')
+    await p.waitForTimeout(150)
+    await p.keyboard.type('5')
+    // Long enough for a write the box should not make to have gone out.
+    await p.waitForTimeout(800)
+    return { sentWhileTyped: writes().length - before, state: await boxState(box) }
+  }
+
+  // ══ 9. THE SHEET'S OTHER DATE BOXES WRITE A DAY WHEN IT IS ACCEPTED ═══════
+  console.log('\n▶ found-30-sep/sheet-dates-write-as-typed — a subtask’s due day and a date field, typed key by key, are written once, when accepted')
+  {
+    const PARENT = await makeTask(`Sheet parent ${TAG}`)
+    const SUB = await makeTask(`Sheet subtask ${TAG}`, { parentTaskId: PARENT, dueDate: octUtc(8, 16) })
+    const field = must('make a date field', await A(`/workspaces/${WS}/projects/${PROJECT}/custom-fields`, { method: 'POST', body: { name: `When ${TAG}`, type: 'date' } }))
+    must('give the parent a date in it', await A(`/workspaces/${WS}/tasks/${PARENT}/custom-fields/${field?.id}`, { method: 'PUT', body: { value: '2026-10-08' } }))
+    const { ctx: sctx, page: spage, writesTo } = await utcPage()
+    await spage.goto(`${B}/app/${WS}/${SPACE}/${PROJECT}/${LIST}?task=${PARENT}`, { waitUntil: 'domcontentloaded' })
+    await spage.getByTestId('task-tab-subtasks').click({ timeout: 30_000 }).catch(() => {})
+    const subBox = spage.getByTestId('subtask-due-date').first()
+    const subReady = await waitUntil(async () => (await subBox.inputValue({ timeout: 1000 }).catch(() => '')) === '2026-10-08', { timeoutMs: 20_000 })
+    const subTyped = await typeTwentyFifth(spage, subBox, () => writesTo(`/tasks/${SUB}`))
+    await spage.keyboard.press('Enter')
+    let subRow = null
+    await waitUntil(async () => ms((subRow = await rowOf(SUB))?.due_date) === ms(octUtc(25, 16)), { timeoutMs: 10_000 })
+    await spage.waitForTimeout(500)
+    const subWrites = writesTo(`/tasks/${SUB}`)
+    const subEntries = await dueEntriesOf(SUB)
+    // The Fields tab's date field.
+    await spage.getByTestId('task-tab-fields').click({ timeout: 20_000 }).catch(() => {})
+    const fieldBox = spage.getByTestId('custom-field-date').first()
+    const fieldReady = await waitUntil(async () => (await fieldBox.inputValue({ timeout: 1000 }).catch(() => '')) === '2026-10-08', { timeoutMs: 20_000 })
+    const fieldTyped = await typeTwentyFifth(spage, fieldBox, () => writesTo(`/custom-fields/${field?.id}`))
+    await spage.keyboard.press('Enter')
+    let fieldHeld = ''
+    await waitUntil(async () => (fieldHeld = String((await sql`select value->>'v' as v from custom_field_values where task_id = ${PARENT} and field_id = ${field?.id}`)[0]?.v ?? '')).startsWith('2026-10-25'), { timeoutMs: 10_000 })
+    await spage.waitForTimeout(500)
+    const fieldWrites = writesTo(`/custom-fields/${field?.id}`)
+    await sctx.close()
+    const typedRight = (t) => t.sentWhileTyped === 0 && t.state?.focused === true && t.state?.disabled === false
+    chk(
+      subReady && typedRight(subTyped) && subTyped.state?.value === '2026-10-25' && subWrites.length === 1 && ms(subRow?.due_date) === ms(octUtc(25, 16)) && subEntries === 1
+        && fieldReady && typedRight(fieldTyped) && fieldTyped.state?.value === '2026-10-25' && fieldWrites.length === 1 && fieldHeld.startsWith('2026-10-25'),
+      'the sheet’s other date boxes write a day typed key by key once, when it is accepted: a subtask’s due day and a date field, typed “2” then “5”, send nothing while typed and keep their focus, and Enter writes the 25th — the subtask still due at 16:00, one PATCH and one due-date entry; the field one write (read by SQL)',
+      JSON.stringify({ subReady, subTyped, subWrites, subDue: subRow?.due_date ?? null, subEntries, fieldReady, fieldTyped, fieldWrites, fieldHeld }),
+    )
+  }
+
+  // ══ 10. THE LIST PAGE'S DATE BOXES WRITE A DAY WHEN IT IS ACCEPTED ════════
+  console.log('\n▶ found-30-sep/sheet-dates-write-as-typed — the list’s row box and Table cell, typed key by key, write once, when accepted, keeping the time')
+  {
+    const ROWT = await makeTask(`Row typed ${TAG}`, { dueDate: octUtc(8, 16) })
+    const CELLT = await makeTask(`Cell typed ${TAG}`, { dueDate: octUtc(8, 16) })
+    const { ctx: lctx, page: lpage, writesTo } = await utcPage()
+    await lpage.goto(`${B}/app/${WS}/${SPACE}/${PROJECT}/${LIST}`, { waitUntil: 'domcontentloaded' })
+    const rowBox = lpage.locator(`[data-testid="list-task-row"][data-task-id="${ROWT}"]`).getByTestId('list-row-due-date')
+    const rowReady = await waitUntil(async () => (await rowBox.inputValue({ timeout: 1000 }).catch(() => '')) === '2026-10-08', { timeoutMs: 20_000 })
+    const rowTyped = await typeTwentyFifth(lpage, rowBox, () => writesTo(`/tasks/${ROWT}`))
+    await lpage.keyboard.press('Enter')
+    let rowHeld = null
+    await waitUntil(async () => ms((rowHeld = await rowOf(ROWT))?.due_date) === ms(octUtc(25, 16)), { timeoutMs: 10_000 })
+    await lpage.waitForTimeout(500)
+    const rowWrites = writesTo(`/tasks/${ROWT}`)
+    // The Table view's due cell, opened by its button.
+    await lpage.getByTestId('work-view-tab-type-table').click({ timeout: 20_000 }).catch(() => {})
+    const cellRow = lpage.locator(`[data-testid="list-table-row"][data-task-id="${CELLT}"]`).first()
+    await cellRow.getByTestId('list-table-due-button').click({ timeout: 20_000 }).catch(() => {})
+    const cellBox = cellRow.getByTestId('list-table-due-date')
+    const cellReady = await waitUntil(async () => (await cellBox.inputValue({ timeout: 1000 }).catch(() => '')) === '2026-10-08', { timeoutMs: 10_000 })
+    const cellTyped = await typeTwentyFifth(lpage, cellBox, () => writesTo(`/tasks/${CELLT}`))
+    await lpage.keyboard.press('Enter')
+    let cellHeld = null
+    await waitUntil(async () => ms((cellHeld = await rowOf(CELLT))?.due_date) === ms(octUtc(25, 16)), { timeoutMs: 10_000 })
+    await lpage.waitForTimeout(500)
+    const cellWrites = writesTo(`/tasks/${CELLT}`)
+    const cellClosed = (await cellBox.count().catch(() => -1)) === 0
+    await lctx.close()
+    const typedRight = (t) => t.sentWhileTyped === 0 && t.state?.focused === true && t.state?.value === '2026-10-25'
+    chk(
+      rowReady && typedRight(rowTyped) && rowWrites.length === 1 && ms(rowHeld?.due_date) === ms(octUtc(25, 16))
+        && cellReady && typedRight(cellTyped) && cellWrites.length === 1 && ms(cellHeld?.due_date) === ms(octUtc(25, 16)) && cellClosed,
+      'the list page’s date boxes write a day typed key by key once, when it is accepted, keeping the time: in a List view row and in the Table view’s due cell, “2” then “5” send nothing while typed — the cell stays open — and Enter writes the 25th, still at 16:00, one PATCH each, and closes the cell (read by SQL)',
+      JSON.stringify({ rowReady, rowTyped, rowWrites, rowDue: rowHeld?.due_date ?? null, cellReady, cellTyped, cellWrites, cellDue: cellHeld?.due_date ?? null, cellClosed }),
+    )
+  }
 } catch (err) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${String(err?.message ?? err).split('\n')[0]}`)

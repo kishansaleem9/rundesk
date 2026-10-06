@@ -1,3 +1,4 @@
 export { getDb } from './client'
+export { readTimestamptzText, TIMESTAMPTZ_OID } from './timestamp-text'
 export type { Db } from './client'
 export * from './schema'

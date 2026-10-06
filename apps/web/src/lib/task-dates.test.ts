@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { toDateInput, toDateTimeInput, fromDateTimeInput, withDatePart, presetToIso } from './task-dates'
+import { toDateInput, toDateTimeInput, fromDateTimeInput, withDatePart, presetToIso, shownDay, shiftByDays, dayAsDateOnly } from './task-dates'
 
 /**
  * §G [21:36–23:38] — "START date aur DUE date … TIME ke saath."
@@ -139,5 +139,100 @@ describe('§G15 date presets', () => {
     // task that never had a time, which is the drift this module exists to stop.
     const dateOnly = '2026-09-10T00:00:00.000Z'
     assert.equal(presetToIso('tomorrow', dateOnly, wed), '2026-09-17T00:00:00.000Z')
+  })
+})
+
+/**
+ * The zones a person may be in, for the checks below: one west of UTC, UTC,
+ * and one east. Node takes `TZ` as it is set, so each check runs in each.
+ */
+const ZONES = ['America/Los_Angeles', 'UTC', 'Asia/Karachi']
+function inZone(zone: string, check: () => void) {
+  const was = process.env.TZ
+  process.env.TZ = zone
+  try {
+    check()
+  } finally {
+    if (was === undefined) delete process.env.TZ
+    else process.env.TZ = was
+  }
+}
+const inEachZone = (check: (zone: string) => void) => {
+  for (const zone of ZONES) inZone(zone, () => check(zone))
+}
+
+/**
+ * `found-5-oct/timeline-press-moves-dates` — a Gantt draws a date on the day it
+ * is shown as, and a drag moves it by whole days, keeping its time.
+ */
+describe('a Gantt draws and moves a date as the day it is shown as', () => {
+  it('draws a date-only day as that day in every zone, and a timed one on its local day', () => {
+    inEachZone((zone) => {
+      const day = shownDay('2026-10-19T00:00:00.000Z')!
+      assert.deepEqual([day.getFullYear(), day.getMonth() + 1, day.getDate(), day.getHours()], [2026, 10, 19, 0], zone)
+      // 16 October 09:00Z is the 16th in all three: 02:00 in Los Angeles, 14:00 in Karachi.
+      const timed = shownDay('2026-10-16T09:00:00.000Z')!
+      assert.deepEqual([timed.getDate(), timed.getHours(), timed.getMinutes()], [16, 0, 0], zone)
+    })
+    assert.equal(shownDay(null), null)
+    assert.equal(shownDay('not a date'), null)
+  })
+
+  it('moves a timed date by whole days and keeps its time of day, across a change of the clocks too', () => {
+    inEachZone((zone) => {
+      // Due 17:30Z and starting 09:00Z, moved a day on: the same clock, a day later.
+      assert.equal(shiftByDays('2026-10-09T17:30:00.000Z', 1), '2026-10-10T17:30:00.000Z', zone)
+      assert.equal(shiftByDays('2026-10-07T09:00:00.000Z', -3), '2026-10-04T09:00:00.000Z', zone)
+      // Nought days is the date as it was.
+      assert.equal(shiftByDays('2026-10-07T09:00:00.000Z', 0), '2026-10-07T09:00:00.000Z', zone)
+    })
+    inZone('America/Los_Angeles', () => {
+      // 09:00 on 31 October (PDT, 16:00Z) is 09:00 on 2 November (PST, 17:00Z), as a picked day keeps it.
+      assert.equal(shiftByDays('2026-10-31T16:00:00.000Z', 2), '2026-11-02T17:00:00.000Z')
+      assert.equal(shiftByDays('2026-10-31T16:00:00.000Z', 2), withDatePart('2026-10-31T16:00:00.000Z', '2026-11-02'))
+    })
+    // A date the task does not have is not made.
+    assert.equal(shiftByDays(null, 1), null)
+    assert.equal(shiftByDays(undefined, 1), null)
+  })
+
+  it('moves a date-only day to the next day, still date-only, in every zone', () => {
+    inEachZone((zone) => {
+      assert.equal(shiftByDays('2026-10-12T00:00:00.000Z', 1), '2026-10-13T00:00:00.000Z', zone)
+      assert.equal(shiftByDays('2026-10-31T00:00:00.000Z', 1), '2026-11-01T00:00:00.000Z', zone)
+      assert.equal(shiftByDays('2026-10-12T00:00:00.000Z', 0), '2026-10-12T00:00:00.000Z', zone)
+    })
+  })
+
+  it('stores a day with no time as the date-only form, whatever the zone', () => {
+    inEachZone((zone) => {
+      const day = shownDay('2026-10-12T00:00:00.000Z')!
+      day.setDate(day.getDate() - 1)
+      assert.equal(dayAsDateOnly(day), '2026-10-11T00:00:00.000Z', zone)
+    })
+  })
+})
+
+/**
+ * `found-5-oct/years-below-100-read-back-wrong` — a year below 100 is shown and
+ * written as that year. `String(2)` drew `2-10-06`, a value no date box shows,
+ * and `new Date(2, …)` and `Date.UTC(2, …)` write 1902.
+ */
+describe('a year below 100 is the year it says', () => {
+  it('is shown with four digits, written as that year, and moved within it', () => {
+    inEachZone((zone) => {
+      assert.equal(toDateInput('0002-10-06T00:00:00.000Z'), '0002-10-06', zone)
+      assert.equal(toDateTimeInput('0002-10-06T00:00:00.000Z'), '0002-10-06T00:00', zone)
+      assert.equal(withDatePart(null, '0002-10-06'), '0002-10-06T00:00:00.000Z', zone)
+      assert.equal(withDatePart('2026-10-06T00:00:00.000Z', '0099-10-07'), '0099-10-07T00:00:00.000Z', zone)
+      assert.equal(toDateTimeInput(withDatePart(fromDateTimeInput('2026-10-06T17:30'), '0002-10-06')), '0002-10-06T17:30', zone)
+      assert.equal(shiftByDays('0002-10-06T00:00:00.000Z', 1), '0002-10-07T00:00:00.000Z', zone)
+      assert.equal(shownDay('0002-10-06T00:00:00.000Z')!.getFullYear(), 2, zone)
+      assert.equal(dayAsDateOnly(shownDay('0002-10-06T00:00:00.000Z')!), '0002-10-06T00:00:00.000Z', zone)
+    })
+    inZone('UTC', () => {
+      assert.equal(toDateTimeInput('0099-10-06T09:00:00.000Z'), '0099-10-06T09:00')
+      assert.equal(toDateTimeInput(fromDateTimeInput('0002-10-06T09:00')), '0002-10-06T09:00')
+    })
   })
 })

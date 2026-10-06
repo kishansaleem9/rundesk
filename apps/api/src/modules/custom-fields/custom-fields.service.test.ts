@@ -15,8 +15,11 @@ const WS = '00000000-0000-4000-8000-0000000000aa'
 const TASK = '00000000-0000-4000-8000-000000000001'
 const ACTOR = '00000000-0000-4000-8000-0000000000ac'
 
-/** A database whose selects answer in order, however they are chained, and which keeps what was written. */
-function scriptedDb(selects: unknown[][]) {
+/**
+ * A database whose selects answer in order, however they are chained, and which keeps what was written.
+ * `updateFinds: false` is a row that went between the read and the write: an update finds nothing.
+ */
+function scriptedDb(selects: unknown[][], { updateFinds = true } = {}) {
   const queue = [...selects]
   const written: Array<{ op: string; arg: unknown }> = []
   const db = {
@@ -35,7 +38,7 @@ function scriptedDb(selects: unknown[][]) {
     update: mock.fn(() => ({
       set: mock.fn((arg: unknown) => {
         written.push({ op: 'update', arg })
-        return { where: () => ({ returning: async () => [{ id: 'value-1', ...(arg as object) }] }) }
+        return { where: () => ({ returning: async () => (updateFinds ? [{ id: 'value-1', ...(arg as object) }] : []) }) }
       }),
     })),
   } as any
@@ -78,6 +81,23 @@ describe('CustomFieldsService.setValue — only a field the task has (found-30-s
       await new CustomFieldsService(db).setValue(WS, TASK, 'F', 'words', ACTOR)
       assert.deepEqual(written, [{ op: 'insert', arg: { taskId: TASK, fieldId: 'F', value: { v: 'words' } } }])
     }
+  })
+})
+
+/*
+ * The review of `found-6-oct/merge-drops-a-value-beside-an-emptied-one`: a
+ * merge deletes the merged task's value row once the survivor holds its value,
+ * and a write into that field queued behind the delete updated nothing — 200,
+ * and no row held its value (lane 7).
+ */
+describe('CustomFieldsService.setValue — a row gone between the read and the write', () => {
+  it('writes the value afresh when the row it read is gone by the time it writes, and answers with what it wrote', async () => {
+    // The task, the field, then the row the task held for it when it was read.
+    const { db, written } = scriptedDb([TASK_ROW, fieldRow({}), [{ id: 'gone', taskId: TASK, fieldId: 'F', value: { v: 'old' } }]], { updateFinds: false })
+    const row = await new CustomFieldsService(db).setValue(WS, TASK, 'F', 'words', ACTOR)
+    assert.deepEqual(written.map((w) => w.op), ['update', 'insert'])
+    assert.deepEqual(written[1]?.arg, { taskId: TASK, fieldId: 'F', value: { v: 'words' } })
+    assert.deepEqual(row?.value, { v: 'words' })
   })
 })
 

@@ -36,6 +36,7 @@ import {
   projectMembers,
   workspaces,
   workspaceMembers,
+  objectShares,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -80,6 +81,7 @@ import { canReachTask } from './mention-access'
 import {
   MERGE_REFUSAL_MESSAGE,
   emptyMergeTally,
+  holdsNoInformation,
   mergeRefusal,
   mergedDescription,
 } from './task-merge'
@@ -2206,6 +2208,7 @@ export class TasksService {
         projectName: projects.name,
         spaceId: projects.spaceId,
         spaceName: spaces.name,
+        folderId: projects.folderId,
       })
       .from(tasks)
       .innerJoin(lists, eq(lists.id, tasks.listId))
@@ -2225,7 +2228,74 @@ export class TasksService {
       )
       .orderBy(asc(tasks.startDate), asc(tasks.dueDate))
 
-    return rows
+    const mayEdit = opts.actor ? await this.timelineEditable(workspaceId, rows, opts.actor.id) : null
+    return rows.map(({ folderId: _folderId, ...row }) => (mayEdit ? { ...row, mayEdit: mayEdit(row) } : row))
+  }
+
+  /**
+   * MAY THE READER MOVE EACH BAR — the write rule's answer for each task the
+   * timeline draws (`found-30-sep/timeline-drags-refused-silently`), so the page
+   * offers a drag only to whoever `PATCH /tasks/:id` would take it from.
+   *
+   * The timeline first asked each LIST (`listCapabilities`), and a member or a
+   * guest given a task at Edit, in a list they may only view, was offered no
+   * drag while the PATCH took it from them (200): the write rule
+   * (`assertTaskWritable`) reads a share on the TASK before its list, project
+   * and folder. So this asks what the write rule asks — a workspace member;
+   * a manager changes anything; anybody else by `resolveSpaceLevel` at "edit",
+   * along the list's chain for each list and along the task's own for each task
+   * shared with them. Every row here is readable and out of the bin (the query
+   * above), the rest of what the write rule checks.
+   */
+  private async timelineEditable(
+    workspaceId: string,
+    rows: Array<{ id: string; listId: string; projectId: string; spaceId: string; folderId: string | null }>,
+    actorId: string,
+  ): Promise<(row: { id: string; listId: string }) => boolean> {
+    if (rows.length === 0) return () => true
+    const [membership] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actorId)))
+      .limit(1)
+    if (!membership) return () => false
+    if (isManagerRole(membership.role)) return () => true
+    const chain = (row: { listId: string; projectId: string; folderId: string | null }) => [
+      { type: 'list' as const, id: row.listId },
+      { type: 'project' as const, id: row.projectId },
+      ...(row.folderId ? [{ type: 'folder' as const, id: row.folderId }] : []),
+    ]
+    // Nothing resolved is somebody no space setting narrows, as the write rule reads it.
+    const edits = (resolved: { level: Parameters<typeof spaceLevelReaches>[0] } | null) =>
+      spaceLevelReaches(resolved?.level ?? 'admin', 'edit')
+    // A task's own grant is a share on it — what the rule reads first.
+    const shared = new Set(
+      (
+        await this.db
+          .select({ objectId: objectShares.objectId })
+          .from(objectShares)
+          .where(and(eq(objectShares.userId, actorId), eq(objectShares.objectType, 'task')))
+      ).map((share) => share.objectId),
+    )
+    const byList = new Map<string, (typeof rows)[number]>()
+    for (const row of rows) if (!byList.has(row.listId)) byList.set(row.listId, row)
+    const [listEdits, taskEdits] = await Promise.all([
+      Promise.all(
+        [...byList.values()].map(async (row) =>
+          [row.listId, edits(await resolveSpaceLevel(this.db, { spaceId: row.spaceId, actorId, within: chain(row) }))] as const,
+        ),
+      ),
+      Promise.all(
+        rows
+          .filter((row) => shared.has(row.id))
+          .map(async (row) =>
+            [row.id, edits(await resolveSpaceLevel(this.db, { spaceId: row.spaceId, actorId, within: [{ type: 'task' as const, id: row.id }, ...chain(row)] }))] as const,
+          ),
+      ),
+    ])
+    const inList = new Map(listEdits)
+    const onTask = new Map(taskEdits)
+    return (row) => onTask.get(row.id) ?? inList.get(row.listId) ?? true
   }
 
   /**
@@ -4897,26 +4967,37 @@ export class TasksService {
    * NOT WRAPPED IN A TRANSACTION, and that is a compromise worth naming. The
    * moves are `UPDATE ... SET task_id` statements against a dozen tables; a
    * failure part-way leaves work split across two tasks, both of which are
-   * still readable and neither of which has lost anything, because nothing is
-   * deleted here. The source is binned LAST, so a failure before that leaves a
-   * merge that can simply be run again. If this file ever gains a delete, it
-   * gains a transaction on the same commit.
+   * still readable and neither of which has lost anything. The source is
+   * binned LAST, so a failure before that leaves a merge that can simply be
+   * run again.
+   *
+   * ONE ROW IS DELETED, AND IN A TRANSACTION OF ITS OWN: the merged task's
+   * value of a field whose survivor value was emptied, once the survivor's own
+   * row holds that value (`fillEmptiedValue`). The fill and the delete commit
+   * together or not at all, and each asks that its row is still as it was
+   * read, so a failure loses nothing and a value written meanwhile stays.
+   * Should this file gain another delete, it gains a transaction for it on the
+   * same commit.
    *
    * Every move is counted and returned. A merge that reports what it moved is a
    * merge somebody can check; `{ ok: true }` is a merge you have to take on
    * faith, and this is the operation where faith is least warranted.
    */
   async mergeTask(taskId: string, targetTaskId: string, actorId: string) {
-    const [source] = await this.db
-      .select({ id: tasks.id, listId: tasks.listId, parentTaskId: tasks.parentTaskId, title: tasks.title, description: tasks.description, isArchived: tasks.isArchived })
-      .from(tasks)
-      .where(eq(tasks.id, taskId))
-      .limit(1)
-    const [target] = await this.db
-      .select({ id: tasks.id, listId: tasks.listId, parentTaskId: tasks.parentTaskId, title: tasks.title, description: tasks.description, isArchived: tasks.isArchived })
-      .from(tasks)
-      .where(eq(tasks.id, targetTaskId))
-      .limit(1)
+    // Each task with the workspace it is in, which the merge rule asks (`mergeRefusal`).
+    const subject = async (id: string) =>
+      (
+        await this.db
+          .select({ id: tasks.id, listId: tasks.listId, workspaceId: spaces.workspaceId, parentTaskId: tasks.parentTaskId, title: tasks.title, description: tasks.description, isArchived: tasks.isArchived })
+          .from(tasks)
+          .innerJoin(lists, eq(lists.id, tasks.listId))
+          .innerJoin(projects, eq(projects.id, lists.projectId))
+          .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+          .where(eq(tasks.id, id))
+          .limit(1)
+      )[0]
+    const source = await subject(taskId)
+    const target = await subject(targetTaskId)
 
     const sourceChildren = source
       ? await this.db.select({ id: tasks.id }).from(tasks).where(eq(tasks.parentTaskId, taskId))
@@ -5003,9 +5084,11 @@ export class TasksService {
     )
     /*
      * Custom fields collide on (task, field), and here a collision means the
-     * two tasks disagree about the same field. The TARGET's value is kept: it
-     * describes the task that continues, and silently overwriting it with the
-     * binned task's answer would change data nobody asked to change. And only
+     * two tasks disagree about the same field. The TARGET's value is kept when
+     * it holds something: it describes the task that continues, and silently
+     * overwriting it with the binned task's answer would change data nobody
+     * asked to change. An emptied one — cleared, an empty text or list — holds
+     * nothing, and takes the binned task's value (`fillEmptiedValue`). And only
      * the values of fields both tasks have move (`moveFieldValues`).
      */
     moved.customFields = await this.moveFieldValues({ id: taskId, listId: source.listId }, { id: targetTaskId, listId: target.listId })
@@ -5060,6 +5143,9 @@ export class TasksService {
    * longer showed, and merged into a task of that list it gave the survivor
    * that value (201, measured on lane 7), where it then showed. Such a row
    * stays on the binned task, as it was.
+   *
+   * THE SURVIVOR'S OWN VALUE IS KEPT WHEN IT HOLDS SOMETHING. An emptied one
+   * takes the merged task's value in its place (`fillEmptiedValue`).
    */
   private async moveFieldValues(from: { id: string; listId: string }, to: { id: string; listId: string }): Promise<number> {
     const homeOf = async (listId: string) =>
@@ -5078,9 +5164,56 @@ export class TasksService {
     return this.moveOrDrop(
       customFieldValues, from.id, to.id,
       (r) => and(eq(customFieldValues.taskId, to.id), eq(customFieldValues.fieldId, r.fieldId)),
-      { taskId: customFieldValues.taskId, id: customFieldValues.id, fieldId: customFieldValues.fieldId },
+      { taskId: customFieldValues.taskId, id: customFieldValues.id, fieldId: customFieldValues.fieldId, value: customFieldValues.value },
       (r) => movable.has(r.fieldId),
+      (r, survivors) => this.fillEmptiedValue(r, survivors),
     )
+  }
+
+  /**
+   * A MERGED TASK'S VALUE BESIDE THE SURVIVOR'S OWN, of a field both have.
+   *
+   * The survivor's is kept when it holds something. An emptied one — cleared,
+   * an empty text or list (`holdsNoInformation`) — holds nothing, and takes a
+   * merged value that holds something: ClickUp adds the merged task's value
+   * "only … if task B doesn't have any information in the same Custom Field"
+   * (help centre, "Merge tasks", read through search excerpts). Any row of the
+   * survivor's was kept, so a Note set and then cleared there kept the merged
+   * task's Note in the bin (201, none moved, lane 7,
+   * `found-6-oct/merge-drops-a-value-beside-an-emptied-one`).
+   *
+   * FILLED WHERE IT IS, AND ONLY AS IT WAS READ. The survivor's row was first
+   * deleted by id and the merged row moved in its place, and a value written
+   * into the survivor's field while the merge ran went with it: queued ahead
+   * of the merge's delete, the PUT answered 200 and then no row anywhere held
+   * its value; queued behind it, the PUT found its row gone, answered 200 and
+   * wrote nothing (lane 7, each order fixed by a row lock: the first in three
+   * runs alike, the second in two). And, the review read, a write between the
+   * delete and the move could make a row of its own, which the move would then
+   * run into half-way through the merge. So the survivor's row is never
+   * deleted: it takes the merged value only while it still holds what was
+   * read — a value written there first stays, and one written after lands on
+   * the row, which is still there. The merged task's row then goes, only while
+   * it is as it was read; and the two are one transaction (`mergeTask`).
+   * Answers whether the value reached the survivor.
+   */
+  private async fillEmptiedValue(
+    merged: { id: string; value: typeof customFieldValues.$inferSelect.value },
+    survivors: { id: string; value: typeof customFieldValues.$inferSelect.value },
+  ): Promise<boolean> {
+    const givesWay = !holdsNoInformation(merged.value) && holdsNoInformation(survivors.value)
+    if (!givesWay) return false
+    const v = customFieldValues
+    return this.db.transaction(async (tx) => {
+      const [filled] = await tx
+        .update(v)
+        .set({ value: merged.value, updatedAt: new Date() })
+        .where(and(eq(v.id, survivors.id), eq(v.value, survivors.value)))
+        .returning({ id: v.id })
+      if (!filled) return false
+      await tx.delete(v).where(and(eq(v.id, merged.id), eq(v.value, merged.value)))
+      return true
+    })
   }
 
   /**
@@ -5094,6 +5227,11 @@ export class TasksService {
    * `movable`, where given, keeps a row it refuses where it is, on the merged
    * task, as a clash is kept: the custom-field values of fields the two tasks
    * do not both have (`moveFieldValues`).
+   *
+   * `settle`, where given, is handed each clash — this row and the target's
+   * own, read with the same columns — instead of dropping it, and answers
+   * whether this row's content reached the target: a survivor's emptied
+   * custom-field value, which takes the merged one (`fillEmptiedValue`).
    */
   private async moveOrDrop<T extends { taskId: unknown }>(
     table: T,
@@ -5105,6 +5243,8 @@ export class TasksService {
     columns: any,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     movable?: (row: any) => boolean,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    settle?: (row: any, clash: any) => Promise<boolean>,
   ): Promise<number> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const t = table as any
@@ -5112,8 +5252,11 @@ export class TasksService {
     let movedCount = 0
     for (const row of rows) {
       if (movable && !movable(row)) continue
-      const [clash] = await this.db.select({ id: t.id }).from(t).where(existing(row)).limit(1)
-      if (clash) continue
+      const [clash] = await this.db.select(settle ? columns : { id: t.id }).from(t).where(existing(row)).limit(1)
+      if (clash) {
+        if (settle && (await settle(row, clash))) movedCount += 1
+        continue
+      }
       await this.db.update(t).set({ taskId: toTaskId }).where(eq(t.id, row.id))
       movedCount += 1
     }

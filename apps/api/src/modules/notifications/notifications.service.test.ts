@@ -114,6 +114,8 @@ describe('NotificationsService.create — mobile push rides the Web Push transpo
     )
     const realtime = { emitToUser: mock.fn() }
     const svc = new NotificationsService(db, realtime as any, {} as any, stubConfig())
+    // The item's read rule is the notification-reach tests' (`notification-reach.test.ts`); here the recipient may read it.
+    ;(svc as any).recipientMayRead = async () => true
     const pushes: Array<{ userId: string; payload: any }> = []
     ;(svc as any).sendWebPush = async (userId: string, payload: any) => {
       pushes.push({ userId, payload })
@@ -178,6 +180,7 @@ describe('NotificationsService.create — mobile push rides the Web Push transpo
       INSERTED,
     )
     const svc = new NotificationsService(db, { emitToUser: mock.fn() } as any, {} as any, stubConfig(vapid))
+    ;(svc as any).recipientMayRead = async () => true
 
     const original = webpush.sendNotification
     let sent = 0
@@ -193,6 +196,50 @@ describe('NotificationsService.create — mobile push rides the Web Push transpo
       assert.equal(sent, 2)
     } finally {
       ;(webpush as any).sendNotification = original
+    }
+  })
+})
+
+// --- found-6-oct/an-open-socket-outlives-its-access — nothing about an item its recipient may not read
+
+/*
+ * A task's followers, a doc's author, the person a reminder is for were chosen
+ * when they could read the item, and nothing asked again: measured on lane 2,
+ * people whose access had ended went on being notified about a task they
+ * followed — on their open socket, in their inbox, by mail — with its new title
+ * in the notification's own. The item's read rule is asked first
+ * (`notification-reach.ts`), with the recipient's account role.
+ */
+describe('NotificationsService.create — nothing about an item its recipient may not read', () => {
+  it('a notification about an item its recipient may not read now is neither written, sent, mailed nor pushed, and one they may read is all four', async () => {
+    for (const may of [false, true]) {
+      const db = buildCreateDb(
+        [[{ notificationPreferences: prefsFor({ inApp: true, web: true, mobile: true, email: true }), timezone: 'UTC', role: 'member' }]],
+        INSERTED,
+      )
+      let written = 0
+      const insert = db.insert
+      db.insert = () => { written += 1; return insert() }
+      const realtime = { emitToUser: mock.fn() }
+      const svc = new NotificationsService(db, realtime as any, {} as any, stubConfig())
+      const asked: unknown[] = []
+      ;(svc as any).recipientMayRead = async (data: any, role: string | null) => {
+        asked.push([data.userId, data.workspaceId, data.target?.entityType, data.target?.entityId, role])
+        return may
+      }
+      const mailed: unknown[] = []
+      ;(svc as any).sendEmail = async (d: unknown) => { mailed.push(d) }
+      const pushed: unknown[] = []
+      ;(svc as any).sendWebPush = async (_u: string, p: unknown) => { pushed.push(p) }
+      const outcome = await svc.createWithOutcome(createArgs())
+      await new Promise((resolve) => setImmediate(resolve))
+      assert.deepEqual(asked, [['u1', 'ws1', 'task', 't1', 'member']], 'the item’s read rule was not asked, or not with the recipient and their account role')
+      const went = { written, sent: realtime.emitToUser.mock.calls.length, mailed: mailed.length, pushed: pushed.length, delivered: outcome.delivered }
+      assert.deepEqual(
+        went,
+        may ? { written: 1, sent: 1, mailed: 1, pushed: 1, delivered: true } : { written: 0, sent: 0, mailed: 0, pushed: 0, delivered: false },
+        may ? 'a notification its recipient may read did not go out' : 'a notification about an item its recipient may not read went out',
+      )
     }
   })
 })

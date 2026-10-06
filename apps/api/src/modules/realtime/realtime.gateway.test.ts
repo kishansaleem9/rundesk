@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { lists, users, workspaceMembers } from '@rundesk/db'
 import { RealtimeGateway } from './realtime.gateway'
 
 /*
@@ -218,14 +219,404 @@ describe('RealtimeGateway — a sweep whose session read fails', () => {
     t.mock.timers.enable({ apis: ['setInterval'] })
     const gateway = gatewayWithSessions({})
     ;(gateway as any).disconnectRevokedSockets = async () => { throw new Error('the database did not answer') }
+    ;(gateway as any).askRoomsAgain = async () => { throw new Error('the database did not answer either') }
     const unheard = await unheardRejectionsDuring(async () => {
       gateway.afterInit()
       try {
-        t.mock.timers.tick((RealtimeGateway as any).REVOKED_SWEEP_MS)
+        t.mock.timers.tick((RealtimeGateway as any).SWEEP_MS)
       } finally {
         gateway.onModuleDestroy()
       }
     })
     assert.deepEqual(unheard.map((r) => String((r as Error)?.message ?? r)), [], 'the timer left a failed sweep unheard (it would end the process)')
+  })
+})
+
+/*
+ * THE SESSIONS ARE ASKED ABOUT AT EVERY TICK, WHATEVER THE ROOMS COST
+ * (`found-6-oct/an-open-socket-outlives-its-access`, review). The room questions
+ * were asked in the same sweep as the sessions, after them, and a tick that
+ * found that sweep running skipped both: measured on lane 2, with one member's
+ * socket holding 3,000 task rooms a signed-out session's socket stayed open
+ * 9.7 s, where it had closed in 3.9 s. Each runs on its own now, one of each at
+ * a time, and a tick that comes while a room pass runs starts the next one as
+ * soon as it ends.
+ */
+/** Let the microtasks a settled sweep queued run, as they would before the next tick. */
+const settle = async () => { for (let i = 0; i < 3; i += 1) await new Promise((resolve) => setImmediate(resolve)) }
+
+describe('RealtimeGateway — the session sweep and the room pass, each on its own', () => {
+  it('the session sweep runs at every tick while a room pass is still running: a revoked session’s socket does not wait behind the rooms', async (t) => {
+    t.mock.timers.enable({ apis: ['setInterval'] })
+    const gateway = gatewayWithSessions({})
+    let sessionSweeps = 0
+    let roomPasses = 0
+    let finishRooms: (() => void) | undefined
+    ;(gateway as any).disconnectRevokedSockets = async () => { sessionSweeps += 1 }
+    ;(gateway as any).askRoomsAgain = () => {
+      roomPasses += 1
+      return new Promise<void>((resolve) => { finishRooms = resolve })
+    }
+    gateway.afterInit()
+    try {
+      for (let i = 0; i < 3; i += 1) {
+        t.mock.timers.tick((RealtimeGateway as any).SWEEP_MS)
+        await settle()
+      }
+      assert.equal(roomPasses, 1, 'a room pass was started on top of one still running')
+      assert.equal(sessionSweeps, 3, `the sessions were asked about ${sessionSweeps} times in 3 ticks while a room pass ran (a revoked session’s socket waited behind the rooms)`)
+    } finally {
+      finishRooms?.()
+      gateway.onModuleDestroy()
+    }
+  })
+
+  it('one room pass at a time: a tick that comes while one runs starts the next as soon as it ends, not on top of it', async (t) => {
+    t.mock.timers.enable({ apis: ['setInterval'] })
+    const gateway = gatewayWithSessions({})
+    const finish: Array<() => void> = []
+    ;(gateway as any).disconnectRevokedSockets = async () => undefined
+    ;(gateway as any).askRoomsAgain = () => new Promise<void>((resolve) => { finish.push(resolve) })
+    gateway.afterInit()
+    try {
+      t.mock.timers.tick((RealtimeGateway as any).SWEEP_MS)
+      t.mock.timers.tick((RealtimeGateway as any).SWEEP_MS)
+      t.mock.timers.tick((RealtimeGateway as any).SWEEP_MS)
+      assert.equal(finish.length, 1, 'a tick started a room pass while the last one was still running')
+      finish[0]()
+      await settle()
+      assert.equal(finish.length, 2, 'the ticks that came while a pass ran did not start the next one when it ended')
+      finish[1]()
+      await settle()
+      assert.equal(finish.length, 2, 'a pass started with no tick having come since the last one began')
+      t.mock.timers.tick((RealtimeGateway as any).SWEEP_MS)
+      assert.equal(finish.length, 3, 'no room pass started at the next tick')
+    } finally {
+      for (const done of finish) done()
+      gateway.onModuleDestroy()
+    }
+  })
+})
+
+/*
+ * A SOCKET HEARS WHAT ITS PERSON MAY READ NOW
+ * (`found-6-oct/an-open-socket-outlives-its-access`). A room was asked once,
+ * at `subscribe`; measured on lane 2, a member removed from the workspace, a
+ * guest whose share was removed, a member lowered to guest and members of a
+ * list and of a space made private each heard a task made seven seconds later
+ * on a socket already open. Each room pass now asks again every room a live
+ * socket's pages asked for (`canJoinRoom`), leaves those its person may no
+ * longer read and joins again those they may read once more. Here the rule
+ * itself is a stand-in, so what is checked is the pass: who is asked, how
+ * often, in what order, and what is left or joined; `realtime-access-ends.mjs`
+ * runs the rule on a lane.
+ */
+const ANOTHER = 'c3333333-3333-4333-8333-333333333333'
+/** A fake socket whose pages asked for these rooms and hold them (let in under `workspaceId`), recording what it leaves and joins and whether it was closed. */
+function holding(id: string, userId: string, sid: string, rooms: string[], workspaceId: string | null = null, role?: string) {
+  const left: string[] = []
+  const joined: string[] = []
+  let disconnected = false
+  const client = {
+    id,
+    data: { userId, sid, role, wanted: new Map(rooms.map((room) => [room, workspaceId])) } as Record<string, unknown>,
+    rooms: new Set([id, `user:${userId}`, ...rooms]),
+    disconnected: false,
+    emit: () => undefined,
+    disconnect: () => { disconnected = true },
+    join: (room: string) => { joined.push(room); client.rooms.add(room) },
+    leave: (room: string) => { left.push(room); client.rooms.delete(room) },
+  }
+  return { client, left, joined, disconnected: () => disconnected }
+}
+/** The gateway's namespace, holding these fake sockets. */
+function serving(gateway: RealtimeGateway, ...sockets: Array<{ client: { id: string } }>) {
+  ;(gateway as any).server = { sockets: new Map(sockets.map((s) => [s.client.id, s.client])) }
+}
+
+describe('RealtimeGateway — a socket stops hearing the rooms its person may no longer read', () => {
+  it('the sweep makes a socket leave each room its person may no longer read, asking once per person and room however many of their sockets hold it, and keeps the rooms they may still read and their own', async () => {
+    const gateway = gatewayWithSessions({})
+    const tabOne = holding('s1', 'u1', LIVE, ['workspace:w1', 'list:gone', 'list:kept'])
+    const tabTwo = holding('s2', 'u1', LIVE, ['list:gone'])
+    const other = holding('s3', 'u2', ANOTHER, ['list:gone'])
+    serving(gateway, tabOne, tabTwo, other)
+    const asked: string[] = []
+    // u1 may no longer read the workspace or list:gone; u2 still reads list:gone.
+    ;(gateway as any).canJoinRoom = async (client: { data: { userId: string } }, room: string) => {
+      asked.push(`${client.data.userId} ${room}`)
+      if (client.data.userId === 'u2') return true
+      return room === 'list:kept'
+    }
+    await (gateway as any).askRoomsAgain()
+    assert.deepEqual(asked.sort(), ['u1 list:gone', 'u1 list:kept', 'u1 workspace:w1', 'u2 list:gone'], 'a room was asked more than once a person, or a socket’s own room was asked')
+    assert.deepEqual(tabOne.left.sort(), ['list:gone', 'workspace:w1'], 'the first tab kept a room its person may no longer read')
+    assert.deepEqual(tabTwo.left, ['list:gone'], 'the second tab of the same person kept the room')
+    assert.deepEqual(other.left, [], 'a person who may still read the room was made to leave it')
+    assert.deepEqual([...tabOne.client.rooms].sort(), ['list:kept', 's1', 'user:u1'], 'the socket did not keep its own rooms and the one it may read')
+    assert.equal(tabOne.disconnected() || tabTwo.disconnected() || other.disconnected(), false, 'a socket whose session is live was closed')
+  })
+
+  it('a room question that fails keeps the room: the sweep resolves, leaves nothing it could not ask, and leaves no rejection unheard', async () => {
+    const gateway = gatewayWithSessions({})
+    const sock = holding('s1', 'u1', LIVE, ['list:unasked', 'list:refused'])
+    serving(gateway, sock)
+    ;(gateway as any).canJoinRoom = async (_client: unknown, room: string) => {
+      if (room === 'list:unasked') {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        throw new Error('database "rundesk" is not currently accepting connections')
+      }
+      return false
+    }
+    let threw: unknown = null
+    const unheard = await unheardRejectionsDuring(async () => {
+      try { await (gateway as any).askRoomsAgain() } catch (err) { threw = err }
+    })
+    assert.equal(threw, null, `the sweep threw: ${String((threw as Error | null)?.message ?? threw)}`)
+    assert.deepEqual(unheard.map((r) => String((r as Error)?.message ?? r)), [], 'a failed room question went unheard (it would end the process)')
+    assert.deepEqual(sock.left, ['list:refused'], 'a room whose question failed was left, or a refused one kept (the failed one is asked again at the next sweep)')
+  })
+
+  /*
+   * A PERSON REMOVED FROM A WORKSPACE LEAVES ALL OF ITS ROOMS AT ONCE. Asked
+   * room by room, in turn with everyone else, a removed member whose socket held
+   * 3,000 task rooms went on hearing them 18.6 s after the removal (lane 2).
+   * Each room is held with the workspace it was let in under, and one
+   * membership read for each person and workspace settles them all.
+   */
+  it('a person no longer a member of a workspace leaves every room of theirs there at once, on one membership read however many they hold; a member, and a super_admin, are asked room by room', async () => {
+    const gateway = gatewayWithSessions({})
+    const removed = holding('s1', 'u1', LIVE, Array.from({ length: 30 }, (_, i) => `task:t${i}`), 'w1')
+    const member = holding('s2', 'u2', ANOTHER, ['list:a', 'list:b'], 'w1')
+    const superAdmin = holding('s3', 'u3', ANOTHER, ['list:c'], 'w1', 'super_admin')
+    serving(gateway, removed, member, superAdmin)
+    const memberships: string[] = []
+    ;(gateway as any).membershipOf = async (workspaceId: string, userId: string) => {
+      memberships.push(`${workspaceId} ${userId}`)
+      return userId === 'u2' ? [{ role: 'member' }] : []
+    }
+    const asked: string[] = []
+    ;(gateway as any).canJoinRoom = async (client: { data: { userId: string } }, room: string) => {
+      asked.push(`${client.data.userId} ${room}`)
+      return true
+    }
+    await (gateway as any).askRoomsAgain()
+    assert.equal(removed.left.length, 30, `the removed member left ${removed.left.length} of their 30 rooms`)
+    assert.deepEqual(asked.filter((q) => q.startsWith('u1 ')), [], 'the removed member’s rooms were asked one by one')
+    assert.deepEqual(memberships.sort(), ['w1 u1', 'w1 u2'], 'the membership was read more than once a person and workspace, or a super_admin’s was asked')
+    assert.deepEqual(asked.filter((q) => !q.startsWith('u1 ')).sort(), ['u2 list:a', 'u2 list:b', 'u3 list:c'], 'a member’s or a super_admin’s rooms were not asked one by one')
+    assert.deepEqual(member.left.concat(superAdmin.left), [], 'a member or a super_admin left a room they may read')
+  })
+
+  /*
+   * ACCESS THAT COMES BACK IS HEARD AGAIN ON THE SAME SOCKET. Leaving alone,
+   * measured on lane 2, kept an open page deaf to its list once its reader's
+   * access came back (a list made private and public again, a member added to
+   * the private space, a guest made a member again) until it was reloaded: a
+   * page subscribes once, when it mounts.
+   */
+  it('a socket joins again a room its page still holds once its person may read it again, and not one its page let go', async () => {
+    const gateway = gatewayWithSessions({})
+    const sock = holding('s1', 'u1', LIVE, ['list:back', 'list:let-go'])
+    serving(gateway, sock)
+    let may = false
+    ;(gateway as any).canJoinRoom = async () => may
+    await (gateway as any).askRoomsAgain()
+    assert.deepEqual(sock.left.sort(), ['list:back', 'list:let-go'], 'the rooms its person lost were not left')
+    // The page that held one of them goes away; then access comes back.
+    gateway.handleUnsubscribe(sock.client as any, { rooms: ['list:let-go'] as any })
+    may = true
+    await (gateway as any).askRoomsAgain()
+    assert.deepEqual(sock.joined, ['list:back'], 'the socket did not join again the room its page still holds, or joined one its page let go')
+    assert.deepEqual([...sock.client.rooms].sort(), ['list:back', 's1', 'user:u1'])
+  })
+
+  it('a subscribe holds the rooms it was let into for the pass to ask about again, and an unsubscribe lets them go', async () => {
+    const gateway = gatewayWithSessions({})
+    const sock = holding('s1', 'u1', LIVE, [])
+    serving(gateway, sock)
+    ;(gateway as any).canJoinRoom = async (_client: unknown, room: string) => room !== 'list:refused'
+    await gateway.handleSubscribe(sock.client as any, { rooms: ['list:a', 'list:refused', 'task:b'] as any })
+    assert.deepEqual([...(sock.client.data.wanted as Map<string, unknown>).keys()].sort(), ['list:a', 'task:b'], 'a subscribe did not hold what it joined, or held what it was refused')
+    gateway.handleUnsubscribe(sock.client as any, { rooms: ['task:b'] as any })
+    assert.deepEqual([...(sock.client.data.wanted as Map<string, unknown>).keys()], ['list:a'], 'an unsubscribe did not let the room go')
+  })
+})
+
+/*
+ * A PASS ASKS A FEW ROOMS AT A TIME, SHARES ITS READS, ACTS ON EACH ANSWER WHEN
+ * IT COMES, ASKS EVERY PERSON IN TURN, AND LASTS AT MOST ONE INTERVAL. Asked
+ * all at once, a sweep's questions took the database's whole pool: measured on
+ * lane 2, 200 people holding four rooms each (800 questions) took 1.7 s and a
+ * request's read sent meanwhile waited 0.7 s behind them; four at a time, it
+ * waited 6 ms. Asked socket by socket and acted on at the end, one socket
+ * holding 3,000 task rooms kept a removed member hearing a list 9.5 s after
+ * their removal, and three such sockets 21.8 s (lane 2).
+ */
+describe('RealtimeGateway — what a room pass costs, and in what order it asks', () => {
+  it('a sweep asks at most ROOM_QUESTIONS_AT_ONCE room questions at a time, and answers every one', async () => {
+    const gateway = gatewayWithSessions({})
+    const rooms = Array.from({ length: 30 }, (_, i) => `list:l${i}`)
+    const sock = holding('s1', 'u1', LIVE, rooms)
+    serving(gateway, sock)
+    let inFlight = 0
+    let most = 0
+    const answered: string[] = []
+    ;(gateway as any).canJoinRoom = async (_client: unknown, room: string) => {
+      inFlight += 1
+      most = Math.max(most, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      inFlight -= 1
+      answered.push(room)
+      return room !== 'list:l7'
+    }
+    await (gateway as any).askRoomsAgain()
+    const atOnce = (RealtimeGateway as any).ROOM_QUESTIONS_AT_ONCE
+    assert.ok(atOnce >= 1 && most <= atOnce, `${most} room questions were asked at once (the pool is the requests’ too; at most ${atOnce})`)
+    assert.deepEqual(answered.sort(), [...rooms].sort(), 'a room was not asked, or was asked twice')
+    assert.deepEqual(sock.left, ['list:l7'], 'the refused room was not left, or a readable one was')
+  })
+
+  it('within one sweep a room’s workspace is read once, and a person’s membership of it once, however many of their rooms ask; a subscribe reads afresh', async () => {
+    const reads: string[] = []
+    const fromTable = (table: unknown) => ({
+      innerJoin() { return this },
+      where() { return this },
+      limit: async () => {
+        if (table === lists) { reads.push('workspace of a list'); return [{ w: 'w1' }] }
+        if (table === workspaceMembers) { reads.push('membership'); return [{ role: 'workspace_admin' }] }
+        throw new Error('an unexpected read')
+      },
+    })
+    const db = { select: () => ({ from: (table: unknown) => fromTable(table) }) }
+    const gateway = new RealtimeGateway({} as any, {} as any, db as any, { recordHeartbeat: async () => undefined } as any)
+    const one = holding('s1', 'u1', LIVE, ['workspace:w1', 'list:a', 'list:b'])
+    const two = holding('s2', 'u2', LIVE, ['list:a'])
+    serving(gateway, one, two)
+    await (gateway as any).askRoomsAgain()
+    assert.deepEqual(reads.filter((r) => r === 'workspace of a list').length, 2, 'a list’s workspace was read more than once in a sweep (two lists)')
+    assert.deepEqual(reads.filter((r) => r === 'membership').length, 2, 'a person’s membership was read more than once in a sweep (two people)')
+    assert.deepEqual(one.left.concat(two.left), [], 'a manager was made to leave a room')
+    // A subscribe is no sweep: it reads afresh every time.
+    reads.length = 0
+    await gateway.handleSubscribe(one.client as any, { rooms: ['list:a', 'list:a'] as any })
+    assert.deepEqual(reads, ['workspace of a list', 'membership', 'workspace of a list', 'membership'], 'a subscribe was answered from an earlier read')
+  })
+
+  it('each answer is acted on when it comes: a refused room is left while the pass is still asking about others', async () => {
+    const gateway = gatewayWithSessions({})
+    const sock = holding('s1', 'u1', LIVE, ['list:refused', 'list:slow'])
+    serving(gateway, sock)
+    let release!: () => void
+    const slow = new Promise<void>((resolve) => { release = resolve })
+    ;(gateway as any).canJoinRoom = async (_client: unknown, room: string) => {
+      if (room === 'list:refused') return false
+      await slow
+      return true
+    }
+    const pass = (gateway as any).askRoomsAgain() as Promise<void>
+    await settle()
+    assert.deepEqual(sock.left, ['list:refused'], 'a refused room was kept until every other question of the pass was answered')
+    release()
+    await pass
+    assert.deepEqual(sock.left, ['list:refused'])
+  })
+
+  it('every person in turn: one socket’s many rooms do not put another person’s rooms at the end of the pass', async () => {
+    const gateway = gatewayWithSessions({})
+    const heavy = holding('s1', 'u1', LIVE, Array.from({ length: 40 }, (_, i) => `task:t${i}`))
+    const light = holding('s2', 'u2', ANOTHER, ['list:a', 'list:b'])
+    serving(gateway, heavy, light)
+    const order: string[] = []
+    ;(gateway as any).canJoinRoom = async (client: { data: { userId: string } }, room: string) => {
+      order.push(`${client.data.userId} ${room}`)
+      return true
+    }
+    await (gateway as any).askRoomsAgain()
+    const lightAt = order.map((asked, i) => (asked.startsWith('u2 ') ? i : -1)).filter((i) => i >= 0)
+    assert.equal(order.length, 42)
+    assert.ok(lightAt.length === 2 && Math.max(...lightAt) < 4, `the light person’s rooms were asked at ${JSON.stringify(lightAt)} of 42, behind the other socket’s`)
+  })
+
+  it('a pass stops asking once the interval is up, and the next pass asks first the rooms the last did not reach', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 })
+    const gateway = gatewayWithSessions({})
+    const rooms = Array.from({ length: 20 }, (_, i) => `list:l${i}`)
+    const sock = holding('s1', 'u1', LIVE, rooms)
+    serving(gateway, sock)
+    const interval = (RealtimeGateway as any).SWEEP_MS as number
+    const asked: string[][] = [[], []]
+    let passIndex = 0
+    // Each question takes a fifth of the interval.
+    ;(gateway as any).canJoinRoom = async (_client: unknown, room: string) => {
+      asked[passIndex].push(room)
+      t.mock.timers.tick(interval / 5)
+      return true
+    }
+    await (gateway as any).askRoomsAgain()
+    assert.ok(asked[0].length >= 1 && asked[0].length <= 5 + (RealtimeGateway as any).ROOM_QUESTIONS_AT_ONCE, `a pass asked ${asked[0].length} questions in an interval that fits five`)
+    passIndex = 1
+    t.mock.timers.tick(interval)
+    await (gateway as any).askRoomsAgain()
+    const again = asked[1].filter((room) => asked[0].includes(room))
+    assert.deepEqual(again, [], `the next pass asked again ${JSON.stringify(again)} before the rooms the last did not reach`)
+  })
+  it('a person the last pass did not reach is asked first in the next, however many people there are', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: 2_000_000 })
+    const gateway = gatewayWithSessions({})
+    const people = Array.from({ length: 10 }, (_, i) => holding(`s${i}`, `u${i}`, LIVE, [`list:l${i}`]))
+    serving(gateway, ...people)
+    const interval = (RealtimeGateway as any).SWEEP_MS as number
+    const asked: string[][] = [[], []]
+    let passIndex = 0
+    // Each question takes a third of the interval: a pass reaches three or four people of ten.
+    ;(gateway as any).canJoinRoom = async (client: { data: { userId: string } }) => {
+      asked[passIndex].push(client.data.userId)
+      t.mock.timers.tick(interval / 3)
+      return true
+    }
+    await (gateway as any).askRoomsAgain()
+    assert.ok(asked[0].length >= 1 && asked[0].length < 10, `the first pass asked ${asked[0].length} of ten people in an interval that fits three`)
+    passIndex = 1
+    t.mock.timers.tick(interval)
+    await (gateway as any).askRoomsAgain()
+    const again = asked[1].filter((person) => asked[0].includes(person))
+    assert.deepEqual(again, [], `the next pass asked again ${JSON.stringify(again)} before the people the last did not reach`)
+  })
+})
+
+/*
+ * A SUPER_ADMIN PASSES, AS IN EVERY GUARD (`ResourceMemberGuard`,
+ * `read-access.ts`). Measured on lane 2: a super_admin who was a plain member
+ * read a list made private (200), and the room pass took their open socket out
+ * of it. The socket's role is its handshake token's, so the account is asked
+ * whether it still is one.
+ */
+describe('RealtimeGateway — a super_admin’s rooms', () => {
+  function gatewayWhere(accountRole: string) {
+    const reads: string[] = []
+    const fromTable = (table: unknown) => ({
+      innerJoin() { return this },
+      where() { return this },
+      limit: async () => {
+        if (table === lists) { reads.push('workspace of a list'); return [{ w: 'w1' }] }
+        if (table === users) { reads.push('account role'); return [{ role: accountRole }] }
+        if (table === workspaceMembers) { reads.push('membership'); return [] }
+        throw new Error('an unexpected read')
+      },
+    })
+    const db = { select: () => ({ from: (table: unknown) => fromTable(table) }) }
+    return { gateway: new RealtimeGateway({} as any, {} as any, db as any, { recordHeartbeat: async () => undefined } as any), reads }
+  }
+  const socketOf = (role: string) => ({ id: 's1', data: { userId: 'u1', role } })
+
+  it('a super_admin may join a list’s room the routes let them read, while their account still is one; a token that says so of an account that no longer is one is asked as anyone else', async () => {
+    const still = gatewayWhere('super_admin')
+    assert.equal(await (still.gateway as any).canJoinRoom(socketOf('super_admin'), 'list:a'), true, 'a super_admin was refused a room the routes let them read')
+    const demoted = gatewayWhere('member')
+    assert.equal(await (demoted.gateway as any).canJoinRoom(socketOf('super_admin'), 'list:a'), false, 'a token’s super_admin was trusted for an account that no longer is one')
+    const member = gatewayWhere('super_admin')
+    assert.equal(await (member.gateway as any).canJoinRoom(socketOf('member'), 'list:a'), false, 'a socket whose token never said super_admin was passed')
+    assert.equal(member.reads.includes('account role'), false, 'the account was asked about a socket whose token never said super_admin')
   })
 })

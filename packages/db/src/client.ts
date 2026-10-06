@@ -1,6 +1,7 @@
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import * as schema from './schema'
+import { readTimestamptzText, TIMESTAMPTZ_OID } from './timestamp-text'
 
 export type Schema = typeof schema
 export type Db = PostgresJsDatabase<Schema>
@@ -20,6 +21,10 @@ export function getDb(connectionString?: string): Db {
   if (existing) return existing
   const client = postgres(url, { prepare: false })
   const db = drizzle(client, { schema })
+  // AFTER drizzle, which sets every timestamp's parser to hand its columns the
+  // raw text: that text, as a form they read as stored (`timestamp-text.ts`,
+  // `found-5-oct/years-below-100-read-back-wrong`).
+  client.options.parsers[TIMESTAMPTZ_OID] = readTimestamptzText
   _pools.set(url, db)
   return db
 }

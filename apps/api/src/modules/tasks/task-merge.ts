@@ -31,7 +31,8 @@
  * docs, external links, sprint membership, reminders and planner blocks. And
  * custom field values, of the fields both tasks have — the source's where it
  * is now, and the survivor's (`fieldIsOnTask`) — where the survivor holds no
- * value of its own (`TasksService.moveFieldValues`).
+ * value of its own (`TasksService.moveFieldValues`), or only an emptied one,
+ * which takes the source's value in its place (`TasksService.fillEmptiedValue`).
  *
  * LEFT ON THE SOURCE, because it is a record of what happened TO the source and
  * moving it would rewrite history: its activity log, its description history,
@@ -41,9 +42,11 @@
  * And three kinds of custom field value, which stay as they were: the value
  * of a field the survivor lacks, which the binned task still shows; a value
  * the source itself no longer showed; and one where the survivor holds its own
- * (`found-30-sep/merge-moves-values-onto-fields-the-target-lacks`). ClickUp
- * asks before such a merge whether to add the field to the survivor (help
- * centre, "Merge tasks"); whether this one should is the owner's to decide.
+ * that holds something (`found-30-sep/merge-moves-values-onto-fields-the-target-lacks`).
+ * A survivor's emptied value — cleared, an empty text or list — holds nothing,
+ * and the source's takes its place (`holdsNoInformation`). ClickUp asks before
+ * such a merge whether to add the field to the survivor (help centre, "Merge
+ * tasks"); whether this one should is the owner's to decide.
  */
 export const MERGE_MOVES = [
   'comments',
@@ -72,6 +75,8 @@ export function emptyMergeTally(): MergeMoved {
 export type MergeSubject = {
   id: string
   listId: string
+  /** The workspace the task is in, by its list's project's space. */
+  workspaceId: string
   parentTaskId: string | null
   description: string | null
   isArchived: boolean | null
@@ -81,6 +86,7 @@ export type MergeRefusal =
   | 'same-task'
   | 'source-missing'
   | 'target-missing'
+  | 'other-workspace'
   | 'would-nest-twice'
   | 'already-binned'
 
@@ -102,6 +108,25 @@ export function mergeRefusal(
 ): MergeRefusal | null {
   if (!source) return 'source-missing'
   if (!target) return 'target-missing'
+  /*
+   * ONE WORKSPACE. Nothing asked it: someone who may write in two workspaces
+   * merged a task of one into a task of the other (201), and its comment then
+   * sat in the other workspace (read by SQL, lane 7,
+   * `found-6-oct/merge-moves-work-across-workspaces`) — across organisations,
+   * one's comments, files and time moved into another's. ClickUp: "Workspaces
+   * are independent, so it's not possible to transfer information between
+   * separate ones" (help centre, "Create a new Workspace", read through search
+   * excerpts). Asked before anything else of the target.
+   *
+   * REFUSED WITH ITS REASON (400, as this rule's other refusals are), in the
+   * words a list or a project moved to another workspace is refused in ("A
+   * list can only be moved within its own workspace"). It was first answered
+   * as a target that is not there (404 "The task to merge into was not
+   * found"), to a caller who could open that task (200), and to one whose own
+   * task was the target; a refusal says why it is one, and "not found" is for
+   * an id naming nothing (the owner's decision of 1 October).
+   */
+  if (source.workspaceId !== target.workspaceId) return 'other-workspace'
   if (source.id === target.id) return 'same-task'
   if (source.isArchived) return 'already-binned'
   /*
@@ -131,8 +156,23 @@ export const MERGE_REFUSAL_MESSAGE: Record<MergeRefusal, string> = {
   'same-task': 'A task cannot be merged into itself',
   'source-missing': 'Task not found',
   'target-missing': 'The task to merge into was not found',
+  'other-workspace': 'A task can only be merged into a task of its own workspace',
   'would-nest-twice': 'This task has subtasks, and the task you picked is itself a subtask. Subtasks only nest one level deep.',
   'already-binned': 'A task in the bin cannot be merged',
+}
+
+/**
+ * Whether a custom-field value holds nothing: cleared (null), an empty text, or
+ * an empty list (Labels, People, Files, Tasks, votes). ClickUp's merge adds the
+ * merged task's value "only … if task B doesn't have any information in the
+ * same Custom Field" (help centre, "Merge tasks", read through search
+ * excerpts); a survivor's emptied value was kept as if it were information, and
+ * the merged task's value stayed in the bin (lane 7,
+ * `found-6-oct/merge-drops-a-value-beside-an-emptied-one`).
+ */
+export function holdsNoInformation(value: { v?: unknown } | null | undefined): boolean {
+  const v = value?.v
+  return v == null || v === '' || (Array.isArray(v) && v.length === 0)
 }
 
 /**

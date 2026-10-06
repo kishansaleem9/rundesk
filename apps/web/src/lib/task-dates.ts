@@ -23,6 +23,32 @@
  */
 
 const pad = (n: number) => String(n).padStart(2, '0')
+/*
+ * A year as a date box writes it: four digits at the least. `String(2)` made
+ * `2-10-06`, which a box cannot show, so a start stored in year 2 drew an empty
+ * box (`found-5-oct/years-below-100-read-back-wrong`).
+ */
+const padYear = (y: number) => String(y).padStart(4, '0')
+
+/**
+ * A local calendar day at a local clock time. `new Date(y, m, d, …)` takes a
+ * year of 0–99 as 1900–1999, so a day typed in year 2 was written as 1902; the
+ * setters take the year as given.
+ */
+function localAt(y: number, m: number, d: number, h = 0, min = 0): Date {
+  const at = new Date(0)
+  at.setFullYear(y, m, d)
+  at.setHours(h, min, 0, 0)
+  return at
+}
+
+/** UTC midnight of a calendar day, the date-only form — and year-safe, as `localAt` is. */
+function utcMidnight(y: number, m: number, d: number): Date {
+  const at = new Date(0)
+  at.setUTCFullYear(y, m, d)
+  at.setUTCHours(0, 0, 0, 0)
+  return at
+}
 
 /**
  * Is this instant exactly UTC midnight?
@@ -48,8 +74,8 @@ export function toDateInput(iso: string | null | undefined): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
   return isDateOnly(d)
-    ? `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`
-    : `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+    ? `${padYear(d.getUTCFullYear())}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`
+    : `${padYear(d.getFullYear())}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
 /** `YYYY-MM-DDTHH:mm`, for an `<input type="datetime-local">`. */
@@ -58,8 +84,8 @@ export function toDateTimeInput(iso: string | null | undefined): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
   return isDateOnly(d)
-    ? `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T00:00`
-    : `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+    ? `${padYear(d.getUTCFullYear())}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T00:00`
+    : `${padYear(d.getFullYear())}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 /**
@@ -91,16 +117,53 @@ export function withDatePart(existing: string | null | undefined, ymd: string): 
 
   const prev = existing ? new Date(existing) : null
   const carry = prev && !Number.isNaN(prev.getTime()) && !isDateOnly(prev)
-  const next = new Date(
-    y, m - 1, d,
-    carry ? prev!.getHours() : 0,
-    carry ? prev!.getMinutes() : 0,
-    0, 0,
-  )
   // A day that never carried a time keeps being stored the way it always was,
   // so a date-only row stays byte-identical rather than acquiring an offset.
-  if (!carry) return new Date(Date.UTC(y, m - 1, d)).toISOString()
-  return next.toISOString()
+  if (!carry) return utcMidnight(y, m - 1, d).toISOString()
+  return localAt(y, m - 1, d, prev!.getHours(), prev!.getMinutes()).toISOString()
+}
+
+/**
+ * The calendar day a stored date is SHOWN as, by `isDateOnly`'s rule — a
+ * date-only value as the day it was picked, a timed one as its local day — as
+ * that day's local midnight, which is where a Gantt's day columns begin.
+ *
+ * `found-5-oct/timeline-press-moves-dates`: the list's Gantt and the workspace
+ * timeline drew `startOfDay(new Date(iso))`, the LOCAL day of the instant, so
+ * in Los Angeles every date-only bar sat a day early ("Oct 18 – Oct 20" for a
+ * task of the 19th to the 21st) and a drag moved it from the wrong day.
+ */
+export function shownDay(iso: string | null | undefined): Date | null {
+  if (!iso) return null
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return null
+  return isDateOnly(at)
+    ? localAt(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate())
+    : localAt(at.getFullYear(), at.getMonth(), at.getDate())
+}
+
+/**
+ * A stored date moved by whole days, as a drag moves it
+ * (`found-5-oct/timeline-press-moves-dates`): `days` days on from the day it is
+ * shown as, at the time of day it carried — what `withDatePart` does with a day
+ * picked that many days later — or, a date with no time, the same date-only
+ * form on the new day. Nought days is the date as it was.
+ *
+ * The timeline saved `startOfDay` of each moved date and the list's Gantt sent
+ * `yyyy-MM-dd`, so a drag of a task due at 17:30 left it due at midnight.
+ */
+export function shiftByDays(iso: string | null | undefined, days: number): string | null {
+  if (!iso) return null
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return null
+  if (isDateOnly(at)) at.setUTCDate(at.getUTCDate() + days)
+  else at.setDate(at.getDate() + days)
+  return at.toISOString()
+}
+
+/** A local calendar day (a `shownDay`) as a date with no time, the form a date-only pick stores. */
+export function dayAsDateOnly(day: Date): string {
+  return utcMidnight(day.getFullYear(), day.getMonth(), day.getDate()).toISOString()
 }
 
 /**

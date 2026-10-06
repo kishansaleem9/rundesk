@@ -17,6 +17,7 @@ import { ConfigService } from '@nestjs/config'
 import webpush from 'web-push'
 import { extractMentionUserIds, formatMentionsInText } from '../../common/utils/mentions'
 import { inboundDomain, taskReplyAddress } from '../email-to-task/task-address'
+import { mayBeToldAbout } from './notification-reach'
 import { randomUUID } from 'node:crypto'
 
 // --- Reminder lead time (§10.4) --------------------------------------------
@@ -508,7 +509,7 @@ export class NotificationsService {
      */
     deferPush?: boolean
   }) {
-    const { prefs, timezone, dndUntil } = await this.getUserNotificationContext(data.userId)
+    const { prefs, timezone, dndUntil, role } = await this.getUserNotificationContext(data.userId)
     const eventKey = this.mapTypeToEventKey(data.type)
     const matrix = prefs.events[eventKey]
     /*
@@ -525,6 +526,13 @@ export class NotificationsService {
 
     // Every channel off is the only case where nothing at all happens.
     if (!matrix.inApp && !matrix.web && !matrix.email && !matrix.mobile) {
+      return { row: null as any, delivered: false }
+    }
+
+    // Nor is anything written, sent or mailed about an item its recipient may
+    // not read now (`notification-reach.ts`): their access may have ended since
+    // they began following it (`found-6-oct/an-open-socket-outlives-its-access`).
+    if (!(await this.recipientMayRead(data, role))) {
       return { row: null as any, delivered: false }
     }
 
@@ -603,6 +611,14 @@ export class NotificationsService {
   }
 
   /** The row, for the callers that only ever wanted that. */
+  /** Whether the recipient may read the item the notification is about (`mayBeToldAbout`); a seam the service's tests answer. */
+  private recipientMayRead(
+    data: { userId: string; workspaceId?: string | null; target?: { entityType: string; entityId: string } },
+    role: string | null,
+  ): Promise<boolean> {
+    return mayBeToldAbout(this.db, { id: data.userId, role }, data.workspaceId, data.target)
+  }
+
   async create(data: Parameters<NotificationsService['createWithOutcome']>[0]) {
     return (await this.createWithOutcome(data)).row
   }
@@ -1504,6 +1520,8 @@ export class NotificationsService {
     prefs: NotificationPreferences
     timezone: string
     dndUntil: Date | null
+    /** The account's role: a super_admin reads every item, as in every guard (`notification-reach.ts`). */
+    role: string | null
   }> {
     const [row] = await this.db
       .select({
@@ -1512,6 +1530,7 @@ export class NotificationsService {
         // §G06 [06:53] — "muted until 3pm" is a different fact from the
         // scheduled quiet hours in the prefs blob, and both can be true.
         dndUntil: users.dndUntil,
+        role: users.role,
       })
       .from(users)
       .where(eq(users.id, userId))
@@ -1521,6 +1540,7 @@ export class NotificationsService {
       prefs: this.mergePreferences(DEFAULT_NOTIFICATION_PREFERENCES, saved),
       timezone: row?.timezone || 'UTC',
       dndUntil: row?.dndUntil ?? null,
+      role: (row?.role as string | undefined) ?? null,
     }
   }
 

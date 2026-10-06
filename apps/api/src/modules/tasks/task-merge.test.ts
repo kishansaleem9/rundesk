@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   MERGE_MOVES,
+  MERGE_REFUSAL_MESSAGE,
   emptyMergeTally,
+  holdsNoInformation,
   mergeRefusal,
   mergedDescription,
   type MergeSubject,
@@ -10,6 +12,7 @@ import {
 
 const task = (over: Partial<MergeSubject> & { id: string }): MergeSubject => ({
   listId: 'l1',
+  workspaceId: 'w1',
   parentTaskId: null,
   description: null,
   isArchived: false,
@@ -20,6 +23,31 @@ const B = task({ id: 'b' })
 
 test('an ordinary merge is allowed', () => {
   assert.equal(mergeRefusal(A, B, false), null)
+})
+
+test('a task of another workspace is refused with its reason, not as one that is not there, before any other rule of the target', () => {
+  // `found-6-oct/merge-moves-work-across-workspaces`: a merge across two
+  // workspaces moved one's comment into the other (201, lane 7). Asked before
+  // the nesting rule, so a task of another workspace is answered by this rule
+  // alone — not that it is a subtask; and in its own words, as a list or a
+  // project moved to another workspace is, since "not found" is for an id
+  // naming nothing (the owner's decision of 1 October).
+  const elsewhere = task({ id: 'b', workspaceId: 'w2', parentTaskId: 'c' })
+  assert.equal(mergeRefusal(A, elsewhere, false), 'other-workspace')
+  assert.equal(mergeRefusal(A, elsewhere, true), 'other-workspace')
+  assert.equal(MERGE_REFUSAL_MESSAGE['other-workspace'], 'A task can only be merged into a task of its own workspace')
+  assert.notEqual(MERGE_REFUSAL_MESSAGE['other-workspace'], MERGE_REFUSAL_MESSAGE['target-missing'])
+})
+
+test('a value cleared, an empty text and an empty list hold no information; a value that is there holds some', () => {
+  // `found-6-oct/merge-drops-a-value-beside-an-emptied-one`: ClickUp adds the
+  // merged task's value "only … if task B doesn't have any information".
+  for (const emptied of [null, undefined, { v: null }, { v: '' }, { v: [] }]) {
+    assert.equal(holdsNoInformation(emptied as never), true, JSON.stringify(emptied))
+  }
+  for (const held of [{ v: 'words' }, { v: ['red'] }, { v: 3 }]) {
+    assert.equal(holdsNoInformation(held), false, JSON.stringify(held))
+  }
 })
 
 test('a task cannot be merged into itself', () => {

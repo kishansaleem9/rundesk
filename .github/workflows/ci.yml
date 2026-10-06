@@ -669,16 +669,18 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs TWO HUNDRED AND FIFTY-EIGHT — every suite in the repo but the
+    # The job now runs TWO HUNDRED AND SIXTY — every suite in the repo but the
     # six in `browser-suites`, which `check-suites-registered.mjs` now enforces
     # rather than this comment asserting it. At the measured 1.1 minutes each
-    # that is about 284 minutes plus setup, against the limit of 300 below; the
+    # that is about 286 minutes plus setup, against the limit of 330 below; the
     # whole job took 108 minutes on the run that passed on 1 October
     # (`scripts/ci-rehearsal/README.md`), so the estimate is the ceiling, not the
     # expectation. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155 → 156 → 158 → 159 → 160 → 161 → 162 → 163 → 164 → 165 → 166 → 167 → 168 → 169 → 170 → 171 → 172 → 173 → 174 → 175 → 176 → 177 → 178 → 179 → 180 → 181 → 182 → 183 → 184 → 185 → 186 → 187 → 188 → 189 → 190 → 191 → 192 → 193 → 194 → 195 → 196 → 197 → 198 → 199 → 200 → 201 → 202 → 203 → 204 → 205 → 206 → 207 → 208 → 216 → 217 → 218 → 219 → 220 → 221 → 222 → 223 → 224 → 225 → 227 → 229 → 231 → 232 → 233 → 234 → 236 → 237 → 241 → 242 → 243 → 244 → 245 → 246 → 247 → 248 → 249 → 250 → 251 → 252 → 253 → 256 → 257 → 258.
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155 → 156 → 158 → 159 → 160 → 161 → 162 → 163 → 164 → 165 → 166 → 167 → 168 → 169 → 170 → 171 → 172 → 173 → 174 → 175 → 176 → 177 → 178 → 179 → 180 → 181 → 182 → 183 → 184 → 185 → 186 → 187 → 188 → 189 → 190 → 191 → 192 → 193 → 194 → 195 → 196 → 197 → 198 → 199 → 200 → 201 → 202 → 203 → 204 → 205 → 206 → 207 → 208 → 216 → 217 → 218 → 219 → 220 → 221 → 222 → 223 → 224 → 225 → 227 → 229 → 231 → 232 → 233 → 234 → 236 → 237 → 241 → 242 → 243 → 244 → 245 → 246 → 247 → 248 → 249 → 250 → 251 → 252 → 253 → 256 → 257 → 258 → 259 → 260.
     #
-    # The limit is 300, raised from 270 when the job reached 227 suites: about
+    # The limit is 330, raised from 300 when the job reached 258 suites: about
+    # 284 minutes plus setup against 300 left a margin thinner than the one that
+    # raised it last. It went from 270 to 300 when the job reached 227 suites: about
     # 250 minutes plus setup against 270 left a margin smaller than one slow
     # runner's variance. It went from 240 to 270 when the job reached 216 suites:
     # about 238 minutes plus setup against 240 left no margin at all. It went from 210
@@ -707,7 +709,7 @@ jobs:
     # A generous limit costs nothing when the job finishes sooner: GitHub bills
     # the runtime, not the limit. The limit only decides whether a slow run is
     # allowed to finish or is killed with the answer half-written.
-    timeout-minutes: 300
+    timeout-minutes: 330
 
     services:
       postgres:
@@ -1750,6 +1752,22 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # A timeline bar moves a task's dates only when dragged, by whole days,
+      # keeping their times, and a date-only day is drawn as that day — on the
+      # workspace timeline and the list's Gantt, in browsers in UTC, Los Angeles
+      # and Karachi; a press with a pixel or two of travel is a press; a bar is
+      # offered to whoever the write rule lets change its task, a share on the
+      # task first, and a refused drag is said in the server's words; and the
+      # list's Calendar and Table draw a date-only day as that day, a Calendar
+      # drop keeping the time (found-5-oct/timeline-press-moves-dates,
+      # found-30-sep/timeline-drags-refused-silently). Read back by SQL.
+      - name: Timeline drags move whole days and keep the time
+        timeout-minutes: 15
+        run: node test/e2e/timeline-dates.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §M frame `20:57` — the Teams empty state. Asserted in BOTH conditions:
       # a check run only when empty cannot tell an empty state from a broken page.
       - name: Teams empty state
@@ -2032,7 +2050,10 @@ jobs:
       # whose session a password change made elsewhere has ended is signed out
       # at its next reload; and one mistyped current password in the profile
       # sends one change (no refresh, no second change) and counts one wrong
-      # password. About forty seconds.
+      # password. And the tab's socket opens again when its person signs out
+      # and back in — in that tab, and in another tab of the same browser,
+      # which rejoins the list it shows — and when they sign in again from
+      # another tab under a policy of one session at a time. About two minutes.
       - name: A session in the browser is kept after accepting an invitation and ended at once elsewhere, and a mistyped password counts once
         timeout-minutes: 15
         run: node test/e2e/session-in-the-browser.mjs --api 3011 --dist apps/web/dist
@@ -2245,6 +2266,20 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
+
+      # A room was asked once, when a socket subscribed, so a person whose
+      # access ended while their session did not went on hearing it on a socket
+      # already open: removed from the workspace, a guest's share removed,
+      # lowered to guest, a list or a space made private — and went on being
+      # notified about a task they followed or a doc they wrote. The gateway
+      # asks each socket's rooms again at its room pass, joins them again when
+      # access comes back, and passes a super_admin as every guard does; a
+      # notification about an item goes only to someone who may read it. Each
+      # "hears nothing" has a twin who keeps access and does. The super_admin
+      # is the run's own account, made one in Postgres. About a minute.
+      - name: An open socket stops hearing what its person may no longer read, and nobody is notified about what they may not read
+        timeout-minutes: 15
+        run: node test/e2e/realtime-access-ends.mjs --api 3011
 
       # "Suggest tasks" handed a member a private space's task titles, and
       # "workload balance" and "Assign with AI" counted everybody's work in
@@ -3368,7 +3403,13 @@ jobs:
       # them be typed so (found-30-sep/a-task-starts-after-it-is-due,
       # found-30-sep/task-estimate-below-zero). And a refusal is said: the
       # list's bulk bar says what it did not change and why, and the task sheet
-      # and a row edit give the server's words. Each row read back by SQL.
+      # and a row edit give the server's words. A date typed into a box — the
+      # sheet's start, due, subtask and date-field boxes, the list's row box and
+      # Table cell — is written once, when it is accepted, the box open while
+      # the write is out; a year below 100 is read back as written, and one
+      # Postgres cannot hold as sent is refused in words
+      # (found-30-sep/sheet-dates-write-as-typed,
+      # found-5-oct/years-below-100-read-back-wrong). Each row read back by SQL.
       - name: A task's dates and estimate are taken as sent, and a refused change is said
         timeout-minutes: 15
         run: node test/e2e/task-values.mjs --api 3011 --dist apps/web/dist

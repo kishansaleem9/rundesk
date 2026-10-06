@@ -43,8 +43,11 @@ type ProjectCapabilities = {
   archive: boolean
   members: boolean
   statuses: boolean
+  /** Define, rename and delete the project's own fields (the define rule its field routes ask). */
+  fields: boolean
   suggest: boolean
-  lists: Record<string, { rename: boolean; delete: boolean }>
+  /** Per list the page asks about — those it shows and those its fields are kept to; `fields` is the define rule for a field scoped to that list. */
+  lists: Record<string, { rename: boolean; delete: boolean; fields: boolean }>
 }
 
 type List = {
@@ -157,11 +160,29 @@ function ProjectHome() {
    * behind each refused a guest passing through or a member who did not make
    * the project. Until it has answered, nothing that changes the project is
    * offered on a guess.
+   *
+   * AND THE LISTS ITS FIELDS ARE KEPT TO, so the Custom fields section has an
+   * answer for a field of a list this page does not show (an archived one);
+   * the same query as the section's, so it is asked once. Until the wider
+   * answer is in, the last one stands for what it covered, and a list it did
+   * not cover is offered nothing.
+   *
+   * THE LAST ANSWER STANDS ONLY FOR THIS PROJECT. The page stays drawn when a
+   * link moves it to another project, and the answer kept for the wait was the
+   * first project's: a member who may change one project's fields and statuses
+   * followed the sidebar to a project they only view, and was offered Add
+   * field, Statuses and a field's delete there until its own answer came
+   * (lane 7, three runs alike, its answer held back).
    */
-  const listIds = lists.map((l) => l.id).sort().join(',')
+  const { data: projectFields = [] } = useQuery({
+    queryKey: ['project-fields', workspaceId, projectId],
+    queryFn: () => api<CustomFieldDef[]>(`/workspaces/${workspaceId}/projects/${projectId}/custom-fields`),
+  })
+  const listIds = [...new Set([...lists.map((l) => l.id), ...projectFields.flatMap((f) => (f.listId ? [f.listId] : []))])].sort().join(',')
   const { data: caps } = useQuery({
     queryKey: ['project-capabilities', projectId, listIds],
     queryFn: () => api<ProjectCapabilities>(`/projects/${projectId}/capabilities?lists=${encodeURIComponent(listIds)}`),
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[1] === projectId ? previous : undefined),
   })
 
   const reorderLists = useMutation({
@@ -419,7 +440,7 @@ function ProjectHome() {
 
       <ProjectHealthSection workspaceId={workspaceId} projectId={projectId} />
 
-      <CustomFieldsSection workspaceId={workspaceId} projectId={projectId} />
+      <CustomFieldsSection workspaceId={workspaceId} projectId={projectId} caps={caps} lists={lists} />
 
       <ProjectActivitySection projectId={projectId} workspaceId={workspaceId} projectName={project?.name} />
 
@@ -776,6 +797,8 @@ type CustomFieldDef = {
   type: 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url' | 'email' | 'phone' | 'money' | 'rating'
   isRequired: boolean
   options: Array<{ label: string; value: string }> | null
+  /** A field kept to one list of the project; none for a field of the whole project. */
+  listId?: string | null
 }
 
 // The `value` is the persisted field-type identifier; `labelKey` references an
@@ -793,12 +816,26 @@ const FIELD_TYPE_OPTIONS = [
   { value: 'rating', labelKey: 'projectShell.fieldType.rating' },
 ] as const
 
+/*
+ * THE PROJECT'S FIELDS, OFFERED AS THE DEFINE RULE LETS THIS PERSON CHANGE
+ * THEM (`caps.fields`, and `caps.lists[id].fields` for a field kept to one
+ * list, from `GET /projects/:id/capabilities`, which asks the rule the field
+ * routes ask). "Add field" and each field's delete were drawn for every
+ * reader: a member of a view-only space pressed delete, the route refused it
+ * (403) and nothing said so (`found-6-oct/project-page-offers-field-edits-to-readers`).
+ * Until the answer is in, nothing is offered on a guess; a refusal is said in
+ * the server's words. A field kept to one list says which.
+ */
 function CustomFieldsSection({
   workspaceId,
   projectId,
+  caps,
+  lists,
 }: {
   workspaceId: string
   projectId: string
+  caps: ProjectCapabilities | undefined
+  lists: List[]
 }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -813,6 +850,10 @@ function CustomFieldsSection({
     queryFn: () =>
       api<CustomFieldDef[]>(`/workspaces/${workspaceId}/projects/${projectId}/custom-fields`),
   })
+  const mayAdd = caps?.fields === true
+  // A field kept to a list is changed by that list's answer; one of the whole project, by the project's.
+  const mayChange = (f: CustomFieldDef) => (f.listId ? caps?.lists[f.listId]?.fields === true : mayAdd)
+  const listName = (listId: string) => lists.find((l) => l.id === listId)?.name
 
   const create = useMutation({
     mutationFn: () => {
@@ -837,11 +878,14 @@ function CustomFieldsSection({
       setOptions('')
       setType('text')
     },
+    // Refused, it said nothing: the form sat there as if it had not been sent.
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('projectShell.fieldNotCreated')),
   })
 
   const remove = useMutation({
     mutationFn: (id: string) => api(`/workspaces/${workspaceId}/custom-fields/${id}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project-fields', workspaceId, projectId] }),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('projectShell.fieldNotDeleted')),
   })
 
   const fields = fieldsQuery.data ?? []
@@ -850,10 +894,12 @@ function CustomFieldsSection({
     <section>
       <WorkSectionTitle
         action={
-          <Button size="sm" variant="outline" onClick={() => setShowForm((v) => !v)}>
-            <Settings className="h-3.5 w-3.5 mr-1.5" />
-            {showForm ? t('common.cancel') : t('projectShell.addField')}
-          </Button>
+          mayAdd ? (
+            <Button size="sm" variant="outline" onClick={() => setShowForm((v) => !v)}>
+              <Settings className="h-3.5 w-3.5 mr-1.5" />
+              {showForm ? t('common.cancel') : t('projectShell.addField')}
+            </Button>
+          ) : undefined
         }
       >
         <span className="flex items-center gap-2">
@@ -865,7 +911,7 @@ function CustomFieldsSection({
         {t('projectShell.customFieldsDesc')}
       </p>
 
-      {showForm && (
+      {showForm && mayAdd && (
         <WorkCreateCard onCancel={() => setShowForm(false)}>
           <Input
             value={name}
@@ -928,16 +974,27 @@ function CustomFieldsSection({
                     <> — {f.options.map((o) => o.label).join(', ')}</>
                   )}
                 </div>
+                {f.listId && (
+                  <div className="text-[12px] text-muted-foreground" data-testid={`project-field-scope-${f.id}`}>
+                    {listName(f.listId)
+                      ? t('projectShell.fieldOnList', { list: listName(f.listId)! })
+                      : t('projectShell.fieldOnOneList')}
+                  </div>
+                )}
               </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-destructive hover:text-destructive"
-                onClick={() => remove.mutate(f.id)}
-                disabled={remove.isPending}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              {mayChange(f) && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-destructive hover:text-destructive"
+                  onClick={() => remove.mutate(f.id)}
+                  disabled={remove.isPending}
+                  aria-label={t('projectShell.deleteField', { name: f.name })}
+                  title={t('projectShell.deleteField', { name: f.name })}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              )}
             </div>
             )
           })}

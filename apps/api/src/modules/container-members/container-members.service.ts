@@ -15,6 +15,7 @@ import { allowedBy } from '../../common/permissions/capability'
 import { CustomRolesService } from '../custom-roles/custom-roles.service'
 import type { WithinStep } from '../../common/permissions/space-default-permission'
 import { assertMayShapeStatuses } from '../../common/permissions/status-access'
+import { assertMayDefineFields } from '../../common/permissions/field-access'
 import { isUuid } from '../../common/validation/uuid'
 
 type ContainerRole = 'admin' | 'edit' | 'comment' | 'view'
@@ -165,6 +166,14 @@ export class ContainerMembersService {
    *   - `members`: who may add, re-role or remove its members, and change its
    *     visibility (`assertCanManageProject`);
    *   - `statuses`: who may shape its statuses (`assertMayShapeStatuses`);
+   *   - `fields`: who may define, rename and delete its fields — the define
+   *     rule its field routes ask (`assertMayDefineFields`), with the account
+   *     role they pass; and for each list the page names, `lists[id].fields`,
+   *     the same rule for a field scoped to that list, whose share may decide.
+   *     The project page's Custom fields section offered "Add field" and each
+   *     field's delete to every reader, and a member of a view-only space was
+   *     refused the delete (403) in silence
+   *     (`found-6-oct/project-page-offers-field-edits-to-readers`);
    *   - `suggest`: anybody but a guest (the AI routes refuse a guest);
    *   - `lists`: rename and delete for each list the page names (`?lists=`),
    *     by the list's own manage rule, whose creator is part of the answer —
@@ -172,7 +181,7 @@ export class ContainerMembersService {
    *
    * A refusal is an answer (false); anything else is not, and is thrown.
    */
-  async projectCapabilities(projectId: string, actorId: string, listIds: string[]) {
+  async projectCapabilities(projectId: string, actorId: string, listIds: string[], actorRole?: string | null) {
     const [row] = await this.db
       .select({ workspaceId: spaces.workspaceId, spaceId: projects.spaceId, createdById: projects.createdById, folderId: projects.folderId })
       .from(projects)
@@ -202,21 +211,26 @@ export class ContainerMembersService {
           .from(lists)
           .where(and(inArray(lists.id, ids), eq(lists.projectId, projectId)))
       : []
-    const [edit, archive, members, statuses] = await Promise.all([
+    // The field routes' own rule, asked as they ask it (`custom-fields.controller.ts` passes the account role).
+    const defineFields = (listId?: string) =>
+      allowed(assertMayDefineFields(this.db, { workspaceId: row.workspaceId, projectId, reader: { id: actorId, role: actorRole }, listId }))
+    const [edit, archive, members, statuses, fields] = await Promise.all([
       allowed(manage(row.createdById, 'project', 'manage')),
       allowed(manage(row.createdById, 'project', 'delete')),
       allowed(this.assertCanManageProject(projectId, actorId)),
       allowed(assertMayShapeStatuses(this.db, { owner: 'project', ownerId: projectId, actorId })),
+      defineFields(),
     ])
-    const perList: Record<string, { rename: boolean; delete: boolean }> = {}
+    const perList: Record<string, { rename: boolean; delete: boolean; fields: boolean }> = {}
     for (const list of listRows) {
-      const [rename, remove] = await Promise.all([
+      const [rename, remove, listFields] = await Promise.all([
         allowed(manage(list.createdById, 'list', 'manage', list.id)),
         allowed(manage(list.createdById, 'list', 'delete', list.id)),
+        defineFields(list.id),
       ])
-      perList[list.id] = { rename, delete: remove }
+      perList[list.id] = { rename, delete: remove, fields: listFields }
     }
-    return { edit, archive, members, statuses, suggest: membership?.role !== 'guest', lists: perList }
+    return { edit, archive, members, statuses, fields, suggest: membership?.role !== 'guest', lists: perList }
   }
 
   async listProjectMembers(projectId: string) {

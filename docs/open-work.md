@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 488 items: 42 open · 4 partly fixed · 388 closed, and 54 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 6 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 494 items: 36 open · 4 partly fixed · 399 closed, and 55 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 6 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -2176,7 +2176,7 @@ Checks: `imports` +2 (a 70-character ClickUp tag; a tag asked for during a runni
 
 *Merged, 6 October,* into the main checkout (onto `687a51d`) with the batch's other builder's work, and run again there on lanes 2, 4 and 6: 20 suites, all green — `imports` 43, `view-writes-by-level` 20 and `view-visibility` 23 among them — and the API's 2033 unit tests and the web's 326, both typechecks clean.
 
-### `found-30-sep/timeline-drags-refused-silently` — open (visible bug, small; found closing `found-30-sep/a-task-starts-after-it-is-due`) · reproduced 5 October
+### `found-30-sep/timeline-drags-refused-silently` — **closed** (visible bug, small; found closing `found-30-sep/a-task-starts-after-it-is-due`) · reproduced 5 October
 
 **A timeline drag the server refuses snaps back and says nothing**
 
@@ -2193,7 +2193,13 @@ Table-view row edit and the bulk bar).
 
 *Triage, 5 October, after the revert:* reproduced on a lane. A timeline drag the server refuses snaps back, or the bar vanishes, with no toast; the reason reaches only the console as an unhandled rejection. Measured for a view-level reader (403) and for a task binned after the page loaded (409). The timeline also offers its drag and both handles to a view-only reader: the bar moves under the mouse and is then refused, where the list page no longer offers a refused edit. Evidence: `docs/triage-2026-10-05.md`.
 
-### `found-30-sep/sheet-dates-write-as-typed` — open (visible bug, small; found closing `found-30-sep/a-task-starts-after-it-is-due`) · reproduced 5 October
+*Closed, 6 October* (built by an agent on lane 5, with `found-5-oct/timeline-press-moves-dates`). ClickUp: View changes nothing ("Permissions in detail", as `list-page-levels` quotes it); nothing found on what its Gantt says of a refused drag. Measured first on lane 5 in UTC, Los Angeles and Karachi: a member of a view-only space was offered both handles, the bar moved under the mouse (168px → 280px) and the PATCH answered 403 with no toast; a task put in the bin after the page loaded answered 409 and the bar vanished, without a word; each reason reached only the console as an unhandled rejection. What changed: the timeline's `persistDates` says a refusal in the server's words, as the list page's `patchTaskSaying` does, and no longer leaves a rejection unhandled; the timeline's read (`GET /tasks/workspace/:id/timeline`) now carries each task's `mayEdit`, the write rule's own answer: a workspace manager may; anybody else by `resolveSpaceLevel` at Edit, along the task's own share first, then its list, project and folder (`TasksService.timelineEditable`). A bar offers its drag and handles by it. After, three zones: the view-only bar has no handles, does not move and sends nothing, the editable list's bar keeps both, and the binned task's drag toasts "This task is in the bin. Restore it before editing." Checks: `timeline-dates`, 2 of its 9 (red on HEAD's bundle, green three times after); `list-page-levels` 9/9. Break patches `timeline-dates-9` and `-10`, each shown to redden exactly its check; `lpl-6` re-aimed at the new call site and shown to redden its seven claims.
+
+*Review, 6 October (lane 5).* The first build asked each list, and a member or a guest given a task at Edit, in a list they may only view, was offered no drag while `PATCH` took it from them (200). HEAD had offered it to them. Now both find both handles and the drag lands; a view-only member still gets none. The per-list capability reads and `lib/list-caps.ts` are gone, and the list page and `lpl-6` are as at HEAD. Read cost measured with 150 dated tasks in 30 lists: an admin 16–35 ms, a member 91–214 ms. Check: `timeline-dates` 'a person whose own share on a task lets them change it is offered its drag…', patch `timeline-dates-11`; `timeline-dates-9` re-aimed. ClickUp: a share's level is what its holder may do ('Permissions in detail'); in Gantt you 'click and drag the start and end brackets to adjust the start and due date' ('Create and share a Gantt view').
+
+*Merged, 6 October,* into the main checkout (onto `986c760`) with the batch's other builders' work, and run again there on lanes 2, 5 and 7: 63 suites, 60 green at once; `list-export` and `panel-collapse` failed once at a load of 14 and were green twice each when run again; `session-in-the-browser` failed 3 of 7 runs, its reconnect checks racing the server's admission of a reopened socket (fixed here: see `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), then 6 of 6. API unit tests 2063/2063, web 344/344, both typechecks clean.
+
+### `found-30-sep/sheet-dates-write-as-typed` — **closed** (visible bug, small; found closing `found-30-sep/a-task-starts-after-it-is-due`) · reproduced 5 October
 
 **The task sheet writes a date on every change of its box, and is closed while each write is out**
 
@@ -2209,6 +2215,14 @@ blur or Enter, and keep the box enabled; check it with `task-values` or
 `task-depth`.
 
 *Triage, 5 October, after the revert:* reproduced on a lane. On lane 4's database and bundle, typing "25" into the task sheet's due day saved the 2nd at the first key: the box was disabled for the save and lost focus, so the "5" was dropped. Typing a year saved year 0002 at the first digit. Reproducing it found `found-5-oct/years-below-100-read-back-wrong`: a year typed digit by digit is saved as 0002 and read back as 10 February 2006. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 6 October* (built by an agent on lane 5). ClickUp: "Press Return or Enter to accept the validated date and time" (help centre, "Natural language processing for dates and times"), and in List view a date is applied on Enter or by clicking away ("Intro to start and due dates", search excerpt). Measured first on lane 5 as the triage did it, in UTC, Los Angeles and Karachi: the due day typed "2" then "5" sent the 2nd at the first key, the box was disabled and lost its focus, the "5" was dropped and the 2nd was recorded in the activity; a start year typed 2, 0, 2, 7 was written as year 0002 at the first digit and the sheet then showed 2006. What changed: the sheet's start and due boxes are a `DateTimeBox` (`components/date-time-box.tsx`), which keeps what is typed and writes it on Enter or when the box is left, stays open while the write is out, and writes nothing for a date typed only in part (`lib/date-box.ts`). After, three zones: nothing is sent while typing, the box keeps its focus, Enter writes the 25th once (one activity entry); the year writes 2027 once; leaving the box writes once. Checks: `task-values` 16 → 20, two of them this item's (UTC and Los Angeles, by SQL), 20/20 three times; its two older sheet checks and `task-depth`'s typed-time check accept with Enter; `date-box.test.ts` new, 3 tests. Break patches `task-values-40` (e2e) and `sdt-1` to `-3` (unit), each shown to redden its check; `task-values-33` and `tsc-7` re-aimed at the new box and shown to redden theirs.
+
+*Review, 6 October (lane 5).* (1) With each PATCH held three seconds, Enter on the 25th and then the stored 8th typed back before the first write landed left the 25th stored: the second Enter compared the draft with the stored date and discarded it. The box now compares with the write that is out, and writes one after another; after, two PATCHes, the 8th stored. (2) Nothing had checked that the box stays open while its write is out; a check now holds the write and reads the box. (3) The sheet's subtask rows and date fields, and the list page's row box and Table cell, still wrote at every key. The Table cell wrote the day at midnight and closed at the first key. All are now the one `DateBox` (`DateTimeBox`, `DayBox`), written on Enter or when left. ClickUp, List view: 'Press Enter or click away to apply' ('Intro to start and due dates'). After: nothing is written while typing, focus is kept, one write each, the time is kept, and the cell stays open until a date is accepted. Checks: `task-values` 20 → 24, three of the new checks this item's; patches `task-values-43`, `-44` and `-46`; unit `date-box.test.ts` 3 → 5 (`sdt-4`, `sdt-5`); `task-values-33` and `-40` re-aimed at `DateBox`.
+
+Found beside it: `found-6-oct/a-time-on-utc-midnight-reads-as-no-time`.
+
+*Merged, 6 October,* into the main checkout (onto `986c760`) with the batch's other builders' work, and run again there on lanes 2, 5 and 7: 63 suites, 60 green at once; `list-export` and `panel-collapse` failed once at a load of 14 and were green twice each when run again; `session-in-the-browser` failed 3 of 7 runs, its reconnect checks racing the server's admission of a reopened socket (fixed here: see `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), then 6 of 6. API unit tests 2063/2063, web 344/344, both typechecks clean.
 
 ### `found-30-sep/create-modal-cuts-off-create` — **closed** (visible bug, small; found closing `found-30-sep/template-submit-ignores-the-form`)
 
@@ -8154,7 +8168,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 31, each reproduced
+## Found by the triage, 5 October, and since — 36, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -8371,7 +8385,7 @@ Found beside it: `found-6-oct/clickup-import-leaves-a-failed-run-behind`, `found
 
 *Merged, 6 October,* into the main checkout (onto `687a51d`) with the batch's other builder's work, and run again there on lanes 2, 4 and 6: 20 suites, all green — `imports` 43, `view-writes-by-level` 20 and `view-visibility` 23 among them — and the API's 2033 unit tests and the web's 326, both typechecks clean.
 
-### `found-5-oct/timeline-press-moves-dates` — open (visible bug, small; found by the triage beside `resume-defects/resume-5`) · reproduced 5 October
+### `found-5-oct/timeline-press-moves-dates` — **closed** (visible bug, small; found by the triage beside `resume-defects/resume-5`) · reproduced 5 October
 
 **A press on a timeline bar rewrites the task's dates, and the Gantt drag drops the times**
 
@@ -8384,6 +8398,12 @@ Found beside it: `found-6-oct/clickup-import-leaves-a-failed-run-behind`, `found
 Coverage: `list-page-levels.mjs` asserts only that the due date changed, in a UTC browser; no suite presses or drags a workspace-timeline bar.
 
 *To close:* a press that does not move a bar saves nothing; a drag moves each date by whole days and keeps its time (`withDatePart`); a date-only day is drawn and moved as that day in any zone. Check each in a suite in UTC and in a zone west of it.
+
+*Closed, 6 October* (built by an agent on lane 5). ClickUp (help centre, "Rescheduling dependencies", read through search excerpts): "To reschedule tasks from a Gantt view, you can drag and drop a task to an earlier or later date, or click and drag the right end of a task to adjust the due date." Measured first on lane 5 with a browser probe in UTC, Los Angeles and Karachi: a press on a workspace-timeline bar sent a PATCH and rewrote 7 Oct 09:00Z – 9 Oct 17:30Z to local midnight (00:00Z, 07:00Z, 19:00Z the day before), and in Los Angeles moved a date-only task of 12–14 October to 11–13 October (drawn from the 11th); a day's drag saved local midnight, gave a due-only task a start, and each handle dropped its date's time; the CSV export in Los Angeles dated that task the 11th to the 13th. The list's Gantt sent `yyyy-MM-dd` (a drag of 16 Oct 09:00 – 17 Oct 15:00 saved midnight in every zone), and in Los Angeles titled a task of 19–21 October "Oct 18 – Oct 20" and saved nothing on a day's drag. What changed: `lib/task-dates.ts` gains `shownDay` (the day a date is shown as, by the date-only rule) and `shiftByDays` (whole days, keeping the time; a date-only day stays date-only); the timeline draws, ranges and exports by them, saves nothing for a drag that ends where it began, moves only the dates a task has, and its handles keep their date's time; the list's Gantt draws by `shownDay` and sends `shiftByDays`. After, same probe, three zones: a press sends nothing; a day's drag saves 8 Oct 09:00Z / 10 Oct 17:30Z, a date-only task 13–15 October, a due-only task no start; the handles keep 09:00 and 17:30; the date-only bar starts on the 12th and the export says 12–14, three days; the Gantt saves 17 Oct 09:00 – 18 Oct 15:00 and draws 19–21 October as "Oct 19 – Oct 21", three days after the task of the 16th. Checks: `timeline-dates` (new, in ci.yml), 9 of its 12 checks, 0/9 on HEAD's bundle, 12/12 four times after; `task-dates.test.ts` 14 → 19. Break patches `timeline-dates-1` to `-8` (e2e) and `tpm-1` to `-4` (unit), each shown to redden its check on lane 5 and restored.
+
+*Review, 6 October (lane 5).* A press whose mouse travelled a pixel or two still moved a bar: at Auto fit (3.03 px a day) 2 px of travel saved the task a day later. The timeline now treats travel within the list Gantt's own threshold as a press (`GANTT_DRAG_THRESHOLD`, 4 px, now in `lib/gantt.ts` and shared); after, 2 px sends nothing. The list's Calendar and Table read a date-only day as the local day of its UTC midnight: in Los Angeles a task due the 19th read 'Oct 18' in the Table and sat in the 18th's cell, while the Gantt drew the 19th. A Calendar drop sent `yyyy-MM-dd`, so a task due at 17:30 dropped on another day lost its time. The Calendar is now keyed by `toDateInput`, the drop writes `withDatePart`, and the Table, row, subtask and Board labels read `shownDay`. After, in UTC and Los Angeles, a date-only task is drawn and labelled on its own day, a drop keeps date-only days date-only, and a timed task keeps its hour. Checks: `timeline-dates` 9 → 12, two of the new checks this item's (a press with a tremor; the list's Calendar and Table); patches `timeline-dates-12`, `-13` and `-14` each redden exactly their check, and `-1` and `-2` now also claim the new checks they redden. Not built, for the owner: a drag across a clock change can land a timed date on UTC midnight (the has-time decision), and the handles of a task that starts after its due date move against the drag, as at HEAD.
+
+*Merged, 6 October,* into the main checkout (onto `986c760`) with the batch's other builders' work, and run again there on lanes 2, 5 and 7: 63 suites, 60 green at once; `list-export` and `panel-collapse` failed once at a load of 14 and were green twice each when run again; `session-in-the-browser` failed 3 of 7 runs, its reconnect checks racing the server's admission of a reopened socket (fixed here: see `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), then 6 of 6. API unit tests 2063/2063, web 344/344, both typechecks clean.
 
 ### `found-5-oct/comment-links-not-links` — open (visible bug, small; found by the triage beside `resume-defects/s4-clip-link`) · reproduced 5 October
 
@@ -8464,7 +8484,7 @@ Found beside it: `found-6-oct/import-merge-writes-tasks-its-importer-may-not-cha
 
 *Merged, 6 October,* into the main checkout (onto `687a51d`) with the batch's other builder's work, and run again there on lanes 2, 4 and 6: 20 suites, all green — `imports` 43, `view-writes-by-level` 20 and `view-visibility` 23 among them — and the API's 2033 unit tests and the web's 326, both typechecks clean.
 
-### `found-5-oct/years-below-100-read-back-wrong` — open (visible bug, small; found by the triage reproducing `found-30-sep/sheet-dates-write-as-typed`) · reproduced 5 October
+### `found-5-oct/years-below-100-read-back-wrong` — **closed** (visible bug, small; found by the triage reproducing `found-30-sep/sheet-dates-write-as-typed`) · reproduced 5 October
 
 **A date with a year below 100 is stored as typed and read back as another date**
 
@@ -8473,6 +8493,14 @@ Found beside it: `found-6-oct/import-merge-writes-tasks-its-importer-may-not-cha
 The cause: drizzle-orm 0.43.1's timestamp column reads the value back with `new Date(value)` (`pg-core/columns/timestamp.js`), and Node reads Postgres's text `0002-10-06 09:00:00+00` as 2006-02-10.
 
 *To close:* research which years ClickUp takes on a date; refuse a date the app cannot show on every date route (or read it back as stored), and check both a write and a read back in a suite.
+
+*Closed, 6 October* (built by an agent on lane 5). ClickUp: nothing found that names a range of years for a date; its API takes a date as Unix milliseconds (developer docs, "Tasks", search excerpt). So the date is read back as stored and the range is left to the owner. Measured first on lane 5: a start of 0002-10-06 09:00Z was written as sent (Postgres held `0002-10-06 09:00:00+00`) and answered as 10 February 2006 by the PATCH, `GET /tasks/:id`, the list, the timeline and `POST /tasks`; 0099 came back as 1999; the sheet showed 2006-02-10 in all three zones. The cause is drizzle's `new Date(<Postgres's text>)`, which V8 reads with its two-digit-year rule. What changed: `packages/db/src/timestamp-text.ts` hands drizzle a form `new Date` reads exactly, given to the driver for every `timestamp with time zone` by `getDb` — everything the app writes today passes through unchanged; a year below 100 or past 9999, BC, or an offset with seconds is turned into the instant's ISO string. The web pads a year to four digits and builds dates without `new Date(y, …)`'s 1900 rule. After: years 2 and 99 are answered as sent by every route and held so; the sheet shows 0002-10-06 09:00. Checks: `task-values`, two of its 20 (write and read back, by SQL; and the sheet); `timestamp-text.test.ts` new, 3 tests. Break patches `task-values-41` and `-42` (e2e) and `ybr-1` to `-6` (unit), each shown to redden its check.
+
+*Review, 6 October (lane 5).* Year 0, the year before it and a year past 9999 reached Postgres, which cannot take them as the ISO text sent: `PATCH` and `POST` answered 500, and the bulk editor failed each task in the database's own words. `taskDateFrom` (`modules/tasks/task-date-input.ts`) now refuses them in all three before anything is written: 400, '… must fall between the years 1 and 9999'. Nothing that used to be written is refused; every one of those writes failed before. Check: `task-values`, patch `task-values-45`; unit `task-date-input.test.ts` (`tdi-1`, `tdi-2`). The review also found that a task stored in year 2 now draws as year 2, and that the list's Gantt and the workspace timeline then lay out a column per day back to it (timeline 26 s). HEAD does the same for any far year (year 202 on HEAD's bundle: 17.8 s, 18.65M px), so it is recorded as found and left with the owner's range decision. No date box writes a year at a single key any more.
+
+For the owner: which years a date may hold, and how the Gantt and the timeline draw a task dated far from the rest (`found-6-oct/timeline-and-gantt-draw-a-column-per-day`).
+
+*Merged, 6 October,* into the main checkout (onto `986c760`) with the batch's other builders' work, and run again there on lanes 2, 5 and 7: 63 suites, 60 green at once; `list-export` and `panel-collapse` failed once at a load of 14 and were green twice each when run again; `session-in-the-browser` failed 3 of 7 runs, its reconnect checks racing the server's admission of a reopened socket (fixed here: see `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), then 6 of 6. API unit tests 2063/2063, web 344/344, both typechecks clean.
 
 ### `found-5-oct/super-admin-cannot-write-a-task-it-reads` — open (behaviour, small; found by the triage, reported by the revert of `found-30-sep/private-task-reads-say-403`) · reproduced 5 October
 
@@ -8492,7 +8520,7 @@ The cause: the task write rule (`common/permissions/task-write.ts`) hands `reada
 
 *To close:* take the root from each script's own location, as `fleet-restart.sh` does; let `verify.sh` accept a lane served from its own tree; and add a self-check that a worktree's `verify.sh` runs the worktree's suite against its own build.
 
-### `found-6-oct/field-lists-name-a-private-lists-fields` — open (security, small; found reviewing `found-30-sep/field-definition-takes-a-foreign-list`) · reproduced 5 October
+### `found-6-oct/field-lists-name-a-private-lists-fields` — **closed** (security, small; found reviewing `found-30-sep/field-definition-takes-a-foreign-list`) · reproduced 5 October
 
 **A project's field list, and search's field filter, name a private list's fields to a member refused that list**
 
@@ -8500,7 +8528,32 @@ The cause: the task write rule (`common/permissions/task-write.ts`) hands `reada
 
 *To close:* leave out of both lists a field whose list the reader may not open (the read rule, `readableList`), and check it in `custom-field-access` by a member refused a private list.
 
-### `found-6-oct/merge-moves-work-across-workspaces` — open (security, small; found reviewing `found-30-sep/merge-moves-values-onto-fields-the-target-lacks`) · reproduced 5 October
+*Closed, 6 October* (built by an agent on lane 7).
+
+ClickUp makes Spaces, Folders, Subfolders, Lists and tasks private "so only certain people can access them" (help centre, "Make Spaces, Folders, Subfolders, Lists, and tasks private", read through search excerpts).
+
+Measured first on lane 7 with the review's probe (`rv-private-search.mjs`), three runs alike. A member refused a private list (403 "This list is private") was answered 200:
+- by the project's field list, with ["Private stage@the private list"];
+- by search's field list, with ["Private stage"].
+
+What changed:
+- `fieldsOnReadableLists` (`common/permissions/field-access.ts`) leaves out of a list of fields each field kept to a list the reader may not open (`readableList`, the read rule). Each list is asked once.
+- `CustomFieldsService.listForProject` and `SearchService.listWorkspaceCustomFields` both ask it. Search's answer keeps its shape.
+
+After, three runs alike: both of the member's lists are 200 []. The refusals, and the admin's search by the value (1 hit), are as they were.
+
+Checks:
+- `custom-field-access`: 7 → 9. The two new checks are "a project’s field list leaves out, to a member refused a private list, the field scoped to it — the project’s own field and an open list’s still listed — while the admin’s lists it" and "and search’s field filter leaves it out to the member, the project’s own field still offered — while the admin’s offers it". Before 7/9, after 9/9.
+- `field-access.test.ts`: 7 → 8.
+- `fpl-1` (the project's list) and `fpl-2` (search's) each redden exactly their check (8/9). `fpl-3` reddens its unit test (7/8).
+
+Regression on lane 7, on the final clean build: 24 suites in 28 runs, 638 checks, all green (task-merge and project-page-controls three times each). API unit tests 1992/1992, web unit tests 326/326, both typechecks clean.
+
+Found reviewing it: `found-6-oct/field-checks-name-a-private-lists-fields` — the rename refusal names a formula kept to a private list, and the formula check confirms a field kept to one. `field-scope.ts` and the list page's comment now say the project's field list holds every field the reader may see.
+
+*Merged, 6 October,* into the main checkout (onto `986c760`) with the batch's other builders' work, and run again there on lanes 2, 5 and 7: 63 suites, 60 green at once; `list-export` and `panel-collapse` failed once at a load of 14 and were green twice each when run again; `session-in-the-browser` failed 3 of 7 runs, its reconnect checks racing the server's admission of a reopened socket (fixed here: see `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), then 6 of 6. API unit tests 2063/2063, web 344/344, both typechecks clean.
+
+### `found-6-oct/merge-moves-work-across-workspaces` — **closed** (security, small; found reviewing `found-30-sep/merge-moves-values-onto-fields-the-target-lacks`) · reproduced 5 October
 
 **A task of one workspace can be merged into a task of another, and its comments, files and time go with it**
 
@@ -8508,7 +8561,39 @@ The cause: the task write rule (`common/permissions/task-write.ts`) hands `reada
 
 *To close:* research what ClickUp allows (its merge picker offers tasks of the Workspace); refuse a merge whose two tasks are in different workspaces before anything moves, and check it in `task-merge`.
 
-### `found-6-oct/an-open-socket-outlives-its-access` — open (security, small; found reviewing `found-30-sep/an-open-socket-outlives-its-session`) · reproduced 6 October
+*Closed, 6 October* (built by an agent on lane 7).
+
+ClickUp: "Workspaces are independent, so it's not possible to transfer information between separate ones" (help centre, "Create a new Workspace"). A merge has you "search for and select the task you want to merge into" (help centre, "Merge tasks"). Both read through search excerpts.
+
+Measured first on lane 7 with the review's probe (`merge-across-workspaces.mjs`), three runs alike:
+- A comment on a task of the second workspace: 201.
+- `POST /tasks/<it>/merge {targetTaskId: <a task of the first>}`: 201, with `moved.comments` 1.
+- By SQL the comment then sat on the first workspace's task, and the merged task was binned.
+
+What changed:
+- `mergeTask` reads each task's workspace (its list's project's space). `mergeRefusal` asks first that both tasks are in one workspace, right after both exist and before any other rule about the target.
+- The refusal gives its reason: 400 "A task can only be merged into a task of its own workspace". The merge rule's other refusals are 400, and a list or project moved to another workspace is refused the same way ("A list can only be moved within its own workspace").
+- The first build answered 404 "The task to merge into was not found". It said that to a caller who could open that task (200), and to a user of another organisation whose own task was the target (the review, `merge-foreign-words.mjs`). By the owner's decision of 1 October a refusal says why, and "not found" is only for an id naming nothing.
+- The refusal comes before anything moves. The web is unchanged: the merge dialog offers only the workspace's own tasks and shows refusals in the server's words.
+
+After, three runs alike (`merge-foreign-words.mjs`):
+- The admin of both workspaces gets 400 with that reason, though both tasks still open for them (200).
+- An id naming nothing still gets 404 "The task to merge into was not found".
+- A user of another organisation gets the same 400 whichever way round they merge.
+- Nothing moved (checked by SQL).
+
+Checks:
+- `task-merge` now reads "a task of another workspace cannot be merged into one of this: 400, saying a task can only be merged into a task of its own workspace, to a caller who may open both — and nothing moves: its comment stays on it and it is not binned (read by SQL)". It is red on the pre-fix build (201) and on the first build (404), green after.
+- In `task-merge.test.ts` the test is now "a task of another workspace is refused with its reason, not as one that is not there, before any other rule of the target".
+- `mxw-1` reddens exactly that check (36/37); `mxw-2` reddens exactly that test (22/23).
+
+For the owner: the merge rule is asked before write access, as in the owner's order of 1 October. So a user of another organisation now hears this 400 instead of the write rule's 404 "Workspace not found". For the same task the guard already says 403 "You are not a member of this workspace". 403 instead of 400 is the owner's call if preferred.
+
+Regression on lane 7, on the final clean build: 24 suites in 28 runs, 638 checks, all green (task-merge and project-page-controls three times each). API unit tests 1992/1992, web unit tests 326/326, both typechecks clean.
+
+*Merged, 6 October,* into the main checkout (onto `986c760`) with the batch's other builders' work, and run again there on lanes 2, 5 and 7: 63 suites, 60 green at once; `list-export` and `panel-collapse` failed once at a load of 14 and were green twice each when run again; `session-in-the-browser` failed 3 of 7 runs, its reconnect checks racing the server's admission of a reopened socket (fixed here: see `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), then 6 of 6. API unit tests 2063/2063, web 344/344, both typechecks clean.
+
+### `found-6-oct/an-open-socket-outlives-its-access` — **closed** (security, small; found reviewing `found-30-sep/an-open-socket-outlives-its-session`) · reproduced 6 October
 
 **A member removed from a workspace keeps hearing a list's events on a socket already open**
 
@@ -8518,6 +8603,61 @@ ClickUp: "When you remove someone from your ClickUp Workspace, the person immedi
 
 *To close (the owner chooses the approach):* stop what an open socket hears when its person's access ends — either re-check each socket's rooms with `canJoinRoom` at the sweep and leave those it may no longer read, or have each change of access drop the affected sockets' rooms. Check that a removed member's open socket hears nothing more from the workspace, and that a member still in it keeps hearing.
 
+*Closed, 6 October* (built by an agent on lane 2, reviewed, and fixed after review on lane 2). The "To close" left the approach to the owner. The room sweep was built because it is the one that covers every way access ends; dropping rooms at each change of access as well would make four of them immediate, and is the owner's to ask for (below).
+
+ClickUp, all read through search excerpts:
+- "When you remove someone from your ClickUp Workspace, the person immediately loses access to all Workspace content" (help centre, "Remove someone from a Workspace").
+- "when an item is set to Private, only specific people or teams can access the item" ("Make Spaces, Folders, Subfolders, Lists, and tasks private").
+- "Adding followers does not change task permissions. Users still need appropriate Workspace permissions or sharing access to open the task" ("Add and remove task followers").
+
+Reproduced first on lane 2, three runs alike (`probe-authz-socket.mjs`). With seven sockets in their rooms, the owner removed a member, removed a guest's share of a list, lowered a member to guest, made a list private and made a space private (each 200). Each person's own read then answered 403. Eight seconds later every one of them still heard a task made in their list, and the removed member also heard a comment, a public channel's message and a doc rename. A room was asked once, at `subscribe` (`canJoinRoom`).
+
+Built:
+- Every 5 s a room pass asks again about each room a live socket's pages asked for. Each socket keeps those rooms from `subscribe`/`unsubscribe`, each with the workspace it was let in under. The pass asks once per person and room, by the rule that let the socket in.
+- A refused room is left as soon as its answer comes. A room the page still holds is joined again once its person may read it again.
+- A person no longer a member of a workspace leaves all their rooms there at once, on one membership read.
+- The pass asks four questions at a time and shares its reads. Each person is asked one room in turn: their longest-unasked first, and the longest-waiting person first. A pass stops when the interval is up, and the next carries on.
+- The revoked-session sweep runs on its own at every tick.
+- A super_admin passes, as in every guard, while their account still is one.
+- The socket itself stays open: it carries the person's other workspaces, and the web does not reopen a socket the server closed.
+- A notification about a task, a doc or a chat message is written, sent, mailed or pushed only to someone that item's read rule lets read it now (`notification-reach.ts`).
+
+Found in review and fixed with it, each measured on lane 2 before and after:
+- Notifications went on after access ended. The five people, each following a task, were each sent a comment and the task's new title, on the socket and in the inbox. A removed doc author was sent a comment with its words. After: none of them is sent anything; an admin following the same four tasks gets each one, and the author still in the workspace gets theirs.
+- The session sweep ran behind the room sweep. In review, a signed-out socket closed in 9.7 s against 3.9 s on its own. Room answers were acted on only at the end of the sweep, socket by socket. A removed member went on hearing a list 3.8 s after removal on its own, 9.5 s beside one socket holding 3,000 task rooms, and 21.8 s beside three. After: nothing heard on its own, 4.1 s beside one and 2.4 s beside three; signed-out sockets closed in 0.2, 4.0 and 2.3 s. The 3,000-room holder's own removal stopped in 2.2 s (18.6 s before rooms were settled per workspace).
+- Access that came back was never heard again on the open socket: a list made private and then public, a member added to the private space, a guest made a member again. The page stayed deaf until reloaded. After: it hears again with no new subscribe, and in the browser the page drew the task.
+- A super_admin who is a plain member was taken out of a list made private that the routes still let them read (200). After: they hear it.
+
+After, with `probe-authz-socket.mjs`, three runs alike: none of the five hears anything made after their access ended. The keeper and the owner hear all of it, and the removed member's socket stays open and hears their own workspace. With `probe-leave-latency.mjs`, the removed member stopped hearing 4.3, 2.5 and 0.3 s after removal.
+
+Cost (`measure-room-pass.ts`, lane 2's database): 50, 200 and 500 people with four rooms each took 556, 2,201 and 5,501 reads, in 0.7, 2.3 and 4.5 s on a loaded host. A request's read sent during the pass waited 2 to 83 ms.
+
+Checks: `realtime-access-ends` went from 6 to 10 checks: 6 of 10 on the reviewed build, 10 of 10 three times after. Check b now also holds the shared list's task room. `realtime.gateway.test.ts` went from 11 to 20 tests, `notification-reach.test.ts` is new with 2, and `notifications.service.test.ts` went from 11 to 12.
+
+Patches, each applied alone on lane 2 and restored byte for byte. E2E, with the checks each reddened:
+- rae-1: a–e
+- rae-2 (re-aimed onto both membership paths): a
+- rae-3: b and c
+- rae-26: b
+- rae-4: c
+- rae-5: d
+- rae-6: e
+- rae-7: f and j
+- rae-13: g
+- rae-14: h
+- rae-15: i
+- rae-16: j
+
+Unit claims: rae-8 to rae-12, rae-17 to rae-25, rae-27 and rae-28. rae-8, rae-12, rae-19 and rae-20 also redden other tests, as their headers say. `sip-68` was re-aimed onto the session sweep's own catch, and `sip-64` still reddens `sign-in-and-password`.
+
+For the owner:
+1. The approach. The sweep is built. Rooms could also be dropped at each change of access (member removal, role change, share removal, visibility change). That would be immediate for those four but would not cover space or project membership, SCIM or organisation removal, and every API process would need telling, for which there is no socket.io adapter here.
+2. A cap on the rooms one socket may hold. None was built. Only a socket holding more rooms than one pass reaches waits longer, and only for its own rooms.
+3. Inbox rows written before a person's access ended are not taken back; GET /notifications still lists them.
+4. What a removed member's open tab shows.
+
+*Merged, 6 October,* into the main checkout (onto `986c760`) with the batch's other builders' work, and run again there on lanes 2, 5 and 7: 63 suites, 60 green at once; `list-export` and `panel-collapse` failed once at a load of 14 and were green twice each when run again; `session-in-the-browser` failed 3 of 7 runs, its reconnect checks racing the server's admission of a reopened socket (fixed here: see `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), then 6 of 6. API unit tests 2063/2063, web 344/344, both typechecks clean.
+
 ### `found-6-oct/list-move-strands-its-fields` — open (visible bug, small; found reviewing `found-30-sep/field-definition-takes-a-foreign-list`) · reproduced 5 October
 
 **Moving a list to another project leaves its own fields behind, and its tasks stop showing them**
@@ -8526,7 +8666,7 @@ ClickUp: "When you remove someone from your ClickUp Workspace, the person immedi
 
 *To close:* research what ClickUp does with a List's own Custom Fields when the List moves (its move of tasks asks what to do with fields the destination lacks); the choice between moving the fields with the list, refusing the move, or asking is the owner's. Check it by SQL in a suite.
 
-### `found-6-oct/project-page-offers-field-edits-to-readers` — open (visible bug, small; found reviewing `found-30-sep/field-definition-takes-a-foreign-list`) · reproduced 5 October
+### `found-6-oct/project-page-offers-field-edits-to-readers` — **closed** (visible bug, small; found reviewing `found-30-sep/field-definition-takes-a-foreign-list`) · reproduced 5 October
 
 **The project page's Custom fields section offers every reader "Add field" and each field's delete, and says nothing when the delete is refused**
 
@@ -8534,7 +8674,41 @@ ClickUp: "When you remove someone from your ClickUp Workspace, the person immedi
 
 *To close:* offer Add and Delete only to whoever the define rule lets (a fields key in the project's capabilities), say a refusal in the server's words, describe list-scoped fields as theirs, and check it in a suite.
 
-### `found-6-oct/merge-drops-a-value-beside-an-emptied-one` — open (visible bug, small; found closing `found-30-sep/merge-moves-values-onto-fields-the-target-lacks`) · reproduced 5 October
+*Closed, 6 October* (built by an agent on lane 7).
+
+ClickUp: "Guests and limited members can't create and add Custom Fields" (help centre, "Create Custom Fields", read through search excerpts). Nothing found on how its pages draw these controls for somebody who may not use them.
+
+Measured first on lane 7 with the review's probe (`project-page-fields.mjs`), three runs alike: a member of a view-only space was shown "Add field" and the field's delete. Pressing delete got 403, the field stayed (SQL), and no toast appeared.
+
+What changed:
+- `GET /projects/:id/capabilities` answers `fields`: the define rule its field routes ask (`assertMayDefineFields`, with the account role they pass). For each list it is asked about, it also answers `lists[id].fields`, the same rule for a field kept to that list.
+- The Custom fields section offers "Add field" (and its form) only on `fields`. It offers each field's delete by that field's list's answer, or by the project's answer for a field of the whole project. Nothing is offered before the answer.
+- The page asks for the lists its fields are kept to as well as the lists it draws, so a field of an archived list keeps its answer.
+- A refused create or delete is said in the server's words (a toast).
+- A field kept to one list says "Only on tasks in <list>", and the section's description says such a field appears only on that list's tasks. The delete is named "Delete field <name>". All four locales.
+
+- While a wider answer loads, the previous answer stands only for the same project: `placeholderData` checks the previous query's project.
+- The first build kept the previous answer across projects. A member who may change one project's fields and statuses followed the sidebar to a project they only view, and was offered Add field, Statuses and a field's delete there until that project's answer arrived: 12 of 12 reads, three runs alike (the review's `caps-placeholder.mjs`). After: 0 of 12, three runs alike.
+- Comments in the capabilities route and the page's type now say the lists asked about are those shown and those its fields are kept to.
+
+After, three runs alike: "Add field" and the delete are not drawn for that member.
+
+Checks:
+- `project-page-controls` goes from 4 to 10. The two new checks are:
+  - "moving by the sidebar from a project whose fields and statuses the member may change to one they only view, the page offers nothing on the first project’s answer while the second’s is on its way — no Add field, Statuses or field’s delete — and then has the second’s". It is red on the first build's bundle (9/10) and green after.
+  - "and that field says it is only on the tasks of one list, the list it is kept to not being drawn on the page". This guards the fallback wording and is green before and after.
+- `ppf-9` (the last answer stands for any project) and `ppf-10` (no words for a list the page does not draw) each redden exactly their check.
+- `ppf-1` and `ppc-7` now also redden the first new check, because they draw controls before any answer; `ppf-4` also reddens the second. Their claims now list these.
+- Run again on the 10-check suite, `ppf-2`, `ppf-3`, `ppf-8`, `ppc-4`, `ppc-8` and `ppc-9` redden only what they claim.
+- The suite's browser contexts block the service worker, as required for a suite that routes requests.
+
+Not built, the owner's to decide: a field kept to a list of another project, which `found-6-oct/list-move-strands-its-fields` leaves behind, gets no list answer. Its delete is offered to nobody on this page.
+
+Regression on lane 7: 22 suites and 521 checks, all green. After the page's last change, the 11 suites that read the project page ran again: 253 checks, all green. API unit tests 1989/1989, web unit tests 326/326, both typechecks clean.
+
+*Merged, 6 October,* into the main checkout (onto `986c760`) with the batch's other builders' work, and run again there on lanes 2, 5 and 7: 63 suites, 60 green at once; `list-export` and `panel-collapse` failed once at a load of 14 and were green twice each when run again; `session-in-the-browser` failed 3 of 7 runs, its reconnect checks racing the server's admission of a reopened socket (fixed here: see `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), then 6 of 6. API unit tests 2063/2063, web 344/344, both typechecks clean.
+
+### `found-6-oct/merge-drops-a-value-beside-an-emptied-one` — **closed** (visible bug, small; found closing `found-30-sep/merge-moves-values-onto-fields-the-target-lacks`) · reproduced 5 October
 
 **A merge keeps the survivor's emptied field and drops the merged task's value**
 
@@ -8542,7 +8716,50 @@ ClickUp: "When you remove someone from your ClickUp Workspace, the person immedi
 
 *To close:* count an emptied value (null, an empty list or text) as no information, and check it in `task-merge` by SQL.
 
-### `found-6-oct/columns-panel-stays-open-beside-the-fields-picker` — open (visible bug, small; found closing `found-30-sep/fields-picker-counts-hidden-columns`) · reproduced 5 October
+*Closed, 6 October* (built by an agent on lane 7).
+
+ClickUp: "Task A's Custom Field values are only added to task B if task B doesn't have any information in the same Custom Field" (help centre, "Merge tasks", read through search excerpts).
+
+Measured first on lane 7, three runs alike:
+- `merge-null-clash.mjs`: 201 with `moved.customFields` 0. The survivor kept Note `{v: null}` and the binned task kept "from the merged task".
+- `merge-empty-clash.mjs`: the same beside an emptied text (`{v: ""}`) and beside Labels with every label taken off (`{v: []}`).
+- A survivor's own value ("kept") stayed, as it should.
+
+What changed:
+- `holdsNoInformation` (`task-merge.ts`): a value cleared, an empty text or an empty list holds nothing.
+- `fillEmptiedValue` (`tasks.service.ts`) handles each clash from `moveOrDrop` (`settle`). When the survivor's value holds nothing and the merged task's holds something, the survivor's own row takes the merged value where it is, but only while it still holds the value that was read. The merged task's row is then deleted, only while it is as it was read. The two steps are one transaction, and the survivor's row is never deleted.
+- `setValue` (`custom-fields.service.ts`): a write whose row disappeared between its read and its write is written as a new row. Before, the update found nothing and still answered 200.
+- A survivor value that holds something stays, and so does an emptied value of the merged task's.
+
+The review, measured on lane 7: the first build deleted the survivor's row by id and moved the merged row into its place, with no transaction. Its own `mergeTask` comment required one for any delete. With the order of two writes fixed by a row lock:
+- A PUT into the survivor's field queued ahead of the delete answered 200, and then no row held its value (the review's `merge-race-emptied.mjs`, three runs alike, and three more here).
+- A PUT queued behind the delete found its row gone, answered 200 and wrote nothing (the suite on that build, and again under `mec-8`).
+- Once the delete was moved to the merged task's row, a PUT into that task's field queued behind it also answered 200 and wrote nothing (`merge-race-merged-side.mjs`, three runs alike). That is why `setValue` changed too.
+
+After, three runs alike in each order (`merge-race-both.mjs`, `merge-race-merged-side.mjs`):
+- Typed first: the merge counts 0 moved; the survivor holds the typed value and the binned task its own.
+- Merge first: 1 moved, then the typed value lands on the survivor's row; the binned task holds none.
+- Typed into the merged task: 1 moved; the survivor holds the merged value and the binned task the typed one.
+The suite's emptied-value check (null, '' and []) stays green.
+
+Checks:
+- `task-merge` goes from 31 to 37. This item's checks are the builder's two (the emptied-value check, red before and green after, and the guard "and a survivor’s own value that holds something stays: …") plus three new ones:
+  - "a value typed into a survivor’s emptied field while the merge runs, queued ahead of the merge’s own write to it, stays: the merge leaves that field to it and counts none moved, and the merged task’s value stays on the binned task (read by SQL)"
+  - "and one queued just behind the merge’s write lands on the survivor’s row, which is still there: the merge counts the merged value moved, the typed one is written over it, and the binned task holds none (read by SQL)"
+  - "and one typed into the merged task’s own field, queued behind the merge’s delete of that task’s row, is written all the same: the survivor holds the merged value, and the binned task the typed one (read by SQL)"
+  The first two are red on the first build, the third on the build without the `setValue` change. All three are green after.
+- `tasks-merge-fields.test.ts` goes from 4 to 8; its fake now models the rows a statement finds. `custom-fields.service.test.ts` goes from 8 to 9. `task-merge.test.ts` gains one test (`holdsNoInformation`).
+- `mec-6` (the fill matches by id alone) reddens exactly the first race check. `mec-8` (the first build's delete-and-move, matched as read, in a transaction) reddens the second and third. `mec-11` (`setValue` reports a vanished row as written) reddens the third.
+- `mec-7`, `mec-9` and `mec-12` redden their unit tests, and `mec-10` (no transaction) reddens the transaction test.
+- `mec-1` to `mec-4` are re-aimed at `fillEmptiedValue`'s predicate. `mec-1` now also reddens the three race checks, because without a fill the merge writes neither row. `mec-3` also reddens the transaction test. `mec-2`, `mec-4` and `mec-5` redden only their own.
+
+The builder's 'Not built, the owner's to decide' (an unticked checkbox, a 0, text of spaces) stays.
+
+Regression on lane 7, on the final clean build: 24 suites in 28 runs, 638 checks, all green (task-merge and project-page-controls three times each). API unit tests 1992/1992, web unit tests 326/326, both typechecks clean.
+
+*Merged, 6 October,* into the main checkout (onto `986c760`) with the batch's other builders' work, and run again there on lanes 2, 5 and 7: 63 suites, 60 green at once; `list-export` and `panel-collapse` failed once at a load of 14 and were green twice each when run again; `session-in-the-browser` failed 3 of 7 runs, its reconnect checks racing the server's admission of a reopened socket (fixed here: see `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), then 6 of 6. API unit tests 2063/2063, web 344/344, both typechecks clean.
+
+### `found-6-oct/columns-panel-stays-open-beside-the-fields-picker` — **closed** (visible bug, small; found closing `found-30-sep/fields-picker-counts-hidden-columns`) · reproduced 5 October
 
 **On the list page the Columns panel does not close on an outside press or on Escape while the Fields picker is on the toolbar**
 
@@ -8550,13 +8767,53 @@ ClickUp: "When you remove someone from your ClickUp Workspace, the person immedi
 
 *To close:* give each panel its own ref and dismissal, and check both close on an outside press and on Escape.
 
-### `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in` — open (visible bug, small; found reviewing `found-30-sep/an-open-socket-outlives-its-session`) · reproduced 6 October
+*Closed, 6 October* (built by an agent on lane 7).
+
+ClickUp: nothing found on how its Columns or Fields panel is dismissed.
+
+Measured first on lane 7 with `columns-dismiss.mjs`, three runs alike: the Columns panel stayed open after a press outside it and after Escape. The Fields picker closed on both.
+
+What changed: the Columns panel has its own ref (`columnsDetailsRef`) and its own `useDismissableDetails`.
+
+After, three runs alike: both panels close on both.
+
+Checks:
+- `list-view-controls`: 50 → 51. The new check is "the Columns panel and the Fields picker beside it each close on a press outside it and on Escape". Before 50/51, after 51/51.
+- `lcd-1` (one ref again) and `lcd-2` (the picker no longer dismissed) each redden exactly it.
+
+Regression on lane 7, on the final clean build: 24 suites in 28 runs, 638 checks, all green (task-merge and project-page-controls three times each). API unit tests 1992/1992, web unit tests 326/326, both typechecks clean.
+
+*Merged, 6 October,* into the main checkout (onto `986c760`) with the batch's other builders' work, and run again there on lanes 2, 5 and 7: 63 suites, 60 green at once; `list-export` and `panel-collapse` failed once at a load of 14 and were green twice each when run again; `session-in-the-browser` failed 3 of 7 runs, its reconnect checks racing the server's admission of a reopened socket (fixed here: see `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), then 6 of 6. API unit tests 2063/2063, web 344/344, both typechecks clean.
+
+### `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in` — **closed** (visible bug, small; found reviewing `found-30-sep/an-open-socket-outlives-its-session`) · reproduced 6 October
 
 **When a person signs out and back in from one tab, another tab of the same browser hears nothing until it is reloaded**
 
 *Evidence, 6 October, lane 2, three runs alike (`twotab-probe.mjs`, on the build that closes `found-30-sep/an-open-socket-outlives-its-session`):* two tabs open; the person signed out and back in from the first. The second tab's socket ended with the old session, as it now must, but its requests carried on with the new session's cookie, so no 401 led it to refresh, and it heard no event until reloaded. Before that closure the socket stayed connected on the ended session, which was the security defect.
 
 *To close:* research how ClickUp's other tabs follow a sign-in; open a tab's socket again when the session it follows changes (another tab's sign-in), and check it with two tabs.
+
+*Closed, 6 October* (built by an agent on lane 2). ClickUp: nothing was found on how its other tabs follow a sign-in. The searches tried were sessions, logging out in one tab, browser tab limits and session management (search excerpts; the help centre is blocked here). Reproduced first on lane 2, four runs alike (`twotab-probe.mjs`). Two tabs of one browser were open, the second on a list page. The person signed out from the first tab's menu and back in through its form, straight away in three runs and after 7 s in one. The server closed the second tab's socket 3–8 s after the sign-out, no socket opened again, and neither a message in the person's own channel nor a task made in that list reached it. It stayed on its list, its store naming the person, with no 401. Two changes fix it. First, a tab now listens for the other tabs' writes to the shared auth storage (`storage`). A write that names this tab's person as newly signed in closes its socket and opens it again on the browser's session: the cookie, not the token the tab holds, which is the ended session's (`followOtherTab`). Second, a reopened socket is in no room but the person's own, and a page subscribes its rooms only when it mounts. So the tab keeps the rooms its pages hold, read from the socket's outgoing events, and asks for them again when the socket opens (`roomLedger`). This also rejoins them after an ordinary reconnect. After (lane 2, three runs alike, two straight away and one after 7 s): the second tab opened one socket again, rejoined its list, heard the message and drew the task, without a reload. Checks: `session-in-the-browser` 4 → 5 (three runs green), and the web's `realtime.test.ts` 2 → 5. Patches `sib-7` (no follow) and `sib-10` (no rejoin: the message was heard but the task was not drawn), plus the unit claims `sib-8`, `sib-9`, `sib-11` and `sib-12`, were each shown to redden their named check on lane 2 and restored byte for byte; `sib-4..6` still redden theirs. For the owner: when another tab signs in as somebody else, a tab still showing the first person keeps its socket closed (its requests already carry the new person's cookie). Nothing was built for that case.
+
+*Fixed after review, 6 October (lane 2).*
+
+A sign-in that did not follow a sign-out was not followed. Signing in again at /login, and accepting an invitation, each hand the browser a new session, but the storage write named the same person before and after, or nothing new. Under a workspace's one-session policy, the listening tab's socket was closed 4.1 s later, none reopened, and a task made in its list was not drawn. The invitation failed the same way whenever the accepting tab wrote a single P->P (1 of 2 runs).
+
+Now, when the server closes the socket, the tab asks the browser's session who it is: `GET /users/me` on the cookie alone, refreshing nothing and signing nobody out. If the answer is still this tab's person, it opens its socket again on that session, at most once a second. After, three runs each: on signing in again, and on the invitation, one socket reopened right after the server closed the old one, and the task was drawn. With no cap, nothing changes.
+
+The two-tab check could not see the token reset, because its listening tab held no token. Now the listening tab is the one that signed in, and it reaches its list through the app's own navigation. The other tab signs back in only after the server has closed the listener's socket, and the check asserts the first socket opened on that tab's token. `sib-13`, which keeps the old token, now reddens it. The branch "after somebody else" is now tested.
+
+Checks: `session-in-the-browser` went from 5 to 6 checks: 5 of 6 on the reviewed bundle, 6 of 6 three times after. `realtime.test.ts` went from 5 to 9 tests.
+
+Patches: sib-7 reddens check 5, sib-14 reddens check 6, and sib-10 and sib-13 redden both. sib-4 still reddens check 4. New unit claims sib-15 to sib-18 were added, and sib-8 and sib-12 were re-aimed onto the shared reopen.
+
+For the owner, unchanged: what a tab still showing one person should do when another tab signs in as somebody else.
+
+Found beside it: `found-6-oct/a-socket-sends-into-rooms-it-may-not-read`.
+
+*Fixed when merged, 6 October (lane 7, by me).* On the merged build `session-in-the-browser` failed 3 of 7 runs, each time a check that says or makes something just after the socket opens again: the socket had opened, and the message or the task was never heard or drawn. A socket is let into its rooms only after its connection opens (the server reads its session first, and joins a page's rooms when their subscribe is answered), so what is said in between reaches nothing; and the page read its data only when it mounted, so a task made in that gap stayed missing until a reload. Now the rooms asked for again wait for the server's answer, and then the page's active queries are read afresh (`rejoinAndCatchUp`, `lib/realtime.ts`), so whatever was said meanwhile is drawn; and the suite says its message again every two seconds until the reopened socket hears it, for twelve seconds, since a message said before the server has let the socket in reaches no room. After: 6 of 6 runs green on lane 7. `realtime.test.ts` 9 → 10, with the unit claim `sib-19` (the subscribe asks no answer and nothing is read afresh), shown to fail exactly that test.
+
+*Merged, 6 October,* into the main checkout (onto `986c760`) with the batch's other builders' work, and run again there on lanes 2, 5 and 7: 63 suites, 60 green at once; `list-export` and `panel-collapse` failed once at a load of 14 and were green twice each when run again; `session-in-the-browser` failed 3 of 7 runs, its reconnect checks racing the server's admission of a reopened socket (fixed here: see `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), then 6 of 6. API unit tests 2063/2063, web 344/344, both typechecks clean.
 
 ### `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change` — open (security, small; found closing `found-5-oct/import-merge-resets-fields-the-file-lacks`) · reproduced 6 October
 
@@ -8645,6 +8902,46 @@ ClickUp: "When you remove someone from your ClickUp Workspace, the person immedi
 *Evidence, 5 October, lane 6:* making a shared view, renaming the admin's view, making a task in the list and renaming the list all answered the identical 403 "Nothing here is shared with you, and a guest changes only what is shared with them", though a task in that list is shared with them. The sentence is the guest-default branch of `assertSpaceLevel`, reached because list-level writes ask within the list, its project and folder, and the guest's grant sits below the list.
 
 *To close:* say what is true ("Only a task here is shared with you…") where the guest holds a share below the location; check it in a suite.
+
+### `found-6-oct/field-checks-name-a-private-lists-fields` — open (security, small; found reviewing `found-6-oct/field-lists-name-a-private-lists-fields`) · reproduced 6 October
+
+**A field's rename refusal names a formula kept to a private list, and the formula check confirms a field kept to one, to a member refused that list**
+
+*Evidence, 6 October, lane 7, three runs alike (`private-field-names-elsewhere.mjs`, on the build that closes `found-6-oct/field-lists-name-a-private-lists-fields`):* in an open project the admin defined a project number "Budget" and, kept to the admin's private list, a formula "Secret margin" (`{Budget} * 2`) and a number "Private cost". A member refused that list (`GET /lists/:id` 403 "This list is private") sees only "Budget" in both field lists. Renaming Budget, which they may do, answered 400 '"Budget" cannot be renamed while "Secret margin" reads it — change the formula first'. Defining project formulas: `{Private cost} + 1` 201; `{Secret margin} + 1` 400 naming it as a formula field; `{Nothing by this name} + 1` 400 "there is no field called …". The rename guard reads every formula of the project, and `checkedFormulaConfig` resolves names against every field; neither asks `fieldsOnReadableLists`. ClickUp: "You must have access to all of the fields used in Formula Custom Fields to see the results. If a private field that you don't have access to is used, you won't see results" ("Custom Field permissions", read through search excerpts).
+
+*To close (the owner chooses):* what a member refused a list is told when a formula kept to that list reads a field they rename (refused without naming the formula, or allowed), and when a formula they define names a field kept to that list (refused with its reason, or allowed). Then check both in `custom-field-access`.
+
+### `found-6-oct/a-socket-sends-into-rooms-it-may-not-read` — open (security, small; found reviewing `found-6-oct/an-open-socket-outlives-its-access`) · reproduced 6 October
+
+**A removed member, or an account that was never a member, sends call reactions into a workspace's room and cursors, under a name of their choosing, into a canvas's room**
+
+*Evidence, 6 October, lane 2 (`probe-sweep-edges` [F]):* a member removed from the workspace and an account never in it each emitted `call.reaction {workspaceId}` and `canvas.cursor {canvasId, displayName}`. The owner's socket, in the workspace's and the canvas's rooms, heard both reactions (stamped with the senders' ids) and both cursors under the chosen names ("Rev owner (not really)"), while both senders' reads of the canvas answered 404. `handleCallReaction` emits to the named workspace's room with no check; `handleCanvasCursor` and `handleCanvasCursorLeave` send to `canvas:<id>` without the sender holding that room, and take `displayName` from the body.
+
+*To close:* research who may react in a ClickUp call; relay a cursor only from a socket that holds that canvas's room, named from the account; relay a reaction only from someone the call's channel lets read it. Check both with a removed member and an outsider, beside a member.
+
+### `found-6-oct/timeline-and-gantt-draw-a-column-per-day` — open (performance, small; found reviewing `found-5-oct/years-below-100-read-back-wrong`) · reproduced 6 October
+
+**The list's Gantt and the workspace timeline lay out one column per day back to the earliest date, so one task dated far away freezes them**
+
+*Evidence, 6 October, lane 5 (`probe-year202-timeline.mjs`):* with one task starting in year 202, HEAD's bundle drew the timeline after 17.8 s (an axis of 18,653,936 px, 95,834 nodes); with 1902, 1.9 s; with year 2, now read back as stored, 26.4 s; the review measured the list's Gantt at 58–69 s with 1.5 million nodes, and its Day zoom unresponsive. The timeline's range and the Gantt's are sized from the earliest date, and their headers and grid draw an element per day.
+
+*To close:* the owner's decision (with the range of years a date may hold, recorded on `found-5-oct/years-below-100-read-back-wrong`): bound or virtualise the drawn range, or list an outlier apart. Then check a far-dated task leaves both views drawn in a second.
+
+### `found-6-oct/list-page-offers-task-edits-by-list-level` — open (visible bug, small; found reviewing `found-30-sep/timeline-drags-refused-silently`) · reproduced 6 October
+
+**The list page offers a task's row edits, Gantt drag and Calendar drag by the list's level alone, so a person given the task at Edit in a list they may only view is offered none of them**
+
+*Evidence, 6 October, lane 5 (`probe-list-share.mjs`):* a member given one task at Edit in a view-only space has task capabilities `edit: true` and list capabilities `edit: false`. On the list page that task's row draws no date boxes and its Gantt bar takes no drag, yet `PATCH /tasks/:id` accepts the change. The workspace timeline now offers it (`mayEdit`, closed with `found-30-sep/timeline-drags-refused-silently`).
+
+*To close:* offer each row's edits by the task's own answer (as the timeline's `mayEdit` and the task sheet do), and check it with a member given one task at Edit.
+
+### `found-6-oct/a-time-on-utc-midnight-reads-as-no-time` — open (visible bug, small; found closing `found-30-sep/sheet-dates-write-as-typed`) · reproduced 6 October
+
+**A real time that lands on UTC midnight is read back as a date with no time**
+
+*Evidence, 6 October, lane 5 (`probe-la-midnight.mjs`):* typed into the task sheet's due box and accepted with Enter, then reloaded: Los Angeles 8 Oct 17:00 → stored `2026-10-09 00:00:00+00` → shown 2026-10-09T00:00, as a date with no time; Karachi 8 Oct 05:00 → stored `2026-10-08 00:00:00+00` → shown as no time; UTC 17:00 right. A timeline drag across a clock change reaches it too (Los Angeles, −2 days on a task at 2 Nov 17:00 PST stored 2026-11-01T00:00Z, drawn as a two-day bar). `isDateOnly` (`lib/task-dates.ts`) treats every UTC-midnight instant as a date picked without a time; ClickUp's API keeps a separate `due_date_time` / `start_date_time` flag.
+
+*To close:* a has-time flag beside each date (a schema change, the owner's decision), written by every date write and read by `isDateOnly`; check it in the three zones.
 
 ## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
 
@@ -9499,7 +9796,14 @@ reason (`found-30-sep/private-task-reads-say-403`, reverted). This item asked to
 so it no longer describes a defect, and it is not counted. The 400 "Doc belongs to a
 different workspace" could still be reviewed as a tenant-boundary matter of its own.
 
-#### Decisions for the owner — 10
+#### Decisions for the owner — 11
+
+### `found-6-oct/doc-refusals-answer-not-found` — decision, not counted (6 October; found reviewing `found-6-oct/an-open-socket-outlives-its-access`)
+
+**A doc the caller may not open answers 404 "Doc not found", where the owner's rule of 1 October answers 403 with the reason for tasks, lists, projects and spaces**
+
+*Measured, 6 October, lane 2:* a member removed from the workspace, reading the doc they wrote, got 404 "Doc not found". `DocsService.assertDocAccess` answers not-found both to a non-member and to a member a private space refuses ("Not found either way"), since `db1416d` (24 September). The owner's decision named tasks, lists, projects and spaces; whether docs follow it is the owner's to say (as for a colleague's private view, recorded on `found-5-oct/readers-change-shared-views`). If they do: 403 with the reason for a doc the caller may not open, 404 for an id naming nothing, paired in a suite.
+
 
 ### `found-30-sep/template-leaves-values-out-silently` — decision, not counted (triage, 5 October; was: open (decision, small; found closing `found-30-sep/template-values-written-unchecked`))
 

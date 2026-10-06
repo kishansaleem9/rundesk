@@ -18,7 +18,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { readableProject, readableTask, type ReadActor } from '../../common/permissions/read-access'
 import { assertTaskWritable } from '../../common/permissions/task-write'
-import { assertMayDefineFields, listOfProject } from '../../common/permissions/field-access'
+import { assertMayDefineFields, fieldsOnReadableLists, listOfProject } from '../../common/permissions/field-access'
 import { computeProgress, toProgressConfig, type ProgressInputs } from './progress'
 import {
   evaluateFormula,
@@ -201,11 +201,14 @@ export class CustomFieldsService {
   // ── Definitions ─────────────────────────────────────────────────────────────
   async listForProject(workspaceId: string, projectId: string, reader?: ReadActor) {
     await this.assertProjectOpenTo(workspaceId, projectId, reader)
-    return this.db
+    const defs = await this.db
       .select()
       .from(customFieldDefinitions)
       .where(eq(customFieldDefinitions.projectId, projectId))
       .orderBy(asc(customFieldDefinitions.position), asc(customFieldDefinitions.createdAt))
+    // Less a field of a list the reader may not open (`fieldsOnReadableLists`,
+    // `found-6-oct/field-lists-name-a-private-lists-fields`).
+    return reader ? fieldsOnReadableLists(this.db, workspaceId, defs, reader) : defs
   }
 
   async createDefinition(
@@ -788,7 +791,15 @@ export class CustomFieldsService {
         .set({ value: { v: value }, updatedAt: new Date() })
         .where(eq(customFieldValues.id, existing[0].id))
         .returning()
-      return row
+      /*
+       * A ROW THAT WENT BETWEEN THE READ AND THE WRITE IS WRITTEN AFRESH. A merge
+       * deletes the merged task's value row once the survivor holds its value
+       * (`TasksService.fillEmptiedValue`), and a write into that task's field
+       * queued behind the delete updated nothing: it answered 200, and no row
+       * anywhere held its value (lane 7, three runs alike, the order fixed by a
+       * row lock).
+       */
+      if (row) return row
     }
     const [row] = await this.db
       .insert(customFieldValues)

@@ -34,6 +34,32 @@ export async function listOfProject(db: Db, projectId: string, listId: unknown):
 }
 
 /*
+ * A FIELD SCOPED TO A LIST IS READ WITH ITS LIST: a list of fields, as a
+ * reader may have it, leaves out each field whose list they may not open (the
+ * read rule, `readableList`). A field with no list is its project's, which the
+ * caller of this has already asked. A project's field list and search's field
+ * filter named a private list's field ("Private stage") to a member that list
+ * refuses (403 "This list is private"), measured on lane 7
+ * (`found-6-oct/field-lists-name-a-private-lists-fields`). ClickUp makes a List
+ * private "so only certain people can access them" (help centre, "Make Spaces,
+ * Folders, Subfolders, Lists, and tasks private", read through search
+ * excerpts). Each list is asked once.
+ */
+export async function fieldsOnReadableLists<F extends { listId?: string | null }>(
+  db: Db,
+  workspaceId: string,
+  fields: F[],
+  reader: ReadActor,
+): Promise<F[]> {
+  const scopedTo = [...new Set(fields.map((f) => f.listId).filter((id): id is string => typeof id === 'string'))]
+  const open = new Set<string>()
+  for (const listId of scopedTo) {
+    if (await readableList(db, workspaceId, listId, reader)) open.add(listId)
+  }
+  return fields.filter((f) => f.listId == null || open.has(f.listId))
+}
+
+/*
  * WHO MAY DEFINE, RENAME OR DELETE A PROJECT'S FIELDS — somebody who may
  * change the project, or for a field scoped to one of its lists that list, and
  * not a guest (`found-25-sep/field-values-written-by-readers`).

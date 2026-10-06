@@ -143,13 +143,10 @@ import { COMPOSER_BLOCKS, applyBlockAtCaret, matchBlocks } from '../lib/composer
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { useDateFormat } from '../lib/date-format'
 import {
-  toDateInput,
-  toDateTimeInput,
-  fromDateTimeInput,
-  withDatePart,
   presetToIso,
   DATE_PRESETS,
 } from '../lib/task-dates'
+import { DateBox, DateTimeBox, DayBox } from './date-time-box'
 import { TaskSheetSkeleton } from './loading-skeletons'
 import { InlineSkeleton } from './loading-skeletons'
 import { useTaskSearch } from '../lib/use-task-search'
@@ -3566,13 +3563,14 @@ function OverviewPanel({
         >
           {/* §G [21:36] — the deadline is a moment, not a day. See
               lib/task-dates.ts for why this is local-time and what a bare
-              `type="date"` here used to do to a time already on the row. */}
-          <input
-            type="datetime-local"
-            data-testid="task-due-date"
-            value={toDateTimeInput(detail.dueDate)}
-            onChange={(e) => patchTask.mutate({ dueDate: fromDateTimeInput(e.target.value) })}
-            disabled={patchTask.isPending || !caps.edit}
+              `type="date"` here used to do to a time already on the row.
+              Written on Enter or when the box is left, and open while the
+              write is out (`DateTimeBox`, `found-30-sep/sheet-dates-write-as-typed`). */}
+          <DateTimeBox
+            testId="task-due-date"
+            stored={detail.dueDate}
+            onCommit={(dueDate) => patchTask.mutateAsync({ dueDate })}
+            disabled={!caps.edit}
             className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
           />
           {/*
@@ -3609,12 +3607,11 @@ function OverviewPanel({
           </div>
         </Field>
         <Field label={t('taskDetail.fieldStartDate')} empty={emptyFields.startDate}>
-          <input
-            type="datetime-local"
-            data-testid="task-start-date"
-            value={toDateTimeInput(detail.startDate)}
-            onChange={(e) => patchTask.mutate({ startDate: fromDateTimeInput(e.target.value) })}
-            disabled={patchTask.isPending || !caps.edit}
+          <DateTimeBox
+            testId="task-start-date"
+            stored={detail.startDate}
+            onCommit={(startDate) => patchTask.mutateAsync({ startDate })}
+            disabled={!caps.edit}
             className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
           />
         </Field>
@@ -4586,6 +4583,8 @@ function SubtasksPanel({
     mutationFn: ({ id, dueDate }: { id: string; dueDate: string | null }) =>
       api(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify({ dueDate }) }),
     onSuccess: invalidateSubtasks,
+    // A refused day is said in the server's words, as the sheet's own dates are.
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotUpdateTask')),
   })
 
   return (
@@ -4672,15 +4671,15 @@ function SubtasksPanel({
               )}
               {/* Deliberately coarse — a full datetime control would be wider
                   than the subtask row it sits in. Coarse is fine; destroying a
-                  time it cannot show is not, hence withDatePart. */}
+                  time it cannot show is not, hence withDatePart (`DayBox`).
+                  Written when a day is accepted, not at each one typed on the
+                  way (`found-30-sep/sheet-dates-write-as-typed`). */}
               {editingSubtaskId !== s.id && (
-                <input
-                  type="date"
+                <DayBox
+                  testId="subtask-due-date"
                   className="h-7 rounded border border-border bg-background px-1 text-[11px] text-muted-foreground"
-                  value={toDateInput(s.dueDate)}
-                  onChange={(e) =>
-                    setDueDate.mutate({ id: s.id, dueDate: withDatePart(s.dueDate, e.target.value) })
-                  }
+                  stored={s.dueDate}
+                  onCommit={(dueDate) => setDueDate.mutateAsync({ id: s.id, dueDate })}
                   disabled={!caps.edit}
                   title={t('taskDetail.dueDateTitle')}
                 />
@@ -9362,7 +9361,8 @@ function CustomFieldsPanelInner({
               workspaceId={workspaceId}
               taskId={taskId}
               disabled={setValue.isPending}
-              onCommit={(next) => setValue.mutate({ fieldId: definition.id, value: next })}
+              // Settled when the write is (a date box shows what was typed until then).
+              onCommit={(next) => setValue.mutateAsync({ fieldId: definition.id, value: next }).catch(() => undefined)}
             />
           )}
         </div>
@@ -9454,7 +9454,7 @@ function CustomFieldEditor({
   workspaceId: string
   taskId: string
   disabled?: boolean
-  onCommit: (next: CustomFieldValue) => void
+  onCommit: (next: CustomFieldValue) => void | Promise<unknown>
 }) {
   const { t } = useTranslation()
   const [draft, setDraft] = useState<string>(() => {
@@ -9531,12 +9531,22 @@ function CustomFieldEditor({
       )
     }
     case 'date':
+      /*
+       * Written when the day is accepted — Enter, or the box left — not at each
+       * day typed on the way, and open while the write is out
+       * (`DateBox`, `found-30-sep/sheet-dates-write-as-typed`): typing "25"
+       * wrote the 2nd, then closed every field for the write and dropped the
+       * "5". So it is not closed while a value is written, as the others are.
+       */
       return (
-        <Input
+        <DateBox
           type="date"
-          value={typeof value === 'string' ? value.slice(0, 10) : ''}
-          disabled={disabled}
-          onChange={(e) => onCommit(e.target.value || null)}
+          testId="custom-field-date"
+          shown={typeof value === 'string' ? value.slice(0, 10) : ''}
+          toValue={(ymd) => ymd || null}
+          onCommit={(next) => Promise.resolve(onCommit(next))}
+          // The classes `Input` gives a box, so the field looks as it did.
+          className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
         />
       )
     case 'checkbox':

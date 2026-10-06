@@ -33,6 +33,14 @@
  * stays on the binned task, where it is still shown; what the merge says of it,
  * or whether it offers to add the field, is the owner's to decide.
  *
+ * AND A SURVIVOR'S EMPTIED VALUE IS NO INFORMATION
+ * (`found-6-oct/merge-drops-a-value-beside-an-emptied-one`): its Note set and
+ * then cleared kept the merged task's Note in the bin. It now takes the merged
+ * value where it is, and a value typed into it while the merge runs is not
+ * lost. AND A TASK OF ANOTHER WORKSPACE IS NOT MERGED INTO ONE OF THIS
+ * (`found-6-oct/merge-moves-work-across-workspaces`): a merge across two moved
+ * a comment from one into the other (201); it is refused with its reason.
+ *
  *   node test/e2e/task-merge.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
@@ -50,7 +58,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 31
+const EXPECTED_CHECKS = 37
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -432,6 +440,174 @@ try {
     'and a task moved out of a field’s list, which no longer shows its value there, merged into a task of that list keeps the value on the binned task — the survivor, which has the field, holds none and shows it empty (read by SQL), and the merge counts no field moved',
     `the merge answered ${staleMerge.status} ${JSON.stringify(staleMerge.error?.message ?? null)} and counted ${JSON.stringify(staleMerge.data?.moved?.customFields)} field(s) moved; ` +
       `the survivor holds rows for ${JSON.stringify(staleOnSurvivor)} and shows Stage = ${JSON.stringify(survivorShown.Stage)}, the binned task holds rows for ${JSON.stringify(staleKept)}`,
+  )
+
+  // ── An emptied value is no information ───────────────────────────────────
+  console.log('\n▶ a survivor’s emptied value gives way to the merged task’s, and one that holds something stays')
+  /*
+   * `found-6-oct/merge-drops-a-value-beside-an-emptied-one`. ClickUp adds the
+   * merged task's value "only … if task B doesn't have any information in the
+   * same Custom Field" (help centre, "Merge tasks", read through search
+   * excerpts). A survivor's Note set and then cleared kept a row `{v: null}`,
+   * which the merge took for an answer: 201, none moved, and the merged task's
+   * Note stayed in the bin (lane 7). Three ways to empty a value — cleared,
+   * an empty text, every label taken off — each beside a merged task's value,
+   * read by SQL; and beside them a survivor whose own value holds something.
+   */
+  const tags = await fieldOf(one, { name: 'Tags', type: 'labels', options: [{ label: 'Red', value: 'red' }, { label: 'Blue', value: 'blue' }] }, 'define Tags on project ONE')
+  /** The value the task holds for a field, read by SQL — `undefined` for no row. */
+  const valueOn = async (taskId, fieldId) =>
+    (await sql`select value from custom_field_values where task_id = ${taskId} and field_id = ${fieldId}`)[0]?.value
+  const emptied = []
+  for (const [field, name, setThenEmpty, mergedValue] of [
+    [note, 'cleared', [`old ${stamp}`, null], `from the merged task ${stamp}`],
+    [note, 'emptied text', [`old ${stamp}`, ''], `from the merged task ${stamp}`],
+    [tags, 'every label taken off', [['red'], []], ['blue']],
+  ]) {
+    const merged = await taskIn(oneMain, `Merged beside a ${name} value`)
+    const survivor = await taskIn(oneMain, `Survivor with a ${name} value`)
+    for (const value of setThenEmpty) await put(survivor, field, value)
+    await put(merged, field, mergedValue)
+    const res = await A(`/tasks/${merged}/merge`, { method: 'POST', body: { targetTaskId: survivor } })
+    emptied.push({
+      name, res, want: mergedValue,
+      onSurvivor: (await valueOn(survivor, field))?.v, onBinned: await valueOn(merged, field),
+    })
+  }
+  chk(
+    emptied.every((e) => e.res.ok && e.res.data?.moved?.customFields === 1 && JSON.stringify(e.onSurvivor) === JSON.stringify(e.want) && e.onBinned === undefined),
+    'a merged task’s value goes onto a survivor whose own value of the field was emptied — cleared, an empty text, every label taken off — and the merge counts it moved: the survivor holds it and the binned task none (read by SQL)',
+    emptied.map((e) => `${e.name}: the merge answered ${e.res.status} ${JSON.stringify(e.res.error?.message ?? null)} and counted ${JSON.stringify(e.res.data?.moved?.customFields)} moved; ` +
+      `the survivor holds ${JSON.stringify(e.onSurvivor)}, the binned task ${JSON.stringify(e.onBinned ?? null)}`).join('; '),
+  )
+
+  const keeper = await taskIn(oneMain, 'Survivor with a Note of its own')
+  const giver = await taskIn(oneMain, 'Merged beside a Note that holds something')
+  await put(keeper, note, `the survivor’s own ${stamp}`)
+  await put(giver, note, `from the merged task ${stamp}`)
+  const keptMerge = await A(`/tasks/${giver}/merge`, { method: 'POST', body: { targetTaskId: keeper } })
+  const [keptOn, keptBinned] = [(await valueOn(keeper, note))?.v, (await valueOn(giver, note))?.v]
+  chk(
+    keptMerge.ok && keptMerge.data?.moved?.customFields === 0 && keptOn === `the survivor’s own ${stamp}` && keptBinned === `from the merged task ${stamp}`,
+    'and a survivor’s own value that holds something stays: the merged task’s stays on the binned task, and the merge counts no field moved (read by SQL)',
+    `the merge answered ${keptMerge.status} and counted ${JSON.stringify(keptMerge.data?.moved?.customFields)} moved; the survivor holds ${JSON.stringify(keptOn)}, the binned task ${JSON.stringify(keptBinned)}`,
+  )
+
+  // ── While a merge runs ───────────────────────────────────────────────────
+  console.log('\n▶ a value written into a merging field while the merge runs is not lost')
+  /*
+   * The review of `found-6-oct/merge-drops-a-value-beside-an-emptied-one`,
+   * measured on lane 7, three runs alike: the merge deleted the survivor's
+   * emptied row by id, having read it empty, and a value written into it in
+   * between — somebody typing into the survivor's field while the merge ran —
+   * went with it: the PUT answered 200, and no row anywhere then held it. The
+   * order of the two writes is fixed here by holding the row from a session of
+   * this suite's own (`for update`) until both are seen queued behind it in
+   * `pg_stat_activity`: the typing first and the merge second, and then the
+   * other way round; and then on the merged task's own row, which the merge
+   * deletes. Each time the typed value is the last word where it was typed.
+   */
+  /** How many statements on custom_field_values wait for a lock in this database (`tx`, the session holding the row). */
+  const queuedOnValues = async (tx) => {
+    await tx`select pg_stat_clear_snapshot()`
+    const rows = await tx`select query from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`
+    return rows.filter((r) => /^\s*(update|delete from) "custom_field_values"/i.test(r.query ?? '')).length
+  }
+  /**
+   * A survivor's Note set and cleared, a merged task's Note, and the two writes queued in `order` on one task's Note
+   * row, held: by default the survivor's, typed into; `{ on: 'merged' }`, the merged task's.
+   */
+  const raced = async (order, { on = 'survivor' } = {}) => {
+    const merged = await taskIn(oneMain, `Merged while ${on === 'merged' ? 'it' : 'the survivor'} is typed into, ${order}`)
+    const survivor = await taskIn(oneMain, `Survivor while ${on === 'merged' ? 'the merged task' : 'it'} is typed into, ${order}`)
+    await put(survivor, note, `old ${stamp}`)
+    await put(survivor, note, null)
+    await put(merged, note, `from the merged task ${stamp}`)
+    const into = on === 'merged' ? merged : survivor
+    const [held] = await sql`select id from custom_field_values where task_id = ${into} and field_id = ${note}`
+    const typed = `typed into the ${on === 'merged' ? 'merged task' : 'survivor'} while the merge ran, ${order} ${stamp}`
+    const typeIt = () => A(`/workspaces/${fw.id}/tasks/${into}/custom-fields/${note}`, { method: 'PUT', body: { value: typed } })
+    const mergeIt = () => A(`/tasks/${merged}/merge`, { method: 'POST', body: { targetTaskId: survivor } })
+    const seenQueued = []
+    let typing = null
+    let merging = null
+    await sql.begin(async (tx) => {
+      await tx`select id from custom_field_values where id = ${held.id} for update`
+      if (order === 'typed first') typing = typeIt()
+      else merging = mergeIt()
+      seenQueued.push(await waitUntil(async () => (await queuedOnValues(tx)) >= 1, { timeoutMs: 15_000 }))
+      if (order === 'typed first') merging = mergeIt()
+      else typing = typeIt()
+      seenQueued.push(await waitUntil(async () => (await queuedOnValues(tx)) >= 2, { timeoutMs: 15_000 }))
+    })
+    const [typedRes, mergeRes] = await Promise.all([typing, merging])
+    return {
+      typed, typedRes, mergeRes, queued: seenQueued.every(Boolean),
+      onSurvivor: (await valueOn(survivor, note))?.v, onBinned: (await valueOn(merged, note))?.v,
+    }
+  }
+  const sayRace = (r) =>
+    `${r.queued ? 'both writes were seen queued' : 'the two writes were NOT both seen queued behind the held row'}; the PUT answered ${r.typedRes.status} ${JSON.stringify(r.typedRes.data?.value ?? r.typedRes.error?.message ?? null)}, ` +
+    `the merge ${r.mergeRes.status} ${JSON.stringify(r.mergeRes.error?.message ?? null)} counting ${JSON.stringify(r.mergeRes.data?.moved?.customFields)} moved; ` +
+    `the survivor holds ${JSON.stringify(r.onSurvivor ?? null)}, the binned task ${JSON.stringify(r.onBinned ?? null)}`
+
+  const typedFirst = await raced('typed first')
+  chk(
+    typedFirst.queued && typedFirst.typedRes.status === 200 && typedFirst.mergeRes.status === 201 && typedFirst.mergeRes.data?.moved?.customFields === 0 &&
+      typedFirst.onSurvivor === typedFirst.typed && typedFirst.onBinned === `from the merged task ${stamp}`,
+    'a value typed into a survivor’s emptied field while the merge runs, queued ahead of the merge’s own write to it, stays: the merge leaves that field to it and counts none moved, and the merged task’s value stays on the binned task (read by SQL)',
+    sayRace(typedFirst),
+  )
+  const mergeFirst = await raced('merge first')
+  chk(
+    mergeFirst.queued && mergeFirst.mergeRes.status === 201 && mergeFirst.mergeRes.data?.moved?.customFields === 1 && mergeFirst.typedRes.status === 200 &&
+      mergeFirst.onSurvivor === mergeFirst.typed && mergeFirst.onBinned === undefined,
+    'and one queued just behind the merge’s write lands on the survivor’s row, which is still there: the merge counts the merged value moved, the typed one is written over it, and the binned task holds none (read by SQL)',
+    sayRace(mergeFirst),
+  )
+  /*
+   * And the merged task's own row, which the merge deletes once the survivor
+   * holds its value: a write into that task's field queued behind the delete
+   * updated nothing, and answered 200 (lane 7, three runs alike).
+   */
+  const mergedSide = await raced('merge first', { on: 'merged' })
+  chk(
+    mergedSide.queued && mergedSide.mergeRes.status === 201 && mergedSide.mergeRes.data?.moved?.customFields === 1 &&
+      mergedSide.typedRes.status === 200 && mergedSide.typedRes.data?.value?.v === mergedSide.typed &&
+      mergedSide.onSurvivor === `from the merged task ${stamp}` && mergedSide.onBinned === mergedSide.typed,
+    'and one typed into the merged task’s own field, queued behind the merge’s delete of that task’s row, is written all the same: the survivor holds the merged value, and the binned task the typed one (read by SQL)',
+    sayRace(mergedSide),
+  )
+
+  // ── Across workspaces ────────────────────────────────────────────────────
+  console.log('\n▶ a task of another workspace is not merged into one of this')
+  /*
+   * `found-6-oct/merge-moves-work-across-workspaces`. Someone who may write in
+   * two workspaces merged a task of one into a task of the other: 201, and
+   * its comment then sat in the other workspace (read by SQL, lane 7). ClickUp:
+   * "Workspaces are independent, so it's not possible to transfer information
+   * between separate ones" (help centre, "Create a new Workspace", read through
+   * search excerpts). Refused before anything moves, with its reason, as a
+   * list or a project moved to another workspace is ("A list can only be
+   * moved within its own workspace"): this caller may open both tasks, and
+   * "not found" is for an id naming nothing (the owner's decision of 1
+   * October).
+   */
+  const foreign = await taskIn(oneMain, 'Of the merge-fields workspace')
+  must(await A(`/tasks/${foreign}/comments`, { method: 'POST', body: { body: `ACROSS ${stamp}` } }), 'comment on the other workspace’s task')
+  const thirdCommentsBefore = ((await A(`/tasks/${third.id}/comments`)).data ?? []).length
+  const across = await A(`/tasks/${foreign}/merge`, { method: 'POST', body: { targetTaskId: third.id } })
+  const [acrossComment] = await sql`select task_id from task_comments where body = ${`ACROSS ${stamp}`}`
+  const [acrossSource] = await sql`select is_archived from tasks where id = ${foreign}`
+  const thirdCommentsAfter = ((await A(`/tasks/${third.id}/comments`)).data ?? []).length
+  const [opensSource, opensTarget] = [(await A(`/tasks/${foreign}`)).status, (await A(`/tasks/${third.id}`)).status]
+  chk(
+    across.status === 400 && across.error?.message === 'A task can only be merged into a task of its own workspace' &&
+      opensSource === 200 && opensTarget === 200 &&
+      acrossComment?.task_id === foreign && acrossSource?.is_archived === false && thirdCommentsAfter === thirdCommentsBefore,
+    'a task of another workspace cannot be merged into one of this: 400, saying a task can only be merged into a task of its own workspace, to a caller who may open both — and nothing moves: its comment stays on it and it is not binned (read by SQL)',
+    `the merge answered ${across.status} ${JSON.stringify(across.error?.message ?? null)}; the caller opens the two tasks ${opensSource} and ${opensTarget}; the comment is on ${acrossComment?.task_id === foreign ? 'its own task' : JSON.stringify(acrossComment?.task_id ?? null)}, ` +
+      `the task binned ${JSON.stringify(acrossSource?.is_archived ?? null)}, the other task's comments ${thirdCommentsBefore} → ${thirdCommentsAfter}`,
   )
 
   // ── On screen ────────────────────────────────────────────────────────────

@@ -13,27 +13,83 @@ import { TasksService } from './tasks.service'
 
 const dialect = new PgDialect()
 
-/** A database whose selects answer in order, however they are chained, and which keeps every update. */
-function scriptedDb(selects: unknown[][]) {
+/**
+ * A database whose selects answer in order, however they are chained, and which
+ * keeps every update and delete — the condition's parameters, and whether it
+ * ran in a transaction.
+ *
+ * `rows` are the value rows the statements reach, by id, as they are when the
+ * statements run (which can differ from what the selects answered: a value
+ * written since it was read). A statement that asks for a value finds its row
+ * only while the row holds that value, as Postgres reads a condition against
+ * the row a write left; one that asks for the id alone finds it whatever it
+ * holds; a deleted row is found by nothing. What a statement finds it changes,
+ * so `holding` reads where each value ended. A row `rows` does not name is
+ * found by any statement and not followed.
+ */
+function scriptedDb(selects: unknown[][], rows: Record<string, { taskId: string; value: unknown }> = {}) {
   const queue = [...selects]
+  const table = new Map(Object.entries(rows).map(([id, row]) => [id, { ...row }]))
+  const gone = new Set<string>()
   const updated: Array<{ set: unknown; params: unknown[] }> = []
-  const db: any = {
+  const deleted: unknown[][] = []
+  /** The statements run inside `db.transaction`. */
+  const inTransaction: string[] = []
+  const finds = (params: unknown[]) => {
+    const [id] = params
+    if (typeof id !== 'string') return true
+    if (gone.has(id)) return false
+    const row = table.get(id)
+    if (!row) return true
+    const asked = params.slice(1).filter((p) => typeof p === 'string' && p.startsWith('{'))
+    return asked.length === 0 || asked.includes(JSON.stringify(row.value))
+  }
+  /** A statement's answer: awaited, its rows; `.returning()`, the row it found. */
+  const answer = (found: boolean, id: unknown) => {
+    const q: any = Promise.resolve([])
+    q.returning = async () => (found ? [{ id }] : [])
+    return q
+  }
+  const statements = (tx: boolean): any => ({
     select: mock.fn(() => {
-      const rows = queue.shift() ?? []
-      const q: any = Promise.resolve(rows)
+      const answered = queue.shift() ?? []
+      const q: any = Promise.resolve(answered)
       for (const step of ['from', 'innerJoin', 'leftJoin', 'where', 'orderBy', 'limit']) q[step] = () => q
       return q
     }),
     update: mock.fn(() => ({
-      set: (set: unknown) => ({
-        where: async (condition: unknown) => {
-          updated.push({ set, params: dialect.sqlToQuery(condition as never).params as unknown[] })
-          return []
+      set: (set: any) => ({
+        where: (condition: unknown) => {
+          const params = dialect.sqlToQuery(condition as never).params as unknown[]
+          updated.push({ set, params })
+          if (tx) inTransaction.push('update')
+          const found = finds(params)
+          const row = table.get(params[0] as string)
+          if (found && row) Object.assign(row, 'taskId' in set ? { taskId: set.taskId } : { value: set.value })
+          return answer(found, params[0])
         },
       }),
     })),
-  }
-  return { db, updated }
+    delete: mock.fn(() => ({
+      where: (condition: unknown) => {
+        const params = dialect.sqlToQuery(condition as never).params as unknown[]
+        deleted.push(params)
+        if (tx) inTransaction.push('delete')
+        const found = finds(params)
+        if (found && table.has(params[0] as string)) {
+          table.delete(params[0] as string)
+          gone.add(params[0] as string)
+        }
+        return answer(found, params[0])
+      },
+    })),
+  })
+  const db = statements(false)
+  db.transaction = async (fn: (tx: unknown) => Promise<unknown>) => fn(statements(true))
+  /** The values a task's rows hold now, and the rows' ids. */
+  const holding = (taskId: string) =>
+    [...table.entries()].filter(([, row]) => row.taskId === taskId).map(([id, row]) => ({ id, value: row.value }))
+  return { db, updated, deleted, inTransaction, holding }
 }
 
 const service = (db: unknown): any =>
@@ -79,5 +135,75 @@ describe('TasksService.moveFieldValues — a merge moves only the values of fiel
     const { db, updated } = scriptedDb(script('P1', 'P1', [{ id: 'f-stage', projectId: 'P1', listId: 'L-side' }]))
     assert.equal(await service(db).moveFieldValues({ id: 'merged', listId: 'L-main' }, { id: 'survivor', listId: 'L-side' }), 0)
     assert.deepEqual(updated, [])
+  })
+})
+
+/**
+ * `found-6-oct/merge-drops-a-value-beside-an-emptied-one` — a survivor's Note
+ * set and then cleared kept a row `{v: null}`, which the merge took for the
+ * survivor's own answer: the merged task's Note stayed in the bin (201, none
+ * moved). ClickUp adds the merged task's value "only … if task B doesn't have
+ * any information in the same Custom Field" (help centre, "Merge tasks").
+ */
+describe('TasksService.moveFieldValues — a survivor’s emptied value gives way to the merged task’s', () => {
+  /** What the merge reads: the merged task holds `merged` for Note, of the survivor's project; the survivor's own row holds `survivors`. */
+  const clash = (merged: unknown, survivors: unknown) => [
+    [{ projectId: 'P1' }],
+    [{ projectId: 'P1' }],
+    [{ id: 'f-note', projectId: 'P1', listId: null }],
+    [{ taskId: 'merged', id: 'v-merged', fieldId: 'f-note', value: { v: merged } }],
+    [{ taskId: 'survivor', id: 'v-survivors', fieldId: 'f-note', value: { v: survivors } }],
+  ]
+  /** The two rows as the statements find them: as read, unless `survivorsNow` was written since. */
+  const rowsNow = (merged: unknown, survivors: unknown, survivorsNow: unknown = survivors) => ({
+    'v-merged': { taskId: 'merged', value: { v: merged } },
+    'v-survivors': { taskId: 'survivor', value: { v: survivorsNow } },
+  })
+  const merge = (db: unknown) => service(db).moveFieldValues({ id: 'merged', listId: 'L-main' }, { id: 'survivor', listId: 'L-main' })
+  const json = (v: unknown) => JSON.stringify({ v })
+  const values = (held: Array<{ value: unknown }>) => held.map((r) => r.value)
+
+  it('moves the merged task’s value onto the survivor in place of its emptied one: cleared, an empty text, an empty list', async () => {
+    for (const emptied of [null, '', []]) {
+      const { db, holding } = scriptedDb(clash('from the merged task', emptied), rowsNow('from the merged task', emptied))
+      assert.equal(await merge(db), 1, `beside ${JSON.stringify(emptied)}`)
+      assert.deepEqual(values(holding('survivor')), [{ v: 'from the merged task' }], `beside ${JSON.stringify(emptied)}`)
+      assert.deepEqual(holding('merged'), [], `beside ${JSON.stringify(emptied)}`)
+    }
+  })
+
+  it('keeps the survivor’s own value that holds something, and an emptied value of the merged task moves nowhere', async () => {
+    for (const [merged, survivors] of [['from the merged task', 'the survivor’s own'], [null, null], ['', '']]) {
+      const { db, updated, deleted } = scriptedDb(clash(merged, survivors), rowsNow(merged, survivors))
+      assert.equal(await merge(db), 0, `${JSON.stringify(merged)} beside ${JSON.stringify(survivors)}`)
+      assert.deepEqual(deleted, [])
+      assert.deepEqual(updated, [])
+    }
+  })
+
+  /*
+   * The review, measured on lane 7: the survivor's emptied row was deleted by
+   * id, having been read empty, and a value written into it in between went
+   * with it (the PUT answered 200; no row then held the value).
+   */
+  it('fills the survivor’s emptied row only while it holds what was read: a value written there since stays, and the merged task’s with it', async () => {
+    const typed = 'typed into the survivor since'
+    const { db, holding } = scriptedDb(clash('from the merged task', null), rowsNow('from the merged task', null, typed))
+    assert.equal(await merge(db), 0)
+    assert.deepEqual(values(holding('survivor')), [{ v: typed }])
+    assert.deepEqual(values(holding('merged')), [{ v: 'from the merged task' }])
+  })
+
+  /*
+   * And a value written just after: the survivor's row was deleted and the
+   * merged row moved in its place, so a PUT queued behind the delete found no
+   * row and wrote nothing (200, lane 7). The survivor's row stays where it is.
+   */
+  it('never deletes the survivor’s row: it takes the merged value where it is, and the merged task’s row then goes as it was read, the two in one transaction', async () => {
+    const { db, deleted, inTransaction, holding } = scriptedDb(clash('from the merged task', ''), rowsNow('from the merged task', ''))
+    assert.equal(await merge(db), 1)
+    assert.deepEqual(holding('survivor'), [{ id: 'v-survivors', value: { v: 'from the merged task' } }], 'the survivor’s own row, holding the merged value')
+    assert.deepEqual(deleted, [['v-merged', json('from the merged task')]], 'only the merged task’s row, as it was read')
+    assert.deepEqual(inTransaction, ['update', 'delete'])
   })
 })

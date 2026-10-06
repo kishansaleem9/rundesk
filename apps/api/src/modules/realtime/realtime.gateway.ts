@@ -13,7 +13,7 @@ import { Logger, Inject, OnModuleDestroy } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { ConfigService } from '@nestjs/config'
 import { and, eq } from 'drizzle-orm'
-import { workspaceMembers, lists, projects, spaces, tasks, taskAssignees, docs, workspaceCanvases } from '@rundesk/db'
+import { workspaceMembers, lists, projects, spaces, tasks, taskAssignees, docs, workspaceCanvases, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { checkContainerAccess } from '../../common/permissions/container-access.guard-helper'
@@ -109,6 +109,43 @@ export type RealtimeEvent =
     }
   | { type: 'canvas.cursor.leave'; canvasId: string; userId: string }
 
+/**
+ * READS ONE ROOM PASS SHARES BETWEEN ITS QUESTIONS (`askRoomsAgain`).
+ * Many people hold the same room, and a person holds several rooms of one
+ * workspace: a room's workspace and a person's membership of it are read once a
+ * pass, not once a question. Made when a pass starts and dropped when it ends,
+ * so no answer outlives the pass that read it; a subscribe reads afresh.
+ */
+type SweepReads = Map<string, Promise<unknown>>
+
+/**
+ * Who a socket is (`admit`), and the rooms its pages asked for and were let
+ * into (`handleSubscribe`) until they let them go, each with the workspace it
+ * was let in under (a room's item never leaves its workspace: a task, a list
+ * and a project are moved only within theirs).
+ */
+type SocketData = { userId?: string; email?: string; role?: string; sid?: string; wanted?: Map<string, string | null> }
+
+/** The rooms a socket's pages hold: what the room pass asks about again, and joins again when access comes back. */
+function wantedBy(client: Socket): Map<string, string | null> {
+  const data = client.data as SocketData
+  data.wanted ??= new Map<string, string | null>()
+  return data.wanted
+}
+
+/** One room pass question: may this person read this room now? Asked once for all of their sockets that want it. */
+type RoomQuestion = { key: string; userId: string; room: string; workspaceId: string | null; asker: Socket; holders: Socket[] }
+
+/** `read()` once per sweep under `key` — or afresh, when no sweep is asking. */
+function shared<T>(reads: SweepReads | undefined, key: string, read: () => Promise<T>): Promise<T> {
+  if (!reads) return read()
+  const known = reads.get(key) as Promise<T> | undefined
+  if (known) return known
+  const reading = read()
+  reads.set(key, reading)
+  return reading
+}
+
 @WebSocketGateway({
   namespace: '/realtime',
   cors: {
@@ -120,14 +157,29 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   private readonly logger = new Logger('RealtimeGateway')
 
   /**
-   * HOW OFTEN A LIVE SOCKET'S SESSION IS RE-READ
-   * (`found-30-sep/an-open-socket-outlives-its-session`). "Within seconds" of
-   * a session ending its sockets go; the presence ping (every ~60s) re-reads
-   * too, between sweeps. A read per distinct session per sweep, so the cost is
-   * the live sessions holding a socket, not the sockets.
+   * HOW OFTEN THE OPEN SOCKETS ARE ASKED ABOUT AGAIN. Each tick starts two
+   * sweeps, each on its own:
+   *
+   *   · whose session has ended (`disconnectRevokedSockets`,
+   *     `found-30-sep/an-open-socket-outlives-its-session`): "within seconds"
+   *     of a session ending its sockets go; the presence ping (every ~60s)
+   *     re-reads too, between sweeps. A read per distinct session, so the cost
+   *     is the live sessions holding a socket, not the sockets;
+   *   · which rooms each socket's person may read now (`askRoomsAgain`,
+   *     `found-6-oct/an-open-socket-outlives-its-access`), a pass that lasts at
+   *     most one interval.
    */
-  private static readonly REVOKED_SWEEP_MS = 5_000
-  private revokedSweep?: ReturnType<typeof setInterval>
+  private static readonly SWEEP_MS = 5_000
+  /** How many room questions a pass asks at once: the database's pool is the requests' too (`askRoomsAgain`). */
+  private static readonly ROOM_QUESTIONS_AT_ONCE = 4
+  private sweepTimer?: ReturnType<typeof setInterval>
+  /** The session sweep under way, if one is: a tick that finds one still running leaves it to finish. */
+  private sessionSweep?: Promise<void>
+  /** The room pass under way, if one is, and whether a tick came while it ran (the next starts when it ends). */
+  private roomPass?: Promise<void>
+  private roomPassDue = false
+  /** When each person's room was last answered (`${userId} ${room}`): a pass asks the longest-unasked first. */
+  private readonly roomAskedAt = new Map<string, number>()
 
   @WebSocketServer()
   server!: Server
@@ -140,9 +192,25 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   ) {}
 
   /**
-   * Start the revoked-session sweep once the namespace is up. Not in the
-   * constructor: the unit tests build the gateway directly and never init it,
-   * so nothing starts a timer there.
+   * Start the sweeps once the namespace is up. Not in the constructor: the
+   * unit tests build the gateway directly and never init it, so nothing starts
+   * a timer there.
+   */
+  afterInit() {
+    if (this.sweepTimer) return
+    this.sweepTimer = setInterval(() => this.tick(), RealtimeGateway.SWEEP_MS)
+    // Does not hold the process open on its own.
+    this.sweepTimer.unref?.()
+  }
+
+  /**
+   * EACH TICK ASKS ABOUT THE SESSIONS AND THE ROOMS, NEITHER BEHIND THE OTHER.
+   * The room questions were asked in the same sweep as the sessions, after
+   * them, and a tick that found that sweep still running skipped both: measured
+   * on lane 2, with one member's socket holding 3,000 task rooms a signed-out
+   * session's socket stayed open 9.7 s where it had closed in 3.9 s, and with
+   * three such sockets 11.0 s. The session sweep is a read per session and
+   * runs at every tick whatever the rooms cost.
    *
    * A SWEEP THAT FAILS IS SAID, AND THE NEXT ONE ASKS AGAIN. A rejection left
    * unheard in a timer ends the process (Node's default for an unhandled
@@ -150,25 +218,46 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
    * lane, the lane's database refused connections for eight seconds while one
    * socket was open, the sweep's read failed, and the API exited and stayed
    * down after the database came back — where a request in the same outage
-   * answers 500 and the process goes on. So the tick catches what the sweep
+   * answers 500 and the process goes on. So the tick catches what each sweep
    * throws (`disconnectRevokedSockets` already keeps a failed read from
    * throwing; this is for anything else).
+   *
+   * ONE OF EACH AT A TIME. A sweep that outlasts the interval (a slow database,
+   * many sockets) is not started again on top of itself, asking the same
+   * questions twice. A room pass stops asking when the interval is up
+   * (`askRoomsAgain`), and a tick that came while it ran starts the next one as
+   * soon as it ends, so the rooms are asked about at the interval's pace.
    */
-  afterInit() {
-    if (this.revokedSweep) return
-    this.revokedSweep = setInterval(() => {
-      this.disconnectRevokedSockets().catch((err: unknown) =>
-        this.logger.warn(`revoked-session sweep failed: ${err instanceof Error ? err.message : String(err)}`),
+  private tick(): void {
+    if (!this.sessionSweep) {
+      this.sessionSweep = this.disconnectRevokedSockets()
+        .catch((err: unknown) =>
+          this.logger.warn(`revoked-session sweep failed: ${err instanceof Error ? err.message : String(err)}`),
+        )
+        .finally(() => {
+          this.sessionSweep = undefined
+        })
+    }
+    if (this.roomPass) this.roomPassDue = true
+    else this.startRoomPass()
+  }
+
+  private startRoomPass(): void {
+    this.roomPassDue = false
+    this.roomPass = this.askRoomsAgain()
+      .catch((err: unknown) =>
+        this.logger.warn(`room sweep failed: ${err instanceof Error ? err.message : String(err)}`),
       )
-    }, RealtimeGateway.REVOKED_SWEEP_MS)
-    // Does not hold the process open on its own.
-    this.revokedSweep.unref?.()
+      .finally(() => {
+        this.roomPass = undefined
+        if (this.roomPassDue && this.sweepTimer) this.startRoomPass()
+      })
   }
 
   onModuleDestroy() {
-    if (this.revokedSweep) {
-      clearInterval(this.revokedSweep)
-      this.revokedSweep = undefined
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer)
+      this.sweepTimer = undefined
     }
   }
 
@@ -244,6 +333,181 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     client.disconnect(true)
   }
 
+  /**
+   * A SOCKET HEARS WHAT ITS PERSON MAY READ NOW
+   * (`found-6-oct/an-open-socket-outlives-its-access`).
+   *
+   * A room was asked once, when the socket subscribed (`canJoinRoom`), and an
+   * event goes to everyone in the room with no question per reader. So when a
+   * person's access ended and their session did not, their open socket went on
+   * hearing: measured on lane 2, a member removed from the workspace, a guest
+   * whose share of a list was removed, a member lowered to guest, and members
+   * of a list and of a space made private each heard a task made seven seconds
+   * later, while their own read of it was refused 403. ClickUp: "When you
+   * remove someone from your ClickUp Workspace, the person immediately loses
+   * access to all Workspace content" (help centre, "Remove someone from a
+   * Workspace").
+   *
+   * So each pass asks again every room a live socket's pages asked for
+   * (`wantedBy`), by the rule that let it in (`canJoinRoom`): one question per
+   * person and room, however many of their sockets want it. A socket leaves a
+   * room its person may no longer read, and joins again one they may read once
+   * more — a list made private and public again, a member added to the private
+   * space, a guest made a member again: leaving alone, measured, kept an open
+   * page deaf to its list after its reader's access came back, until it was
+   * reloaded, since a page subscribes once, when it mounts. The person's own
+   * room (`user:<id>`) is who the socket is and is not asked. The socket itself
+   * stays: it also carries the person's other workspaces (measured: the removed
+   * member's socket went on hearing their own workspace's channel), and the web
+   * does not open again a socket the server has closed.
+   *
+   * EACH ANSWER IS ACTED ON WHEN IT COMES, not when the pass ends.
+   *
+   * A QUESTION THAT FAILS ANSWERS NOTHING: the room is left as it is and asked
+   * again at the next pass, as a failed session read keeps its socket.
+   *
+   * A FEW QUESTIONS AT A TIME, SHARING THEIR READS. Asked all at once, the
+   * questions took the database's whole pool for the length of the sweep:
+   * measured on lane 2 against its database, 200 people holding four rooms each
+   * (800 questions, 2,800 reads) took 1.7 s, and a request's read sent meanwhile
+   * waited 0.7 s behind them, every five seconds. So `ROOM_QUESTIONS_AT_ONCE`
+   * are asked at a time, leaving the rest of the pool to the requests, and the
+   * reads one pass makes again and again — a room's workspace, a person's
+   * membership of it — are read once a pass (`SweepReads`): the same 800
+   * questions then made 2,200 reads in 1.5 s, and the request's read waited 6 ms.
+   *
+   * EVERY PERSON IN TURN, AND A PASS LASTS AT MOST ONE INTERVAL. The questions
+   * were asked socket by socket, so one socket holding thousands of rooms put
+   * everyone after it at the end of a sweep that took tens of seconds (measured
+   * on lane 2: a removed member went on hearing a list 9.5 s after their removal
+   * beside one socket holding 3,000 task rooms, 21.8 s beside three). Now each
+   * person is asked one room in turn, their longest-unasked first and the person
+   * who has waited longest first (`inTurn`), and a pass stops asking once the
+   * interval is up: the next pass goes on from the rooms and the people not
+   * reached. Whoever holds a page's few rooms is asked about them all early in
+   * every pass; only a person holding more than a pass can ask waits more than
+   * one interval, for their own rooms — and not when they leave the workspace,
+   * which settles all of their rooms there first (`leaveWorkspacesNoLongerJoined`).
+   */
+  private async askRoomsAgain(): Promise<void> {
+    const until = Date.now() + RealtimeGateway.SWEEP_MS
+    const questions = new Map<string, RoomQuestion>()
+    for (const client of this.localSockets()) {
+      const data = client.data as SocketData | undefined
+      const userId = data?.userId
+      if (!userId || client.disconnected || !data?.wanted) continue
+      for (const [room, workspaceId] of data.wanted) {
+        if (room === `user:${userId}`) continue
+        const key = `${userId} ${room}`
+        const asked = questions.get(key)
+        if (asked) asked.holders.push(client)
+        else questions.set(key, { key, userId, room, workspaceId, asker: client, holders: [client] })
+      }
+    }
+    // What nobody wants any more is forgotten.
+    for (const key of this.roomAskedAt.keys()) if (!questions.has(key)) this.roomAskedAt.delete(key)
+    if (questions.size === 0) return
+    const reads: SweepReads = new Map()
+    const leftAtOnce = await this.leaveWorkspacesNoLongerJoined([...questions.values()], reads)
+    const queue = this.inTurn([...questions.values()].filter((question) => !leftAtOnce.has(question.key)))
+    let unanswered = 0
+    let next = 0
+    const askInTurn = async () => {
+      while (next < queue.length && Date.now() < until) {
+        const question = queue[next++]
+        let may: boolean
+        try {
+          may = await this.canJoinRoom(question.asker, question.room, reads)
+        } catch {
+          unanswered += 1
+          continue
+        }
+        this.roomAskedAt.set(question.key, Date.now())
+        this.actOnAnswer(question, may)
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(RealtimeGateway.ROOM_QUESTIONS_AT_ONCE, queue.length) }, askInTurn))
+    if (unanswered > 0) this.logger.warn(`room sweep: ${unanswered} of ${queue.length} room questions failed; their rooms are asked about again at the next pass`)
+  }
+
+  /**
+   * A PERSON NO LONGER A MEMBER OF A WORKSPACE MAY READ NONE OF ITS ROOMS,
+   * however many they hold: one membership read for each person and workspace
+   * answers every one of their rooms there, first thing in the pass. Asked room
+   * by room, in turn with everyone else, a removed member whose socket held
+   * 3,000 task rooms went on hearing them 18.6 s after the removal (lane 2),
+   * where a removed member holding a page's few rooms stopped within the pass.
+   * A super_admin passes every guard, so is asked room by room
+   * (`canJoinRoom`). Answers the keys of the questions it settled.
+   */
+  private async leaveWorkspacesNoLongerJoined(questions: RoomQuestion[], reads: SweepReads): Promise<Set<string>> {
+    const byMembership = new Map<string, { workspaceId: string; userId: string; questions: RoomQuestion[] }>()
+    for (const question of questions) {
+      if (!question.workspaceId || (question.asker.data as SocketData)?.role === 'super_admin') continue
+      const key = `${question.workspaceId} ${question.userId}`
+      const same = byMembership.get(key)
+      if (same) same.questions.push(question)
+      else byMembership.set(key, { workspaceId: question.workspaceId, userId: question.userId, questions: [question] })
+    }
+    const settled = new Set<string>()
+    const pairs = [...byMembership.values()]
+    let next = 0
+    const askInTurn = async () => {
+      while (next < pairs.length) {
+        const pair = pairs[next++]
+        let member: boolean
+        try {
+          member = (await this.membershipOf(pair.workspaceId, pair.userId, reads)).length > 0
+        } catch {
+          // Answered nothing: each room is asked on its own below, as any question that fails is.
+          continue
+        }
+        if (member) continue
+        for (const question of pair.questions) {
+          this.roomAskedAt.set(question.key, Date.now())
+          this.actOnAnswer(question, false)
+          settled.add(question.key)
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(RealtimeGateway.ROOM_QUESTIONS_AT_ONCE, pairs.length) }, askInTurn))
+    return settled
+  }
+
+  /** Each socket of the person that still wants the room leaves it if they may not read it, and joins it again if they may. */
+  private actOnAnswer(question: RoomQuestion, may: boolean): void {
+    for (const holder of question.holders) {
+      if (holder.disconnected || !wantedBy(holder).has(question.room)) continue
+      const holds = holder.rooms.has(question.room)
+      if (!may && holds) holder.leave(question.room)
+      else if (may && !holds) holder.join(question.room)
+    }
+  }
+
+  /**
+   * The questions in turn: one room of each person a round, each person's
+   * longest-unasked first, and the person who has waited longest first — so a
+   * pass that ends inside a round (more people than a pass can reach) reaches
+   * the others at the next pass, rather than the same people every time.
+   */
+  private inTurn(questions: RoomQuestion[]): RoomQuestion[] {
+    const byPerson = new Map<string, RoomQuestion[]>()
+    for (const question of questions) {
+      const theirs = byPerson.get(question.userId)
+      if (theirs) theirs.push(question)
+      else byPerson.set(question.userId, [question])
+    }
+    const lastAsked = (question: RoomQuestion) => this.roomAskedAt.get(question.key) ?? 0
+    const turns = [...byPerson.values()]
+      .map((theirs) => theirs.sort((a, b) => lastAsked(a) - lastAsked(b)))
+      .sort((a, b) => lastAsked(a[0]) - lastAsked(b[0]))
+    const queue: RoomQuestion[] = []
+    for (let round = 0; queue.length < questions.length; round += 1) {
+      for (const theirs of turns) if (round < theirs.length) queue.push(theirs[round])
+    }
+    return queue
+  }
+
   /** Resolve the owning workspace for a room key, or null if it can't be resolved. */
   private async resolveWorkspaceForRoom(kind: string, id: string): Promise<string | null> {
     if (kind === 'workspace') return id
@@ -280,8 +544,9 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   /** A socket may only join a room it is authorized for (own user channel, or a
-   *  workspace it belongs to — resolved transitively for list/task/doc/canvas). */
-  private async canJoinRoom(client: Socket, room: string): Promise<boolean> {
+   *  workspace it belongs to — resolved transitively for list/task/doc/canvas).
+   *  `reads` are a room pass's, shared between its questions; a subscribe has none. */
+  private async canJoinRoom(client: Socket, room: string, reads?: SweepReads, found?: { workspaceId?: string }): Promise<boolean> {
     // A subscribe can arrive before the handshake has found the session live (`handleConnection`).
     await (client.data as { handshake?: Promise<void> })?.handshake
     const userId = (client.data as { userId?: string })?.userId
@@ -292,13 +557,20 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     const id = room.slice(idx + 1)
     if (!id) return false
     if (kind === 'user') return id === userId
-    const workspaceId = await this.resolveWorkspaceForRoom(kind, id)
+    const workspaceId = await shared(reads, `workspace of ${room}`, () => this.resolveWorkspaceForRoom(kind, id))
     if (!workspaceId) return false
-    const [membership] = await this.db
-      .select({ role: workspaceMembers.role })
-      .from(workspaceMembers)
-      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
-      .limit(1)
+    if (found) found.workspaceId = workspaceId
+    /*
+     * A SUPER_ADMIN PASSES, AS IN EVERY GUARD (`ResourceMemberGuard`,
+     * `read-access.ts`): the routes let one read a private list they are a
+     * plain member of, and the room pass took their open socket out of it —
+     * measured on lane 2, their read of the list answered 200 and a task made
+     * there went unheard. The socket's role is its handshake token's, which a
+     * socket can outlive by hours, so the account is asked whether it still is
+     * one (once a pass); a token that never said so is not asked.
+     */
+    if ((client.data as SocketData)?.role === 'super_admin' && (await this.stillSuperAdmin(userId, reads))) return true
+    const [membership] = await this.membershipOf(workspaceId, userId, reads)
     if (!membership) return false
     /*
      * THE WORKSPACE'S ROOM IS EVERY MEMBER'S, and a guest's is not: it carries
@@ -330,6 +602,25 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       return !!doc && canReadDoc(this.db, doc, userId, isManagerRole(membership.role as string))
     }
     return true
+  }
+
+  /** The person's membership of the workspace, read once a pass (`SweepReads`). */
+  private membershipOf(workspaceId: string, userId: string, reads?: SweepReads): Promise<Array<{ role: unknown }>> {
+    return shared(reads, `membership ${workspaceId} ${userId}`, async () =>
+      this.db
+        .select({ role: workspaceMembers.role })
+        .from(workspaceMembers)
+        .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+        .limit(1),
+    )
+  }
+
+  /** Whether the account is a super_admin now, not when its socket's token was made. */
+  private async stillSuperAdmin(userId: string, reads?: SweepReads): Promise<boolean> {
+    const [account] = await shared(reads, `account role ${userId}`, async () =>
+      this.db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1),
+    )
+    return account?.role === 'super_admin'
   }
 
   /** The container rule, the private-list rule and, for a task, the private-task rule. */
@@ -481,8 +772,11 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     const joined: string[] = []
     const denied: string[] = []
     for (const room of body.rooms) {
-      if (await this.canJoinRoom(client, room)) {
+      const found: { workspaceId?: string } = {}
+      if (await this.canJoinRoom(client, room, undefined, found)) {
         client.join(room)
+        // Held for the page that asked, until it lets go: the room pass asks about it again (`askRoomsAgain`).
+        wantedBy(client).set(room, found.workspaceId ?? null)
         joined.push(room)
       } else {
         denied.push(room)
@@ -497,7 +791,10 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     @MessageBody() body: { rooms: RoomKey[] },
   ) {
     if (!Array.isArray(body?.rooms)) return { ok: false, error: 'rooms must be an array' }
-    for (const room of body.rooms) client.leave(room)
+    for (const room of body.rooms) {
+      client.leave(room)
+      wantedBy(client).delete(room)
+    }
     return { ok: true, left: body.rooms }
   }
 

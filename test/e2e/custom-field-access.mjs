@@ -35,6 +35,11 @@
  * readers ask (`fieldIsOnTask`): the task's project is the field's, and for a
  * field scoped to a list, the task is in it.
  *
+ * AND A FIELD SCOPED TO A LIST IS LISTED ONLY TO WHO MAY OPEN THE LIST
+ * (`found-6-oct/field-lists-name-a-private-lists-fields`): a project's field
+ * list and search's field filter named a private list's field to a member that
+ * list refuses.
+ *
  *   node test/e2e/custom-field-access.mjs --api 3021
  */
 import { signInApi, signUpApi } from './lib/signin.mjs'
@@ -47,7 +52,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 7
+const EXPECTED_CHECKS = 9
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -263,6 +268,39 @@ try {
     `by the second list’s field (${byStage.status}): the moved-out task found ${has(byStage, movedOut)}, the one that stayed ${has(byStage, staysOut)}; ` +
       `by the other project’s field (${byOwner.status}): the moved-in task found ${has(byOwner, movedIn)}, the one that stayed ${has(byOwner, staysIn)}; ` +
       `the moved tasks hold ${JSON.stringify(stillHeld)}`,
+  )
+
+  // ══ 8–9. A PRIVATE LIST'S FIELD ══════════════════════════════════════════
+  console.log('\n▶ the field lists, beside a private list the member may not open')
+  /*
+   * `found-6-oct/field-lists-name-a-private-lists-fields`. In the open project,
+   * a private list of the admin's and a field scoped to it. The member, refused
+   * the list (403 "This list is private"), was answered 200 with that field, by
+   * name, by the project's field list and by search's field filter (lane 7).
+   * Both leave it out now, as the read rule leaves out the list (`readableList`).
+   */
+  const privateList = await make(A, '/lists', { projectId: open.project, name: `${TAG} private list`, visibility: 'private' }, 'the private list')
+  const privateField = await make(A, `/workspaces/${WS}/projects/${open.project}/custom-fields`, { name: `${TAG} private stage`, type: 'text', listId: privateList }, 'the private list’s field')
+  const privateGate = await M(`/lists/${privateList}`)
+  if (privateGate.status !== 403) throw new Error(`the member was not refused the private list (${said(privateGate)}), so nothing here would mean anything`)
+  const idsOf = (res) => (Array.isArray(res.data) ? res.data : []).map((f) => f.id)
+  const namesOf = (res) => (Array.isArray(res.data) ? res.data : []).map((f) => String(f.name ?? '').replace(`${TAG} `, ''))
+  const memberProjectFields = await M(`/workspaces/${WS}/projects/${open.project}/custom-fields`)
+  const adminProjectFields = await A(`/workspaces/${WS}/projects/${open.project}/custom-fields`)
+  chk(
+    memberProjectFields.status === 200 && !idsOf(memberProjectFields).includes(privateField) &&
+      idsOf(memberProjectFields).includes(open.field) && idsOf(memberProjectFields).includes(scopedElsewhere) &&
+      adminProjectFields.status === 200 && idsOf(adminProjectFields).includes(privateField),
+    'a project’s field list leaves out, to a member refused a private list, the field scoped to it — the project’s own field and an open list’s still listed — while the admin’s lists it',
+    `the member's (${memberProjectFields.status}): ${JSON.stringify(namesOf(memberProjectFields))}; the admin's (${adminProjectFields.status}): ${JSON.stringify(namesOf(adminProjectFields))}`,
+  )
+  const memberSearchFields = await M(`/search/${WS}/custom-fields`)
+  const adminSearchFields = await A(`/search/${WS}/custom-fields`)
+  chk(
+    memberSearchFields.status === 200 && !idsOf(memberSearchFields).includes(privateField) && idsOf(memberSearchFields).includes(open.field) &&
+      adminSearchFields.status === 200 && idsOf(adminSearchFields).includes(privateField),
+    'and search’s field filter leaves it out to the member, the project’s own field still offered — while the admin’s offers it',
+    `the member's (${memberSearchFields.status}): ${JSON.stringify(namesOf(memberSearchFields))}; the admin's (${adminSearchFields.status}): ${JSON.stringify(namesOf(adminSearchFields))}`,
   )
 } catch (e) {
   failed += 1

@@ -1,6 +1,14 @@
 export type GanttNode = { id: string; durationDays: number; blockedBy: string[] }
 
 /**
+ * Pointer travel (px) before a press on a Gantt bar is a drag rather than a
+ * press: on the list's Gantt, where a press opens the task, and on the
+ * workspace timeline, where a press moves nothing
+ * (`found-5-oct/timeline-press-moves-dates`).
+ */
+export const GANTT_DRAG_THRESHOLD = 4
+
+/**
  * Ids on the critical path: the longest cumulative-duration chain through the
  * dependency graph (each edge blockedBy → this task means the blocker must
  * finish first). Returns an empty set unless the chain spans ≥2 tasks. Cycles
