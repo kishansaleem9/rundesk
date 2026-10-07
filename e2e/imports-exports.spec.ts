@@ -15,6 +15,7 @@ const FIXTURES = join(__dirname, '..', 'test', 'fixtures', 'imports')
 test.skip(!process.env.PW_IMPORTS_E2E, 'Writes data: set PW_IMPORTS_E2E=1 against a non-production stack.')
 // A run waits on a real import and a real export; a dev server compiles the settings page on first visit.
 test.describe.configure({ timeout: 300_000 })
+test.use({ navigationTimeout: 120_000 })
 
 let tree: Tree | undefined
 let token = ''
@@ -118,4 +119,31 @@ test('export: choose a location, start, and get a download link', async ({ page,
         'Time Spent,Time Spent Text,Rolled Up Time,Rolled Up Time Text',
     ),
   ).toBe(true)
+})
+
+test('sources: every app is listed; Coming soon cannot be opened; an app shows its export steps; the workspace menu leads here', async ({ page, request }) => {
+  const login = await apiLogin(request)
+  const wsId = login.workspaces[0].id
+  await uiLogin(page)
+
+  // The workspace menu offers Imports / Exports, as ClickUp's does.
+  await page.goto(`/app/${wsId}`)
+  await page.getByRole('button', { name: 'Accept' }).click({ timeout: 5_000 }).catch(() => undefined)
+  await page.getByTestId('workspace-switcher').click({ timeout: 120_000 })
+  await page.getByTestId('switcher-menu-imports').click()
+  await expect(page.getByTestId('imports-exports')).toBeVisible({ timeout: 120_000 })
+
+  const newImport = page.getByTestId('history-new-import')
+  await expect(newImport.or(page.getByTestId('source-spreadsheet'))).toBeVisible({ timeout: 60_000 })
+  if (await newImport.isVisible()) await newImport.click()
+  for (const app of ['asana', 'basecamp', 'clickup', 'confluence', 'jira', 'monday', 'notion', 'slack', 'todoist', 'trello', 'wrike']) {
+    await expect(page.getByTestId(`source-${app}`)).toBeVisible()
+  }
+  for (const soon of ['basecamp', 'confluence', 'slack']) {
+    await expect(page.getByTestId(`source-${soon}`)).toBeDisabled()
+    await expect(page.getByTestId(`source-${soon}-soon`)).toHaveText('Coming soon')
+  }
+  await page.getByTestId('source-asana').click()
+  await expect(page.getByTestId('app-instructions-asana')).toContainText('Export your tasks from Asana first')
+  await expect(page).toHaveURL(/source=asana/)
 })
