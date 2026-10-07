@@ -2614,7 +2614,15 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                           <DropdownMenuItem
                             data-testid="space-create-imports"
                             onClick={() =>
-                              navigate({ to: '/app/$workspaceId/import', params: { workspaceId } })
+                              // Settings › Imports / Exports, with this space as the destination,
+                              // for whoever may import; the importers' page answers everybody else.
+                              permissions.can('workspace.import')
+                                ? navigate({
+                                    to: '/app/$workspaceId/settings',
+                                    params: { workspaceId },
+                                    search: { tab: 'importsExports', locationType: 'space', locationId: space.id },
+                                  })
+                                : navigate({ to: '/app/$workspaceId/import', params: { workspaceId } })
                             }
                           >
                             <Import className="h-3.5 w-3.5 shrink-0" />

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useParams } from '@tanstack/react-router'
+import { useParams, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Button, Card, Input, Progress, RadioGroup, RadioGroupItem, Badge, Skeleton } from '@rundesk/ui'
 import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Copy, Info, KeyRound, Table2, Ban } from 'lucide-react'
@@ -84,7 +84,9 @@ type ImportTab = 'clickup' | 'sheet' | 'doc'
  */
 export function ImportPage() {
   const { t } = useTranslation()
-  const [tab, setTab] = useState<ImportTab>('sheet')
+  // Settings › Imports / Exports opens a tab by name (`?tab=doc`, `?tab=clickup`).
+  const { tab: tabFromUrl } = useSearch({ from: '/app/$workspaceId/import' })
+  const [tab, setTab] = useState<ImportTab>(tabFromUrl ?? 'sheet')
   const { workspaceId } = useParams({ from: '/app/$workspaceId/import' })
   // Importing a spreadsheet or a ClickUp export is `workspace.import`'s, an admin's by default
   // (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`); documents are anyone's.

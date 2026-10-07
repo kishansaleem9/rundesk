@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Dialog, DialogContent, DialogHeader, DialogTitle, Input, Label, Switch, cn, toast } from '@rundesk/ui'
-import { Building2, Users, Plug, Shield, Tag, Trash2, Archive, RotateCcw, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Upload, CreditCard, ToggleRight, Layers, Sparkles, UserCog, Lock, Globe, Shapes, CalendarDays, Star, X, Megaphone, ScrollText } from 'lucide-react'
+import { Building2, Users, Plug, Shield, Tag, Trash2, Archive, RotateCcw, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Upload, CreditCard, ToggleRight, Layers, Sparkles, UserCog, Lock, Globe, Shapes, CalendarDays, Star, X, Megaphone, ScrollText, Import } from 'lucide-react'
 import { api, ApiError, downloadFile, refusalMessage } from '../lib/api'
 import { applyBrandColor } from '../lib/branding'
 import { applyAccentColor } from '../components/app-topbar'
@@ -15,6 +15,7 @@ import { ReportingTree } from '../components/reporting-tree'
 import { RolesTab } from '../components/roles-tab'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { TrashTab } from '../components/trash-tab'
+import { ImportsExportsTab } from '../components/imports/imports-exports-tab'
 import { useResolvedFlags } from '../lib/use-feature-flags'
 import { useWorkspaceRole, withinRank } from '../hooks/use-workspace-role'
 import { usePermissions } from '../hooks/use-permissions'
@@ -121,6 +122,7 @@ const TAB_GROUPS = [
       { id: 'features', labelKey: 'settings.tabFeatures', icon: ToggleRight },
       { id: 'announcements', labelKey: 'settings.tabAnnouncements', icon: Megaphone },
       { id: 'integrations', labelKey: 'settings.tabIntegrations', icon: Plug },
+      { id: 'importsExports', labelKey: 'settings.tabImportsExports', icon: Import },
       { id: 'labels', labelKey: 'settings.tabLabels', icon: Tag },
       { id: 'taskTypes', labelKey: 'settings.tabTaskTypes', icon: Shapes },
       { id: 'aiUsage', labelKey: 'settings.tabAiUsage', icon: Sparkles },
@@ -237,7 +239,7 @@ export function SettingsPage() {
         <div
           className={cn(
             'mx-auto grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-8',
-            tab === 'trash' ? 'max-w-7xl' : 'max-w-5xl',
+            tab === 'trash' || tab === 'importsExports' ? 'max-w-7xl' : 'max-w-5xl',
           )}
         >
           <nav className="space-y-4">
@@ -293,6 +295,7 @@ export function SettingsPage() {
                 {tab === 'features' && <FeaturesTab workspaceId={validWorkspaceId} />}
                 {tab === 'announcements' && <AnnouncementsPanel workspaceId={validWorkspaceId} />}
                 {tab === 'integrations' && <IntegrationsTab workspaceId={validWorkspaceId} />}
+                {tab === 'importsExports' && <ImportsExportsTab workspaceId={validWorkspaceId} />}
                 {tab === 'security' && <SecurityTab workspaceId={validWorkspaceId} />}
                 {tab === 'auditLog' && <AuditLogPanel workspaceId={validWorkspaceId} />}
                 {tab === 'sso' && <SsoTab workspaceId={validWorkspaceId} />}

@@ -3113,6 +3113,7 @@ function FormForm({
 function Footer({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const mayImport = usePermissions(workspaceId).can('workspace.import') === true
   const go = (to: '/app/$workspaceId/templates' | '/app/$workspaceId/import') => {
     onClose()
     navigate({ to, params: { workspaceId } })
@@ -3137,7 +3138,12 @@ function Footer({ workspaceId, onClose }: { workspaceId: string; onClose: () => 
       <button
         type="button"
         data-testid="create-footer-import"
-        onClick={() => go('/app/$workspaceId/import')}
+        onClick={() => {
+          // Settings › Imports / Exports for whoever may import; the importers' page for everybody else.
+          if (!mayImport) return go('/app/$workspaceId/import')
+          onClose()
+          navigate({ to: '/app/$workspaceId/settings', params: { workspaceId }, search: { tab: 'importsExports' } })
+        }}
         className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
       >
         <Upload className="h-3.5 w-3.5" />
