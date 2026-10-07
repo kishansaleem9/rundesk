@@ -71,7 +71,7 @@ import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import { localDateTimeValue } from '../lib/local-date'
 import type { TranslationKey } from '../lib/i18n/catalogs'
-import { getRealtimeSocket } from '../lib/realtime'
+import { getRealtimeSocket, joinRooms } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
 import { useSidebarStore } from '../store/sidebar'
 import { openPersonPanel } from '../store/person-panel'
@@ -842,7 +842,12 @@ export function ChatPage() {
 
   useEffect(() => {
     const socket = getRealtimeSocket()
-    socket.emit('subscribe', { rooms: [`workspace:${workspaceId}`] })
+    // Once the server holds the room, what was said in it meanwhile is read afresh: what its events below refresh.
+    joinRooms(socket, [`workspace:${workspaceId}`], () => {
+      for (const queryKey of [['chat-messages'], ['chat-thread'], ['chat-channel-members'], ['chat-channels', workspaceId], ['chat-archived-channels', workspaceId]]) {
+        void qc.invalidateQueries({ queryKey })
+      }
+    })
     const onEvent = (event: {
       type: string
       workspaceId?: string

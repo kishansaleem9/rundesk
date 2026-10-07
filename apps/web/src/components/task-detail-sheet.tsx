@@ -123,7 +123,7 @@ import {
   setCollapseEmptyFields,
   isEmptyFieldValue,
 } from '../lib/collapse-empty-fields'
-import { getRealtimeSocket } from '../lib/realtime'
+import { getRealtimeSocket, joinRooms } from '../lib/realtime'
 import { SaveAsTemplateButton } from './task-templates-section'
 import { CoverImagePicker, type CoverChoice } from './cover-image-picker'
 import { CommentRecorder } from './comment-recorder'
@@ -1406,7 +1406,8 @@ export function TaskDetailSheet({
   useEffect(() => {
     if (!enabled || !taskId) return
     const socket = getRealtimeSocket()
-    socket.emit('subscribe', { rooms: [`task:${taskId}`] })
+    // Once the server holds the room, what was said in it meanwhile is read afresh: the task's every panel, as an edit's events do.
+    joinRooms(socket, [`task:${taskId}`], () => void qc.invalidateQueries({ queryKey: ['task', taskId] }))
     /*
      * ONE PASS PER BURST. One edit arrives as several events: `task.updated`,
      * sent to the list's room and the task's (a page in both gets it twice),

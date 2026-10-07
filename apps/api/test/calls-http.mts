@@ -215,9 +215,12 @@ async function main() {
   const r2 = app.get(R2Service)
   let aiAvailable = true
   let notesCalls = 0
+  // How long the notes take, as a real model takes seconds (found-7-oct/a-call-ended-twice-keeps-two-records).
+  let notesDelayMs = 0
   ai.isAvailable = () => aiAvailable
   ai.notesFromTranscript = async (transcript) => {
     notesCalls++
+    if (notesDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, notesDelayMs))
     return `## Summary\nFrom ${transcript.split('\n').length} line(s).`
   }
   let r2Configured = true
@@ -623,6 +626,55 @@ async function main() {
       'and neither is told nothing at all',
       `responses: ${ends.map((e) => JSON.stringify(e.data)).join(' | ')}`,
     )
+  }
+
+  console.log('\n▶ a second end while the first is still writing the record')
+  {
+    /*
+     * `found-7-oct/a-call-ended-twice-keeps-two-records`. The two ends above
+     * race for the claim. This one comes after the claim and before the record,
+     * while the notes are written: it found the end claimed and no record, took
+     * the first end for one that died, and wrote a second record and asked for
+     * the notes again. The notes are held back here as a real model holds them.
+     */
+    const live = await call('POST', `/workspaces/${WS}/calls`, { channelId: CHANNEL })
+    const id = live.data?.id
+    await call('POST', `/workspaces/${WS}/calls/${id}/recording`, { recording: true })
+    await call('POST', `/workspaces/${WS}/calls/${id}/transcript`, { text: 'the notes for this one take a while' })
+    const before = rowsOf(await db.execute('SELECT count(*)::int AS n FROM meetings'))[0].n
+    const notesBefore = notesCalls
+    notesDelayMs = 600
+    const firstEnd = call('POST', `/workspaces/${WS}/calls/${id}/end`, {})
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    const second = await call('POST', `/workspaces/${WS}/calls/${id}/end`, {})
+    const first = await firstEnd
+    notesDelayMs = 0
+    const after = rowsOf(await db.execute('SELECT count(*)::int AS n FROM meetings'))[0].n
+    const pointed = rowsOf(await db.execute(`SELECT meeting_id::text AS m FROM calls WHERE id = '${id}'`))[0]?.m ?? null
+    chk(after - before === 1 && first.data?.meetingId === pointed, 'leaves ONE meeting record, the one the call points at', `${after - before} records were written; the first end named ${first.data?.meetingId}, the call points at ${pointed}`)
+    chk(notesCalls - notesBefore === 1, 'and asks for the notes once', `the notes were asked for ${notesCalls - notesBefore} time(s)`)
+    chk(
+      second.data?.pending === true || (second.data?.meetingId != null && second.data?.meetingId === pointed),
+      'and the second end is told the record is coming',
+      `the second end answered ${JSON.stringify(second.data)}`,
+    )
+  }
+
+  console.log('\n▶ a new workspace whose channels are listed three times at once')
+  {
+    /*
+     * `found-7-oct/two-first-listings-make-two-generals`. Listing a workspace's
+     * channels makes its #general the first time; three listings at once each
+     * found none and each made one. A second workspace here, with no #general.
+     */
+    const SECOND = '44444444-4444-4444-8444-444444444444'
+    await db.execute(`DELETE FROM workspaces WHERE id = '${SECOND}'`)
+    await db.execute(`INSERT INTO workspaces (id, organization_id, name, slug) VALUES ('${SECOND}', '00000000-0000-4000-8000-000000000002', 'Calls two', 'calls-two')`)
+    await db.execute(`INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ('${SECOND}', '${ME}', 'member')`)
+    const listings = await Promise.all([1, 2, 3].map(() => call('GET', `/workspaces/${SECOND}/chat/channels`)))
+    const generals = rowsOf(await db.execute(`SELECT count(*)::int AS n FROM chat_channels WHERE workspace_id = '${SECOND}' AND name = 'general'`))[0].n
+    chk(listings.every((r) => r.status === 200) && generals === 1, 'have ONE #general', `the listings answered ${listings.map((r) => r.status).join(', ')}; ${generals} #general were made`)
+    await db.execute(`DELETE FROM workspaces WHERE id = '${SECOND}'`)
   }
 
   console.log('\n▶ a call that ended without ever leaving a record')

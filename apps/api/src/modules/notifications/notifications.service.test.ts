@@ -313,3 +313,51 @@ describe('NotificationsService.list — url/target enrichment (§10.1)', () => {
     assert.equal(res[2].url, '/app/ws2/tasks/t3')
   })
 })
+
+// --- resume-defects/resume-8 — every mail about a task carries its thread ----
+
+describe('NotificationsService.sendEmail — the thread a reply to a mail about a task follows', () => {
+  it('a mail about a task is sent with the thread kept for it, whatever its type; a mail about a chat message with none', async () => {
+    const CASES: Array<{ type: string; sender: string; emailContext?: Record<string, unknown> }> = [
+      { type: 'task_assigned', sender: 'sendTaskAssigned' },
+      { type: 'task_mentioned', sender: 'sendMention' },
+      { type: 'task_commented', sender: 'sendComment' },
+      { type: 'task_commented', sender: 'sendCommentResolved', emailContext: { commentVariant: 'resolved' } },
+      { type: 'task_due_soon', sender: 'sendDueSoon' },
+      { type: 'task_overdue', sender: 'sendOverdue' },
+      { type: 'task_status_changed', sender: 'sendActivity' },
+      { type: 'comment_assigned', sender: 'sendActivity' },
+    ]
+    const PERSON = { email: 'person@example.test', displayName: 'Person' }
+    const db = buildCreateDb(Array.from({ length: CASES.length + 1 }, () => [PERSON]), INSERTED)
+    const sent: unknown[] = []
+    const email = new Proxy({}, {
+      get: (_target, sender) => async (opts: { messageId?: string; replyTo?: string }) => {
+        sent.push([sender, opts.messageId ?? null, opts.replyTo ?? null])
+      },
+    })
+    const svc = new NotificationsService(db, {} as any, email as any, stubConfig())
+    const kept: unknown[] = []
+    ;(svc as any).replyThread = async (taskId: string, recipient: string) => {
+      kept.push([taskId, recipient])
+      return { messageId: `<notify.${taskId}@inbound.test>`, replyTo: `list-a+task-${taskId}@inbound.test` }
+    }
+    for (const c of CASES) {
+      await (svc as any).sendEmail({
+        userId: 'u1', workspaceId: 'ws1', type: c.type, title: 'Something about the task',
+        target: { entityType: 'task', entityId: 't1', url: '/app/ws1/tasks/t1' },
+        emailContext: c.emailContext,
+      })
+    }
+    // A mention in chat is a `task_mentioned` too, about a message: no task to answer on.
+    await (svc as any).sendEmail({
+      userId: 'u1', workspaceId: 'ws1', type: 'task_mentioned', title: 'You were mentioned',
+      target: { entityType: 'chat_message', entityId: 'm1', url: '/app/ws1/chat?message=m1' },
+    })
+    assert.deepEqual(sent, [
+      ...CASES.map((c) => [c.sender, '<notify.t1@inbound.test>', 'list-a+task-t1@inbound.test']),
+      ['sendMention', null, null],
+    ])
+    assert.deepEqual(kept, CASES.map(() => ['t1', PERSON.email]), 'a thread was kept for a mail about no task, or not for one about a task')
+  })
+})

@@ -33,6 +33,21 @@ export class PlannerController {
     return this.planner.listBlocks(workspaceId, user.id, from, to)
   }
 
+  /**
+   * The events of the caller's own connected calendars in `[from, to)`, and the
+   * calendars that could not be read (`found-25-sep/connected-calendars-read-by-nothing`).
+   * Only ever the caller's: a colleague's calendar crosses as free/busy alone.
+   */
+  @Get('events')
+  listEvents(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: any,
+    @Query('from') from: string,
+    @Query('to') to: string,
+  ) {
+    return this.planner.listEvents(workspaceId, user.id, from, to)
+  }
+
   @Post('blocks')
   createBlock(
     @Param('workspaceId') workspaceId: string,

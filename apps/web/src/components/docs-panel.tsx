@@ -69,7 +69,7 @@ import TextAlign from '@tiptap/extension-text-align'
 import { TableKit } from '@tiptap/extension-table'
 import { api, ApiError, downloadFile, refusalMessage } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
-import { getRealtimeSocket } from '../lib/realtime'
+import { getRealtimeSocket, joinRooms } from '../lib/realtime'
 import { createMentionExtension, type MentionMember } from '../lib/tiptap-mention'
 import { useFavorites, useToggleFavorite } from '../lib/use-favorites'
 import { Callout, ListEmbed } from '../lib/tiptap-doc-blocks'
@@ -338,7 +338,11 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   useEffect(() => {
     if (!selectedDocId) return
     const socket = getRealtimeSocket()
-    socket.emit('subscribe', { rooms: [`doc:${selectedDocId}`] })
+    // Once the server holds the room, what was said in it meanwhile is read afresh: what its events below refresh.
+    joinRooms(socket, [`doc:${selectedDocId}`], () => {
+      void qc.invalidateQueries({ queryKey: ['docs', workspaceId] })
+      void qc.invalidateQueries({ queryKey: ['doc-comments', selectedDocId] })
+    })
     const onEvent = (event: { type: string; docId?: string }) => {
       if (!event.docId) return
       if (event.type === 'doc.updated') {

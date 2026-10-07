@@ -116,7 +116,7 @@ import { SharePanel } from '../components/share-panel'
 // the whole reason `feature-gate.tsx` exists is that every locked feature
 // should explain itself the same way.
 import { useFeatureGate, type GatedFeature } from '../components/feature-gate'
-import { getRealtimeSocket } from '../lib/realtime'
+import { getRealtimeSocket, joinRooms } from '../lib/realtime'
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent, useDraggable, useDroppable } from '@dnd-kit/core'
 import { addDays, addMonths, differenceInCalendarDays, endOfMonth, endOfWeek, format, isSameMonth, isToday, startOfDay, startOfMonth, startOfWeek } from 'date-fns'
 import { ListSkeleton } from '../components/loading-skeletons'
@@ -1937,7 +1937,12 @@ function ListDetail() {
 
   useEffect(() => {
     const socket = getRealtimeSocket()
-    socket.emit('subscribe', { rooms: [`list:${listId}`] })
+    // Once the server holds the room, what was said in it meanwhile is read afresh, as its events below do:
+    // the list's tasks, and every task's own queries marked, since which changed is not known.
+    joinRooms(socket, [`list:${listId}`], () => {
+      void qc.invalidateQueries({ queryKey: ['tasks', listId] })
+      void qc.invalidateQueries({ queryKey: ['task'], refetchType: 'none' })
+    })
     /*
      * The list refetches once a burst: one edit sends `task.updated` to this
      * list's room and to the task's, and a page in both gets it twice.

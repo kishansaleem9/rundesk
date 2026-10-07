@@ -569,6 +569,56 @@ lane_search_ready () {
   grep -a -q "Meilisearch connected at http://127.0.0.1:$(lane_search_port "$k")" "${LANE_LOG_DIR:-/tmp/claude-0}/api-v$k.log" 2>/dev/null
 }
 
+# ── THE LANE'S CALENDARS ───────────────────────────────────────────────────
+#
+#   lane_calendar_up  <k>   start lane k's calendar stub, wait for it to say ready
+#   lane_calendar_env <k>   export the variables that point the API at it
+#
+# A PERSON'S CONNECTED CALENDARS ARE READ AND WRITTEN
+# (`found-25-sep/connected-calendars-read-by-nothing`): the planner draws their
+# events, "Upcoming" lists them, and a block is written to the default one. The
+# addresses are Google's and Microsoft's unless these say otherwise, and no lane
+# reaches either, so every lane points them at `calendar-stub.mjs`, the token
+# addresses too, so an expired token is refreshed there.
+#
+# ON FOR EVERY LANE, unlike search: without it a connected calendar is not a
+# different path but an unreachable one. And it holds nothing a suite did not
+# put there — a calendar is a bearer token, seeded by the suite that made the
+# account — so no suite's calendars reach another's.
+#
+# Lane k gets port 94<k>, beside search on 93<k>.
+lane_calendar_port () { echo $((9400 + $1)); }
+
+lane_calendar_env () {
+  local base
+  base="http://127.0.0.1:$(lane_calendar_port "$1")"
+  export GOOGLE_CALENDAR_API_URL="$base/google/calendar/v3"
+  export MS_GRAPH_API_URL="$base/graph/v1.0"
+  export GOOGLE_TOKEN_URL="$base/google/token"
+  export MICROSOFT_TOKEN_URL="$base/microsoft/token"
+}
+
+lane_calendar_up () {
+  local k="$1" port log
+  port="$(lane_calendar_port "$k")"
+  log="/tmp/claude-0/calendar-v$k.log"
+  # A running stub that is current is kept, and its calendars with it, for the
+  # reason the store keeps its objects.
+  if grep -q '"ready":true' "$log" 2>/dev/null && stub_is_current "$port" "$LANE_ENV_DIR/calendar-stub.mjs"; then
+    return 0
+  fi
+  stub_down "$port" "$LANE_ENV_DIR/calendar-stub.mjs"
+  : > "$log"
+  RUNDESK_CALENDAR_STUB=1 nohup node "$LANE_ENV_DIR/calendar-stub.mjs" --port "$port" >> "$log" 2>&1 &
+  for _ in $(seq 1 50); do
+    grep -q '"ready":true' "$log" 2>/dev/null && return 0
+    sleep 0.2
+  done
+  echo "lane $k: the calendar stub never announced itself on $port" >&2
+  tail -3 "$log" 2>/dev/null >&2
+  return 1
+}
+
 # ── STOP A LANE'S API, AND WAIT UNTIL IT HAS GONE ──────────────────────────
 #
 # `lane_api_down <port>`. Every script that starts a lane's API has to stop the

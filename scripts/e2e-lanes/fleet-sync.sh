@@ -76,6 +76,7 @@ for k in $(seq 1 "$N"); do
   lane_store_up "$k"
   lane_model_up "$k"
   lane_search_up "$k"
+  lane_calendar_up "$k"
   (
     cd "$R/apps/api"
     export PORT="$PORT" PORTMARK="$k"
@@ -88,6 +89,7 @@ for k in $(seq 1 "$N"); do
     lane_store_env "$k"
     lane_model_env "$k"
     lane_search_env "$k"
+    lane_calendar_env "$k"
     lane_oauth_env "$k"
     lane_proxy_env "$k"
     nohup node --require "$TSX/dist/preflight.cjs" \

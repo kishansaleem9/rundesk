@@ -94,6 +94,15 @@ async function main() {
     // And it does not latch: the call after it is scripted again, not STAGED.
     const after = await client.messages.create({ model: 'claude-stub-1', max_tokens: 256, system: sys, messages: [{ role: 'user', content: 'again' }] })
     out.afterStaged = after.content[0]?.type === 'text' ? after.content[0].text : null
+    // A staging may hold its answer back, as a real model takes seconds; the call after it is not held.
+    await fetch(BASE + '/__control/next', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'SLOW', delayMs: 600 }) })
+    let t0 = Date.now()
+    const slow = await client.messages.create({ model: 'claude-stub-1', max_tokens: 16, system: 'x', messages: [{ role: 'user', content: 'y' }] })
+    out.slowMs = Date.now() - t0
+    out.slowText = slow.content[0]?.type === 'text' ? slow.content[0].text : null
+    t0 = Date.now()
+    await client.messages.create({ model: 'claude-stub-1', max_tokens: 16, system: 'x', messages: [{ role: 'user', content: 'y' }] })
+    out.fastMs = Date.now() - t0
     // An arranged API error must reach the product as an ERROR, not as text.
     await fetch(BASE + '/__control/next', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 500, message: 'arranged' }) })
     /*
@@ -239,6 +248,11 @@ if (out.none !== undefined) {
     'the staged reply latched and answered twice',
   )
   chk(
+    out.slowText === 'SLOW' && Number(out.slowMs) >= 550 && Number(out.fastMs) < 400,
+    'a staged delay holds that answer back as long as it says, and the next answer is not held',
+    `the staged answer ${JSON.stringify(out.slowText)} took ${out.slowMs} ms; the next took ${out.fastMs} ms`,
+  )
+  chk(
     /Error:500$/.test(String(out.arranged ?? '')),
     'an arranged API error reaches the product as an ERROR carrying THE STATUS THAT WAS ARRANGED',
     `the arranged failure came back as ${JSON.stringify(out.arranged)}`,
@@ -285,6 +299,8 @@ if (process.argv.includes('--mutate')) {
     // is read. The case asserted the error's class name and could not see it.
     ['a staged status is read after it has been cleared', 'const status = staged.status\n    const err =', 'const err ='],
     ['the arranged status is replaced by a constant', 'return json(res, status, err)', 'return json(res, 400, err)'],
+    ['a staged delay is ignored', 'if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))', 'void delayMs'],
+    ['the delay latches into every answer after it', 'const delayMs = Math.min(Math.max(Number(staged?.delayMs ?? 0) || 0, 0), 30_000)', 'const delayMs = (globalThis.__held = staged?.delayMs ?? globalThis.__held ?? 0)'],
     ['usage is zeroes, so a metering check passes on nothing', 'const usage = { input_tokens: Math.max(1, Math.ceil(system.length / 4)), output_tokens: Math.max(1, Math.ceil(text.length / 4)) }', 'const usage = { input_tokens: 0, output_tokens: 0 }'],
     ['a stale stub reports the source on disk', 'return res.end(JSON.stringify({ source: SOURCE }))', "return res.end(JSON.stringify({ source: 'stale' }))"],
     ['reset keeps the record of the run before', 'seen.length = 0', 'void seen'],

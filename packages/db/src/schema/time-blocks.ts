@@ -1,8 +1,9 @@
-import { pgTable, text, timestamp, uuid, boolean, index, check } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, uuid, boolean, index, check, foreignKey } from 'drizzle-orm/pg-core'
 import { relations, sql } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { users } from './users'
 import { tasks } from './tasks'
+import { userCalendarAccounts } from './calendar-accounts'
 
 /**
  * §V2-02 — the Planner's time blocks.
@@ -46,6 +47,14 @@ export const taskTimeBlocks = pgTable(
     endsAt:      timestamp('ends_at', { withTimezone: true }).notNull(),
     /** Frame `13:08`'s "All day" row, which sits above the hour gutter. */
     isAllDay:    boolean('is_all_day').notNull().default(false),
+    /**
+     * The default calendar this block was written to, and the event it became
+     * there (`found-25-sep/connected-calendars-read-by-nothing`): moving the
+     * block moves that event, deleting it deletes it. Set null when the account
+     * is disconnected; the event stays in their calendar, theirs to keep.
+     */
+    calendarAccountId: uuid('calendar_account_id'),
+    externalEventId:   text('external_event_id'),
     createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -59,6 +68,13 @@ export const taskTimeBlocks = pgTable(
     check('task_time_blocks_has_subject', sql`${t.taskId} is not null or ${t.title} is not null`),
     // Zero-length and backwards blocks are not a thing a calendar can draw.
     check('task_time_blocks_ends_after_starts', sql`${t.endsAt} > ${t.startsAt}`),
+    // Named: drizzle's own name for it is 65 characters and Postgres keeps 63
+    // (migration 0173).
+    foreignKey({
+      name: 'task_time_blocks_calendar_account_fk',
+      columns: [t.calendarAccountId],
+      foreignColumns: [userCalendarAccounts.id],
+    }).onDelete('set null'),
   ],
 )
 

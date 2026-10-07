@@ -50,6 +50,12 @@ function fakeDb(
      * so the next attempt is free.
      */
     conflictingInserts?: number
+    /**
+     * Another end holds the call's record lock: it is writing the record
+     * (`found-7-oct/a-call-ended-twice-keeps-two-records`). Free unless a test
+     * says so.
+     */
+    recordBeingWritten?: boolean
   } = {},
 ) {
   const store = {
@@ -187,13 +193,18 @@ function fakeDb(
      * right — it would only be proving itself — so this models the RULE and
      * calls-http.mts proves the statement against real Postgres.
      */
-    execute: async () => {
+    execute: async (q?: { queryChunks?: Array<{ value?: unknown }> }) => {
+      // The record lock end() asks for before it writes, answered as the seed says.
+      const text = (q?.queryChunks ?? []).map((c) => (Array.isArray(c?.value) ? c.value.join('') : '')).join('')
+      if (text.includes('pg_try_advisory_xact_lock')) return [{ held: !seed.recordBeingWritten }]
       const call = store.calls[0]
       const allowed = !!call && call.recording === true && !call.endedAt
       if (!allowed) return []
       executes.push(true)
       return [{ id: `row-${executes.length}` }]
     },
+    // One connection here: what runs in the transaction runs on the fake.
+    transaction: async <T,>(fn: (tx: unknown) => Promise<T>) => fn(db),
   }
   return { db, store, updates, inserts, executes, setNextSelect: (rows: unknown[]) => (nextSelect = rows) }
 }
@@ -449,6 +460,30 @@ describe('§2.8 ending a call', () => {
     const result = await svc.end('call1', 'me')
     assert.equal(result.meetingId, 'meeting-1')
     assert.equal(m.create.mock.callCount(), 0, 'ending twice created a second meeting record')
+  })
+
+  it('tells an end that finds another writing the record that it is coming, and writes none (found-7-oct/a-call-ended-twice-keeps-two-records)', async () => {
+    // Claimed by the first end, its record not yet written: the second end
+    // must not take that for an end that died and write a record of its own.
+    const { db } = fakeDb({ calls: [{ ...LIVE_CALL, endedAt: new Date() }], participants: [{ userId: 'me' }], recordBeingWritten: true })
+    const m = meetings()
+    const notes = ai()
+    const svc = makeService({ db, meetings: m, ai: notes })
+    const result = await svc.end('call1', 'me')
+    assert.deepEqual(result, { ok: true, meetingId: null, pending: true })
+    assert.equal(m.create.mock.callCount(), 0, 'a second record was written while the first was being written')
+    assert.equal(notes.notesFromTranscript.mock.callCount(), 0, 'the notes were asked of the model a second time')
+  })
+
+  it('writes the record an end that died owed, once the lock is free', async () => {
+    // Claimed, no record, and nobody holding the lock: the end that claimed it
+    // died before writing, and this end writes what it owed.
+    const { db } = fakeDb({ calls: [{ ...LIVE_CALL, endedAt: new Date() }], participants: [{ userId: 'me' }] })
+    const m = meetings()
+    const svc = makeService({ db, meetings: m })
+    const result = await svc.end('call1', 'me')
+    assert.equal(result.meetingId, 'meeting-1')
+    assert.equal(m.create.mock.callCount(), 1)
   })
 
   it('still ends the call when the meeting record cannot be written', async () => {

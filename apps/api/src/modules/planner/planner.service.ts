@@ -1,5 +1,5 @@
 import { Injectable, Inject, BadRequestException, NotFoundException, ForbiddenException, HttpException } from '@nestjs/common'
-import { and, asc, eq, gte, lt } from 'drizzle-orm'
+import { and, asc, eq, gte, inArray, lt } from 'drizzle-orm'
 import { taskTimeBlocks, tasks, users, lists, projects, spaces, workspaces } from '@rundesk/db'
 import type { Db, PlannerSettings } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -8,6 +8,7 @@ import { assertCanCreateTaskIn, ListInTrashException } from '../../common/permis
 import { isUuid } from '../../common/validation/uuid'
 import { PeopleService } from '../people/people.service'
 import { CalendarAccountsService } from '../calendar-sync/calendar-accounts.service'
+import { CalendarRefused } from '../calendar-sync/calendar-events'
 
 /**
  * §V2-02 — the Planner.
@@ -250,6 +251,36 @@ export class PlannerService {
       }),
     )
     return { people: columns }
+  }
+
+  /**
+   * THE EVENTS OF THIS PERSON'S CONNECTED CALENDARS between two instants
+   * (`found-25-sep/connected-calendars-read-by-nothing`), for the grid to draw
+   * beside their blocks and for "Upcoming", and the calendars that could not be
+   * read. The blocks' range, by the blocks' rule: half-open, and no wider than
+   * the grid ever asks.
+   */
+  async listEvents(workspaceId: string, userId: string, fromRaw: unknown, toRaw: unknown) {
+    const from = parseInstant(fromRaw, 'from')
+    const to = parseInstant(toRaw, 'to')
+    if (to <= from) throw new BadRequestException('"to" must be after "from"')
+    if ((to.getTime() - from.getTime()) / 86_400_000 > MAX_RANGE_DAYS) {
+      throw new BadRequestException(`A planner range covers at most ${MAX_RANGE_DAYS} days`)
+    }
+    const read = await this.accounts.events(userId, workspaceId, from, to)
+    /*
+     * A BLOCK WRITTEN TO A CALENDAR COMES BACK FROM IT AS AN EVENT, and is drawn
+     * once, as the block (which can be dragged; its event cannot). Matched by
+     * the account and the provider's id the block kept.
+     */
+    const ids = read.events.map((e) => e.id)
+    if (ids.length === 0) return read
+    const mine = await this.db
+      .select({ accountId: taskTimeBlocks.calendarAccountId, eventId: taskTimeBlocks.externalEventId })
+      .from(taskTimeBlocks)
+      .where(and(eq(taskTimeBlocks.userId, userId), inArray(taskTimeBlocks.externalEventId, ids)))
+    const blocks = new Set(mine.map((m) => `${m.accountId}:${m.eventId}`))
+    return { ...read, events: read.events.filter((e) => !blocks.has(`${e.accountId}:${e.id}`)) }
   }
 
   /**
@@ -621,7 +652,7 @@ export class PlannerService {
         isAllDay: body.isAllDay === true,
       })
       .returning()
-    return row
+    return { ...row, ...(await this.toCalendar(row)) }
   }
 
   /** Moving or resizing a block on the grid. */
@@ -649,13 +680,71 @@ export class PlannerService {
       .set(set)
       .where(eq(taskTimeBlocks.id, blockId))
       .returning()
-    return row
+    return { ...row, ...(await this.toCalendar(row)) }
   }
 
   async deleteBlock(blockId: string, userId: string) {
-    await this.ownedBlock(blockId, userId)
+    const block = await this.ownedBlock(blockId, userId)
     await this.db.delete(taskTimeBlocks).where(eq(taskTimeBlocks.id, blockId))
-    return { ok: true }
+    return { ok: true, calendar: await this.offCalendar(block) }
+  }
+
+  /**
+   * A BLOCK IS AN EVENT IN ITS OWNER'S DEFAULT CALENDAR
+   * (`found-25-sep/connected-calendars-read-by-nothing`). The Accounts page
+   * says the default calendar is "where new events are created", and nothing
+   * was ever written there. ClickUp makes a calendar event of a block on its
+   * planner. So a block made or changed is written: to the calendar it was
+   * written to before, which the change follows, or else to the default — a
+   * block made before any calendar was connected, or whose write failed, is
+   * written the next time it changes. A task's block is titled with the task.
+   *
+   * THE BLOCK IS SAVED WHATEVER THE CALENDAR ANSWERS, and what it answered is
+   * returned beside it (`calendar`): null with no default calendar, `written`
+   * false with why, so the page can say a block is not in the calendar rather
+   * than leave somebody believing it is.
+   */
+  private async toCalendar(block: typeof taskTimeBlocks.$inferSelect) {
+    const account = block.calendarAccountId
+      ? await this.accounts.ownAccountWithTokens(block.userId, block.calendarAccountId)
+      : await this.accounts.defaultAccountWithTokens(block.userId, block.workspaceId)
+    if (!account) return { calendar: null }
+    let title = block.title
+    if (!title && block.taskId) {
+      const [task] = await this.db.select({ title: tasks.title }).from(tasks).where(eq(tasks.id, block.taskId)).limit(1)
+      title = task?.title ?? null
+    }
+    const said = { accountId: account.id, email: account.externalAccountEmail }
+    try {
+      const eventId = await this.accounts.writeBlockEvent(
+        account,
+        { title: title ?? '', start: block.startsAt, end: block.endsAt, allDay: block.isAllDay },
+        block.calendarAccountId === account.id ? block.externalEventId : null,
+      )
+      if (eventId !== block.externalEventId || account.id !== block.calendarAccountId) {
+        await this.db
+          .update(taskTimeBlocks)
+          .set({ calendarAccountId: account.id, externalEventId: eventId })
+          .where(eq(taskTimeBlocks.id, block.id))
+      }
+      return { calendarAccountId: account.id, externalEventId: eventId, calendar: { ...said, written: true } }
+    } catch (err) {
+      return { calendar: { ...said, written: false, reason: err instanceof CalendarRefused ? 'refused' : 'failed' } }
+    }
+  }
+
+  /** A deleted block's event goes from the calendar it was written to; what that calendar answered, or null. */
+  private async offCalendar(block: typeof taskTimeBlocks.$inferSelect) {
+    if (!block.calendarAccountId || !block.externalEventId) return null
+    const account = await this.accounts.ownAccountWithTokens(block.userId, block.calendarAccountId)
+    if (!account) return null
+    const said = { accountId: account.id, email: account.externalAccountEmail }
+    try {
+      await this.accounts.deleteBlockEvent(account, block.externalEventId)
+      return { ...said, written: true }
+    } catch (err) {
+      return { ...said, written: false, reason: err instanceof CalendarRefused ? 'refused' : 'failed' }
+    }
   }
 
   /**

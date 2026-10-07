@@ -59,6 +59,33 @@ export function rejoinAndCatchUp(sock: Pick<Socket, 'emit'> | null, again: strin
   return true
 }
 
+/**
+ * A PAGE ASKS FOR ITS ROOMS HERE, AND READS AFRESH WHAT WAS SAID IN THEM ONCE
+ * THE SERVER HOLDS THEM (`found-7-oct/a-room-asked-on-an-open-socket-misses-what-was-said`).
+ *
+ * A page reads its data as it mounts and asks for its rooms then, and the
+ * server lets the socket into a room only once it has read who may hear it:
+ * whatever was said to the room in between reached nothing. Only a socket's
+ * opening read anything afresh (`rejoinAndCatchUp`), so a page that asked on a
+ * socket already open — every page a tab draws after its first, and the first
+ * when its code arrives after the socket opens — went on showing what it read.
+ * Measured on lane 4: a message posted while the chat page's subscribe was
+ * held never showed, 3 runs of 3, nor one posted while the socket was down and
+ * the page was opened meanwhile, 3 of 3; in the CI rehearsal of `518f96a`, a
+ * call card, until a reload.
+ *
+ * So the subscribe asks for the server's answer, and when it comes the page
+ * reads afresh what its rooms' events refresh (`catchUp`); every event after
+ * reaches the rooms it holds. A subscribe sent while the socket is down waits
+ * in socket.io's buffer with its answer, so that page reads afresh once the
+ * socket opens and the server has let it in. A room with nothing to read
+ * afresh (a cursor is where it is now) gives no `catchUp`.
+ */
+export function joinRooms(sock: Pick<Socket, 'emit'>, rooms: string[], catchUp?: () => void): void {
+  if (catchUp) sock.emit('subscribe', { rooms }, () => catchUp())
+  else sock.emit('subscribe', { rooms })
+}
+
 export function reconnectRealtime() {
   if (!socket) return
   socket.auth = { token: useAuthStore.getState().accessToken }
@@ -277,21 +304,18 @@ if (typeof window !== 'undefined') {
  * let go is kept here, read off the socket's outgoing events, and the rooms
  * held when the socket dropped are asked for again when it opens. What a page
  * subscribes while the socket is down is sent by socket.io itself when it
- * opens, so it is not asked twice; nor is anything at the first opening.
+ * opens, with its answer, and read afresh when that comes (`joinRooms`), so it
+ * is not asked twice; nor is anything at the first opening.
+ *
+ * A SOCKET THAT OPENS LATE (`found-7-oct/a-socket-that-opens-late-misses-what-was-said`):
+ * with a tab's socket held back 6 s, a sheet never showed a colleague's change
+ * made meanwhile, 4 runs of 4. The first opening took up every room asked for
+ * before it, and read all the tab's queries afresh once they were answered;
+ * each page's own answer does that now, for its own queries alone.
  */
 export function roomLedger() {
   const held = new Set<string>()
   let whenDropped: string[] | null = null
-  /*
-   * AND THE FIRST OPEN IS AN OPENING AGAIN (`found-7-oct/a-socket-that-opens-late-misses-what-was-said`).
-   * A page reads its data as it mounts and asks for its rooms then; a socket
-   * that has not opened yet holds the asking until it does. What was said in
-   * between reached nothing, and the page went on showing what it read: with a
-   * tab's socket held back 6 s, a sheet never showed a colleague's change made
-   * meanwhile, 4 runs of 4. So the first open takes up every room a page asked
-   * for before it, as a later one takes up those it held when it dropped.
-   */
-  let opened = false
   return {
     /** An outgoing event: a subscribe holds its rooms, an unsubscribe lets them go. */
     sent(event: string, payload: unknown): void {
@@ -307,10 +331,9 @@ export function roomLedger() {
     dropped(): void {
       whenDropped = [...held]
     },
-    /** The socket is open: the first time, every room a page asked for before; again, the rooms held when it dropped that a page still holds. */
+    /** The socket is open: the rooms held when it dropped that a page still holds, and none the first time. */
     rejoin(): string[] {
-      const again = opened ? (whenDropped ?? []).filter((room) => held.has(room)) : [...held]
-      opened = true
+      const again = (whenDropped ?? []).filter((room) => held.has(room))
       whenDropped = null
       return again
     },

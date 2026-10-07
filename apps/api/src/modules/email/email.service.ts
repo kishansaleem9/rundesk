@@ -2,6 +2,16 @@ import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common
 import { ConfigService } from '@nestjs/config'
 import nodemailer, { type Transporter } from 'nodemailer'
 
+/**
+ * What a reply to a mail about a task follows back to it: the Message-ID the
+ * notifications service keeps with the task, and the task's own address where
+ * its list takes email (`resume-defects/resume-8-reply-routing`). Only the
+ * comment notification took them, so a reply to the mail that told somebody
+ * they were mentioned, or that a task was theirs, found no task
+ * (`resume-defects/resume-8`). Every sender of a mail about a task takes them.
+ */
+export type ReplyThread = { messageId?: string; replyTo?: string }
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name)
@@ -198,9 +208,11 @@ export class EmailService {
     taskTitle: string
     taskUrl: string
     workspaceName: string
-  }) {
+  } & ReplyThread) {
     return this.send({
       to: opts.to,
+      messageId: opts.messageId,
+      replyTo: opts.replyTo,
       subject: `[Rundesk] ${opts.actorName} assigned you "${opts.taskTitle}"`,
       html: this.layout({
         heading: 'You were assigned a task',
@@ -224,9 +236,11 @@ export class EmailService {
     taskTitle: string
     taskUrl: string
     workspaceName: string
-  }) {
+  } & ReplyThread) {
     return this.send({
       to: opts.to,
+      messageId: opts.messageId,
+      replyTo: opts.replyTo,
       subject: `[Rundesk] ${opts.actorName} mentioned you ${opts.context}`,
       html: this.layout({
         heading: `${this.esc(opts.actorName)} mentioned you`,
@@ -249,9 +263,11 @@ export class EmailService {
     taskUrl: string
     dueDateLabel: string      // e.g. "tomorrow" or "in 2 days"
     workspaceName: string
-  }) {
+  } & ReplyThread) {
     return this.send({
       to: opts.to,
+      messageId: opts.messageId,
+      replyTo: opts.replyTo,
       subject: `[Rundesk] Task due ${opts.dueDateLabel}: "${opts.taskTitle}"`,
       html: this.layout({
         heading: `Task due ${opts.dueDateLabel}`,
@@ -273,9 +289,11 @@ export class EmailService {
     taskTitle: string
     taskUrl: string
     workspaceName: string
-  }) {
+  } & ReplyThread) {
     return this.send({
       to: opts.to,
+      messageId: opts.messageId,
+      replyTo: opts.replyTo,
       subject: `[Rundesk] Overdue task: "${opts.taskTitle}"`,
       html: this.layout({
         heading: 'Overdue task',
@@ -300,9 +318,11 @@ export class EmailService {
     taskUrl: string
     commentSnippet: string
     workspaceName: string
-  }) {
+  } & ReplyThread) {
     return this.send({
       to: opts.to,
+      messageId: opts.messageId,
+      replyTo: opts.replyTo,
       subject: `[Rundesk] ${opts.actorName} resolved your comment on "${opts.taskTitle}"`,
       html: this.layout({
         heading: `Comment resolved on "${opts.taskTitle}"`,
@@ -330,14 +350,7 @@ export class EmailService {
     taskUrl: string
     commentSnippet: string
     workspaceName: string
-    /**
-     * A reply finds its task by this, in its `In-Reply-To` (the notifications
-     * service keeps it with the task), and by `replyTo` where the task has an
-     * address of its own (`resume-defects/resume-8-reply-routing`).
-     */
-    messageId?: string
-    replyTo?: string
-  }) {
+  } & ReplyThread) {
     return this.send({
       to: opts.to,
       messageId: opts.messageId,
@@ -404,9 +417,11 @@ export class EmailService {
     body?: string
     taskUrl: string
     workspaceName: string
-  }) {
+  } & ReplyThread) {
     return this.send({
       to: opts.to,
+      messageId: opts.messageId,
+      replyTo: opts.replyTo,
       subject: `[Rundesk] ${opts.title}`,
       html: this.layout({
         heading: 'New activity',

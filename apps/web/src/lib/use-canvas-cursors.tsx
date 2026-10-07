@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { getRealtimeSocket } from './realtime'
+import { getRealtimeSocket, joinRooms } from './realtime'
 import { useAuthStore } from '../store/auth'
 
 export type RemoteCursor = {
@@ -49,7 +49,8 @@ export function useCanvasCursors(canvasId: string | null, containerRef: React.Re
     if (!canvasId) return
     const socket = getRealtimeSocket()
     const room = `canvas:${canvasId}`
-    socket.emit('subscribe', { rooms: [room] })
+    // Nothing to read afresh once the server holds the room: a cursor is where it is now.
+    joinRooms(socket, [room])
 
     const onEvent = (event: {
       type: string

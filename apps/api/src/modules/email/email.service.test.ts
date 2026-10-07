@@ -9,16 +9,17 @@ import { EmailService } from './email.service'
  * (`resume-defects/resume-8-reply-routing`). No lane has a mail server, so the
  * end-to-end suite reads the kept id and never sees the transport: this does.
  */
-describe('EmailService.sendComment — the thread a reply follows', () => {
-  const service = () => {
-    const config = {
-      get: (key: string) => ({ SMTP_HOST: 'smtp.test', SMTP_USER: 'user', SMTP_PASS: 'pass' } as Record<string, string>)[key],
-    }
-    const svc = new EmailService(config as never)
-    const sendMail = mock.fn(async (_mail: Record<string, unknown>) => ({}))
-    ;(svc as unknown as { transport: unknown }).transport = { sendMail }
-    return { svc, sendMail }
+const service = () => {
+  const config = {
+    get: (key: string) => ({ SMTP_HOST: 'smtp.test', SMTP_USER: 'user', SMTP_PASS: 'pass' } as Record<string, string>)[key],
   }
+  const svc = new EmailService(config as never)
+  const sendMail = mock.fn(async (_mail: Record<string, unknown>) => ({}))
+  ;(svc as unknown as { transport: unknown }).transport = { sendMail }
+  return { svc, sendMail }
+}
+
+describe('EmailService.sendComment — the thread a reply follows', () => {
   const comment = {
     to: 'watcher@example.test',
     recipientName: 'Watcher',
@@ -44,5 +45,41 @@ describe('EmailService.sendComment — the thread a reply follows', () => {
     const sent = sendMail.mock.calls[0].arguments[0]
     assert.equal('messageId' in sent, false)
     assert.equal('replyTo' in sent, false)
+  })
+})
+
+/**
+ * And every other mail about a task (`resume-defects/resume-8`): the mail that
+ * tells somebody they were mentioned, or that a task is theirs, due or changed,
+ * took no thread, so a reply to it found no task.
+ */
+describe('EmailService — every mail about a task, the thread a reply follows', () => {
+  const SENDERS = ['sendTaskAssigned', 'sendMention', 'sendDueSoon', 'sendOverdue', 'sendCommentResolved', 'sendComment', 'sendActivity'] as const
+  const everything = {
+    to: 'person@example.test',
+    recipientName: 'Person',
+    actorName: 'Admin',
+    context: 'in a comment',
+    taskTitle: 'A task',
+    taskUrl: 'https://app.example.test/t',
+    dueDateLabel: 'tomorrow',
+    commentSnippet: 'A comment',
+    title: 'Something changed',
+    workspaceName: 'Workspace',
+  }
+
+  it('each sender of a mail about a task sends the Message-ID and the Reply-To it is given', async () => {
+    const told: Record<string, unknown> = {}
+    for (const name of SENDERS) {
+      const { svc, sendMail } = service()
+      const send = svc[name] as (opts: unknown) => Promise<unknown>
+      await send.call(svc, { ...everything, messageId: `<notify.${name}@inbound.example.test>`, replyTo: 'list-abc+task-1@inbound.example.test' })
+      const sent = sendMail.mock.calls[0]?.arguments[0]
+      told[name] = sent ? [sent.messageId ?? null, sent.replyTo ?? null] : 'nothing was sent'
+    }
+    assert.deepEqual(
+      told,
+      Object.fromEntries(SENDERS.map((name) => [name, [`<notify.${name}@inbound.example.test>`, 'list-abc+task-1@inbound.example.test']])),
+    )
   })
 })

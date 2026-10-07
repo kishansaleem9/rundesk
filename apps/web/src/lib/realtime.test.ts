@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
+import { readdirSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { test } from 'node:test'
-import { followOtherTab, followServerClose, followSignedIn, rejoinAndCatchUp, roomLedger, takesItsPersonBack, whoItHeldWhenCleared } from './realtime'
+import { fileURLToPath } from 'node:url'
+import { followOtherTab, followServerClose, followSignedIn, joinRooms, rejoinAndCatchUp, roomLedger, takesItsPersonBack, whoItHeldWhenCleared } from './realtime'
 
 /*
  * THE TAB'S SOCKET FOLLOWS WHO IS SIGNED IN
@@ -130,17 +133,14 @@ test('the person remembered is whom the tab named when its store was cleared, ke
  * keeps what the pages hold, from the socket's outgoing events, and says what
  * to ask for again when the socket opens.
  *
- * And the first opening asks again for every room a page asked for before it
- * (`found-7-oct/a-socket-that-opens-late-misses-what-was-said`): the pages read
- * their data while the socket was not yet open, and what was said in between
- * reached nothing. Asked again, the rooms are answered, and the pages read
- * afresh (`rejoinAndCatchUp`).
+ * Not at the first opening (`found-7-oct/a-socket-that-opens-late-misses-what-was-said`):
+ * what a page asked for before it waits in socket.io's buffer with its answer,
+ * and the page reads afresh when that comes (`joinRooms`, below).
  */
-test('the rooms a page holds when the socket drops are asked for again when it opens; those let go and those sent while it was down ask for nothing; the first opening asks again for every room asked for before it', () => {
+test('the rooms a page holds when the socket drops are asked for again when it opens; those let go, those sent while it was down, and those asked for before the first opening ask for nothing', () => {
   const rooms = roomLedger()
   rooms.sent('subscribe', { rooms: ['list:a', 'task:b'] })
-  assert.deepEqual(rooms.rejoin(), ['list:a', 'task:b'], 'the first opening did not ask again for the rooms its pages asked for before it, so nothing reads afresh what they read meanwhile')
-  assert.deepEqual(rooms.rejoin(), [], 'the same rooms were asked for twice for the first opening')
+  assert.deepEqual(rooms.rejoin(), [], 'the first opening asked again for rooms whose pages read afresh on their own answers, so they read everything twice')
   rooms.sent('unsubscribe', { rooms: ['task:b'] })
   rooms.sent('presence.ping', undefined)
   rooms.dropped()
@@ -231,4 +231,41 @@ test('the rooms asked for again wait for the server’s answer, and then the pag
   assert.equal(rejoinAndCatchUp(null, ['list:l1'], () => { caughtUp += 1 }), false)
   assert.equal(sent.length, 1, 'something was asked for with no rooms to ask for')
   assert.equal(caughtUp, 1)
+})
+
+/*
+ * A PAGE ASKS FOR ITS ROOMS AND READS AFRESH ONCE THE SERVER HOLDS THEM
+ * (`found-7-oct/a-room-asked-on-an-open-socket-misses-what-was-said`).
+ * A page reads its data as it mounts and asks for its rooms then; what was said
+ * to a room before the server let the socket in reached nothing. Measured on
+ * lane 4: a message posted while the chat page's subscribe was held never
+ * showed, 3 runs of 3, on a socket already open or one that was down. The
+ * subscribe asks for the server's answer, and on it the page reads afresh what
+ * its rooms' events refresh. `room-catch-up.mjs` holds a page's subscribe on a
+ * lane while something is said, then lets it go.
+ */
+test('a page’s rooms wait for the server’s answer, and then the page reads afresh what their events refresh; a room with nothing to read asks no answer', () => {
+  const sent: Array<{ event: string; payload: unknown; ack?: () => void }> = []
+  const sock = { emit: (event: string, payload: unknown, ack?: () => void) => { sent.push({ event, payload, ack }); return sock } }
+  let caughtUp = 0
+  joinRooms(sock as never, ['workspace:w1'], () => { caughtUp += 1 })
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0].event, 'subscribe')
+  assert.deepEqual(sent[0].payload, { rooms: ['workspace:w1'] })
+  assert.equal(caughtUp, 0, 'the page read afresh before the server held its room')
+  assert.equal(typeof sent[0].ack, 'function', 'the subscribe asked for no answer, so the page never reads what was said while the server let it in')
+  sent[0].ack?.()
+  assert.equal(caughtUp, 1, 'the server’s answer did not lead the page to read afresh')
+  joinRooms(sock as never, ['canvas:c1'])
+  assert.deepEqual(sent[1].payload, { rooms: ['canvas:c1'] })
+  assert.equal(sent[1].ack, undefined, 'a room with nothing to read afresh asked for an answer')
+})
+
+test('no page asks for a room but through joinRooms, so none goes on showing only what it read before its room was held', () => {
+  const src = join(dirname(fileURLToPath(import.meta.url)), '..')
+  const files = (readdirSync(src, { recursive: true }) as string[])
+    .filter((rel) => /\.tsx?$/.test(rel) && !/\.test\.tsx?$/.test(rel) && rel !== join('lib', 'realtime.ts'))
+  assert.ok(files.length > 100, `only ${files.length} source files found under ${src}: this check is reading the wrong place`)
+  const asking = files.filter((rel) => /\.emit\(\s*['"`]subscribe['"`]/.test(readFileSync(join(src, rel), 'utf8')))
+  assert.deepEqual(asking, [], 'these subscribe on the socket themselves, and read nothing afresh once the server holds their rooms')
 })

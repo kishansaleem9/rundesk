@@ -10,7 +10,7 @@ import {
   toast,
 } from '@rundesk/ui'
 import { api, ApiError } from '../lib/api'
-import { getRealtimeSocket } from '../lib/realtime'
+import { getRealtimeSocket, joinRooms } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
 import { CursorLayer, useCanvasCursors } from '../lib/use-canvas-cursors'
 import {
@@ -188,7 +188,8 @@ export function MindMapsPage() {
 
   useEffect(() => {
     const socket = getRealtimeSocket()
-    socket.emit('subscribe', { rooms: [`workspace:${workspaceId}`] })
+    // Once the server holds the room, what was said in it meanwhile is read afresh: what its events below change.
+    joinRooms(socket, [`workspace:${workspaceId}`], () => void qc.invalidateQueries({ queryKey: ['workspace-canvases', workspaceId, 'mindmap'] }))
     const onEvent = (event: {
       type: string
       workspaceId?: string

@@ -110,6 +110,7 @@ restart() {
   lane_store_up "$LANE"
   lane_model_up "$LANE"
   lane_search_up "$LANE"
+  lane_calendar_up "$LANE"
   (
     cd "$WT/apps/api"
     export PORT="$PORT" PORTMARK="$LANE"
@@ -122,6 +123,7 @@ restart() {
     lane_store_env "$LANE"
     lane_model_env "$LANE"
     lane_search_env "$LANE"
+    lane_calendar_env "$LANE"
     lane_oauth_env "$LANE"
     lane_proxy_env "$LANE"
     nohup node --require "$TSX/dist/preflight.cjs" \

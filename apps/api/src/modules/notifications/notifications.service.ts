@@ -1262,13 +1262,14 @@ export class NotificationsService {
   // ---------------------------------------------------------------------------
 
   /**
-   * WHAT A REPLY TO A COMMENT NOTIFICATION FINDS ITS TASK BY. The mail gets a
+   * WHAT A REPLY TO A MAIL ABOUT A TASK FINDS THE TASK BY. The mail gets a
    * Message-ID of its own, kept with the task (`outbound_email_messages`), so
    * a reply's `In-Reply-To` names it; and, where the task's list takes email,
    * a Reply-To of the task's own address. Neither was set, and the inbound
    * handler, which says replies route by header, matched only inbound mail
-   * (`resume-defects/resume-8-reply-routing`). The id is random, so knowing a
-   * task does not let anybody guess one.
+   * (`resume-defects/resume-8-reply-routing`); then only the comment
+   * notification had them (`resume-defects/resume-8`). The id is random, so
+   * knowing a task does not let anybody guess one.
    */
   private async replyThread(taskId: string, recipient: string): Promise<{ messageId: string; replyTo: string | null } | null> {
     const [task] = await this.db.select({ listId: tasks.listId }).from(tasks).where(eq(tasks.id, taskId)).limit(1)
@@ -1312,6 +1313,22 @@ export class NotificationsService {
     const taskTitle = ctx.taskTitle ?? data.title
     const workspaceName = ctx.workspaceName ?? 'your workspace'
 
+    /*
+     * EVERY MAIL ABOUT A TASK IS ANSWERED ON THE TASK (`resume-defects/resume-8`).
+     * Only the comment notification was sent with a thread, so the mail that
+     * told somebody they were mentioned, or that a task was theirs, had no
+     * Message-ID anybody kept, and a reply to it found no task: measured, the
+     * mentioned person and the assignee were kept nothing, and their replies
+     * landed nowhere. ClickUp adds a reply to a task notification email to the
+     * task as a comment. What a type is does not say whether it is about a
+     * task (a mention in chat is a `task_mentioned` about a message), so the
+     * target does; a mail about a message or a doc carries none.
+     */
+    const thread = data.target?.entityType === 'task'
+      ? await this.replyThread(data.target.entityId, recipient.email)
+      : null
+    const threaded = { messageId: thread?.messageId, replyTo: thread?.replyTo ?? undefined }
+
     switch (data.type) {
       case 'task_assigned':
         await this.email.sendTaskAssigned({
@@ -1321,6 +1338,7 @@ export class NotificationsService {
           taskTitle,
           taskUrl,
           workspaceName,
+          ...threaded,
         })
         break
 
@@ -1333,6 +1351,7 @@ export class NotificationsService {
           taskTitle,
           taskUrl,
           workspaceName,
+          ...threaded,
         })
         break
 
@@ -1346,11 +1365,9 @@ export class NotificationsService {
             taskUrl,
             commentSnippet: ctx.commentSnippet ?? '(view in app)',
             workspaceName,
+            ...threaded,
           })
         } else {
-          const thread = data.target?.entityType === 'task'
-            ? await this.replyThread(data.target.entityId, recipient.email)
-            : null
           await this.email.sendComment({
             to: recipient.email,
             recipientName: recipient.displayName,
@@ -1359,8 +1376,7 @@ export class NotificationsService {
             taskUrl,
             commentSnippet: ctx.commentSnippet ?? '(view in app)',
             workspaceName,
-            messageId: thread?.messageId,
-            replyTo: thread?.replyTo ?? undefined,
+            ...threaded,
           })
         }
         break
@@ -1373,6 +1389,7 @@ export class NotificationsService {
           taskUrl,
           dueDateLabel: ctx.dueDateLabel ?? 'soon',
           workspaceName,
+          ...threaded,
         })
         break
 
@@ -1383,6 +1400,7 @@ export class NotificationsService {
           taskTitle,
           taskUrl,
           workspaceName,
+          ...threaded,
         })
         break
 
@@ -1399,6 +1417,7 @@ export class NotificationsService {
           body: data.body,
           taskUrl,
           workspaceName,
+          ...threaded,
         })
         break
 
@@ -1411,6 +1430,7 @@ export class NotificationsService {
           body: data.body,
           taskUrl,
           workspaceName,
+          ...threaded,
         })
         break
     }

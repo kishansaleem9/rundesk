@@ -161,6 +161,7 @@ for k in "${LANES[@]}"; do
   # And its search engine, when RUNDESK_LANE_SEARCH names it — before the API,
   # which makes its index at boot (lane-env.sh).
   lane_search_up "$k"
+  lane_calendar_up "$k"
   (
     cd "$R/apps/api"
     export PORT="$PORT"
@@ -174,6 +175,7 @@ for k in "${LANES[@]}"; do
     lane_store_env "$k"
     lane_model_env "$k"
     lane_search_env "$k"
+    lane_calendar_env "$k"
     lane_oauth_env "$k"
     lane_proxy_env "$k"
     nohup node --require "$TSX/dist/preflight.cjs" \

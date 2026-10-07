@@ -435,7 +435,37 @@ export class CallsService {
     const call = await this.assertCanReach(callId, userId)
     // Ended AND the record is there: nothing left to do.
     if (call.endedAt && call.meetingId) return { ok: true, meetingId: call.meetingId, pending: false }
+    /*
+     * ONE END WRITES THE RECORD (`found-7-oct/a-call-ended-twice-keeps-two-records`).
+     *
+     * An end that came after another had claimed the call, but before that one
+     * had pointed it at its record, found the end claimed and no record — what
+     * an end that died before writing leaves — and wrote a second one: two
+     * records, one that nothing points at, and the notes asked of the model
+     * twice. On lane 4 an end 20 ms after the first did it; with a real model
+     * the window is the seconds the notes take. So the end that writes holds
+     * the call's lock until it has written (to the end of this transaction),
+     * and an end that cannot take it is told the record is coming. An end that
+     * dies lets the lock go with its connection, so the record it owed is still
+     * written by the next end, as below.
+     */
+    return this.db.transaction(async (tx) => {
+      const [lock] = await tx.execute(sql`select pg_try_advisory_xact_lock(hashtext(${`call-record:${callId}`})) as held`)
+      if ((lock as { held?: unknown } | undefined)?.held !== true) {
+        const [settled] = await this.db.select().from(calls).where(eq(calls.id, callId)).limit(1)
+        const meetingId = settled?.meetingId ?? null
+        return { ok: true, meetingId, pending: meetingId === null }
+      }
+      // Read again, holding it: the end that held it before may have written the record since.
+      const [now] = await this.db.select().from(calls).where(eq(calls.id, callId)).limit(1)
+      if (now?.endedAt && now.meetingId) return { ok: true, meetingId: now.meetingId, pending: false }
+      return this.endHolding(now ?? call, userId)
+    })
+  }
 
+  /** The end itself, by the end that holds the call's record lock (`end`). */
+  private async endHolding(call: typeof calls.$inferSelect, userId: string) {
+    const callId = call.id
     let endedAt = call.endedAt
     if (!endedAt) {
       /*

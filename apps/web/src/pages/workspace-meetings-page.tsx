@@ -223,6 +223,41 @@ function UpcomingMeetings({ meetings, failed }: { meetings: Meeting[] | undefine
   const calendarAccounts = accounts.data
   const offerConnect = calendarAccounts !== undefined && calendarAccounts.length === 0
   /*
+   * AND THE CALENDARS' OWN MEETINGS (`found-25-sep/connected-calendars-read-by-nothing`).
+   * "Upcoming" read Rundesk's meetings alone, so a connected calendar's never
+   * showed here. The next week of the person's ticked calendars, read as the
+   * planner reads them, and asked only of somebody who has one.
+   */
+  const hasCalendars = (calendarAccounts?.length ?? 0) > 0
+  const calendar = useQuery({
+    queryKey: ['meetings-upcoming-events', workspaceId],
+    queryFn: () => {
+      const from = new Date()
+      const to = new Date(from.getTime() + 7 * 86_400_000)
+      return api<{
+        events: Array<{ id: string; accountId: string; title: string; start: string; end: string; allDay: boolean; location: string | null; link: string | null }>
+        unread: Array<{ accountId: string; email: string | null; provider: string; reason: string }>
+      }>(`/planner/${workspaceId}/events?from=${from.toISOString()}&to=${to.toISOString()}`)
+    },
+    enabled: !!workspaceId && hasCalendars,
+    refetchInterval: 60_000,
+  })
+  const emailOf = (accountId: string) =>
+    calendarAccounts?.find((a) => a.id === accountId)?.externalAccountEmail ?? ''
+  /*
+   * One list, soonest first: a meeting starting in five minutes is the one being
+   * looked for, whichever calendar holds it. An all-day event is a day, not a
+   * meeting, and one that has started is not upcoming.
+   */
+  const upcoming = [
+    ...(meetings ?? []).map((meeting) => ({ kind: 'meeting' as const, at: meeting.startsAt, meeting })),
+    ...(calendar.data?.events ?? [])
+      .filter((e) => !e.allDay && Date.parse(e.start) >= Date.now())
+      .map((event) => ({ kind: 'event' as const, at: event.start, event })),
+  ]
+    .sort((a, b) => Date.parse(a.at ?? '') - Date.parse(b.at ?? ''))
+    .slice(0, 10)
+  /*
    * NOTHING IS SAID BEFORE IT IS KNOWN
    * (`found-6-oct/upcoming-says-nothing-scheduled-before-it-knows`). The
    * meetings defaulted to none while they loaded, so the section said
@@ -237,6 +272,8 @@ function UpcomingMeetings({ meetings, failed }: { meetings: Meeting[] | undefine
         ? 'failed'
         : 'checking'
       : calendarAccounts === undefined && !accounts.isError
+      ? 'checking'
+      : hasCalendars && calendar.isPending
       ? 'checking'
       : 'known'
 
@@ -292,7 +329,9 @@ function UpcomingMeetings({ meetings, failed }: { meetings: Meeting[] | undefine
         ) : (
           <ListSkeleton rows={1} />
         )
-      ) : meetings.length === 0 ? (
+      ) : hasCalendars && calendar.isPending ? (
+        <ListSkeleton rows={1} />
+      ) : upcoming.length === 0 ? (
         <div
           className="rounded-xl border border-dashed border-border/70 px-4 py-4 flex flex-wrap items-center justify-between gap-3"
           data-testid="meetings-upcoming-empty"
@@ -318,7 +357,44 @@ function UpcomingMeetings({ meetings, failed }: { meetings: Meeting[] | undefine
         </div>
       ) : (
         <ul className="space-y-2">
-          {meetings.map((meeting) => {
+          {upcoming.map((item) => {
+            if (item.kind === 'event') {
+              const event = item.event
+              const until = untilLabel(event.start)
+              return (
+                <li
+                  key={`event-${event.accountId}-${event.id}`}
+                  data-testid="meeting-upcoming-event"
+                  data-event-id={event.id}
+                  data-account-id={event.accountId}
+                  className="rounded-xl border border-border/70 px-4 py-3 flex flex-wrap items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium truncate">{event.title || t('planner.eventNoTitle')}</span>
+                      {showTimeLeft && until && (
+                        <Badge variant={isJoinable(event.start) ? 'default' : 'secondary'} className="text-[10px] shrink-0">
+                          {until === 'now' ? t('meetings.now') : until}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                      {t('meetings.fromCalendar', { account: emailOf(event.accountId) })}
+                      {event.location ? ` · ${event.location}` : ''}
+                    </p>
+                  </div>
+                  {event.link && (
+                    <Button asChild size="sm" variant="outline">
+                      <a href={event.link} target="_blank" rel="noreferrer">
+                        {t('meetings.openEvent')}
+                        <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
+                      </a>
+                    </Button>
+                  )}
+                </li>
+              )
+            }
+            const meeting = item.meeting
             const until = untilLabel(meeting.startsAt)
             const joinable = isJoinable(meeting.startsAt)
             return (
@@ -373,6 +449,17 @@ function UpcomingMeetings({ meetings, failed }: { meetings: Meeting[] | undefine
           })}
         </ul>
       )}
+      {/* A calendar that could not be read is said, by name: its meetings are missing from the list above. */}
+      {(calendar.data?.unread ?? []).map((u) => (
+        <p
+          key={u.accountId}
+          className="text-xs text-amber-700 dark:text-amber-300"
+          data-testid="meetings-upcoming-unread"
+          data-account-id={u.accountId}
+        >
+          {t('meetings.calendarUnread', { account: u.email ?? emailOf(u.accountId) })}
+        </p>
+      ))}
     </section>
   )
 }

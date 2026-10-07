@@ -3124,7 +3124,34 @@ export class ChatService {
       .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
       .limit(1)
     if (caller?.role === 'guest') return null
-    return this.createChannel({ workspaceId, name: 'general', createdById: userId })
+    /*
+     * ONE #general, HOWEVER MANY LIST THE CHANNELS AT ONCE
+     * (`found-7-oct/two-first-listings-make-two-generals`). Two listings of a
+     * new workspace's channels each read none above and each made one: six
+     * times in six on lane 4, each with its lister in it. So #general is made
+     * one listing at a time for a workspace, under a lock held to the end of
+     * this transaction (as favourites and views take theirs), and the listing
+     * that waited reads again and finds what the other made. It is made on the
+     * connection that holds the lock rather than through `createChannel`, which
+     * would take a second one while the waiters hold theirs, and it is
+     * announced once it is committed.
+     */
+    const made = await this.db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`chat-general:${workspaceId}`}))`)
+      const [found] = await tx
+        .select()
+        .from(chatChannels)
+        .where(and(eq(chatChannels.workspaceId, workspaceId), eq(chatChannels.name, 'general')))
+        .limit(1)
+      if (found) return { channel: found, isNew: false }
+      const [channel] = await tx.insert(chatChannels).values({ workspaceId, name: 'general', createdById: userId }).returning()
+      await tx.insert(chatChannelMembers).values({ channelId: channel.id, userId }).onConflictDoNothing()
+      return { channel, isNew: true }
+    })
+    if (made.isNew) {
+      await this.emitToChannel(made.channel, { type: 'chat.channel.created', workspaceId, channel: made.channel })
+    }
+    return made.channel
   }
 
   /**

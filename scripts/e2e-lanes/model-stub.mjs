@@ -180,8 +180,18 @@ const server = createServer(async (req, res) => {
   }
 
   const system = typeof body.system === 'string' ? body.system : JSON.stringify(body.system ?? '')
+  /*
+   * AND AS SLOW AS A REAL ONE, WHEN ASKED (`found-7-oct/a-call-ended-twice-keeps-two-records`).
+   * A model takes seconds and this answers at once, so what the product does
+   * while it waits had no time here to go wrong in: a second end of a call
+   * wrote a second record only in a 20 ms window. A staging's `delayMs` holds
+   * its answer back that long (at most 30 s). Read before the staging is
+   * cleared, as the status above is.
+   */
+  const delayMs = Math.min(Math.max(Number(staged?.delayMs ?? 0) || 0, 0), 30_000)
   const text = staged?.text ?? SCRIPTS.find((s) => s.when.test(system))?.text ?? 'A stubbed reply.'
   staged = null
+  if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
   // The product meters on these; zeroes would make a usage check pass on a
   // call that never happened, so they are derived from the exchange.
   const usage = { input_tokens: Math.max(1, Math.ceil(system.length / 4)), output_tokens: Math.max(1, Math.ceil(text.length / 4)) }

@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 523 items: 13 open · 3 partly fixed · 450 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 524 items: 10 open · 2 partly fixed · 455 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -7570,7 +7570,7 @@ counted skips (91 of 94 — the remainder is A3.9's unbalanced `else`, which is
 the notification not arranged, from "91 of 94 checks ran" to 94 of 94 with three
 FAILs. video-regression 94/94.
 
-### `resume-defects/resume-8` — partly-fixed, large · reproduced 5 October
+### `resume-defects/resume-8` — **closed**, large · reproduced 5 October
 
 **email.service send() still has no replyTo, cc or messageId, and task_comments still has no channel column**
 
@@ -7581,6 +7581,18 @@ FAILs. video-regression 94/94.
 *Partly fixed, 24 September (with `resume-8-reply-routing`):* `send()` takes a Message-ID and a Reply-To and hands both to the transport. A comment notification's Message-ID is kept where `resolveReplyContext` finds it. Its Reply-To is the task's address when the list has an alias; none is minted. Left: cc and bcc; the comment's channel column and its reader; email metadata on a comment; minting an alias; and carrying a thread on the other notifications.
 
 *Triage, 5 October:* reproduced on a lane. Reproduced: a reply to an @mention notification email lands nowhere because only comment notifications carry a thread. cc/bcc, a comment channel column with its reader, email metadata and alias minting are still unbuilt Email-composer plumbing. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 7 October* (lanes 4 and 2): the defect the triage counted. ClickUp's help centre is blocked here; a search excerpt of its "Create tasks and comments via email" says a reply to a task notification email is added to the task as a comment, and the email says so. The rest of this row (cc and bcc, a comment's channel and its reader, email metadata on a comment, minting a list's address) is the Email composer's plumbing, as the triage found, and is the work of `resume-defects/s4-composer-email` (not counted), whose *To close* names each part.
+
+- Every mail about a task is sent with a thread: a Message-ID kept with the task, and the task's own address as its Reply-To where its list takes email (`sendEmail`, `notifications.service.ts`; `replyThread` as before). The mail that tells somebody they were mentioned, that a task is theirs, due, overdue or changed, that their comment was resolved, and any other mail whose target is a task, as the comment notification already was. Whether a mail is about a task is read from its target, not its type: a mention in chat is a `task_mentioned` about a message, and carries none.
+- Each sender of such a mail takes the thread and hands it to the transport (`ReplyThread`, `email.service.ts`); the comment notification's own two fields are that type now.
+
+Measured on lane 4 with the extended `email-reply-routing` suite: before, on the build of `a936b69`, somebody mentioned in a comment, who did not watch the task, and the watcher given the task were each kept nothing (no row in `outbound_email_messages` for them), so their replies had nothing to name and reached no task (4 of 6, the two new checks red, two runs alike). After, each mail was kept with a Message-ID and the task's address as its Reply-To, and a reply naming it landed on the task as its sender's comment (6 of 6, three runs).
+
+Checks:
+- `email-reply-routing` 4 → 6: "the mail that tells somebody they were mentioned is sent with a Message-ID the server keeps and the task’s own Reply-To, and a reply naming it lands on the task as their comment"; "and the mail that tells somebody the task is theirs is answered on the task the same way".
+- `notifications.service.test.ts` +1: each type of mail about a task is sent with the thread kept for it, the resolved comment and a type no case names among them, and a mention in chat with none. `email.service.test.ts` +1: each of the seven senders hands the transport the Message-ID and the Reply-To it is given.
+- Patch `err-5` (only the comment mail keeps a thread) reddens both new checks (4 of 6 on lane 2). Unit claims `err-6` (the mail no type names drops its thread) and `err-7` (the mention mail does not hand its thread to the transport) each redden their test.
 
 ### `harness/model-lane-routing-unbuilt` — **closed** (test tooling, medium)
 
@@ -7782,7 +7794,7 @@ So the write takes a person: a member, admin or owner may add a task they can se
 - In CI (234).
 - Regression on lane 7, 16 suites (the console's audit page, Settings' tabs by key, custom-role grants, the admin-key pages): 16/16.
 
-### `found-25-sep/connected-calendars-read-by-nothing` — open, unbuilt (large; found closing `meetings-connect-calendar-goes-to-settings`) · reproduced 5 October
+### `found-25-sep/connected-calendars-read-by-nothing` — **closed** (large; found closing `meetings-connect-calendar-goes-to-settings`) · reproduced 5 October
 
 **A connected calendar's events are read by nothing, and three sentences say they are**
 
@@ -7798,6 +7810,25 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 *To close:* read each connected account's events for a window (Google `events.list`, Graph `calendarView`), with the providers' base addresses overridable so a lane stub can answer, and draw them on the grid and in "Upcoming". Write a new event to the default account. Until then, correct the two Accounts page sentences.
 
 *Triage, 5 October:* reproduced on a lane. The two Accounts-page sentences still promise that events appear on the Planner and that new events are created in one calendar. They are false, shown on lane 4 in four locales. Reading and writing connected calendars is unbuilt. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 7 October* (lanes 4 and 2). ClickUp's help centre is blocked here; through search excerpts, its Planner shows a connected Google Calendar's events inside ClickUp, and time-blocking a task in it creates an event in the calendar. Rundesk's Accounts page said both, and now does both.
+
+- A connected calendar's events are read for a window (`calendar-events.ts`: Google `events.list` with `singleEvents`, Graph `calendarView` in UTC), every page up to eight and the rest said, at the addresses the environment names (`GOOGLE_CALENDAR_API_URL`, `MS_GRAPH_API_URL`), so a lane's stub answers them. Which calendars: the ones the planner's picker has ticked (`countsAsBusy`, the column that already meant "this calendar is read"), each read on its own, and a failure costing only its own events and SAID, by address (`unread`): refused (the grant is gone) or failed. Only ever the caller's own accounts; a colleague is shown free/busy alone, as before.
+- An access token is refreshed when it has expired, or is about to, and once more when the provider refuses it, at the token addresses (`GOOGLE_TOKEN_URL`, and `MICROSOFT_TOKEN_URL` as the workspace connection already read it); the new token is kept. Free/busy reads through the same refresh: it sent the token an account was connected with, which Google refuses an hour later.
+- `GET /planner/:ws/events?from&to` (the blocks' range rule) answers them; an event that is one of the person's own written blocks is left out, so it is drawn once, as the block.
+- The planner draws them: a timed event in its day's column, behind the blocks, an all-day one in the all-day row on every day it covers, each opening in its calendar; fetched only while an account calendar is ticked. A calendar that could not be read is named above the grid.
+- Meetings' "Upcoming" lists the next week's timed events beside Rundesk's meetings, soonest first, ten at most, each with whose calendar it is and an Open link; a calendar that could not be read is named.
+- A block made on the planner is written to the default calendar as an event (a task's block titled with the task); moving it moves the event and deleting it deletes it (`task_time_blocks.calendar_account_id`, `external_event_id`, migration 0173; set null when the account is disconnected). The block is saved whatever the calendar answers, and the answer says what it did (`calendar`); one not taken is toasted. A block made before any calendar was connected, or whose write failed, is written the next time it changes.
+- The lanes run `scripts/e2e-lanes/calendar-stub.mjs` (port 94k, on every lane): Google's and Graph's calls and token addresses, a calendar per bearer token, a control seam to seed, read, fail and forget one. `check-calendar-stub.mjs` drives the product's own readers and writers against it, and each of its rules broken in turn reddens a case.
+
+Measured on lane 4 with the new suite `connected-calendars` (a person of the run's own with three accounts — a Google default with events, a Microsoft one whose grant is gone, a Google one whose token has expired — and a colleague in their workspace): before, on the build of `a936b69` with the resume-8 change (no calendar code), 0 of 11 — `GET /planner/:ws/events` answered 404, nothing was read or refreshed, a block's answer said nothing of a calendar and none was written, and neither page drew an event or named a calendar. After, 11 of 11, three runs.
+
+Checks:
+- `connected-calendars` (new, 11).
+- `calendar-events.test.ts` (new, 8) and `calendar-accounts.service.test.ts` (new, 3).
+- `check-calendar-stub.mjs` (new): 7 cases, 10 of 10 mutations, each caught.
+- Patches: `ccl-1` (no calendar read, 7 of 11), `ccl-2` (an expired token never refreshed, 9 of 11), `ccl-3` (a refused calendar left out in silence: its three checks, 8 of 11), `ccl-4` (the workspace's calendars read, not the caller's, 10 of 11), `ccl-5` (a block saved and not written: its two, 7 of 11), `ccl-6` and `ccl-7` (a moved, a deleted block leaves its event, 10 of 11 each), `ccl-8` (a calendar's failure fails the block, 10 of 11), `ccl-9` (a written block read back as an event, 10 of 11), `ccl-10` (the grid draws no timed event), `ccl-11` (the planner names no unread calendar) and `ccl-12` (Upcoming lists Rundesk's meetings alone), 10 of 11 each, all on lane 2, each reddening the checks it names. Unit claims `ccl-13` (a cancelled Google event read), `ccl-14` (the token follows any next page) and `ccl-15` (a refused token given up on) each redden their test.
+- Re-aimed: `mcc-14` (the accounts' branch of Upcoming's state), which reddens its check again (5 of 6 on lane 2).
 
 ## Ledger rows still open — 18
 
@@ -9264,6 +9295,8 @@ Checks:
 - Patch `tsf-5` (a first opening asks for no room) reddens the new check (2 of 3 on lane 2); the unit claim `sib-25` reddens the ledger's test.
 - Patch `sib-11` (a reopening asks for no room) lost its line to the change and was re-aimed at the reopening alone, the first opening kept; it reddens the renamed test again (12 of 13).
 
+Changed the same day by `found-7-oct/a-room-asked-on-an-open-socket-misses-what-was-said`: each page now asks for its rooms with an answer and reads its own queries afresh when it comes (`joinRooms`), whether the socket is open or not yet. So the first opening asks again for nothing, as before this item. The third sheet still shows the change once its socket joins (`task-sheet-fetches`, lane 4). `tsf-5` is re-aimed at the sheet's answer, `sib-25` at the first opening asking for everything again, and `sib-11` at the reopening.
+
 ### `found-7-oct/the-made-at-rule-is-written-twice` — **closed** (test tooling, small; found rehearsing CI for `a936b69`) · reproduced 7 October
 
 **The sweep's rule for when a row was made is written twice, so the gate's mutation of it proves nothing, and the gate's CI step runs past its cap**
@@ -9315,7 +9348,7 @@ Checks:
 - `task-values` keeps its 24 checks. After the change it passed 24 of 24 three times on lane 4.
 - The patches that claim the touched checks still redden them: `task-values-36` and `-37` (the sheet says nothing of a refusal, or says its own sentence), `-38` and `-39` (the same for a row edit) and `-33` (the sheet bounds the start by the due date). Each ran 23 of 24 on lane 2, with its claimed check red.
 
-### `found-7-oct/two-first-listings-make-two-generals` — open (visible bug, small; found reproducing `found-7-oct/first-use-rows-counted-as-left`) · reproduced 7 October
+### `found-7-oct/two-first-listings-make-two-generals` — **closed** (visible bug, small; found reproducing `found-7-oct/first-use-rows-counted-as-left`) · reproduced 7 October
 
 **A new workspace whose channels are listed twice at once gets two #general**
 
@@ -9323,7 +9356,16 @@ Checks:
 
 *To close:* one #general per workspace, whatever the timing. That means a unique index on a workspace's #general, or the insert made conditional on there being none, under a lock. Add a check that two listings at once leave one. The leftovers check no longer counts #general (`found-7-oct/first-use-rows-counted-as-left`), so this needs a check of its own.
 
-### `found-7-oct/a-call-ended-twice-keeps-two-records` — open (visible bug, small; found reproducing `found-7-oct/first-use-rows-counted-as-left`) · reproduced 7 October
+*Closed, 7 October.* `ensureGeneralChannel` makes #general one listing at a time for a workspace. It takes a lock held to the end of a transaction (`pg_advisory_xact_lock`, as favourites, views and feature flags take theirs) and reads again. Only if there is still none does it make the channel and its lister's membership, on that transaction's connection; the channel is announced once committed. A listing that finds #general takes no lock. A workspace that already has two keeps them.
+
+Measured on lane 5 (`races-probe.mjs`, the build with the fix): six new workspaces, each listed twice at once, each had one #general. Before, on lane 4, each had two (6 of 6).
+
+Checks:
+- `made-once` (new; CI and lanes): three new workspaces, each with its channels listed four times at once, each has one #general. Before, on lane 5's unfixed build, each had 2 to 4 (2 runs of 2); after, 3 runs of 3.
+- `calls-http.mts` (CI's calls harness, against real Postgres): a second workspace whose channels are listed three times at once has one #general.
+- Patch `mo-1` (the lock removed) reddens both: `made-once` 2 of 3 (two #general a workspace), the harness 98 of 99 (three).
+
+### `found-7-oct/a-call-ended-twice-keeps-two-records` — **closed** (visible bug, small; found reproducing `found-7-oct/first-use-rows-counted-as-left`) · reproduced 7 October
 
 **A call ended a second time while its record is being written gets a second record**
 
@@ -9335,6 +9377,66 @@ Checks:
 `CallsService.end` claims the end (`ended_at`), then gathers the transcript, has the model write the notes, writes the record, and points the call at it last. An end that comes after the claim but before that last write finds `ended_at` set and `meeting_id` empty. It takes this for an end that died before writing (the "record is OWED" recovery) and writes another record. It also asks the model for notes again: the double generation the claim was written to stop. Here the window was about 20 ms, because the local model answers at once. With a real model it is the seconds the notes take, and two people pressing End for all in that time each leave a record, as does a client that asks again. On lane 4, `syncup-live`, which asks `end` until it names the record, left one this way.
 
 *To close:* an end that finds the end claimed and the record not yet written should wait for it, or answer pending, unless the claim is old enough to be a writer that died (a claim time, or a lease). Add a check that two ends, at any gap, leave one record.
+
+*Closed, 7 October.* `CallsService.end` writes the record under the call's lock (`pg_try_advisory_xact_lock`, to the end of a transaction), taken before the claim. An end that cannot take it writes nothing and asks for no notes: it is told the record is coming (`pending`), or given it once it is written. The end that holds the lock reads the call again before anything else. An end that dies lets the lock go with its connection, so the next end still writes what it owed; the harness's "a call that ended without ever leaving a record" still holds. The model stub can now hold an answer back (`delayMs`), so a lane suite can make the notes as slow as a real model's.
+
+Measured on lane 5, with a model, on the build with the fix (`races-probe.mjs`): a call ended again at gaps from 0 to 400 ms kept one record at every gap. The second end was told pending up to 30 ms, and was given the record from 50 ms on.
+
+Checks:
+- `made-once`: a recorded call whose notes are held back 1.5 s is ended, then ended again 300 ms later. It keeps one record, the one it points at, and the second end is told the record is coming or given the same one. Before, on lane 5's unfixed build, there were two records (2 runs of 2); after, 3 runs of 3. Where no model answers (CI), the second end follows at once, and the harness carries the check.
+- `calls-http.mts`: with the notes held back 600 ms, an end 150 ms after the first leaves one record, asks for the notes once, and is told the record is coming. 99 of 99.
+- `calls.service.test.ts` +2: an end that finds another writing the record is told it is coming and writes none; the record an end that died owed is written once the lock is free. 57 of 57.
+- `check-model-stub.mjs`: a staged delay holds that answer back, and only that one (13 of 13 cases, 13 of 13 mutations).
+- Patch `mo-2` (the lock ignored) reddens `made-once`'s record check (lane 5, with a model) and three of the harness's checks (96 of 99). Unit claim `mo-3` reddens the first unit test (56 of 57).
+
+### `found-7-oct/a-room-asked-on-an-open-socket-misses-what-was-said` — **closed** (visible bug, small; found rehearsing CI for `518f96a`) · reproduced 7 October
+
+**A page that asks for its realtime room after the tab's socket has opened is never told what was said while the server let it in**
+
+*Evidence, 7 October, the CI rehearsal of `518f96a`:* the postgres-harnesses step "A real SyncUp, in two browsers" (`syncup-live`) passed 58 of 59 checks. It failed on "and it arrives without a reload — a card you have to refresh for is a log entry": the second person's channel showed the call card only after a reload. From the rehearsal's API log: B's socket opened at 19:00:47, the card was written and sent to the workspace's room at 19:00:49, and B reloaded at 19:01:05.
+
+Traced: the chat page asks for its workspace's room (`subscribe`) on the tab's socket, which the top bar has already opened, and asks for no answer. The server lets a socket into a room only once it has read who may hear it, and whatever is said to the room in between reaches nothing. Since `found-7-oct/a-socket-that-opens-late-misses-what-was-said`, a page reads afresh when the socket opens. A page that asks on a socket already open reads nothing afresh: that is every page a tab draws after its first, and the first too when its code arrives after the socket opens.
+
+Reproduced on lane 4 (`room-probe.mjs`). The tab's socket was routed through the probe, and a public channel had one message.
+- The chat page was opened from the sidebar on an open socket. Its subscribe was held while a second message was posted, and let go 1.5 s later. The second message never showed (8 s), and the channel's messages were not read again: 3 runs of 3.
+- The socket was dropped and its next connection held. The chat page was opened meanwhile, a message posted, and the connection let through 1.5 s later. The result was the same, 3 runs of 3. The room was asked for while the socket was down, so it was not among the rooms held when the socket dropped (`roomLedger`), and nothing asked for it again with an answer.
+
+*To close:* a page's subscribe asks for the server's answer, and on it the page reads afresh what its room's events refresh. Check it on a lane with a page's subscribe held.
+
+*Closed, 7 October.* There is no ClickUp question here. A page that never shows what was said while it was being let in, until it is reloaded, is the defect whatever the product.
+
+- Pages ask for their rooms through one function, `joinRooms` (`lib/realtime.ts`). The subscribe asks for the server's answer, and when it comes the page reads afresh what its room's events refresh:
+  - the chat page: its messages, threads, members and channel lists;
+  - a list: its tasks, and it marks every task's own queries;
+  - a task's sheet: the task;
+  - the docs panel: the docs and the doc's comments;
+  - the whiteboards and mind maps pages: their boards.
+
+  The canvas cursors read nothing, since a cursor is where it is now. A subscribe sent while the socket is down waits in socket.io's buffer with its answer. Its page reads afresh once the socket opens and the server answers.
+- So the first opening no longer asks again for every room and reads every active query afresh (`found-7-oct/a-socket-that-opens-late-misses-what-was-said`). Each page's own answer does that now, for its own queries alone. A reopening still asks again for the rooms held when the socket dropped, and reads afresh (`found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`).
+- `realtime.test.ts` reads every source file under `apps/web/src` and fails on a page that emits its own subscribe.
+
+Measured:
+- Before: as above, 3 runs of 3 in both cases on lane 4.
+- After, on lane 4's bundle built with the change: the message showed 0.2–0.3 s after the subscribe, or the connection, was let go, and the channel's messages were read again. That held in 3 runs of 3 for each case. `room-catch-up` passed 3 of 3, in 3 runs.
+
+Checks:
+- `room-catch-up` (new, in CI and on the lanes), 3 checks. Each opens a page, holds its subscribe or its socket while something is said, and the page must show it without a reload:
+  - the chat page, opened on an open socket;
+  - the chat page, opened while the socket is down;
+  - a list, opened on an open socket.
+- `realtime.test.ts` 13 → 15:
+  - a page's rooms wait for the answer, and then the page reads afresh; a room with nothing to read asks for no answer;
+  - no page subscribes except through `joinRooms`.
+
+  The ledger's test now has the first opening ask for nothing.
+- Patches:
+  - `rcu-1` (the chat page reads nothing afresh) reddens `room-catch-up`'s two chat checks, and only those (lane 4).
+  - `rcu-2` (the list reads nothing afresh) reddens its list check.
+  - The unit claims `rcu-3` (no answer asked) and `rcu-4` (a page subscribes by itself) each redden their test (14 of 15).
+  - `tsf-5` is re-aimed at the sheet's answer, and reddens `task-sheet-fetches`' late-socket check again.
+  - `sib-25` is re-aimed (now "a first opening asks for everything again") and `sib-11` re-aimed again; each reddens the ledger's test.
+  - `sib-19` still reddens its test.
 
 ### `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change` — **closed** (security, small; found closing `found-5-oct/import-merge-resets-fields-the-file-lacks`) · reproduced 6 October
 

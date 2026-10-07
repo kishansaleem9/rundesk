@@ -619,6 +619,12 @@ jobs:
       - name: The search seam is really a seam, and each case bites
         run: node scripts/check-meili-stub.mjs --mutate
 
+      # And for a person's calendars (found-25-sep/connected-calendars-read-by-nothing):
+      # the product's own readers and writers against the stub every lane and
+      # the suites' job start, and each rule of the stub broken in turn.
+      - name: The calendar seam is really a seam, and each case bites
+        run: node scripts/check-calendar-stub.mjs --mutate
+
       # And the other direction from the ledger's own reconciliations: does a
       # line of the SPECIFICATION appear anywhere in the evidence? 115
       # timestamped frame observations, and asking found `03:15` — a cover
@@ -760,6 +766,10 @@ jobs:
       # uploaded is removed with its rows (`storeOf`, test/e2e/lib/made-sweep.mjs;
       # `found-30-sep/suite-cleanup-leaves-stored-objects`).
       E2E_STORE_BUCKET: rundesk-ci
+      # Where the calendars listen, as the store's port above: a suite reaches
+      # the stub's control routes through `test/e2e/lib/calendar.mjs`, which
+      # reads this; the lane formula (9400 + api - 3020) is 9391 here.
+      E2E_CALENDAR_PORT: 9400
 
     steps:
       - name: Checkout
@@ -861,6 +871,23 @@ jobs:
           done
           echo "The object store never announced itself. Its output:"; cat /tmp/s3.log; exit 1
 
+      # THE CALENDARS EVERY LANE HAS (`found-25-sep/connected-calendars-read-by-nothing`).
+      # A person's connected calendars are read and written now, at the
+      # addresses the API is given below, and every lane points them at
+      # `scripts/e2e-lanes/calendar-stub.mjs`; a calendar there is a bearer
+      # token, seeded by the suite that made the account.
+      - name: Start the calendars
+        timeout-minutes: 15
+        run: |
+          RUNDESK_CALENDAR_STUB=1 nohup node scripts/e2e-lanes/calendar-stub.mjs \
+            --port "$E2E_CALENDAR_PORT" > /tmp/calendar.log 2>&1 &
+          disown
+          for i in $(seq 1 50); do
+            if grep -q '"ready":true' /tmp/calendar.log; then echo "calendars up"; exit 0; fi
+            sleep 0.2
+          done
+          echo "The calendar stub never announced itself. Its output:"; cat /tmp/calendar.log; exit 1
+
       # Backgrounded and waited for: a suite that starts talking to an API that
       # is not up yet fails for a reason that has nothing to do with calls.
       - name: Start the API
@@ -893,6 +920,12 @@ jobs:
           # sets it: `clip-links` waits one window out to show the clip's link
           # still plays after it (`resume-defects/resume-7`).
           CLIP_PLAYBACK_URL_SECONDS: 10
+          # The calendars started above — the four variables `lane_calendar_env`
+          # exports: Google's and Graph's addresses, and their token addresses.
+          GOOGLE_CALENDAR_API_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/google/calendar/v3
+          MS_GRAPH_API_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/graph/v1.0
+          GOOGLE_TOKEN_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/google/token
+          MICROSOFT_TOKEN_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/microsoft/token
           # Integration keys that are not real — the six `lane_oauth_env`
           # exports. A grant's start refuses a provider with no keys, and the
           # suites that read a grant's state start Google, Microsoft and
@@ -1274,6 +1307,15 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
+
+      # A person's connected calendars (connected-calendars-read-by-nothing):
+      # their events read and drawn on the planner and in Meetings' Upcoming,
+      # an expired token refreshed, a refused calendar named, none of it read
+      # by a colleague; and a block written to the default calendar, moved and
+      # deleted there, saved whatever the calendar answers.
+      - name: Connected calendars are read, and a block is written to one
+        timeout-minutes: 15
+        run: node test/e2e/connected-calendars.mjs --api 3011 --dist apps/web/dist
 
       # §V2-06 — the wizard itself. `space-presets.mjs` proves the API applies
       # what it is sent; this proves a person can send it, which was the gap.
@@ -2075,6 +2117,19 @@ jobs:
       - name: A session in the browser is kept after accepting an invitation and ended at once elsewhere, and a mistyped password counts once
         timeout-minutes: 15
         run: node test/e2e/session-in-the-browser.mjs --api 3011 --dist apps/web/dist
+
+      # A page shows what was said while the server was letting its socket into
+      # its room (found-7-oct/a-room-asked-on-an-open-socket-misses-what-was-said):
+      # the chat page opened on a socket already open, and opened while the
+      # socket was down, and a list opened on an open socket, each asking for its
+      # room while something is said to it, and showing it without a reload. The
+      # rehearsal of 518f96a lost syncup-live's call card to this. About a minute.
+      - name: A page shows what was said while its room was asked for
+        timeout-minutes: 10
+        run: node test/e2e/room-catch-up.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
 
       # What a read shows depends on who is reading. The Teams preview listed
       # every member's open tasks with no viewer, so private spaces, projects,
@@ -3366,6 +3421,20 @@ jobs:
       - name: An automation notifies only those who may open its task
         timeout-minutes: 15
         run: node test/e2e/automation-notices.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # What is made once is made once, however many ask for it at the same
+      # time: a new workspace's #general, listed three times at once, and a
+      # call's meeting record, ended again while its record is written
+      # (found-7-oct/two-first-listings-make-two-generals,
+      # found-7-oct/a-call-ended-twice-keeps-two-records). No model answers
+      # here, so the second end follows the first at once; the calls harness
+      # above holds its notes back, as a model's are on a lane.
+      - name: What is made once is made once, however many ask at once
+        timeout-minutes: 15
+        run: node test/e2e/made-once.mjs --api 3011
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

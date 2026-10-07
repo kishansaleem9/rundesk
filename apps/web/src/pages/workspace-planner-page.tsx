@@ -81,6 +81,34 @@ type Block = {
 }
 
 /**
+ * An event of one of this person's own connected calendars
+ * (`found-25-sep/connected-calendars-read-by-nothing`): read, not a block. It is
+ * the calendar's, so it is drawn and opened there, never dragged here.
+ */
+type CalendarEvent = {
+  id: string
+  accountId: string
+  provider: 'gcal' | 'outlook'
+  title: string
+  /** An instant; `YYYY-MM-DD` for an all-day event. */
+  start: string
+  /** An instant; for an all-day event the day after its last. */
+  end: string
+  allDay: boolean
+  location: string | null
+  link: string | null
+}
+type CalendarEvents = {
+  events: CalendarEvent[]
+  /** Calendars that could not be read, said rather than drawn as an empty week. */
+  unread: Array<{ accountId: string; email: string | null; provider: string; reason: 'refused' | 'failed' }>
+  /** Calendars with more events in the range than were read. */
+  truncated: string[]
+}
+/** What a calendar said to a block written into it; null with no default calendar. */
+type CalendarWrite = { written: boolean; email: string | null; reason?: 'refused' | 'failed' } | null
+
+/**
  * §V2-02e — one projected future occurrence of a recurring block.
  *
  * NOT A BLOCK. It has no id in `task_time_blocks` and nothing in the database
@@ -689,6 +717,26 @@ export function PlannerPage() {
   })
   const calendarGroups = calendarPicker?.groups ?? []
   /*
+   * THE EVENTS OF THE CALENDARS TICKED ABOVE
+   * (`found-25-sep/connected-calendars-read-by-nothing`). The Accounts page said
+   * a connected calendar's events appear on the Planner, and nothing read one.
+   * An account's tick is its `countsAsBusy` — "this calendar is read" — so
+   * they are fetched only while one is ticked, and the request is itself
+   * evidence the checkbox was honoured, as the Time off calendar's is.
+   */
+  const accountCalendarOn = calendarGroups.some((g) => g.calendars.some((c) => c.kind === 'account' && c.checked))
+  const { data: calendarEvents } = useQuery({
+    queryKey: ['planner-events', workspaceId, rangeFrom.toISOString(), rangeTo.toISOString()],
+    queryFn: () =>
+      api<CalendarEvents>(
+        `/planner/${workspaceId}/events?from=${rangeFrom.toISOString()}&to=${rangeTo.toISOString()}`,
+      ),
+    enabled: !!workspaceId && accountCalendarOn,
+  })
+  const events = accountCalendarOn ? calendarEvents?.events ?? [] : []
+  const accountName = (accountId: string, fallback: string) =>
+    calendarGroups.flatMap((g) => g.calendars).find((c) => c.accountId === accountId)?.label ?? fallback
+  /*
    * The number on the header chip, and it is COUNTED rather than stated.
    *
    * Frame `13:28` has the chip reading `1` beside a popover with four rows, one
@@ -740,7 +788,11 @@ export function PlannerPage() {
         body: JSON.stringify({ countsAsBusy: checked }),
       }),
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['planner-calendars', workspaceId] })
+      // Its events go, or come, with its tick.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['planner-calendars', workspaceId] }),
+        qc.invalidateQueries({ queryKey: ['planner-events', workspaceId] }),
+      ])
     },
   })
 
@@ -1104,8 +1156,24 @@ export function PlannerPage() {
 
   const createBlock = useMutation({
     mutationFn: (body: { taskId?: string; title?: string; startsAt: string }) =>
-      api(`/planner/${workspaceId}/blocks`, { method: 'POST', body }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['planner-blocks', workspaceId] }),
+      api<{ calendar?: CalendarWrite }>(`/planner/${workspaceId}/blocks`, { method: 'POST', body }),
+    onSuccess: (block) => {
+      void qc.invalidateQueries({ queryKey: ['planner-blocks', workspaceId] })
+      /*
+       * A block is written to the default calendar, and saved here whatever
+       * the calendar answers (`found-25-sep/connected-calendars-read-by-nothing`):
+       * one the calendar did not take is said, rather than left for somebody
+       * to find missing from their calendar.
+       */
+      const written = block?.calendar
+      if (written && !written.written) {
+        toast.error(
+          t(written.reason === 'refused' ? 'planner.blockNotWrittenRefused' : 'planner.blockNotWritten', {
+            account: written.email ?? '',
+          }),
+        )
+      }
+    },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : t('planner.blockFailed')),
   })
 
@@ -1168,7 +1236,7 @@ export function PlannerPage() {
   const onClickColumn = (day: Date, e: React.MouseEvent<HTMLDivElement>) => {
     if (dragging) return
     const el = e.target as HTMLElement | null
-    if (el?.closest('[data-testid="planner-block"], [data-testid="planner-recurring-block"], [data-testid="planner-busy-block"], [data-testid="planner-event-draft"]')) {
+    if (el?.closest('[data-testid="planner-block"], [data-testid="planner-recurring-block"], [data-testid="planner-busy-block"], [data-testid="planner-event-draft"], [data-testid="planner-calendar-event"]')) {
       return
     }
     const rect = e.currentTarget.getBoundingClientRect()
@@ -1982,6 +2050,28 @@ export function PlannerPage() {
             })}
           </div>
 
+          {/*
+            A calendar that could not be read is SAID, and by name
+            (`found-25-sep/connected-calendars-read-by-nothing`): a week drawn
+            without its events looks like a free week.
+          */}
+          {accountCalendarOn && calendarEvents && (calendarEvents.unread.length > 0 || calendarEvents.truncated.length > 0) && (
+            <div className="space-y-0.5 border-b border-border/60 px-3 py-1.5 text-[11px] text-amber-700 dark:text-amber-300" data-testid="planner-calendar-unread">
+              {calendarEvents.unread.map((u) => (
+                <p key={u.accountId} data-account-id={u.accountId} data-reason={u.reason}>
+                  {t(u.reason === 'refused' ? 'planner.calendarRefused' : 'planner.calendarFailed', {
+                    account: u.email ?? accountName(u.accountId, u.provider),
+                  })}
+                </p>
+              ))}
+              {calendarEvents.truncated.map((accountId) => (
+                <p key={`more-${accountId}`} data-account-id={accountId} data-reason="truncated">
+                  {t('planner.calendarTruncated', { account: accountName(accountId, '') })}
+                </p>
+              ))}
+            </div>
+          )}
+
           {/* The all-day row of frame 13:08, above the gutter. */}
           <div
             className="grid border-b border-border/60"
@@ -2031,6 +2121,25 @@ export function PlannerPage() {
                         {t('planner.timeOffChip', { name: nameOf(o.userId) })}
                       </div>
                     ))}
+                {/* A connected calendar's all-day events, on every day they cover. */}
+                {events
+                  .filter((ev) => ev.allDay && ev.start <= localDayKey(d) && localDayKey(d) < ev.end)
+                  .map((ev) => (
+                    <a
+                      key={`${ev.accountId}:${ev.id}:${localDayKey(d)}`}
+                      data-testid="planner-calendar-event"
+                      data-event-id={ev.id}
+                      data-account-id={ev.accountId}
+                      data-day={localDayKey(d)}
+                      href={ev.link ?? undefined}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={ev.title || t('planner.eventNoTitle')}
+                      className="block truncate rounded bg-sky-500/15 px-1.5 py-0.5 text-[11px] text-sky-800 dark:text-sky-200"
+                    >
+                      {ev.title || t('planner.eventNoTitle')}
+                    </a>
+                  ))}
                 {allDay
                   .filter((b) => sameDay(new Date(b.startsAt), d))
                   .map((b) => (
@@ -2137,6 +2246,36 @@ export function PlannerPage() {
                       className="pointer-events-none absolute inset-0 bg-foreground/[0.10] dark:bg-background/40"
                     />
                   )}
+                  {/*
+                    A connected calendar's events, drawn BEHIND the blocks and
+                    opened in their calendar: they are read, not planned here
+                    (`found-25-sep/connected-calendars-read-by-nothing`).
+                  */}
+                  {events
+                    .filter((ev) => !ev.allDay && sameDay(new Date(ev.start), d))
+                    .map((ev) => {
+                      const s = new Date(ev.start)
+                      const e = new Date(ev.end)
+                      const top = (s.getHours() + s.getMinutes() / 60 - FIRST_HOUR) * hourPx
+                      const height = Math.max(18, ((e.getTime() - s.getTime()) / 3_600_000) * hourPx)
+                      return (
+                        <a
+                          key={`${ev.accountId}:${ev.id}`}
+                          data-testid="planner-calendar-event"
+                          data-event-id={ev.id}
+                          data-account-id={ev.accountId}
+                          data-day={localDayKey(d)}
+                          href={ev.link ?? undefined}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={ev.location ? `${ev.title || t('planner.eventNoTitle')} · ${ev.location}` : ev.title || t('planner.eventNoTitle')}
+                          className="absolute inset-x-1 overflow-hidden rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[11px] text-sky-800 dark:text-sky-200"
+                          style={{ top, height }}
+                        >
+                          {ev.title || t('planner.eventNoTitle')}
+                        </a>
+                      )
+                    })}
                   {timed
                     .filter((b) => sameDay(new Date(b.startsAt), d))
                     .map((b) => {

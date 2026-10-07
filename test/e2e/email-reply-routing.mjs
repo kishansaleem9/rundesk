@@ -14,6 +14,13 @@
  * naming an id this server never sent must not. And where the task's list
  * takes email, the notification's Reply-To is the task's own address.
  *
+ * AND EVERY OTHER MAIL ABOUT THE TASK (`resume-defects/resume-8`). Only the
+ * comment notification carried a thread: the mail that told somebody they were
+ * mentioned, or that the task was now theirs, had no Message-ID, nothing was
+ * kept, and a reply to it reached no task. Somebody who does not watch the task
+ * is mentioned, and the watcher is assigned it; a reply to each mail must land
+ * on the task as its sender's comment.
+ *
  *   node test/e2e/email-reply-routing.mjs --api 3021
  */
 import { signInApi, signUpApi } from './lib/signin.mjs'
@@ -27,7 +34,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 4
+const EXPECTED_CHECKS = 6
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -78,12 +85,20 @@ try {
   if (added.status >= 300) throw new Error(`could not add the watcher: ${added.status}`)
   const watch = await A(`/tasks/${TASK}/watchers`, { method: 'POST', body: { userId: watcher.user.id } })
   if (watch.status >= 300) throw new Error(`could not make them watch the task: ${watch.status}`)
+  // Somebody the task is not watched by: only a mention tells them of it.
+  const mentionedEmail = `${TAG}-mentioned@rundesk.invalid`
+  const mentioned = await signUpApi(API, {
+    fullName: 'Reply mentioned', email: mentionedEmail, password: 'Mentioned@12345!',
+    organizationName: `Mentioned ${stamp}`, organizationSlug: `mentioned-${stamp}`,
+  })
+  const joined = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email: mentionedEmail, role: 'member' } })
+  if (joined.status >= 300) throw new Error(`could not add the person to mention: ${joined.status}`)
 
   // Nothing kept, or nowhere to keep it (a build before the table), reads null.
-  const kept = async (after) => {
+  const kept = async (after, to = email) => {
     const rows = await sql`
       select message_id, reply_to from outbound_email_messages
-      where task_id = ${TASK} and recipient = ${email} and sent_at > ${after}
+      where task_id = ${TASK} and recipient = ${to} and sent_at > ${after}
       order by sent_at desc limit 1`.catch(() => [])
     return rows[0] ?? null
   }
@@ -104,12 +119,12 @@ try {
   // ══ 2. THE REPLY ═════════════════════════════════════════════════════════
   console.log('\n▶ the watcher replies from their mail client')
   const REPLY = `${TAG} answered by mail`
-  const inbound = (inReplyTo, text, n) => fetch(`${API}/inbound/email`, {
+  const inbound = (inReplyTo, text, n, from = email) => fetch(`${API}/inbound/email`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       messageId: `<reply-${stamp}-${n}@mail.example.test>`,
-      fromAddress: email,
+      fromAddress: from,
       fromName: 'Reply watcher',
       // The address the notification came FROM: not a list's, so only the
       // reply's headers can say which task it answers.
@@ -154,6 +169,57 @@ try {
     alias.status < 300 && !!address && again?.reply_to === address,
     'where the task’s list takes email, the notification’s Reply-To is the task’s own address',
     `the alias answered ${alias.status}; the task's address is ${JSON.stringify(address)}; the notification's Reply-To ${JSON.stringify(again?.reply_to ?? null)}`,
+  )
+
+  // Each of the next two reads a reply into the task from the mail that told
+  // its sender, by the thread that mail was sent with.
+  const answeredBy = async (thread, text, n, from, who) => {
+    const answer = thread ? await inbound(thread.message_id, text, n, from) : { status: 0, data: null }
+    let landed = null
+    if (thread) {
+      await waitUntil(async () => (landed = (await comments()).find((c) => (c.body ?? '').includes(text)) ?? null) !== null, { timeoutMs: 8000 })
+    }
+    return {
+      ok: !!thread?.message_id && thread.reply_to === address && answer.data?.outcome === 'comment_added'
+        && (landed?.authorId ?? landed?.author?.id) === who,
+      said: `kept for them: ${JSON.stringify(thread)}; the webhook answered ${answer.status} ${JSON.stringify(answer.data)}; `
+        + `the reply ${landed ? `landed, by ${landed.authorId ?? landed.author?.id}` : 'is not on the task'}`,
+    }
+  }
+
+  // ══ 5. A MENTION ═════════════════════════════════════════════════════════
+  console.log('\n▶ the admin mentions somebody who does not watch the task; they answer that mail')
+  const thirdAt = new Date(Date.now() - 1000)
+  const NAME = '@Reply mentioned'
+  const mentioning = await A(`/tasks/${TASK}/comments`, {
+    method: 'POST',
+    body: { body: `${NAME} ${TAG} a question for you`, mentions: [{ userId: mentioned.user.id, offset: 0, length: NAME.length }] },
+  })
+  if (mentioning.status >= 300) throw new Error(`could not mention them: ${mentioning.status}`)
+  let told = null
+  await waitUntil(async () => (told = await kept(thirdAt, mentionedEmail)) !== null, { timeoutMs: 10_000 })
+  const toMention = await answeredBy(told, `${TAG} the mention answered by mail`, 3, mentionedEmail, mentioned.user.id)
+  chk(
+    toMention.ok,
+    'the mail that tells somebody they were mentioned is sent with a Message-ID the server keeps and the task’s own Reply-To, and a reply naming it lands on the task as their comment',
+    toMention.said,
+  )
+
+  // ══ 6. AN ASSIGNMENT ═════════════════════════════════════════════════════
+  console.log('\n▶ the admin gives the task to the watcher; they answer that mail')
+  // The watcher's mail about the mention's comment is kept first, so what
+  // follows is the assignment's.
+  await waitUntil(async () => (await kept(thirdAt)) !== null, { timeoutMs: 10_000 })
+  const fourthAt = new Date()
+  const assigning = await A(`/tasks/${TASK}/assignees`, { method: 'POST', body: { userId: watcher.user.id } })
+  if (assigning.status >= 300) throw new Error(`could not assign them: ${assigning.status}`)
+  let given = null
+  await waitUntil(async () => (given = await kept(fourthAt)) !== null, { timeoutMs: 10_000 })
+  const toAssignee = await answeredBy(given, `${TAG} the assignment answered by mail`, 4, email, watcher.user.id)
+  chk(
+    toAssignee.ok,
+    'and the mail that tells somebody the task is theirs is answered on the task the same way',
+    toAssignee.said,
   )
 } catch (e) {
   failed += 1

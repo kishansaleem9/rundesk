@@ -88,6 +88,7 @@ step "a new table proves a lane current too" bash scripts/check-schema-witness.s
 step "bail stops the file and loses nothing" node scripts/check-bail.mjs --mutate
 step "and the model seam is really a seam" node scripts/check-model-stub.mjs --mutate
 step "and the search seam is really a seam" node scripts/check-meili-stub.mjs --mutate
+step "and the calendar seam is really a seam" node scripts/check-calendar-stub.mjs --mutate
 step "the chain helper holds its contract" node scripts/check-chain-helper.mjs --mutate
 step "a wait gives up at its deadline" node scripts/check-wait-helper.mjs --mutate
 step "a mutant run ends with all it started" node scripts/check-run-mutant.mjs --mutate
