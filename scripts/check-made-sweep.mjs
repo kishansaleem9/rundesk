@@ -42,7 +42,11 @@
  *   · a journal that says no start (its name does not parse and it has no
  *     `{"run":{"started":…}}` line) is refused, and an account older than any
  *     run in it (the admin's, by mistake) and the organization only it owns
- *     stay; one written by hand with a start is swept.
+ *     stay; one written by hand with a start is swept;
+ *   · what the store held for a run's account and workspace goes with them
+ *     (`found-30-sep/suite-cleanup-leaves-stored-objects`), on a stub of this
+ *     check's own, and the outsider's avatar and the shared workspace's
+ *     objects stay.
  *
  * NEEDS A DATABASE WITH THE SCHEMA (`DATABASE_URL`, else the checkout's
  * `.env`). It plants its rows under `made-check-<stamp>` names and
@@ -60,6 +64,7 @@ import { randomUUID } from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { proveMutationsBite } from './lib/mutate.mjs'
+import { freePort } from './lib/free-port.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const E2E_LIB = join(HERE, '..', 'test', 'e2e', 'lib')
@@ -113,6 +118,9 @@ const probeFile = (name) => {
 }
 const env = (plan) => ({
   ...process.env,
+  // No store but the one a case names: CI's job names its own (`storeOf`, made-sweep.mjs).
+  E2E_STORE_PORT: '',
+  E2E_STORE_BUCKET: '',
   DATABASE_URL: URL_,
   E2E_MADE_DIR: JOURNALS,
   MADE_LIB_URL: pathToFileURL(LIB).href,
@@ -225,6 +233,67 @@ try {
   }
   chk(await sharedStands(), 'the shared workspace, its organization, its owner from outside the run and a notification no run caused are all still there',
     'the sweep removed what the run did not make')
+
+  console.log('\n▶ and what the store held for them, and nothing else')
+  {
+    /*
+     * A STORE OF THIS CHECK'S OWN, the stub a lane runs, named to the sweep as
+     * CI names its store. The run's account has an avatar, and the workspace
+     * only it owns a logo, a task's file, a call's recording and an emoji; the
+     * outsider has an avatar, and the shared workspace a logo and a clip.
+     */
+    const port = await freePort()
+    const store = { base: `http://127.0.0.1:${port}`, bucket: 'made-check' }
+    const stub = spawn(process.execPath, [join(HERE, 'e2e-lanes', 's3-stub.mjs'), '--port', String(port), '--bucket', store.bucket], {
+      env: { ...process.env, RUNDESK_S3_STUB: '1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    try {
+      await new Promise((resolve, reject) => {
+        let seen = ''
+        const bail = setTimeout(() => reject(new Error(`the store stub never said it was ready: ${seen}`)), 60_000)
+        stub.stdout.on('data', (d) => {
+          seen += d
+          if (/"ready":true/.test(seen)) { clearTimeout(bail); resolve() }
+        })
+        stub.on('exit', (code) => { clearTimeout(bail); reject(new Error(`the store stub exited with ${code}: ${seen}`)) })
+      })
+      const listed = async () => {
+        const body = await (await fetch(`${store.base}/${store.bucket}?list-type=2`)).text()
+        return [...body.matchAll(/<Key>([^<]*)<\/Key>/g)].map((m) => m[1])
+      }
+      const p = await person('stored')
+      const ours = [
+        `avatars/${p.a.id}-1.png`,
+        `workspace-logos/${p.ownWs}-1.png`,
+        `workspaces/${p.ownWs}/tasks/${randomUUID()}/attachments/1-notes.txt`,
+        `calls/${p.ownWs}/${randomUUID()}/recording-1.webm`,
+        `chat/${p.ownWs}/emoji/1-party.png`,
+      ]
+      const others = [`avatars/${outsider.id}-1.png`, `workspace-logos/${shared}-1.png`, `workspaces/${shared}/clips/1-demo.webm`]
+      for (const k of [...ours, ...others]) {
+        const put = await fetch(`${store.base}/${store.bucket}/${k}`, { method: 'PUT', body: 'x' })
+        if (put.status !== 200) throw new Error(`the store stub refused ${k}: ${put.status}`)
+      }
+      const r = spawnSync(process.execPath, [probeFile('probe-store')], {
+        encoding: 'utf8',
+        timeout: 120_000,
+        env: { ...env({ register: plan(p), end: 'fall' }), E2E_STORE_PORT: String(port), E2E_STORE_BUCKET: store.bucket },
+      })
+      const out = `${r.stdout ?? ''}${r.stderr ?? ''}`
+      const held = await listed()
+      const stayed = ours.filter((k) => held.includes(k))
+      chk(r.status === 0 && stayed.length === 0 && (await allGone(p)).length === 0,
+        'a run that ends leaves nothing the store held for its account and the workspace only it owns — the avatar, the logo, a task’s file, a call’s recording, an emoji',
+        `it exited ${r.status}; still in the store: ${stayed.join(', ') || 'nothing'}; it said ${JSON.stringify(out.trim().slice(-300))}`)
+      const gone = others.filter((k) => !held.includes(k))
+      chk(gone.length === 0 && new RegExp(`removed what this run made: .*${ours.length} stored objects`).test(out),
+        'and keeps the outsider’s avatar and the shared workspace’s logo and clip, and says how many objects it removed',
+        `gone from the store: ${gone.join(', ') || 'nothing'}; it said ${JSON.stringify(out.trim().slice(-300))}`)
+    } finally {
+      stub.kill()
+    }
+  }
   {
     const p = await person('throws')
     const r = run('probe-throw', { register: plan(p), end: 'throw' })
@@ -422,7 +491,7 @@ try {
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)
-const MIN_CASES = 24
+const MIN_CASES = 26
 if (pass + fail < MIN_CASES) {
   console.log(`\x1b[31mnot ok\x1b[0m only ${pass + fail} case(s) ran, below the floor of ${MIN_CASES}`)
   fail += 1
@@ -471,6 +540,10 @@ if (process.argv.includes('--mutate') && !process.env.MADE_LIB_UNDER_TEST && !pr
       ['held-ignored', '    if (e.held) {', '    if (false) {'],
       ['holds-anything', "return (await sql`select 1 from ${sql(table)} where id = ${id}::uuid`).length ? 0 : 3", 'return 0'],
       ['startless-journals-swept', 'if (!(j.run.started > 0)) {', 'if (false) {'],
+      ['store-left', "const purged = holding ? await step('remove what the store held for them', () => purgeStored(holding, storeOf())) : null", 'const purged = null'],
+      ['avatars-left', '    ...accountIds.map((id) => `avatars/${id}-`),\n', ''],
+      ['workspace-objects-left', '    ...ws.flatMap((id) => [`workspaces/${id}/`, `calls/${id}/`, `chat/${id}/`, `workspace-logos/${id}-`]),\n', ''],
+      ['every-avatar-goes', '    ...accountIds.map((id) => `avatars/${id}-`),\n', "    ...accountIds.map(() => 'avatars/'),\n"],
     ],
   })
 }

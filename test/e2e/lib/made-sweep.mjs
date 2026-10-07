@@ -65,6 +65,17 @@
  * workspace: `project_templates.created_by_id`), so they go first. Read from
  * the catalog, not listed: a table added with such a key is covered the day
  * it is added.
+ *
+ * AND THEN WHAT THE STORE HELD FOR THEM (`found-30-sep/suite-cleanup-leaves-stored-objects`).
+ * The rows went and the objects they named stayed: `stable-images` left the
+ * avatar and the logo of an account and a workspace that no longer existed.
+ * So, read before the rows go, as `WorkspacesService.storedKeysOf` reads a
+ * workspace deleted for good: for each workspace this removes, the keys its
+ * rows name and the prefixes it owns, and `avatars/<id>-` for each account;
+ * deleted once the rows are gone, and listed again. Only from a stub: the
+ * lane's (`91<k>`, bucket `rundesk-v<k>`, for the database `rundesk_v<k>`) or
+ * the one `E2E_STORE_PORT` and `E2E_STORE_BUCKET` name, which must answer as
+ * the stub does (`/__control/version`); any other store is said and left.
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -205,6 +216,110 @@ async function clearRestricting(sql, table, ids, depth = 0) {
   }
 }
 
+/**
+ * The object store of the database swept: `E2E_STORE_PORT` and
+ * `E2E_STORE_BUCKET` (CI's), else the lane's — `rundesk_v<k>` keeps its
+ * objects in bucket `rundesk-v<k>` on port 91<k> (`lane_store_env`,
+ * lane-env.sh). Null when neither says.
+ */
+export function storeOf(url = databaseUrl(), env = process.env) {
+  if (env.E2E_STORE_PORT && env.E2E_STORE_BUCKET) {
+    return { base: `http://127.0.0.1:${Number(env.E2E_STORE_PORT)}`, bucket: env.E2E_STORE_BUCKET }
+  }
+  let name = ''
+  try {
+    name = new URL(url).pathname.slice(1)
+  } catch {
+    return null
+  }
+  const lane = /^rundesk_v(\d+)$/.exec(name)
+  return lane ? { base: `http://127.0.0.1:${9100 + Number(lane[1])}`, bucket: `rundesk-v${lane[1]}` } : null
+}
+
+/*
+ * What the store holds for the workspaces and accounts a sweep removes, read
+ * before their rows go: `WorkspacesService.storedKeysOf`'s keys and prefixes
+ * for each workspace — registered, or in an organization the sweep removes —
+ * and `avatars/<id>-` for each account (`UsersService`'s avatar keys).
+ */
+async function storedOf(sql, workspaceIds, orgIds, accountIds) {
+  const ws = (await sql`
+    select id::text as id from workspaces
+    where id = any(${workspaceIds}::uuid[]) or organization_id = any(${orgIds}::uuid[])`).map((r) => r.id)
+  const keys = ws.length
+    ? (await sql`
+        select ta.storage_key as k from task_attachments ta
+          join tasks t on t.id = ta.task_id join lists l on l.id = t.list_id
+          join projects p on p.id = l.project_id join spaces s on s.id = p.space_id
+          where s.workspace_id = any(${ws}::uuid[])
+        union select t.cover_storage_key from tasks t join lists l on l.id = t.list_id
+          join projects p on p.id = l.project_id join spaces s on s.id = p.space_id
+          where s.workspace_id = any(${ws}::uuid[]) and t.cover_storage_key is not null
+        union select ca.storage_key from chat_message_attachments ca join chat_channels c on c.id = ca.channel_id
+          where c.workspace_id = any(${ws}::uuid[])
+        union select e.storage_key from chat_custom_emoji e where e.workspace_id = any(${ws}::uuid[]) and e.storage_key is not null
+        union select cr.storage_key from call_recordings cr join calls c on c.id = cr.call_id where c.workspace_id = any(${ws}::uuid[])
+        union select c.recording_storage_key from calls c where c.workspace_id = any(${ws}::uuid[]) and c.recording_storage_key is not null`)
+        .map((r) => r.k)
+        .filter(Boolean)
+    : []
+  const prefixes = [
+    ...ws.flatMap((id) => [`workspaces/${id}/`, `calls/${id}/`, `chat/${id}/`, `workspace-logos/${id}-`]),
+    ...accountIds.map((id) => `avatars/${id}-`),
+  ]
+  return { keys, prefixes }
+}
+
+const keyPath = (store, key) => `${store.base}/${store.bucket}/${key.split('/').map(encodeURIComponent).join('/')}`
+const unescapeXml = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&')
+
+/** Every key under `prefix`, page by page, as ListObjectsV2 answers. Throws when the store does not answer. */
+async function listKeys(store, prefix) {
+  const keys = []
+  let token = null
+  for (let page = 0; page < 1000; page += 1) {
+    const q = new URLSearchParams({ 'list-type': '2', prefix, 'max-keys': '1000', ...(token ? { 'continuation-token': token } : {}) })
+    const res = await fetch(`${store.base}/${store.bucket}?${q}`)
+    if (!res.ok) throw new Error(`listing ${prefix} answered ${res.status}`)
+    const body = await res.text()
+    for (const m of body.matchAll(/<Key>([^<]*)<\/Key>/g)) keys.push(unescapeXml(m[1]))
+    token = /<NextContinuationToken>([^<]*)<\/NextContinuationToken>/.exec(body)?.[1] ?? null
+    if (!token) break
+    token = unescapeXml(token)
+  }
+  return keys
+}
+
+/** Whether `key` is in the store (a HEAD answering 200). */
+const stored = async (store, key) => (await fetch(keyPath(store, key), { method: 'HEAD' })).status === 200
+
+/**
+ * Delete what `storedOf` read: every key under its prefixes, and each of its
+ * keys the store has. `{ removed, left, unsaid }`: `left` is listed again
+ * after the deletes; `unsaid` says why nothing was asked of the store.
+ */
+async function purgeStored({ keys, prefixes }, store) {
+  if (!keys.length && !prefixes.length) return { removed: 0, left: 0, unsaid: null }
+  // No store known: a database with none beside it (a gate's, a laptop's) has had nothing uploaded for it.
+  if (!store) return { removed: 0, left: 0, unsaid: null }
+  const stub = await fetch(`${store.base}/__control/version`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((b) => typeof b?.source === 'string', () => false)
+  if (!stub) return { removed: 0, left: 0, unsaid: `the store at ${store.base} did not answer as the stub does, and only the stub's objects are removed` }
+  // Under its prefixes: listed one by one, or, for many, the bucket listed once and read through.
+  const underPrefixes = async () => {
+    if (prefixes.length <= 20) return (await Promise.all(prefixes.map((p) => listKeys(store, p)))).flat()
+    return (await listKeys(store, '')).filter((k) => prefixes.some((p) => k.startsWith(p)))
+  }
+  const outside = keys.filter((k) => !prefixes.some((p) => k.startsWith(p)))
+  const present = new Set(await underPrefixes())
+  for (const k of outside) if (await stored(store, k)) present.add(k)
+  for (const k of present) await fetch(keyPath(store, k), { method: 'DELETE' })
+  let left = (await underPrefixes()).length
+  for (const k of outside) if (await stored(store, k)) left += 1
+  return { removed: present.size - left, left, unsaid: null }
+}
+
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 const TABLE_WORDS = {
   users: ['account', 'accounts'],
@@ -258,6 +373,9 @@ export async function sweepJournal(sql, j) {
                           where m.organization_id = o.id and m.role = 'owner' and not (m.user_id = any(${accountIds}::uuid[])))`)) ?? []).map((o) => o.id)
     : []
   const orgIds = [...new Set([...owned, ...(j.rows.get('organizations') ?? [])])]
+  // What the store holds for the workspaces and accounts that go, read while their rows say so.
+  const holding = await step('read what the store holds for them', () =>
+    storedOf(sql, [...(j.rows.get('workspaces') ?? [])], orgIds, accountIds))
 
   // 1. What was registered by table: other tables first, then spaces, then workspaces.
   const order = [...tables.filter((t) => t !== 'spaces' && t !== 'workspaces'), ...tables.filter((t) => t === 'spaces'), ...tables.filter((t) => t === 'workspaces')]
@@ -292,9 +410,14 @@ export async function sweepJournal(sql, j) {
     })
     if (n) removed.unshift(said('users', n))
   }
+  // 4. What the store held for them, now that no row names it.
+  const purged = holding ? await step('remove what the store held for them', () => purgeStored(holding, storeOf())) : null
+  if (purged?.removed) removed.push(plural(purged.removed, 'stored object'))
+  if (purged?.unsaid) removed.push(`and left the store as it was: ${purged.unsaid}`)
 
   // What is still there, read back.
   const left = []
+  if (purged?.left) left.push(plural(purged.left, 'stored object'))
   const still = await step('read back the accounts', () => sql`
     select email from users
     where (id = any(${[...new Set([...j.accountIds, ...accountIds])]}::uuid[]) or lower(email) = any(${j.emails}::text[]))

@@ -16,12 +16,13 @@
 # `exit`, so nothing appended after it runs either.
 {
 set -u
-R=/home/user/rundesk
+# The tree this file is in, as `fleet-restart.sh` (`found-5-oct/lane-scripts-build-the-main-checkout`).
+R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 N=${1:-4}
 export PGPASSWORD=rundesk
 TSX="$R/node_modules/.pnpm/tsx@4.21.0/node_modules/tsx"
 # Storage, in one place — see lane-env.sh for why it is not inlined here.
-. "/home/user/rundesk/scripts/e2e-lanes/lane-env.sh"
+. "$R/scripts/e2e-lanes/lane-env.sh"
 
 for k in $(seq 1 "$N"); do
   DB="rundesk_v$k"

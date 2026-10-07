@@ -364,7 +364,8 @@ pnpm -C apps/web exec vite build > "/tmp/claude-0/wt$LANE-web.log" 2>&1 || {
     tail -5 "/tmp/claude-0/wt$LANE-web.log"; } >> "$OUT"
   exit 4
 }
-timeout 900 node "$WT/test/e2e/$SUITE.mjs" --api "$PORT" --dist "$WT/apps/web/dist" \
+# In a UTF-8 locale, as verify.sh runs a suite (`LANE_SUITE_LOCALE`, lane-env.sh).
+timeout 900 env "${LANE_SUITE_LOCALE[@]}" node "$WT/test/e2e/$SUITE.mjs" --api "$PORT" --dist "$WT/apps/web/dist" \
   > "/tmp/claude-0/brk-$SUITE-baseline.log" 2>&1
 BASE=$(grep -E 'passed,' "/tmp/claude-0/brk-$SUITE-baseline.log" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')
 echo "== BASELINE (no patch) $BASE" >> "$OUT"
@@ -526,7 +527,7 @@ for b in "$@"; do
       fi
     fi
     API_DIRTY="$NEEDS_API"
-    timeout 900 node "$WT/test/e2e/$SUITE.mjs" --api "$PORT" --dist "$WT/apps/web/dist" \
+    timeout 900 env "${LANE_SUITE_LOCALE[@]}" node "$WT/test/e2e/$SUITE.mjs" --api "$PORT" --dist "$WT/apps/web/dist" \
       > "/tmp/claude-0/brk-$b.log" 2>&1
     # WHAT THIS FILE RECORDS IS THE ONLY THING ANYBODY READS, and it was
     # under-reporting in two ways that both look like a clean result.

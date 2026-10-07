@@ -73,6 +73,9 @@
  * download the attachments". The store claims a size past the cap for one HEAD,
  * and the page has to show the server's sentence and save nothing.
  *
+ * AND A LANE SAVED A NAME IN ANOTHER SCRIPT AS "download" (`found-30-sep/lanes-save-downloads-in-ascii`).
+ * The same task, retitled in Arabic, has its zip saved under that title.
+ *
  *   node test/e2e/task-attachments.mjs --api 3011 --dist apps/web/dist
  */
 import fs from 'node:fs'
@@ -92,7 +95,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 33
+const EXPECTED_CHECKS = 34
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -1018,6 +1021,31 @@ try {
     savedName === WANT_ZIP_NAME,
     'and the zip is saved under the task\'s name — <title>-attachments.zip, with the characters no file name may hold made safe',
     `the browser saved ${JSON.stringify(savedName)}; the task is ${JSON.stringify(ZIP_TITLE)}, so ${JSON.stringify(WANT_ZIP_NAME)}`,
+  )
+
+  /*
+   * A TITLE IN ARABIC IS THE ZIP'S NAME TOO (`found-30-sep/lanes-save-downloads-in-ascii`).
+   * The server sends the whole name in `filename*` and the page saves under it,
+   * but a browser whose locale's charset is ASCII saves a name in any other
+   * script as "download". The lanes' shells set no LANG, so no lane run could
+   * see such a name until `verify.sh` and `launchOptions` gave the browser a
+   * UTF-8 locale, as a reader's desktop and GitHub's runners have. The same
+   * task, retitled, pressed again; it still ends with the run's tag, which the
+   * cleanup removes it by.
+   */
+  const ARABIC_TITLE = `ملفات المراجعة ${TAG}`
+  const retitled = await A(`/tasks/${zipTask.id}`, { method: 'PATCH', body: { title: ARABIC_TITLE } })
+  const [savedArabic] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30_000 }).catch(() => null),
+    downloadAll.click({ timeout: 8000 }).catch(() => {}),
+  ])
+  const arabicName = savedArabic ? savedArabic.suggestedFilename() : null
+  const WANT_ARABIC_NAME = `${ARABIC_TITLE}-attachments.zip`
+  chk(
+    retitled.status < 300 && arabicName === WANT_ARABIC_NAME,
+    'and a task titled in Arabic has its zip saved under that title, not as "download"',
+    `the task was ${retitled.status < 300 ? `retitled ${JSON.stringify(ARABIC_TITLE)}` : `not retitled (${retitled.status})`}; ` +
+      `the browser saved ${JSON.stringify(arabicName)}, against ${JSON.stringify(WANT_ARABIC_NAME)}`,
   )
 
   /*

@@ -48,11 +48,22 @@
 # `exit`, so nothing appended after it runs either.
 {
 set -u
-cd /home/user/rundesk
+# THE TREE THIS FILE IS IN (`found-5-oct/lane-scripts-build-the-main-checkout`).
+# It was `cd /home/user/rundesk`, so a worktree's copy checked and ran the main
+# checkout: its suites, its bundle's sources, its API build, and a lane served
+# from the worktree itself refused as another tree's.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+cd "$ROOT" || exit 1
 SUITE="$1"; LANE="${2:-1}"
 PORT=$((3020 + LANE))
 # The lane helpers (`lane_schema_drift`); it defines functions and sets nothing else.
-. /home/user/rundesk/scripts/e2e-lanes/lane-env.sh
+. "$ROOT/scripts/e2e-lanes/lane-env.sh"
+# A SUITE THIS TREE DOES NOT HAVE IS NOT A FAILED ONE. It was run anyway, and
+# read as a suite that failed ("Cannot find module").
+if [ ! -f "test/e2e/$SUITE.mjs" ]; then
+  echo "== $SUITE (lane $LANE) REFUSING — there is no test/e2e/$SUITE.mjs in $ROOT"
+  exit 2
+fi
 DIST="/tmp/claude-0/dist-$LANE"
 # A BUILD NEVER WRITES THE BUNDLE THIS RUN READS (`commit-log/log-d92d58f-1`).
 # Held shared from here to the end of the run (the suite inherits the lock's
@@ -205,14 +216,16 @@ fi
 # of the day rather than after it.
 #
 # `fuser` names the pid listening on the port; its working directory says
-# which tree it runs. Anything but this repository's `apps/api` is refused.
+# which tree it runs. Anything but this tree's `apps/api` is refused — the main
+# checkout's for the main checkout's copy of this file, a worktree's for the
+# worktree's, which its own `build-api.sh` and `fleet-restart.sh` serve.
 LANE_PID=$(fuser -n tcp "$PORT" 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$' | head -1)
 if [ -n "$LANE_PID" ]; then
   LANE_CWD=$(readlink "/proc/$LANE_PID/cwd" 2>/dev/null)
-  if [ "$LANE_CWD" != "/home/user/rundesk/apps/api" ]; then
-    echo "== $SUITE (lane $LANE) REFUSING — port $PORT is served from $LANE_CWD, not this tree"
+  if [ "$LANE_CWD" != "$ROOT/apps/api" ]; then
+    echo "== $SUITE (lane $LANE) REFUSING — port $PORT is served from $LANE_CWD, not this tree ($ROOT)"
     echo "   a break worktree's API is left running when wt-break.sh finishes; put the lane back on this build:"
-    echo "   bash scripts/e2e-lanes/build-api.sh \"$LANE\""
+    echo "   bash $ROOT/scripts/e2e-lanes/build-api.sh \"$LANE\""
     exit 8
   fi
   # AND IT HAS TO HAVE STARTED AFTER THE BUILD IT IS MEANT TO SERVE. The stamp
@@ -273,8 +286,9 @@ export E2E_PASSWORD='Admin@123!'
 # into one file, and each summary below read the other's lines.
 OUT="/tmp/claude-0/run-$SUITE-lane$LANE.log"
 # A KILL FOLLOWS THE TERM (`run_bounded`): a suite whose teardown hung ran on
-# past `timeout 900` (`found-6-oct/verify-timeout-ends-no-hung-suite`).
-run_bounded 900 30 node "test/e2e/$SUITE.mjs" --api "$PORT" --dist "$DIST" > "$OUT" 2>&1
+# past `timeout 900` (`found-6-oct/verify-timeout-ends-no-hung-suite`). And the
+# suite and its browser run in a UTF-8 locale, as on CI (`LANE_SUITE_LOCALE`).
+run_bounded 900 30 env "${LANE_SUITE_LOCALE[@]}" node "test/e2e/$SUITE.mjs" --api "$PORT" --dist "$DIST" > "$OUT" 2>&1
 code=$?
 echo "== $SUITE (lane $LANE, dist $DIST) exit=$code"
 # EVERY FAIL LINE. This printed the last eight lines, so a run with eight

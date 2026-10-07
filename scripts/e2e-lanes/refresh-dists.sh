@@ -22,10 +22,12 @@
 # `exit`, so nothing appended after it runs either.
 {
 set -u
-cd /home/user/rundesk
+# The tree this file is in, as `build-api.sh` (`found-5-oct/lane-scripts-build-the-main-checkout`):
+# a worktree's copy builds the worktree's web and records its sources.
+cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 # The bundle lock (`dist_lock_exclusive`): a build waits for the runs reading
 # this bundle, and a second build of the same lane waits for the first.
-. /home/user/rundesk/scripts/e2e-lanes/lane-env.sh
+. "$PWD/scripts/e2e-lanes/lane-env.sh"
 
 if [ $# -ge 1 ]; then
   LANES=($1)

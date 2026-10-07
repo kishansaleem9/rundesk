@@ -13,18 +13,24 @@
 #   · a bundle's sources are told apart by content, not mtime: a file put back
 #     with an earlier mtime and other bytes is another tree, while staging, or
 #     restoring the same bytes, is the same one
-#     (`found-6-oct/verify-takes-a-bundle-of-other-sources-as-fresh`).
+#     (`found-6-oct/verify-takes-a-bundle-of-other-sources-as-fresh`);
+#   · a suite started from a shell that sets no locale runs in UTF-8
+#     (`LANE_SUITE_LOCALE`), and `verify.sh` and `wt-break.sh` start every
+#     suite so (`found-30-sep/lanes-save-downloads-in-ascii`).
 #
 # With --mutate, each helper is replaced by what `verify.sh` did before —
-# whole seconds from `ps -o lstart`, `timeout` with no kill, the newest mtime
-# — and the same cases must catch each one. No lane, no API: CI's verify job
-# runs it too.
+# whole seconds from `ps -o lstart`, `timeout` with no kill, the newest mtime,
+# no locale, a runner line without it — and the same cases must catch each
+# one. No lane, no API: CI's verify job runs it too.
 # READ WHOLE BEFORE IT RUNS (`lane-scripts-read-as-they-run`).
 {
 set -u
-. "$(cd "$(dirname "$0")" && pwd)/lane-env.sh"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/lane-env.sh"
 DIR=$(mktemp -d)
 trap 'rm -rf "$DIR"' EXIT
+# The scripts that start a suite on a lane, read by case 6.
+RUNNERS=("$HERE/verify.sh" "$HERE/wt-break.sh")
 
 # A stand-in source tree, in a repository of its own.
 REPO="$DIR/repo"
@@ -81,6 +87,20 @@ run_cases () {
   h5=$(web_sources_hash "$REPO"); rm -f "$REPO/apps/web/src/c.ts"
   if [ "$h5" != "$h1" ]; then echo "  ok   a new file, however old its mtime, is another tree"
   else echo "  FAIL a new, old-dated file reads as the same tree"; bad=1; fi
+  # 5. A suite's locale, from a shell that sets none, as the lanes' shells do
+  #    (CI's runner has one, so it is taken away first). `locale charmap` reads
+  #    the charset as Chromium does: setlocale, then nl_langinfo(CODESET).
+  got=$(env -u LANG -u LANGUAGE -u LC_ALL -u LC_CTYPE env "${LANE_SUITE_LOCALE[@]}" locale charmap 2>/dev/null)
+  if [ "$got" = "UTF-8" ]; then echo "  ok   a suite started from a shell with no locale runs in UTF-8"
+  else echo "  FAIL a suite started from a shell with no locale reads its charset as ${got:-nothing}"; bad=1; fi
+  # 6. Every line of a runner that starts a suite starts it under that locale.
+  local f runs bare
+  for f in "${RUNNERS[@]}"; do
+    runs=$(grep -cE 'node "(\$WT/)?test/e2e/\$SUITE\.mjs"' "$f")
+    bare=$(grep -E 'node "(\$WT/)?test/e2e/\$SUITE\.mjs"' "$f" | grep -cvF 'env "${LANE_SUITE_LOCALE[@]}" node')
+    if [ "$runs" -gt 0 ] && [ "$bare" -eq 0 ]; then echo "  ok   $(basename "$f") starts each of its $runs suite runs in that locale"
+    else echo "  FAIL $(basename "$f") starts $bare of its $runs suite runs without it"; bad=1; fi
+  done
   return $bad
 }
 
@@ -105,6 +125,18 @@ if [ "${1:-}" = "--mutate" ]; then
   web_sources_hash () { ( cd "${1:-.}" && find apps/web/src apps/web/public -type f -printf '%T@\n' 2>/dev/null | sort -n | tail -1 ); }
   if run_cases > "$DIR/m3.log" 2>&1; then echo "  NOT CAUGHT: the newest mtime for the tree"; fails=1
   else echo "  caught: the newest mtime for the tree"; fi
+  . "$(cd "$(dirname "$0")" && pwd)/lane-env.sh"
+  # no locale for the suite
+  LANE_SUITE_LOCALE=()
+  if run_cases > "$DIR/m4.log" 2>&1; then echo "  NOT CAUGHT: a suite started in the shell's own locale"; fails=1
+  else echo "  caught: a suite started in the shell's own locale"; fi
+  . "$(cd "$(dirname "$0")" && pwd)/lane-env.sh"
+  # a runner that starts its suite without it, as verify.sh did
+  sed 's/env "${LANE_SUITE_LOCALE\[@\]}" node/node/' "$HERE/verify.sh" > "$DIR/verify.sh"
+  RUNNERS=("$DIR/verify.sh" "$HERE/wt-break.sh")
+  if run_cases > "$DIR/m5.log" 2>&1; then echo "  NOT CAUGHT: verify.sh starting its suite without the locale"; fails=1
+  else echo "  caught: verify.sh starting its suite without the locale"; fi
+  RUNNERS=("$HERE/verify.sh" "$HERE/wt-break.sh")
   if [ "$fails" -ne 0 ]; then echo "verify-guards selfcheck FAILED: a mutation went uncaught"; exit 1; fi
 fi
 echo "verify-guards selfcheck: ok"

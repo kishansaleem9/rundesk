@@ -142,6 +142,10 @@ export function launchOptions(extraArgs = []) {
  * or the server named it (measured 30 September, closing
  * `found-30-sep/list-export-saved-as-list-csv`). A desktop has a UTF-8 locale,
  * and so do GitHub's runners. Pass as `env` to `chromium.launch`.
+ *
+ * The lanes' runners now start every suite in a UTF-8 locale themselves
+ * (`LANE_SUITE_LOCALE`, lane-env.sh; `found-30-sep/lanes-save-downloads-in-ascii`),
+ * so this is for a suite started by hand from a shell that sets none.
  */
 export function utf8LocaleEnv() {
   return { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }

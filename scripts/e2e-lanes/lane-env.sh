@@ -877,6 +877,20 @@ started_before () { awk -v s="$1" -v b="$2" 'BEGIN { exit !(s + 0.05 < b) }'; }
 # by `$2` seconds: `run_bounded <seconds> <grace> <command…>`.
 run_bounded () { local secs=$1 grace=$2; shift 2; timeout -k "$grace" "$secs" "$@"; }
 
+# ── A SUITE'S BROWSER SAVES A NAME IN ANY SCRIPT ────────────────────────────
+#
+# Chromium converts a download's name to its locale's charset, and the lanes'
+# shells set no LANG. Under the POSIX locale that charset is ASCII, so
+# "Übersicht.csv", a list's export named in Arabic, even "a — b.csv", were
+# saved as "download", whatever the server and the page called them. A
+# reader's desktop and GitHub's runners have a UTF-8 locale, so no lane could
+# see what CI sees of such a name (`found-30-sep/lanes-save-downloads-in-ascii`).
+# Each runner starts a suite under these, which its browser inherits — the
+# suite's process only, not the lane's API, which the fleet scripts start as
+# before:
+#   run_bounded 900 30 env "${LANE_SUITE_LOCALE[@]}" node "test/e2e/$SUITE.mjs" …
+LANE_SUITE_LOCALE=(LANG=C.UTF-8 LC_ALL=C.UTF-8)
+
 # ── WHAT A BUNDLE WAS BUILT FROM ────────────────────────────────────────────
 #
 # `verify.sh` asked whether any source was newer than a bundle, by mtime, and a
@@ -889,11 +903,12 @@ run_bounded () { local secs=$1 grace=$2; shift 2; timeout -k "$grace" "$secs" "$
 # working copy's where it does not, and each untracked file's — hashed
 # together, so staging changes nothing and a byte anywhere changes it.
 # `refresh-dists.sh` writes it into the bundle (`.sources-hash`); `verify.sh`
-# asks it again. Run in `$1` (this checkout when none is given).
+# asks it again. Run in `$1`, or in the tree this file is in when none is
+# given — not the main checkout (`found-5-oct/lane-scripts-build-the-main-checkout`).
 WEB_SOURCE_PATHS="apps/web/src packages/ui/src packages/feature-flags/src apps/web/index.html apps/web/vite.config.ts apps/web/tailwind.config.ts apps/web/postcss.config.js apps/web/public"
 web_sources_hash () {
   # shellcheck disable=SC2086
-  ( cd "${1:-/home/user/rundesk}" && python3 - $WEB_SOURCE_PATHS <<'PY'
+  ( cd "${1:-$LANE_ENV_DIR/../..}" && python3 - $WEB_SOURCE_PATHS <<'PY'
 import hashlib, subprocess, sys
 paths = sys.argv[1:]
 def git(*a):

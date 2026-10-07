@@ -45,7 +45,10 @@
 # `exit`, so nothing appended after it runs either.
 {
 set -u
-cd /home/user/rundesk
+# THE TREE THIS FILE IS IN (`found-5-oct/lane-scripts-build-the-main-checkout`).
+# It was `cd /home/user/rundesk`, so a worktree's copy built the main checkout
+# and stamped its build. `fleet-restart.sh` already serves the tree it is in.
+cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 
 pnpm --filter @rundesk/api build || exit 1
 # AFTER the build, never before: a stamp written first would mark a build that

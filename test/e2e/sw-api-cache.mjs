@@ -190,11 +190,41 @@ try {
   await mt.getByTestId('user-menu').click({ timeout: 15_000 }).catch(() => {})
   // The menu used to run past the bottom of a 900px window, Sign out with it.
   await mt.getByTestId('menu-sign-out').waitFor({ state: 'attached', timeout: 10_000 }).catch(() => {})
-  const menuFits = await mt.evaluate(() => {
-    const menu = document.querySelector('[role=menu]')
-    if (!menu) return false
-    return menu.getBoundingClientRect().bottom <= window.innerHeight
-  }).catch(() => false)
+  /*
+   * THE BOX IT SETTLES AT (`found-30-sep/sw-api-cache-reads-the-menu-box-once`).
+   * This read the box once, as soon as Sign out was in the page, and the menu
+   * opens with a 150 ms zoom and slide: a read during them saw a smaller box
+   * than the menu settles at — 871 against a settled 900.5 in a 900 px window.
+   * So the box is read every frame until it has no animation running and two
+   * reads a frame apart agree, within five seconds.
+   */
+  const menuBox = await mt.evaluate(() => new Promise((resolve) => {
+    const began = performance.now()
+    let last = null
+    const read = () => {
+      const menu = document.querySelector('[role=menu]')
+      if (!menu) {
+        // Not drawn (yet, or any more): read again until the five seconds are up.
+        if (performance.now() - began > 5000) return resolve(null)
+        last = null
+        return requestAnimationFrame(read)
+      }
+      const r = menu.getBoundingClientRect()
+      const box = { top: r.top, bottom: r.bottom }
+      const still = !!last && box.top === last.top && box.bottom === last.bottom && menu.getAnimations().length === 0
+      if (still || performance.now() - began > 5000) {
+        resolve({ ...box, settled: still, windowHeight: window.innerHeight })
+        return
+      }
+      last = box
+      requestAnimationFrame(read)
+    }
+    requestAnimationFrame(read)
+  })).catch(() => null)
+  const menuFits = !!menuBox?.settled && menuBox.bottom <= menuBox.windowHeight
+  const saidOfMenu = !menuBox
+    ? 'no menu was drawn'
+    : `the menu ${menuBox.settled ? 'settled' : 'had not settled in 5 s'} at ${menuBox.top} to ${menuBox.bottom} in a ${menuBox.windowHeight} px window`
   await mt.getByTestId('menu-sign-out').click({ timeout: 10_000 }).catch(() => {})
   await mt.waitForURL(/\/login/, { timeout: 15_000 }).catch(() => {})
   await waitUntil(async () => !(await mt.evaluate((name) => caches.has(name), API_CACHE).catch(() => true)), { timeoutMs: 10_000 })
@@ -203,7 +233,7 @@ try {
   chk(
     menuFits && memberPlanted && /\/login/.test(mt.url()) && !memberCache && memberRefresh === 401,
     'and the topbar’s Sign out — its menu inside a 1440×900 window — does the same for a member',
-    `menu fits ${menuFits}; planted ${memberPlanted}; on the sign-in page ${/\/login/.test(mt.url())}; cache still there ${memberCache}; refresh answered ${memberRefresh}`,
+    `${saidOfMenu}; planted ${memberPlanted}; on the sign-in page ${/\/login/.test(mt.url())}; cache still there ${memberCache}; refresh answered ${memberRefresh}`,
   )
 } catch (err) {
   failed += 1

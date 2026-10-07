@@ -756,6 +756,10 @@ jobs:
       # through `test/e2e/lib/store.mjs`, which reads this; unset, it falls back
       # to the lane formula (9100 + api - 3020), which is 9091 for this job.
       E2E_STORE_PORT: 9100
+      # And its bucket, the API's `R2_BUCKET_NAME` below: what a suite's run
+      # uploaded is removed with its rows (`storeOf`, test/e2e/lib/made-sweep.mjs;
+      # `found-30-sep/suite-cleanup-leaves-stored-objects`).
+      E2E_STORE_BUCKET: rundesk-ci
 
     steps:
       - name: Checkout

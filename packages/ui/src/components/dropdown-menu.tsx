@@ -33,9 +33,11 @@ DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayNam
 export const DropdownMenuSubContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
->(({ className, ...props }, ref) => (
+>(({ className, collisionPadding = 8, ...props }, ref) => (
   <DropdownMenuPrimitive.SubContent
     ref={ref}
+    // Kept off the window's edge as a menu is, and for the same rounding (`DropdownMenuContent`).
+    collisionPadding={collisionPadding}
     className={cn(
       'z-50 min-w-[8rem] max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto overflow-x-hidden rounded-lg border border-border/60 bg-popover p-1 text-popover-foreground shadow-glow',
       'data-[state=open]:animate-in data-[state=closed]:animate-out',
@@ -151,14 +153,23 @@ const ReopenableContent = React.forwardRef<
 })
 ReopenableContent.displayName = 'ReopenableContent'
 
+/*
+ * EIGHT PIXELS FROM THE WINDOW'S EDGE (`found-30-sep/sw-api-cache-reads-the-menu-box-once`).
+ * Radix works the room out from where the menu would sit — 51.5 px down, under
+ * the topbar's avatar — and then draws it at a whole pixel, 52, so the user
+ * menu, as tall as that room, ended at 900.5 in a 900 px window, every time.
+ * Kept this far from every edge, a menu has the room less the padding, and its
+ * foot stays inside the window whatever the rounding.
+ */
 export const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
->(({ className, sideOffset = 6, ...props }, ref) => (
+>(({ className, sideOffset = 6, collisionPadding = 8, ...props }, ref) => (
   <DropdownMenuPrimitive.Portal>
     <ReopenableContent
       ref={ref}
       sideOffset={sideOffset}
+      collisionPadding={collisionPadding}
       className={cn(
         // Never taller than the room the trigger leaves: the user menu ran to
         // 951px in a 900px window, with "Sign out" at 914px — out of reach.

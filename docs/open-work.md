@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 512 items: 17 open · 4 partly fixed · 434 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 6 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 514 items: 14 open · 4 partly fixed · 439 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1974,7 +1974,7 @@ Checks:
 - After, four times (the last on `bac7eae` with the final library): killed the same way, the run's journal named its 2 accounts and 10 templates. The next run removed them with their organizations and workspaces, then its own. From before the kill to after it, no account, organization, workspace, member of Main or template was added. `check-made-sweep.mjs` does the same with a probe process on every CI run.
 - Merged here onto `2d38c0e` (one clash: `request-access` had moved onto `signUpApi` in the batch before, which now registers each person, so that side was kept). The gate names none over the 262 suites, and 19 of 19 mutations bite; it and its cases run in preflight too. Run again on lanes 2, 4, 5 and 7: the 25 suites this changed and `sign-in-and-password`, all green, 456 checks, and the four named suites it changed through `signUpApi` alone (`project-template-key`, `like-literal`, `role-permissions-web`, `space-default-permission`) 5, 5, 5 and 36, all green. `check-made-sweep.mjs` against lane 6: 24 cases hold, and 21 of 21 mutations bite (a first run cut off by a 15-minute limit of mine left one mutant file beside its subject, removed).
 
-### `found-30-sep/suite-cleanup-leaves-stored-objects` — open (test tooling, small; found closing `found-30-sep/suite-runs-leave-accounts-behind`) · reproduced 5 October
+### `found-30-sep/suite-cleanup-leaves-stored-objects` — **closed** (test tooling, small; found closing `found-30-sep/suite-runs-leave-accounts-behind`) · reproduced 5 October
 
 **What a suite uploads stays in the lane's store after the sweep deletes its rows**
 
@@ -1984,7 +1984,14 @@ Checks:
 
 *Triage, 5 October:* reproduced on a lane. A suite's uploads stay in the lane's object store after the sweep deletes their rows: stable-images on lane 1 left an avatar and a workspace logo whose user and workspace no longer exist. Evidence: `docs/triage-2026-10-05.md`.
 
-### `found-30-sep/lanes-hold-earlier-runs-leftovers` — open (test tooling, small; found closing `found-30-sep/suite-runs-leave-accounts-behind`) · reproduced 5 October
+*Closed, 6 October* (lane 2). The sweep removes what the store held for the workspaces and accounts it removes (`made-sweep.mjs`). It reads them before their rows go, as `WorkspacesService.storedKeysOf` reads a workspace deleted for good: for each workspace, registered or in an organization the sweep removes, the keys its rows name (task files and covers, chat files and emoji, call recordings) and the prefixes it owns (`workspaces/<id>/`, `calls/<id>/`, `chat/<id>/`, `workspace-logos/<id>-`); for each account, `avatars/<id>-`. It deletes them once the rows are gone, through the store's S3 API, and lists them again: an object still there is left behind, as a row is. Only a stub's objects are removed. The store is the lane's (port 91<k>, bucket `rundesk-v<k>`, for the database `rundesk_v<k>`) or the one `E2E_STORE_PORT` and `E2E_STORE_BUCKET` name (CI's Postgres job now names its bucket too), and it must answer as the stub does; any other store is said and left.
+
+Measured on lane 2 with `stable-images`, the store listed before and after the run. Before, on the build these fixes went onto, the run left `avatars/2af802a4-…png` and `workspace-logos/840f809e-…png`, whose account and workspace SQL no longer found (32 objects before the run, 34 after). After, the run's sweep said "removed what this run made: 1 account, 1 organization with 1 workspace, 2 stored objects", and the store held 34 objects before the run and 34 after; 6 of 6 again in the regression sweep, on lane 7.
+
+Checks:
+- `check-made-sweep.mjs` 24 → 26 cases, on a store stub of its own: a run that ends leaves nothing the store held for its account and the workspace only it owns (the avatar, the logo, a task's file, a call's recording, an emoji); and it keeps the outsider's avatar and the shared workspace's logo and clip, and says how many objects it removed. Its `--mutate` list gains four mutations, each of which makes a case fail (run by hand): the store left as it was, the avatars left, the workspace's objects left, and every avatar taken.
+
+### `found-30-sep/lanes-hold-earlier-runs-leftovers` — **closed** (test tooling, small; found closing `found-30-sep/suite-runs-leave-accounts-behind`) · reproduced 5 October
 
 **The cleanup removes what runs make from now on; every lane still holds what runs made before it**
 
@@ -1993,6 +2000,20 @@ Checks:
 *To close:* once per lane, remove `@rundesk.invalid` accounts with the organizations only they own (the sweeper's rule), and the archived workspaces, spaces and lists suites made (by their stamped names); count before and after by SQL, lane by lane.
 
 *Triage, 5 October:* reproduced on a lane. Lane 1 still holds what runs made before the sweep landed (3175 @rundesk.invalid accounts, 1195 archived workspaces, 364 of 388 Main spaces archived), and nothing removes it. The archived-lists part is 0 on this lane. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 6 October* (lanes 1 to 7). `lane-leftovers.mjs` (new, `scripts/e2e-lanes/`) counts what runs left on a lane and, with `--remove`, removes it through the sweep's own `sweepJournal`: the rows a restricting key points at first, the notifications the accounts caused, and what the store held for the workspaces and accounts. What a run made is what `rundesk_pristine`, the dump every lane is restored from, does not have, by id. Pristine holds the two admins, Rundesk HQ, Main Workspace, its General space and its To do list. It takes only a lane's database (`rundesk_v<k>`), and refuses a lane while a suite runs on it.
+
+Two passes, counted by SQL lane by lane. The first took what this item names: the accounts at `@rundesk.invalid` with the organizations only they own, and every archived workspace, space and list. It left run-made organizations on every lane, 3 to 19 of them. On lane 1 there were eight: six whose owners were already gone, one of an account a suite had signed up at `@rundesk.internal`, and one the admin owns, holding 643 live workspaces named by their suites (`gcm…`, `lpl…`, `rpw-…`, made 24 to 29 September). So the second pass took every account, organization, workspace, space and list that pristine does not have, archived or live.
+- Lane 1: 3,175 accounts, 3,157 organizations, 1,195 archived workspaces, 395 archived spaces and 108 archived lists, with 364 of Main's 388 spaces archived. The first pass removed the accounts, 3,149 organizations with 3,112 workspaces, and the archived rows. The second removed 1 account, 8 organizations, 650 workspaces, 1,610 spaces and 2,058 lists.
+- Lane 2: 3,825 accounts, 3,839 organizations, 2,023 archived workspaces, 611 archived spaces, 144 archived lists; Main 566 of 582 spaces archived. The second pass removed 19 organizations, 405 workspaces, 915 spaces and 1,167 lists.
+- Lane 3 (both rules at once): 4,784 accounts, 4,634 organizations, 6,128 workspaces (3,406 archived), 4,183 spaces (562 archived), 4,785 lists (131 archived), 559 spaces in Main.
+- Lane 4: 1,964 accounts, 1,929 organizations, 1,543 archived workspaces, 345 archived spaces, 164 archived lists; then 14 organizations, 205 workspaces, 409 spaces, 624 lists.
+- Lane 5: 1,162 accounts, 1,163 organizations, 433 archived workspaces, 121 archived spaces, 39 archived lists, and 2 stored objects; then 6 organizations, 262 workspaces, 579 spaces, 773 lists.
+- Lane 6: 651 accounts, 659 organizations, 389 archived workspaces, 162 archived spaces, 40 archived lists; then 8 organizations, 39 workspaces, 91 spaces, 167 lists.
+- Lane 7: 857 accounts, 859 organizations, 190 archived workspaces, 65 archived spaces, 71 archived lists; then 3 organizations, 159 workspaces, 310 spaces, 361 lists.
+- After, on every lane: no account, organization, workspace, space or list that pristine does not have, and Main holds its one space.
+
+What is inside pristine's own containers (a task or a doc in General › To do) is not taken: that is `found-30-sep/suite-leftovers-unmeasured`'s. Neither are objects in a lane's store whose rows were deleted before the sweep purged the store: nothing names them now, and they go when the lane's stub restarts. The regression sweep after the removal shows no suite relied on what was removed (all 268 suites on lanes 2, 4, 5, 6 and 7, 4,179 checks, 266 green at once, and `create-menu-ai` (24) and `task-ai-bar` (19) on lane 4, which has no model. `password-hash-time` failed under the sweep's load and was green alone twice; `session-in-the-browser`'s failure is `found-7-oct/a-tab-that-saw-the-sign-out-misses-the-sign-in`).
 
 ### `found-30-sep/suite-leftovers-unmeasured` — open (test tooling, medium; found closing `found-30-sep/suite-runs-leave-accounts-behind`) · reproduced 5 October
 
@@ -2991,7 +3012,7 @@ Checks:
 
 Regression on lanes 2, 4, 5, 6 and 7: the 34 suites the six fixes of this batch touch (`admin-audit-page`, `comment-plus-menu`, `data-transfer-keys`, `field-writes-by-level`, `file-exports`, `full-edit-levels`, `gantt-controls`, `goals-page`, `guest-canvas-scope`, `guest-chat-scope`, `guest-create-menu`, `guest-invitations`, `guest-read-scope`, `guest-space-level`, `guest-task-edits`, `guest-task-making`, `imports`, `list-export`, `local-dates`, `login-workspace-binding`, `lookup-read-access`, `menu-reopen`, `panel-collapse`, `realtime-access-ends`, `refused-as-forbidden`, `report-export-key`, `session-in-the-browser`, `sign-in-and-password`, `task-attachments`, `task-field-create`, `task-menu-favorite-archive`, `timeline-dates`, `view-visibility` and `view-writes-by-level`), 517 checks, all green.
 
-### `found-30-sep/sw-api-cache-reads-the-menu-box-once` — open (suite, small; found closing `found-30-sep/password-hash-holds-the-event-loop`) · reproduced 5 October
+### `found-30-sep/sw-api-cache-reads-the-menu-box-once` — **closed** (suite, small; found closing `found-30-sep/password-hash-holds-the-event-loop`) · reproduced 5 October
 
 **`sw-api-cache` reads the account menu's box once, as it appears**
 
@@ -3003,6 +3024,25 @@ Regression on lanes 2, 4, 5, 6 and 7: the 34 suites the six fixes of this batch 
 *To close:* wait for the menu's box to be stable (two equal reads a frame apart), and check it with the menu placed past the window's foot.
 
 *Triage, 5 October:* reproduced on a lane. The menu check is timing-dependent as the entry says, but the other way round: mid-animation reads fit and the settled menu always ends at 900.5px in a 900px window, so the proposed 'wait until stable' fix would turn the check red on every run. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 6 October* (lane 2). The check reads the box the menu settles at — every frame until no animation runs on it and two reads a frame apart agree, five seconds at most — and says where it settled. Read so, the menu did not fit, every time and not once in a while, as the triage measured: Radix works a menu's room out from where it would sit, 51.5 px down under the topbar's avatar, and draws it at a whole pixel, 52, so the user menu, as tall as its room, ended at 900.5 in the 900 px window. The single read had passed because it landed in the 150 ms opening, at 863 to 880. So every menu is kept 8 px from the window's edges (`collisionPadding`, in `DropdownMenuContent` and `DropdownMenuSubContent`), and its foot stays inside the window whatever the rounding.
+
+Measured on lane 2 with the changed `sw-api-cache`: before, on the build these fixes went onto, the settled read failed in 3 runs of 3, "the menu settled at 52 to 900.5 in a 900 px window" (4 of 5); after, 5 of 5 in 3 runs of 3; 5 of 5 again in the regression sweep, on lane 4. And a probe of the user menu, every frame of six openings at CPU throttling 1× and 8×: settled at 52 to 892.5 (its max height 840.5) each time, and no frame past the foot.
+
+Checks:
+- `sw-api-cache` (5): the member's Sign out check reads the settled box.
+- Patches `swc-7` (a menu as tall as its content: settled at 52 to 951) and `swc-8` (no padding: 52 to 900.5) each redden it.
+
+Found while closing it:
+- `found-6-oct/user-menu-hides-sign-out-below-a-scroll`
+
+### `found-6-oct/user-menu-hides-sign-out-below-a-scroll` — open (visible bug, small; found closing `found-30-sep/sw-api-cache-reads-the-menu-box-once`)
+
+**In a 900 px window the user menu's Sign out is below its foot, reached only by scrolling the menu**
+
+*Evidence, 6 October, lane 2:* the user menu holds 897 px of rows, and has 840.5 px of room under the avatar at 1440×900, so it scrolls. Sign out, its last row, sits at 914 to 946 while the menu ends at 892.5, until the menu is scrolled, and nothing on the menu says there is more below it.
+
+*To close:* decide what the menu drops or folds so that it fits a 900 px window, as ClickUp's does, or show that it scrolls. Then check that Sign out is in view on opening at 1440×900.
 
 ### `found-30-sep/comment-files-unordered` — **closed** (visible bug, small; found closing `found-30-sep/attachments-unordered`)
 
@@ -3237,7 +3277,7 @@ Checks:
 
 Regression on lanes 2, 4, 5, 6 and 7: the 34 suites the six fixes of this batch touch (`admin-audit-page`, `comment-plus-menu`, `data-transfer-keys`, `field-writes-by-level`, `file-exports`, `full-edit-levels`, `gantt-controls`, `goals-page`, `guest-canvas-scope`, `guest-chat-scope`, `guest-create-menu`, `guest-invitations`, `guest-read-scope`, `guest-space-level`, `guest-task-edits`, `guest-task-making`, `imports`, `list-export`, `local-dates`, `login-workspace-binding`, `lookup-read-access`, `menu-reopen`, `panel-collapse`, `realtime-access-ends`, `refused-as-forbidden`, `report-export-key`, `session-in-the-browser`, `sign-in-and-password`, `task-attachments`, `task-field-create`, `task-menu-favorite-archive`, `timeline-dates`, `view-visibility` and `view-writes-by-level`), 517 checks, all green.
 
-### `found-30-sep/lanes-save-downloads-in-ascii` — open (test tooling, small; found closing `found-30-sep/list-export-saved-as-list-csv`) · reproduced 5 October
+### `found-30-sep/lanes-save-downloads-in-ascii` — **closed** (test tooling, small; found closing `found-30-sep/list-export-saved-as-list-csv`) · reproduced 5 October
 
 **On the lanes, Chromium saves any download named outside ASCII as "download", so no suite can see a name in another script unless it asks for a UTF-8 locale**
 
@@ -3250,6 +3290,18 @@ Regression on lanes 2, 4, 5, 6 and 7: the 34 suites the six fixes of this batch 
 *To close:* give every suite's browser a UTF-8 locale: `launchOptions()` passes `env`, or `lane_*_env` exports `LANG`. Then check Download all's zip saved under a title in Arabic.
 
 *Triage, 5 October:* reproduced on a lane. On the lanes, Chromium still saves any non-ASCII download name as "download" unless the suite passes utf8LocaleEnv(), and only two suites do. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 6 October* (lane 2). The lanes' runners start every suite in a UTF-8 locale, as GitHub's runners and a reader's desktop have: `verify.sh` and `wt-break.sh` run each suite under `env "${LANE_SUITE_LOCALE[@]}"` (`LANG=C.UTF-8 LC_ALL=C.UTF-8`, `lane-env.sh`), which the suite's browser inherits, so a download named in any script is saved under its name on a lane as well. Only the suite's process is given it; the lanes' APIs are started as before. Under it the browser's language, its `Intl` locale, its date and number formats and its collation read as they did (`en-US`, a bare page measured both ways); only the charset is UTF-8. `utf8LocaleEnv` stays, for a suite started by hand from a shell with no locale.
+
+Measured on lane 2 with the extended `task-attachments` suite: before, through `verify.sh` as it was, the task retitled "ملفات المراجعة <tag>" had its zip saved as "download" (33 of 34, the new check red); after, as "ملفات المراجعة <tag>-attachments.zip" (34 of 34; 34 of 34 again in the regression sweep, on lane 7).
+
+Checks:
+- `task-attachments` 33 → 34: a task titled in Arabic has its zip saved under that title, not as "download".
+- `verify-guards-selfcheck.sh` holds the runners to it: a suite started from a shell with no locale runs in UTF-8 (`locale charmap`, read as Chromium reads its charset), and each line of `verify.sh` (one) and `wt-break.sh` (two) that starts a suite starts it so. With `--mutate`, no locale and a `verify.sh` line without it are each caught, from a shell with no locale and from a UTF-8 one, as CI's runner is.
+- Patches `tat-13` (the zip's name is sent in ASCII alone, with no `filename*`) and `tat-14` (the page never reads `filename*`) each redden it: the browser saved "<tag>-attachments.zip". Until now only the unit claims of `dla-21` and `dla-22` could see either.
+
+Found while closing it:
+- `found-7-oct/a-tab-that-saw-the-sign-out-misses-the-sign-in`: in this batch's regression `session-in-the-browser` failed, and it fails as often without the locale as with it.
 
 ### `found-30-sep/task-cover-second-board-reads-early` — **closed** (test tooling, small; found running `task-cover` in this work's regression)
 
@@ -8733,13 +8785,22 @@ Patches: `saw-4` (container), `saw-5` (private list), `saw-6` (born assigned); `
 
 *Merged, 6 October,* into the main checkout by hand (onto `893f8ff`) with the other builder's work, and run again there on lanes 2, 4, 5, 6 and 7: 62 suites and 1014 checks, 61 green at once; `subtask-row-actions` failed once at a load of 15, the row it reads not found, and was green twice when run again. API unit tests 2124/2124, web 344/344, both typechecks clean.
 
-### `found-5-oct/lane-scripts-build-the-main-checkout` — open (test tooling, small; found by the revert builders, reproduced by the triage) · reproduced 5 October
+### `found-5-oct/lane-scripts-build-the-main-checkout` — **closed** (test tooling, small; found by the revert builders, reproduced by the triage) · reproduced 5 October
 
 **Run from a worktree, `build-api.sh`, `verify.sh` and `refresh-dists.sh` build, check and run the main checkout**
 
 *Evidence, reproduced 5 October on a scratch worktree by the triage, with no-op shims so nothing was built:* `build-api.sh` and `verify.sh` begin with `cd /home/user/rundesk`, and so does `refresh-dists.sh`; `fleet-sync.sh` and `fleet-up.sh` set the root to it. The worktree's `build-api.sh` built the main checkout and touched its build stamp. The worktree's `verify.sh` ran the main checkout's copy of the suite, so a suite that exists only in the worktree read as a failed suite ("Cannot find module '/home/user/rundesk/test/e2e/…'"). With a lane served from the worktree, as the worktree's own `fleet-restart.sh` leaves it, `verify.sh` refused (exit 8) and advised `build-api.sh`, which builds the main checkout and moves the lane back onto it. `fleet-restart.sh` alone takes its root from its own location. Both revert builders of 5 October ran into it and worked from path-rewritten copies.
 
 *To close:* take the root from each script's own location, as `fleet-restart.sh` does; let `verify.sh` accept a lane served from its own tree; and add a self-check that a worktree's `verify.sh` runs the worktree's suite against its own build.
+
+*Closed, 6 October* (lane 3, from a worktree). `build-api.sh`, `verify.sh`, `refresh-dists.sh`, `fleet-sync.sh` and `fleet-up.sh` take their root from where they are, as `fleet-restart.sh` did, so a worktree's copy builds, stamps, checks and runs the worktree; `web_sources_hash` (`lane-env.sh`) hashes the tree it is in when given none. `verify.sh` accepts a lane served from its own tree and refuses one served from another, so the main checkout's copy refuses a worktree's lane as before. And it refuses a suite its tree does not have as missing (exit 2), where it ran it and read it as a suite that failed. `wt-break.sh` stays as it was: it is run from the main checkout to break worktrees, and uses the main checkout's scripts on purpose.
+
+Measured on a worktree at 496843f (`/tmp/claude-0/wt-root`) and lane 3, with a suite only the worktree has (`root-probe`, which says where it ran and asks the lane's API for its health):
+- Before, the worktree's `build-api.sh` and `refresh-dists.sh` (with `pnpm`, `mkdir` and `touch` stood in for) ran in `/home/user/rundesk`, stamped its build, and recorded its sources (`36b484…`) rather than the worktree's (`c3339d…`). The worktree's `verify.sh` ran the main checkout's copy of the suite ("Cannot find module '/home/user/rundesk/test/e2e/root-probe.mjs'", exit 1). With lane 3 served from the worktree, it refused it as "not this tree" (exit 8) and advised `build-api.sh`, which built the main checkout.
+- After, the same two ran in the worktree and recorded `c3339d…`. The worktree's own `build-api.sh 3` and `refresh-dists.sh 3` put lane 3 on the worktree's build, and its `verify.sh` ran its suite there: "this suite ran from /tmp/claude-0/wt-root/test/e2e/root-probe.mjs, and the lane's API answered 200" (exit 0). The main checkout's `verify.sh` refused the worktree's suite as missing (exit 2), the worktree's bundle as built from other sources (exit 6), and, once its own bundle was rebuilt, the worktree's API: "port 3023 is served from /tmp/claude-0/wt-root/apps/api, not this tree" (exit 8). Lane 3 was then put back on the main checkout's build.
+
+Checks:
+- `lane-root-selfcheck.sh` (new, in preflight), on a stand-in tree: the five scripts take their root from where they are and name no other; `build-api.sh` builds and stamps the stand-in; `refresh-dists.sh` builds its web and records its sources; and its `verify.sh` refuses a suite only this checkout has, as this checkout's refuses the stand-in's. With `--mutate`, each of the five given the main checkout back as its root is caught, `verify.sh`'s by the run as well as by the scan.
 
 ### `found-6-oct/field-lists-name-a-private-lists-fields` — **closed** (security, small; found reviewing `found-30-sep/field-definition-takes-a-foreign-list`) · reproduced 5 October
 
@@ -9035,6 +9096,17 @@ Found beside it: `found-6-oct/a-socket-sends-into-rooms-it-may-not-read`.
 *Fixed when merged, 6 October (lane 7, by me).* On the merged build `session-in-the-browser` failed 3 of 7 runs, each time a check that says or makes something just after the socket opens again: the socket had opened, and the message or the task was never heard or drawn. A socket is let into its rooms only after its connection opens (the server reads its session first, and joins a page's rooms when their subscribe is answered), so what is said in between reaches nothing; and the page read its data only when it mounted, so a task made in that gap stayed missing until a reload. Now the rooms asked for again wait for the server's answer, and then the page's active queries are read afresh (`rejoinAndCatchUp`, `lib/realtime.ts`), so whatever was said meanwhile is drawn; and the suite says its message again every two seconds until the reopened socket hears it, for twelve seconds, since a message said before the server has let the socket in reaches no room. After: 6 of 6 runs green on lane 7. `realtime.test.ts` 9 → 10, with the unit claim `sib-19` (the subscribe asks no answer and nothing is read afresh), shown to fail exactly that test.
 
 *Merged, 6 October,* into the main checkout (onto `986c760`) with the batch's other builders' work, and run again there on lanes 2, 5 and 7: 63 suites, 60 green at once; `list-export` and `panel-collapse` failed once at a load of 14 and were green twice each when run again; `session-in-the-browser` failed 3 of 7 runs, its reconnect checks racing the server's admission of a reopened socket (fixed here: see `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), then 6 of 6. API unit tests 2063/2063, web 344/344, both typechecks clean.
+
+### `found-7-oct/a-tab-that-saw-the-sign-out-misses-the-sign-in` — open (visible bug, small; found in the regression of `found-30-sep/lanes-save-downloads-in-ascii`)
+
+**A tab that has noticed a sign-out made in another tab is not given its socket back when the person signs in again there**
+
+*Evidence, 7 October, lane 6:* `session-in-the-browser`'s two-tab check failed in this batch's sweep, and failed alone in 1 run of 6 with a UTF-8 locale and 1 of 6 without (and 3 of 6 before the machine was restarted), so the locale is not why. With the listening tab's writes and storage events logged:
+- In a passing run it heard the sign-out (the person → nobody) at +0.5 s and the sign-in (nobody → the person) at +5.3 s, and opened its socket again.
+- In the failing run the other tab's sign-in landed 9.5 s after it was submitted. Before it did, at +11.7 s, the listening tab's own request found no session, and the tab cleared its own store (nobody). When the sign-in was heard at +13.7 s the tab named nobody, and `followOtherTab`, which follows only a sign-in of this tab's person, did nothing.
+- The page stayed on its list with its socket closed. The suite's `stillHolds` reads the shared storage, which the other tab had filled again, so the suite called the tab signed in.
+
+*To close:* a tab that cleared itself after a sign-out elsewhere follows the next sign-in of the person it last held: it takes them from the shared storage and opens its socket again. Another person's sign-in stays the owner's to decide. Check it by holding the sign-in until the listening tab has cleared itself.
 
 ### `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change` — **closed** (security, small; found closing `found-5-oct/import-merge-resets-fields-the-file-lacks`) · reproduced 6 October
 
