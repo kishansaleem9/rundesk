@@ -657,6 +657,36 @@ try {
     await sql`delete from notifications where title like ${`${stamp}-due-%`}`
   }
   {
+    // What the product makes the first time it is used (found-7-oct/first-use-rows-counted-as-left):
+    // a workspace's #general, with the member who listed its channels in it, and that person's dock.
+    const a = await account('first-use')
+    const general = []
+    const r = await whileRunning('probe-first-use', [{ t: 'users', id: a.id }], async () => {
+      const [c] = await sql`insert into chat_channels (workspace_id, name, created_by_id) values (${shared}, 'general', ${outsider.id}) returning id::text as id`
+      general.push(c.id)
+      await sql`insert into chat_channel_members (channel_id, user_id) values (${c.id}, ${outsider.id})`
+      await sql`insert into user_dock_configs (user_id, workspace_id, pinned_links) values (${outsider.id}, ${shared}, '[]'::jsonb)`
+      return null
+    })
+    chk(r.up && r.code === 0 && !/✗ this run left/.test(r.out),
+      'and one during which a workspace’s #general is made, with the member who listed its channels in it, and a shared account’s dock, passes: the product makes those the first time it is used',
+      `ready ${r.up}; it exited ${r.code}; it said ${JSON.stringify(r.out.trim().slice(-300))}`)
+    for (const id of general) await sql`delete from chat_channels where id = ${id}`
+    await sql`delete from user_dock_configs where user_id = ${outsider.id} and workspace_id = ${shared}`
+  }
+  {
+    // Any other channel is a run's to say: one it made and never registered fails it.
+    const a = await account('a-channel')
+    const r = await whileRunning('probe-a-channel', [{ t: 'users', id: a.id }], async () => {
+      const [c] = await sql`insert into chat_channels (workspace_id, name, created_by_id) values (${shared}, ${slug('channel')}, ${outsider.id}) returning id::text as id`
+      return c.id
+    })
+    chk(r.up && r.code === 1 && /✗ this run left 1 row that nothing it registered removes: 1 chat_channels row/.test(r.out),
+      'but one that leaves another channel it made and never registered fails, naming it',
+      `ready ${r.up}; it exited ${r.code}; it said ${JSON.stringify(r.out.trim().slice(-300))}`)
+    if (r.made) await sql`delete from chat_channels where id = ${r.made}`
+  }
+  {
     // A notification a request writes for nobody: a test notification has no actor, and is no schedule's.
     const a = await account('tests')
     const r = await whileRunning('probe-tests', [{ t: 'users', id: a.id }], async () => {
@@ -776,7 +806,7 @@ try {
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)
-const MIN_CASES = 46
+const MIN_CASES = 48
 if (pass + fail < MIN_CASES) {
   console.log(`\x1b[31mnot ok\x1b[0m only ${pass + fail} case(s) ran, below the floor of ${MIN_CASES}`)
   fail += 1
@@ -861,7 +891,10 @@ if (process.argv.includes('--mutate') && !process.env.MADE_LIB_UNDER_TEST && !pr
       ['elder-rows-deleted', 'if (elder.length) kept.push(said(table, elder.length))\n      return ids.filter((id) => !elder.includes(id))', 'return ids'],
       ['leftovers-read-by-hand', "const atExit = argv[0] === '--exit'", 'const atExit = true'],
       ['leftovers-pass', '      if (left.length) {\n        status = 1', '      if (false) {\n        status = 1'],
-      ['use-counted-as-left', "c.ordinal_position`).filter((r) => !(r.t in LEFT_BY_USE))", 'c.ordinal_position`)'],
+      ['use-counted-as-left', '(await madeAtColumns(sql)).filter((r) => !(r.t in LEFT_BY_USE))', '(await madeAtColumns(sql))'],
+      ['general-counted-as-left', "? await sql`select count(*)::int as n from chat_channels c where c.created_at >= ${since} and not (${GENERAL(sql)})`", "? await sql`select count(*)::int as n from chat_channels c where c.created_at >= ${since}`"],
+      ['every-channel-first-use', "const GENERAL = sql => sql`c.name = 'general' and not c.is_dm and not c.is_private`", "const GENERAL = sql => sql`true`"],
+      ['every-shared-dock-counted', "and exists (select 1 from users u where u.id = d.user_id and u.created_at >= ${since})`", "`"],
       ['unscheduled-notifications-pass', "and (actor_id is not null or not (type::text = any(${SCHEDULED}::text[])))", 'and actor_id is not null'],
       ['scheduled-notifications-counted', 'created_at >= to_timestamp(${started} / 1000.0) and (actor_id is not null or not (type::text = any(${SCHEDULED}::text[])))`', 'created_at >= to_timestamp(${started} / 1000.0)`'],
     ],

@@ -317,9 +317,15 @@ try {
   const startBox = page.getByTestId('task-start-date')
   const dueBox = page.getByTestId('task-due-date')
   const sheetReady = await waitUntil(async () => (await startBox.inputValue({ timeout: 1000 }).catch(() => '')) === SHEET_START, { timeoutMs: 20_000 })
+  /*
+   * An attribute that is not there is answered at once; the time is for a page
+   * busy reading itself afresh as its socket joins. Given a second, the start's
+   * came back unread in the twelfth batch's regression, under the sweep's load
+   * (`found-7-oct/task-values-bins-before-the-socket-catches-up`).
+   */
   const bounds = {
-    startMax: await startBox.getAttribute('max', { timeout: 1000 }).catch(() => 'unread'),
-    dueMin: await dueBox.getAttribute('min', { timeout: 1000 }).catch(() => 'unread'),
+    startMax: await startBox.getAttribute('max', { timeout: 10_000 }).catch(() => 'unread'),
+    dueMin: await dueBox.getAttribute('min', { timeout: 10_000 }).catch(() => 'unread'),
   }
   const patched = page.waitForResponse((r) => r.request().method() === 'PATCH' && new URL(r.url()).pathname.endsWith(`/tasks/${S}`), { timeout: 15_000 }).catch(() => null)
   await startBox.fill(dayAt(10, 9), { timeout: 5000 }).catch(() => {})
@@ -390,12 +396,32 @@ try {
   // ══ 4. A REFUSED CHANGE IS SAID IN THE SERVER'S WORDS ═════════════════════
   console.log('\n▶ the task sheet and a row edit say a refused change in the server’s words')
   /*
-   * Each task is put in the bin BY SQL while the page shows it, as binning does
-   * it (`deleteTask`) but with no event: the list page redraws on a bin's event
-   * and the row would be gone before it is changed. What is checked is what the
-   * page says when the server refuses a change; the bin is only the refusal.
+   * Each task is put in the bin BY SQL as the page's change of it leaves the
+   * page, as binning does it (`deleteTask`) but with no event: the list page
+   * redraws on a bin's event and the row would be gone before it is changed.
+   * What is checked is what the page says when the server refuses a change; the
+   * bin is only the refusal.
+   *
+   * AS THE CHANGE LEAVES, NOT BEFORE IT IS MADE
+   * (`found-7-oct/task-values-bins-before-the-socket-catches-up`). A page whose
+   * socket joins after it has read reads itself afresh once it has
+   * (`found-7-oct/a-socket-that-opens-late-misses-what-was-said`), so a task
+   * binned while the socket was still joining was read back binned: the sheet
+   * shut its start box, the Table view dropped the row, and nothing was sent.
+   * The rehearsal of `a936b69` failed so, and a socket held until after the bin
+   * did it every time.
    */
   const binBySql = (id) => sql`update tasks set is_archived = true, archived_at = now() where id = ${id}`
+  /** Bins the task by SQL as its next PATCH leaves the page, then lets the PATCH go on; returns what undoes the route. */
+  const binAsItIsChanged = async (id) => {
+    const only = (url) => url.pathname.endsWith(`/tasks/${id}`)
+    const binThenSend = async (route) => {
+      if (route.request().method() === 'PATCH') await binBySql(id)
+      await route.continue()
+    }
+    await page.route(only, binThenSend)
+    return () => page.unroute(only, binThenSend).catch(() => {})
+  }
   /** The PATCH of this task the page sends next, and the server's sentence in its answer. */
   const nextPatchOf = (id) => page.waitForResponse((r) => r.request().method() === 'PATCH' && new URL(r.url()).pathname.endsWith(`/tasks/${id}`), { timeout: 15_000 })
     .then(async (r) => {
@@ -404,16 +430,17 @@ try {
     })
     .catch(() => ({ status: null, words: '' }))
 
-  // The sheet: a task binned while its sheet is open, then a start typed.
+  // The sheet: a start typed on a task binned as the start is sent.
   const SB_START = dayAt(1, 9)
   const SB = await makeTask(`Sheet refused ${TAG}`, { startDate: new Date(SB_START).toISOString(), dueDate: new Date(SHEET_DUE).toISOString() })
   await page.goto(`${B}/app/${WS}/${SPACE}/${PROJECT}/${LIST}?task=${SB}`, { waitUntil: 'domcontentloaded' })
   const sbReady = await waitUntil(async () => (await startBox.inputValue({ timeout: 1000 }).catch(() => '')) === SB_START, { timeoutMs: 20_000 })
-  await binBySql(SB)
+  const sbUnroute = await binAsItIsChanged(SB)
   const sbPatch = nextPatchOf(SB)
   await startBox.fill(dayAt(2, 9), { timeout: 5000 }).catch(() => {})
   await startBox.press('Enter', { timeout: 5000 }).catch(() => {})
   const sbAnswer = await sbPatch
+  await sbUnroute()
   let sbToast = ''
   await waitUntil(async () => (sbToast = (sbAnswer.words && (await toasts()).find((s) => s.includes(sbAnswer.words))) || '').length > 0, { timeoutMs: 10_000 })
   const sbRow = await rowOf(SB)
@@ -423,7 +450,7 @@ try {
     `the sheet showed the start ${sbReady}; the PATCH answered ${sbAnswer.status ?? 'nothing'} saying ${JSON.stringify(sbAnswer.words)}; the toasts read ${JSON.stringify(await toasts())}; the task holds ${JSON.stringify(sbRow)}`,
   )
 
-  // A row edit in the Table view: a priority picked on a task binned while its menu is open.
+  // A row edit in the Table view: a priority picked on a task binned as the pick is sent.
   const RB = await makeTask(`Row refused ${TAG}`, { priority: 'normal' })
   await page.goto(`${B}/app/${WS}/${SPACE}/${PROJECT}/${LIST}`, { waitUntil: 'domcontentloaded' })
   await page.getByTestId('work-view-tab-type-table').click({ timeout: 20_000 }).catch(() => {})
@@ -431,10 +458,11 @@ try {
   const rbShown = await waitUntil(() => tableRow.isVisible().catch(() => false), { timeoutMs: 20_000 })
   await tableRow.getByTestId('list-table-priority-button').click({ timeout: 5000 }).catch(() => {})
   const rbMenu = await waitUntil(() => tableRow.getByRole('button', { name: /^high$/i }).first().isVisible().catch(() => false), { timeoutMs: 5000 })
-  await binBySql(RB)
+  const rbUnroute = await binAsItIsChanged(RB)
   const rbPatch = nextPatchOf(RB)
   await tableRow.getByRole('button', { name: /^high$/i }).first().click({ timeout: 5000 }).catch(() => {})
   const rbAnswer = await rbPatch
+  await rbUnroute()
   let rbToast = ''
   await waitUntil(async () => (rbToast = (rbAnswer.words && (await toasts()).find((s) => s.includes(rbAnswer.words))) || '').length > 0, { timeoutMs: 10_000 })
   const rbRow = await rowOf(RB)

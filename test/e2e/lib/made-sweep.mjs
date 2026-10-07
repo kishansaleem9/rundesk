@@ -664,23 +664,50 @@ export const LEFT_BY_USE = {
 /** The kinds of notification the API's schedules write, with no actor (`reminders`, `task-reminders`, `briefing`, `workload-alert`). */
 export const SCHEDULED = ['task_due_soon', 'task_overdue', 'task_updated', 'message_reminder', 'ai_briefing', 'workload_alert']
 
-export async function leftSince(sql, started) {
-  /*
-   * Each table's own time of making: `created_at`, or, where it has none, the
-   * time its row says it came (`received_at`, `joined_at`, `added_at`…), the
-   * first column that is a time set as the row is written. A table with only
-   * `updated_at` cannot say a row is new, and is not read.
-   */
-  const madeAt = (await sql`
+/*
+ * Each table's own time of making: `created_at`, or, where it has none, the
+ * time its row says it came (`received_at`, `joined_at`, `added_at`…), the
+ * first column that is a time set as the row is written. A table with only
+ * `updated_at` cannot say a row is new. Read by the leftovers and by the rows
+ * a run finds alike, and said once: a copy of it in each was a rule the gate's
+ * mutation could break in one place and not the other (the rehearsal of
+ * `a936b69`: "ANCHOR AMBIGUOUS made-at-only-created").
+ */
+const madeAtColumns = (sql) => sql`
     select distinct on (c.table_name) c.table_name as t, c.column_name as at
     from information_schema.columns c
     join information_schema.tables x on x.table_schema = c.table_schema and x.table_name = c.table_name and x.table_type = 'BASE TABLE'
     where c.table_schema = 'public' and c.data_type like 'timestamp%'
       and (c.column_name = 'created_at' or (c.column_default like 'now()%' and c.column_name <> 'updated_at' and c.column_name not like 'last\\_%'))
-    order by c.table_name, (c.column_name = 'created_at') desc, c.ordinal_position`).filter((r) => !(r.t in LEFT_BY_USE))
+    order by c.table_name, (c.column_name = 'created_at') desc, c.ordinal_position`
+
+/*
+ * ROWS THE PRODUCT MAKES THE FIRST TIME IT IS USED, which are nobody's run's
+ * (`found-7-oct/first-use-rows-counted-as-left`): a workspace's #general, made
+ * by the first member to list its channels (`ChatService.ensureGeneralChannel`),
+ * with that member in it; and a person's dock, made by the first page they open,
+ * which it keeps among their recent pages (`DashboardsService.updateDockConfig`).
+ * On a lane both were made long ago; in CI's fresh database the first suite to
+ * open chat or the app makes them, and `syncup-live` was failed for it in the
+ * rehearsal of `a936b69`. Another channel still counts, and so does the dock of
+ * an account the run made.
+ */
+const GENERAL = sql => sql`c.name = 'general' and not c.is_dm and not c.is_private`
+
+export async function leftSince(sql, started) {
+  const madeAt = (await madeAtColumns(sql)).filter((r) => !(r.t in LEFT_BY_USE))
+  const since = sql`to_timestamp(${started} / 1000.0)`
   const left = []
   for (const { t, at } of madeAt) {
-    const [{ n }] = t === 'notifications'
+    const [{ n }] = t === 'chat_channels'
+      ? await sql`select count(*)::int as n from chat_channels c where c.created_at >= ${since} and not (${GENERAL(sql)})`
+      : t === 'chat_channel_members'
+      ? await sql`select count(*)::int as n from chat_channel_members m where m.${sql(at)} >= ${since}
+                    and not exists (select 1 from chat_channels c where c.id = m.channel_id and ${GENERAL(sql)})`
+      : t === 'user_dock_configs'
+      ? await sql`select count(*)::int as n from user_dock_configs d where d.${sql(at)} >= ${since}
+                    and exists (select 1 from users u where u.id = d.user_id and u.created_at >= ${since})`
+      : t === 'notifications'
       ? await sql`select count(*)::int as n from notifications where created_at >= to_timestamp(${started} / 1000.0) and (actor_id is not null or not (type::text = any(${SCHEDULED}::text[])))`
       : t === 'project_templates'
         ? await sql`select count(*)::int as n from project_templates where created_at >= to_timestamp(${started} / 1000.0) and not is_built_in`
@@ -721,12 +748,7 @@ export async function rowsFound(sql) {
     join information_schema.tables x on x.table_schema = c.table_schema and x.table_name = c.table_name and x.table_type = 'BASE TABLE'
     where c.table_schema = 'public' and c.column_name = 'id'
     order by 1`).map((r) => r.t).filter((t) => !(t in LEFT_BY_USE))
-  const madeAt = Object.fromEntries((await sql`
-    select distinct on (c.table_name) c.table_name as t, c.column_name as at
-    from information_schema.columns c
-    where c.table_schema = 'public' and c.data_type like 'timestamp%'
-      and (c.column_name = 'created_at' or (c.column_default like 'now()%' and c.column_name <> 'updated_at' and c.column_name not like 'last\\_%'))
-    order by c.table_name, (c.column_name = 'created_at') desc, c.ordinal_position`).map((r) => [r.t, r.at]))
+  const madeAt = Object.fromEntries((await madeAtColumns(sql)).map((r) => [r.t, r.at]))
   const rows = {}
   for (const t of tables) {
     const got = await sql`select id::text as id, to_jsonb(x) as row from ${sql(t)} x`

@@ -663,7 +663,7 @@ jobs:
     # free, by running these same steps locally from a checkout at this
     # runner's path (1 October). So a failure here stops the job where it
     # happened, each step is capped at 15 minutes (the made-sweep gate, about
-    # 17 on a slow runner, at 40) so a hang costs at most that, and the job
+    # 51 on a slow runner, at 90) so a hang costs at most that, and the job
     # waits for Verify and Browser suites, so a lint error or a broken page is
     # never followed by an hour of suites.
     needs: [changes, verify, browser-suites]
@@ -792,8 +792,15 @@ jobs:
       # Probe processes against this database; each rule of the registry and
       # the sweep is broken in turn and a case must notice. Before the suites,
       # which all run through it.
+      #
+      # EVERY MUTATION RUNS EVERY CASE AGAIN (sixty over 46 cases then, 63 over
+      # 48 now), and every case's run reads every table twice since the shared
+      # rows are kept (found-7-oct/shared-rows-keep-what-runs-changed): the
+      # rehearsal of a936b69 took 4,018 s here, about 51 minutes on a slow
+      # runner, where it had taken 1,328 s the day before. 40 minutes would
+      # have cut it off.
       - name: A run's people go when it ends, a killed run's with the next
-        timeout-minutes: 40
+        timeout-minutes: 90
         run: node scripts/check-made-sweep.mjs --mutate
 
       # The harnesses import the compiled service, guards and controllers, so

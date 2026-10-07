@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 518 items: 11 open · 3 partly fixed · 447 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 523 items: 13 open · 3 partly fixed · 450 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -9263,6 +9263,78 @@ Checks:
 - `realtime.test.ts`: the first opening asks again for every room asked for before it, and for none twice (13 tests).
 - Patch `tsf-5` (a first opening asks for no room) reddens the new check (2 of 3 on lane 2); the unit claim `sib-25` reddens the ledger's test.
 - Patch `sib-11` (a reopening asks for no room) lost its line to the change and was re-aimed at the reopening alone, the first opening kept; it reddens the renamed test again (12 of 13).
+
+### `found-7-oct/the-made-at-rule-is-written-twice` — **closed** (test tooling, small; found rehearsing CI for `a936b69`) · reproduced 7 October
+
+**The sweep's rule for when a row was made is written twice, so the gate's mutation of it proves nothing, and the gate's CI step runs past its cap**
+
+*Evidence, 7 October, the CI rehearsal of `a936b69` (every job, from a clean checkout):* the postgres-harnesses step "A run's people go when it ends, a killed run's with the next" (`check-made-sweep.mjs --mutate`) failed with `ANCHOR AMBIGUOUS made-at-only-created (2 match(es))`, 47 of 48 of the sweep's mutations biting. The twelfth batch's found snapshot (`rowsFound`) read each table's time of making with a copy of the query `leftSince` reads it with, so the one mutation that breaks that rule matched twice and never ran. Nothing here ran the gate whole between the two: the preflight does not run it, and the twelfth batch's own mutation runs named only its new mutations. And the step took 4,018 s, about 51 minutes on a slow runner, against its cap of 40 (1,328 s the day before): sixty mutations, each running all 46 cases again, and each case's run now reading every table twice.
+
+*To close:* one query for a table's time of making, read by both; the mutation aimed at it bites; the step given the time it takes.
+
+*Closed, 7 October.*
+- `madeAtColumns` (`test/e2e/lib/made-sweep.mjs`) is the one query, and `leftSince` and `rowsFound` both read it. The registry's `use-counted-as-left` mutation, anchored on the copy's end, is aimed at the helper's call.
+- The step's cap is 90 minutes (`.github/workflows/ci.yml`), with the measurement beside it.
+
+Measured here, the gate whole, against a database with the schema (`rundesk_pristine`), after the fix:
+- 48 cases pass.
+- Each of its 63 mutations reddens a case (12 of the registry's, 51 of the sweep's). That includes `made-at-only-created`, 9 cases red; before the fix its anchor matched twice and it never ran. It also includes `use-counted-as-left`, aimed at the helper's call.
+- It took 4,315 s, about 55 minutes on a slow runner by the rehearsal's reckoning, inside the step's 90.
+
+### `found-7-oct/first-use-rows-counted-as-left` — **closed** (test tooling, small; found rehearsing CI for `a936b69`) · reproduced 7 October
+
+**A suite that is the first to open chat or the app is failed for the rows the product makes on first use**
+
+*Evidence, 7 October, the CI rehearsal of `a936b69`:* the postgres-harnesses step "A real SyncUp in two browsers" (`syncup-live`) passed 59 of 59 checks and failed on "✗ this run left 4 rows that nothing it registered removes: 1 chat_channel_members row, 1 chat_channels row, 2 user_dock_configs rows". In CI's fresh database it is the first suite to list the fixture workspace's channels and to open a page as its two accounts. Listing the channels makes the workspace's #general, with the member who listed them in it (`ChatService.ensureGeneralChannel`). A person's first page makes their dock, which keeps it among their recent pages (`DashboardsService.updateDockConfig`). On a lane all of that was made on 20 September, so the leftovers check (`found-30-sep/suite-leftovers-unmeasured`) never met it. Those rows are the product's, made once per workspace and per person, and no run's. Reproduced on lane 4 by making CI's fresh state by hand: the fixture workspace's #general was renamed, and the two accounts' docks there were set aside, then put back after. `syncup-live` passed 59 of 59 and failed on "this run left 9 rows that nothing it registered removes: 2 chat_channel_members rows, 2 chat_channels rows, 2 meeting_attendees rows, 1 meetings row, 2 user_dock_configs rows". Those are the first-use rows, plus two product races, each entered as its own item: `found-7-oct/two-first-listings-make-two-generals` and `found-7-oct/a-call-ended-twice-keeps-two-records`.
+
+*To close:* what the product makes the first time it is used is not counted against a run: a workspace's #general and its members, and the dock of a person the run did not make. Any other channel still counts, and so does the dock of an account the run made. The gate needs a case for each.
+
+*Closed, 7 October.* `leftSince` (`test/e2e/lib/made-sweep.mjs`) leaves out a #general channel (not a direct message, not private), its members, and a dock whose person was not made since the run began. The gate (`scripts/check-made-sweep.mjs`) has two new cases. A run during which #general is made with its lister in it, and a shared account's dock with it, passes. One that leaves another channel it made and never registered fails, naming it.
+
+Measured on lane 4, with the same state made by hand again and put back after: `syncup-live` passed 59 of 59 and exited 0, with nothing said left. That run made one #general and no second record. In the gate, the two cases pass, and `general-counted-as-left`, `every-channel-first-use` and `every-shared-dock-counted` each redden one.
+
+### `found-7-oct/task-values-bins-before-the-socket-catches-up` — **closed** (test tooling, small; found rehearsing CI for `a936b69`) · reproduced 7 October
+
+**task-values bins a task before the page's socket has joined, and the page reads the bin back before the change is made**
+
+*Evidence, 7 October:*
+- The CI rehearsal of `a936b69`: `task-values` failed "the task sheet says a refused change in the server's words" with "the sheet showed the start true; the PATCH answered nothing saying ""; the toasts read []; the task holds" the start it had.
+- The twelfth batch's regression: the same suite failed "the task sheet takes a start date typed after the due date" with "the boxes' bounds {"startMax":"unread","dueMin":null}", while the PATCH answered 200 and the task held the typed date.
+
+Section 4 bins each task by SQL while its page shows it, then types a start into the sheet, or picks a priority on the Table view's row, and reads the refusal. Since the twelfth batch a socket that joins after its page has read reads the page afresh (`found-7-oct/a-socket-that-opens-late-misses-what-was-said`). A task binned before the socket had joined was therefore read back binned. The sheet's capabilities came back without edit, so it disabled its start box; the Table view dropped the row; nothing was sent. The bounds are read with a one-second timeout, and in the regression, under the sweep's load, the start box's read ran out of time.
+
+*To close:* bin the task where the page cannot read it back first, and give the bounds' reads time to answer. Measure with the socket held until after the bin.
+
+*Closed, 7 October.* The suite bins each task by SQL as the page's PATCH of it leaves the page: a route on that task's address bins it, then lets the PATCH go on. A page that reads itself afresh before then reads the task as it was. The bounds are read with ten seconds to answer; an attribute that is not there is answered at once.
+
+Measured with a probe on lane 4 that holds the page's socket until the task has been binned, then lets it join. The socket's first join re-reads the page (the twelfth batch's catch-up: the subscribe with an answer, then the capabilities read again).
+- **Binned before the change, as the suite did:** the sheet's start box was disabled once the page had read itself afresh, and no PATCH was sent. The Table view had dropped the row by then, and no PATCH was sent there either.
+- **Binned as the change leaves, as it does now** (two runs): the box stayed enabled and the row stayed. Each PATCH answered 409 "This task is in the bin. Restore it before editing.", the toast carried that sentence, and each task kept its start and its priority (read by SQL).
+
+Checks:
+- `task-values` keeps its 24 checks. After the change it passed 24 of 24 three times on lane 4.
+- The patches that claim the touched checks still redden them: `task-values-36` and `-37` (the sheet says nothing of a refusal, or says its own sentence), `-38` and `-39` (the same for a row edit) and `-33` (the sheet bounds the start by the due date). Each ran 23 of 24 on lane 2, with its claimed check red.
+
+### `found-7-oct/two-first-listings-make-two-generals` — open (visible bug, small; found reproducing `found-7-oct/first-use-rows-counted-as-left`) · reproduced 7 October
+
+**A new workspace whose channels are listed twice at once gets two #general**
+
+*Evidence, 7 October, lane 4 (`races-probe.mjs`):* six new workspaces, each with its channels listed twice at once by its owner (`GET /workspaces/:ws/chat/channels`, both 200). Each was left with two #general, 6 of 6. `ChatService.ensureGeneralChannel` reads for a channel named `general` and, finding none, makes one. Nothing makes the two one: there is no unique index on a workspace's channel names and no lock. So each listing that reads before the other writes makes its own #general, with its lister in it. It was seen first in `syncup-live` on lane 4, with CI's fresh state made by hand: its two browsers opened chat together and made two. A workspace's first members opening chat together see two #general.
+
+*To close:* one #general per workspace, whatever the timing. That means a unique index on a workspace's #general, or the insert made conditional on there being none, under a lock. Add a check that two listings at once leave one. The leftovers check no longer counts #general (`found-7-oct/first-use-rows-counted-as-left`), so this needs a check of its own.
+
+### `found-7-oct/a-call-ended-twice-keeps-two-records` — open (visible bug, small; found reproducing `found-7-oct/first-use-rows-counted-as-left`) · reproduced 7 October
+
+**A call ended a second time while its record is being written gets a second record**
+
+*Evidence, 7 October, lane 4 (`races-probe.mjs`):* calls with a line of transcript were ended (`POST …/calls/:id/end`), then ended again after a gap.
+- At 20 ms the call kept two meeting records. The call pointed at one; the other stood in Meetings with nothing pointing at it.
+- At 0 and 5 ms the second end was answered "pending" (it lost the claim).
+- At 50 ms and later it was answered with the first end's record, which had been written by then.
+
+`CallsService.end` claims the end (`ended_at`), then gathers the transcript, has the model write the notes, writes the record, and points the call at it last. An end that comes after the claim but before that last write finds `ended_at` set and `meeting_id` empty. It takes this for an end that died before writing (the "record is OWED" recovery) and writes another record. It also asks the model for notes again: the double generation the claim was written to stop. Here the window was about 20 ms, because the local model answers at once. With a real model it is the seconds the notes take, and two people pressing End for all in that time each leave a record, as does a client that asks again. On lane 4, `syncup-live`, which asks `end` until it names the record, left one this way.
+
+*To close:* an end that finds the end claimed and the record not yet written should wait for it, or answer pending, unless the claim is old enough to be a writer that died (a claim time, or a lease). Add a check that two ends, at any gap, leave one record.
 
 ### `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change` — **closed** (security, small; found closing `found-5-oct/import-merge-resets-fields-the-file-lacks`) · reproduced 6 October
 
