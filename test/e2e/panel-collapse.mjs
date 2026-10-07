@@ -27,7 +27,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
 import { waitUntil } from './lib/wait.mjs'
-import { apiAs as apiAsAt, madeRow } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeRow, changesShared } from './lib/fixture.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -186,6 +186,16 @@ try {
   const admin = await signInApi(API, ADMIN.email, ADMIN.password)
   const A = apiAs(admin.accessToken)
   const workspaceId = admin.workspaces[0].id
+  /*
+   * WHAT THIS CHANGES OF THE SHARED ADMIN'S, PUT BACK AS IT WAS FOUND
+   * (`found-7-oct/shared-rows-keep-what-runs-changed`). Its panels, its sidebar
+   * and its dock's pinned links are the admin's, every run's; reset to what
+   * this suite took for the defaults, they were left unlike pristine on every
+   * lane. Said here, before anything changes them, the run's sweep writes them
+   * back whole, however the run ends.
+   */
+  changesShared('users', { email: ADMIN.email }, ['panels_collapsed', 'sidebar_collapsed'])
+  if (admin.user?.id) changesShared('user_dock_configs', { match: { user_id: admin.user.id, workspace_id: workspaceId } }, ['pinned_links'])
 
   // Start from a known state: the checks below are about what a collapse does,
   // not about what this account happened to leave behind last time.

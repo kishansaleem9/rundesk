@@ -3352,6 +3352,17 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # An automation's notification is written only for the members who may
+      # open its task (automation-notifications-reach-every-member): a private
+      # list's task is told to nobody it is closed to, an open list's to each
+      # member, and not to a guest it is not shared with.
+      - name: An automation notifies only those who may open its task
+        timeout-minutes: 15
+        run: node test/e2e/automation-notices.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # A member sets their own weekly capacity from the Workload page;
       # somebody else's asks the profile permission (own-capacity-not-self-service).
       - name: A member sets their own capacity

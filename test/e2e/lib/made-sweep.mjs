@@ -127,6 +127,7 @@ export function readJournal(file) {
   const emails = new Set()
   const accountIds = new Set()
   const rows = new Map()
+  const shared = []
   const bad = []
   for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
     if (!line.trim()) continue
@@ -146,6 +147,12 @@ export function readJournal(file) {
       held = true
       continue
     }
+    if (e.shared) {
+      // A shared row the run said it changes: put back as found when it ends (`changesShared`).
+      if (TABLE.test(String(e.shared.t)) && Array.isArray(e.shared.cols) && e.shared.cols.every((c) => TABLE.test(String(c)))) shared.push(e.shared)
+      else bad.push(line.slice(0, 80))
+      continue
+    }
     if (e.t === 'users') {
       if (typeof e.email === 'string' && e.email) emails.add(e.email.toLowerCase())
       if (typeof e.id === 'string' && UUID.test(e.id)) accountIds.add(e.id)
@@ -156,7 +163,7 @@ export function readJournal(file) {
       bad.push(line.slice(0, 80))
     }
   }
-  return { file, run, held, emails: [...emails], accountIds: [...accountIds], rows, bad }
+  return { file, run, held, emails: [...emails], accountIds: [...accountIds], rows, shared, bad }
 }
 
 /**
@@ -683,8 +690,114 @@ export async function leftSince(sql, started) {
   return left
 }
 
+/*
+ * AND WHAT A RUN LEFT CHANGED OF WHAT IT FOUND (`found-7-oct/shared-rows-keep-what-runs-changed`).
+ * The rows every run shares — the admins' accounts and docks, Main, its space,
+ * list and tasks, the task types, the platform's switches — are no run's to
+ * remove, and a run that changes one and does not put it back hands the next a
+ * database unlike the one it was written for: lane 7's admin kept a planner
+ * rail without "Meet with" from an earlier run, and `calendar-accounts`, which
+ * looks for that box, failed there and nowhere else. So as a run begins
+ * (`--found`, which `lib/made.mjs` runs as the journal opens), every row of
+ * every table with an id is read, but those using the product makes
+ * (`LEFT_BY_USE`); and as it ends, each is read again. One changed outside what
+ * using the product writes (`CHANGED_BY_USE`), or gone, fails the run, named
+ * with its columns. A row made within the minute before the run began is the
+ * run's, as the sweep takes it, and is not read so.
+ */
+export const CHANGED_BY_USE = {
+  '*': ['updated_at'],
+  users: ['last_seen_at'],
+  // The pages a person last visited, written as they go.
+  user_dock_configs: ['nav_recents'],
+}
+const foundFile = (journal) => `${journal}.found.json`
+const FOUND_NAME = /^(.+)\.(\d+)\.(\d+)\.jsonl\.found\.json$/
+
+/** Every row a run finds, by table and id, and each table's own time of making where it has one. */
+export async function rowsFound(sql) {
+  const tables = (await sql`
+    select c.table_name as t from information_schema.columns c
+    join information_schema.tables x on x.table_schema = c.table_schema and x.table_name = c.table_name and x.table_type = 'BASE TABLE'
+    where c.table_schema = 'public' and c.column_name = 'id'
+    order by 1`).map((r) => r.t).filter((t) => !(t in LEFT_BY_USE))
+  const madeAt = Object.fromEntries((await sql`
+    select distinct on (c.table_name) c.table_name as t, c.column_name as at
+    from information_schema.columns c
+    where c.table_schema = 'public' and c.data_type like 'timestamp%'
+      and (c.column_name = 'created_at' or (c.column_default like 'now()%' and c.column_name <> 'updated_at' and c.column_name not like 'last\\_%'))
+    order by c.table_name, (c.column_name = 'created_at') desc, c.ordinal_position`).map((r) => [r.t, r.at]))
+  const rows = {}
+  for (const t of tables) {
+    const got = await sql`select id::text as id, to_jsonb(x) as row from ${sql(t)} x`
+    if (got.length) rows[t] = Object.fromEntries(got.map((r) => [r.id, r.row]))
+  }
+  return { rows, madeAt }
+}
+
+/** What of the rows found is changed now, or gone: `[{ table, id, label, cols }]`, `cols` null for a row gone. */
+export function changedSince(found, now, started) {
+  const out = []
+  for (const [table, rows] of Object.entries(found.rows)) {
+    const byUse = new Set([...CHANGED_BY_USE['*'], ...(CHANGED_BY_USE[table] ?? [])])
+    // A table with no time of making says when its row was last written instead (the AI index's passages).
+    const at = found.madeAt[table] ?? ('updated_at' in (Object.values(rows)[0] ?? {}) ? 'updated_at' : null)
+    for (const [id, was] of Object.entries(rows)) {
+      if (at && Date.parse(was[at]) >= started - 60_000) continue
+      const label = was.email || was.name || was.title || was.flag_key || id
+      const is = now.rows[table]?.[id]
+      if (!is) {
+        out.push({ table, id, label, cols: null })
+        continue
+      }
+      const cols = Object.keys(was).filter((k) => !byUse.has(k) && JSON.stringify(was[k]) !== JSON.stringify(is[k]))
+      if (cols.length) out.push({ table, id, label, cols })
+    }
+  }
+  return out
+}
+
+/**
+ * The shared rows a run said it changes (`changesShared`), written back as the
+ * run found them: those columns only, from what it found. Said, by row.
+ */
+export async function putBack(sql, found, said) {
+  const back = []
+  for (const s of said) {
+    const rows = found.rows[s.t] ?? {}
+    const same = (row) => Object.entries(s.match ?? {}).every(([c, v]) => (c === 'email' ? String(row[c] ?? '').toLowerCase() === String(v).toLowerCase() : String(row[c] ?? '') === String(v)))
+    const id = s.id ?? Object.keys(rows).find((k) => same(rows[k]))
+    const was = id ? rows[id] : null
+    if (!was) continue
+    const cols = s.cols.filter((c) => c in was)
+    if (!cols.length) continue
+    await sql`
+      update ${sql(s.t)} set (${sql(cols)}) = (select ${sql(cols)} from jsonb_populate_record(null::${sql(s.t)}, ${was}::jsonb))
+      where id = ${id}::uuid`
+    back.push(`${s.t} ${was.email || was.name || was.title || id} (${cols.join(', ')})`)
+  }
+  return back
+}
+
+/** What a run finds as it begins, written beside its journal for its end to read. */
+async function writeFound(journal) {
+  let sql = null
+  try {
+    sql = await openDb()
+    if (!sql) return 0
+    fs.writeFileSync(foundFile(journal), JSON.stringify(await rowsFound(sql)))
+    return 0
+  } catch (e) {
+    console.log(`  (what this run found could not be read: ${String(e?.message ?? e).split('\n')[0]}; what it changes of it is not read at its end)`)
+    return 1
+  } finally {
+    await sql?.end({ timeout: 5 }).catch(() => {})
+  }
+}
+
 async function main(argv) {
   if (argv[0] === '--holds') return holds(argv[1], argv[2])
+  if (argv[0] === '--found') return writeFound(argv[1])
   // A run's own end reads what it left; a journal swept by hand has no run around it to read.
   const atExit = argv[0] === '--exit'
   if (atExit) argv = argv.slice(1)
@@ -700,6 +813,11 @@ async function main(argv) {
       return 0
     }
     for (const name of names) {
+      const f = FOUND_NAME.exec(name)
+      if (f) {
+        if (!stillRunning(Number(f[2]), `${f[1]}.mjs`) && !names.includes(name.replace(/\.found\.json$/, ''))) fs.rmSync(path.join(dir, name), { force: true })
+        continue
+      }
       const m = NAME.exec(name)
       if (!m) continue
       const [, suite, pid, , sweeper] = m
@@ -758,7 +876,7 @@ async function main(argv) {
       console.log(`  ✗ cleanup found none of ${whose} in this database (${databaseName()}): of the ${plural(named, 'row')} it names by id, not one is here, so they were made in another database — is DATABASE_URL the API's? Nothing removed; ${aside} keeps the list (no run sweeps it); remove them where they are with DATABASE_URL=<that database> node test/e2e/lib/made-sweep.mjs ${aside}`)
       continue
     }
-    runs.push({ dir: path.dirname(file), started: j.run.started })
+    runs.push({ dir: path.dirname(file), started: j.run.started, journal: kept, shared: j.shared })
     let result = { removed: [], left: [], errors: [] }
     if (!empty) {
       if (!sql) result.left.push('everything it names (no database)')
@@ -772,11 +890,12 @@ async function main(argv) {
       continue
     }
     if (!empty) console.log(`  (removed ${whose}: ${result.removed.length ? result.removed.join(', ') : 'nothing was left of it'})`)
+    if (ended) fs.rmSync(foundFile(kept), { force: true })
     if (j.bad.length) console.log(`    (and passed over ${j.bad.length} unreadable line(s) of its journal: ${j.bad[0]}…)`)
     fs.rmSync(file, { force: true })
   }
   if (!ended && sql) {
-    for (const { dir, started } of runs) {
+    for (const { dir, started, journal, shared } of runs) {
       const nobody = await unregisteredSince(sql, dir, started).catch(() => [])
       if (nobody.length) {
         console.log(`  ! ${plural(nobody.length, 'account was', 'accounts were')} made on this database while this run ran that no run registered, and stay: ${nobody.join(', ')}` +
@@ -795,6 +914,27 @@ async function main(argv) {
         status = 1
         console.log(`  ✗ this run left ${plural(left.reduce((n, l) => n + l.n, 0), 'row')} that nothing it registered removes: ${left.map((l) => `${said(l.table, l.n)}`).join(', ')}` +
           ' — register what it makes (madeRow, lib/made.mjs), as it is made')
+      }
+      const file = foundFile(journal)
+      if (!fs.existsSync(file)) continue
+      let changed
+      try {
+        const found = JSON.parse(fs.readFileSync(file, 'utf8'))
+        const back = shared.length ? await putBack(sql, found, shared) : []
+        if (back.length) console.log(`  (put back as this run found them: ${back.join('; ')})`)
+        changed = changedSince(found, await rowsFound(sql), started)
+      } catch (e) {
+        status = 1
+        console.log(`  ✗ could not read what this run left changed of what it found: ${String(e?.message ?? e).split('\n')[0]}`)
+        continue
+      } finally {
+        fs.rmSync(file, { force: true })
+      }
+      if (changed.length) {
+        status = 1
+        const named = changed.slice(0, 12).map((c) => `${c.table} ${c.label} (${c.cols ? c.cols.join(', ') : 'gone'})`)
+        console.log(`  ✗ this run left ${plural(changed.length, 'row')} it found changed: ${named.join('; ')}${changed.length > 12 ? '; …' : ''}` +
+          ' — put back what it changes of what every run shares, as it ends, or change rows of its own')
       }
     }
   }

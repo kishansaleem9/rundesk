@@ -142,6 +142,8 @@ function arm() {
     }
     journal = path.join(dir, `${SUITE}.${process.pid}.${STARTED}.jsonl`)
     fs.appendFileSync(journal, `${JSON.stringify({ run: { suite: SUITE, pid: process.pid, started: STARTED } })}\n`)
+    // What the run finds, read before it changes anything: its end says what of it the run left changed (`changedSince`, made-sweep.mjs).
+    runSweeper(['--found', journal], url)
   }
   process.on('exit', () => removeAtExit(url))
 }
@@ -225,6 +227,32 @@ export function madeRow(table, id) {
   if (typeof id !== 'string' || !UUID.test(id)) throw new Error(`madeRow(${table}): ${JSON.stringify(id)} is not an id`)
   if (table === 'users') return madeAccount({ id })
   record({ t: table, id })
+}
+
+/**
+ * A ROW EVERY RUN SHARES THAT THIS RUN CHANGES, put back as the run found it
+ * (`found-7-oct/shared-rows-keep-what-runs-changed`): `table`'s row, by `{ id }`
+ * (an account by `{ email }` too), and the `columns` the run changes. Said
+ * before the change, so a run that dies half-way has it put back all the same:
+ * as the run ends the sweep writes those columns back from what the run found,
+ * as it found them, a NULL a NULL, which no route of the product writes back.
+ * A row it changes that it did not say fails the run.
+ */
+export function changesShared(table, row, columns) {
+  if (!TABLE.test(String(table))) throw new Error(`changesShared: ${JSON.stringify(table)} is not a table name`)
+  // By its id; an account by its email; any row by the values of some of its columns (`{ match: { user_id, workspace_id } }`).
+  const key = typeof row === 'string' ? { id: row } : { ...(row ?? {}) }
+  const match = key.match && typeof key.match === 'object' ? { ...key.match }
+    : table === 'users' && typeof key.email === 'string' && key.email.trim() !== '' ? { email: key.email.trim().toLowerCase() } : null
+  const byId = typeof key.id === 'string' && UUID.test(key.id)
+  if (!byId && !(match && Object.keys(match).length && Object.keys(match).every((c) => TABLE.test(c)))) {
+    throw new Error(`changesShared(${table}): name the row by { id }, { match: { column: value } }${table === 'users' ? ' or { email }' : ''}: got ${JSON.stringify(row)}`)
+  }
+  const cols = [...(columns ?? [])].map(String)
+  if (!cols.length || cols.some((c) => !TABLE.test(c))) throw new Error(`changesShared(${table}): ${JSON.stringify(columns)} are not column names`)
+  arm()
+  const shared = { t: table, ...(byId ? { id: key.id } : { match }), cols }
+  if (journal) fs.appendFileSync(journal, `${JSON.stringify({ shared })}\n`)
 }
 
 /** A workspace this run made, removed for good (archiving keeps it). */

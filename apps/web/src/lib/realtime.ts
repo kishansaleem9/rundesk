@@ -282,6 +282,16 @@ if (typeof window !== 'undefined') {
 export function roomLedger() {
   const held = new Set<string>()
   let whenDropped: string[] | null = null
+  /*
+   * AND THE FIRST OPEN IS AN OPENING AGAIN (`found-7-oct/a-socket-that-opens-late-misses-what-was-said`).
+   * A page reads its data as it mounts and asks for its rooms then; a socket
+   * that has not opened yet holds the asking until it does. What was said in
+   * between reached nothing, and the page went on showing what it read: with a
+   * tab's socket held back 6 s, a sheet never showed a colleague's change made
+   * meanwhile, 4 runs of 4. So the first open takes up every room a page asked
+   * for before it, as a later one takes up those it held when it dropped.
+   */
+  let opened = false
   return {
     /** An outgoing event: a subscribe holds its rooms, an unsubscribe lets them go. */
     sent(event: string, payload: unknown): void {
@@ -297,9 +307,10 @@ export function roomLedger() {
     dropped(): void {
       whenDropped = [...held]
     },
-    /** The socket is open again: the rooms held when it dropped that a page still holds. */
+    /** The socket is open: the first time, every room a page asked for before; again, the rooms held when it dropped that a page still holds. */
     rejoin(): string[] {
-      const again = (whenDropped ?? []).filter((room) => held.has(room))
+      const again = opened ? (whenDropped ?? []).filter((room) => held.has(room)) : [...held]
+      opened = true
       whenDropped = null
       return again
     },

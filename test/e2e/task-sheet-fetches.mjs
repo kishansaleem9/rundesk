@@ -14,6 +14,16 @@
  * that only watches. Each counts the requests its panels make, from the change
  * until things settle, and the watching sheet must still show the change.
  *
+ * A SHEET WHOSE SOCKET JOINS LATE (`found-7-oct/a-socket-that-opens-late-misses-what-was-said`).
+ * Under a sweep's load the watching sheet once missed the change: its socket
+ * joined after it, and a first join read nothing afresh. A third sheet now opens
+ * with its socket held back until after the change, and once it joins it must
+ * show the change without a reload. A socket that joins reads its page's
+ * queries afresh, so each sheet counts from when its socket has joined and its
+ * panels have asked for nothing for a moment, not from three seconds after it
+ * opened, and after the change until each panel has fetched and then asked for
+ * nothing for a moment.
+ *
  *   node test/e2e/task-sheet-fetches.mjs --api 3021
  */
 import path from 'node:path'
@@ -29,7 +39,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 2
+const EXPECTED_CHECKS = 3
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -57,6 +67,8 @@ const TAG = `tsf-${stamp}`
 let browser = null
 let WS = null
 let token = null
+/** A socket.io frame from the server that lets the socket into its namespace. */
+const JOINED = /^40\/realtime,/
 
 try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
@@ -81,16 +93,42 @@ try {
   }
 
   browser = await chromium.launch(launchOptions())
-  const openSheet = async () => {
+  /**
+   * A sheet on the task, signed in as the admin. Its socket is held, not
+   * dropped, until `release()` — what either side says waits, and goes through
+   * once the server is reached, as when a socket opens late under load: for
+   * `holdFor` ms after the sheet is drawn, or, with none, until it is released.
+   */
+  const openSheet = async ({ holdFor = null } = {}) => {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
     const page = await ctx.newPage()
     const counts = Object.fromEntries(PANELS.map((p) => [p, 0]))
     let counting = false
-    page.on('request', (req) => {
-      if (!counting || req.method() !== 'GET') return
-      const panel = panelOf(req.url())
-      if (panel) counts[panel] += 1
+    let joined = false
+    let lastAsked = Date.now()
+    let release = () => {}
+    const let_ = new Promise((go) => { release = go })
+    await page.routeWebSocket(/\/socket\.io\//, (ws) => {
+      const pending = []
+      let server = null
+      ws.onMessage((m) => (server ? server.send(m) : pending.push(m)))
+      void let_.then(() => {
+        server = ws.connectToServer()
+        server.onMessage((m) => {
+          if (JOINED.test(String(m))) joined = true
+          ws.send(m)
+        })
+        for (const m of pending.splice(0)) server.send(m)
+      })
     })
+    page.on('request', (req) => {
+      if (req.method() !== 'GET') return
+      const panel = panelOf(req.url())
+      if (!panel) return
+      lastAsked = Date.now()
+      if (counting) counts[panel] += 1
+    })
+    const quietFor = (ms) => waitUntil(async () => Date.now() - lastAsked >= ms, { timeoutMs: 20_000 })
     await page.goto(`${B}/login`, { waitUntil: 'domcontentloaded' })
     await page.fill('input[type=email]', ADMIN.email)
     await page.fill('input[type=password]', ADMIN.password)
@@ -102,32 +140,50 @@ try {
     await sheet.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
     const priority = sheet.locator('select').filter({ has: page.locator('option[value="urgent"]') }).first()
     await priority.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
-    // Settled: whatever the sheet asks for on opening is not this change's.
-    await page.waitForTimeout(3000)
-    return { page, priority, counts, start: () => { counting = true } }
+    if (holdFor === null) return { page, priority, counts, settled: true, joined: () => joined, release, quietFor, start: () => { counting = true } }
+    setTimeout(release, holdFor)
+    // Settled: its socket has joined, and its panels have asked for nothing for a moment —
+    // what the sheet reads on opening, and again once its socket joins, is not the change's.
+    const settled = (await waitUntil(async () => joined, { timeoutMs: 30_000 })) && (await quietFor(1500))
+    return { page, priority, counts, settled, joined: () => joined, release, quietFor, start: () => { counting = true } }
   }
-  const editor = await openSheet()
-  const watcher = await openSheet()
+  const editor = await openSheet({ holdFor: 0 })
+  const watcher = await openSheet({ holdFor: 0 })
+  const late = await openSheet()
 
   console.log('\n▶ one priority change, low to urgent, in the first sheet')
   editor.start()
   watcher.start()
   await editor.priority.selectOption('urgent', { timeout: 10_000 }).catch(() => {})
-  const shown = await waitUntil(async () => (await watcher.priority.inputValue().catch(() => '')) === 'urgent', { timeoutMs: 10_000 })
-  // Long enough for every event the change sends, and every refetch they start.
-  await editor.page.waitForTimeout(4000)
+  const shown = await waitUntil(async () => (await watcher.priority.inputValue().catch(() => '')) === 'urgent', { timeoutMs: 15_000 })
+  // Until each panel of each sheet has fetched, and then nothing has been asked for a moment:
+  // every event the change sends has come, and every refetch it started.
+  const fetched = await waitUntil(async () => [editor, watcher].every((s) => PANELS.every((p) => s.counts[p] >= 1)), { timeoutMs: 15_000 })
+  const quiet = (await editor.quietFor(2000)) && (await watcher.quietFor(2000))
   console.log(`  the editing sheet fetched ${JSON.stringify(editor.counts)}; the watching sheet ${JSON.stringify(watcher.counts)}`)
   const most = (counts) => Math.max(...Object.values(counts))
   const least = (counts) => Math.min(...Object.values(counts))
+  const settledSaid = `settled before the change: the editing sheet ${editor.settled}, the watching sheet ${watcher.settled}; every panel fetched ${fetched}; quiet after ${quiet}`
   chk(
-    least(editor.counts) >= 1 && most(editor.counts) <= 2,
+    editor.settled && least(editor.counts) >= 1 && most(editor.counts) <= 2,
     'in the sheet that made it, the change refetches the task and each open panel at most twice — its own save, and the events that follow it, once',
-    `the editing sheet fetched ${JSON.stringify(editor.counts)}`,
+    `the editing sheet fetched ${JSON.stringify(editor.counts)}; ${settledSaid}`,
   )
   chk(
-    shown && least(watcher.counts) >= 1 && most(watcher.counts) <= 1,
+    watcher.settled && shown && least(watcher.counts) >= 1 && most(watcher.counts) <= 1,
     'in another sheet open on the task, it refetches the task and each open panel once, and that sheet shows the new priority',
-    `the watching sheet fetched ${JSON.stringify(watcher.counts)}; it shows urgent: ${shown}`,
+    `the watching sheet fetched ${JSON.stringify(watcher.counts)}; it shows urgent: ${shown}; ${settledSaid}`,
+  )
+
+  console.log('\n▶ a third sheet, whose socket joins only after the change')
+  const stale = (await late.priority.inputValue().catch(() => '')) !== 'urgent'
+  late.release()
+  const lateJoined = await waitUntil(async () => late.joined(), { timeoutMs: 30_000 })
+  const lateShows = await waitUntil(async () => (await late.priority.inputValue().catch(() => '')) === 'urgent', { timeoutMs: 15_000 })
+  chk(
+    stale && lateJoined && lateShows,
+    'a sheet whose socket joins only after the change shows it once it does, without a reload',
+    `it showed the old priority before its socket joined: ${stale}; its socket joined: ${lateJoined}; it shows urgent after: ${lateShows}`,
   )
 } catch (e) {
   failed += 1

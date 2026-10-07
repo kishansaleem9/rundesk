@@ -21,7 +21,7 @@
  */
 import { signInApi } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
-import { apiAs as apiAsAt, madeAccount, madeRow } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeAccount, madeRow, changesShared } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -68,6 +68,9 @@ const BOUNDARY = '2026-08-10T00:00:00.000Z'
 const cleanup = []
 
 try {
+  // Its planner settings are the shared admin's: put back whole as this run found them, however it ends
+  // (`found-7-oct/shared-rows-keep-what-runs-changed`).
+  changesShared('users', { email: ME.email }, ['planner_settings'])
   const auth = await signInApi(API, ME.email, ME.password)
   const A = apiAs(auth.accessToken)
   const workspaces = (await A('/workspaces')).data ?? []

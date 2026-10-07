@@ -36,7 +36,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil } from './lib/wait.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, changesShared } from './lib/fixture.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -93,6 +93,8 @@ let stagedZoomId = null
 let otherEmail = null
 
 try {
+  // Its planner settings are the shared admin's: put back whole as this run found them (see the end).
+  changesShared('users', { email: ME.email }, ['planner_settings'])
   const auth = await signInApi(API, ME.email, ME.password)
   const A = apiAs(auth.accessToken)
   const me = (await A('/users/me')).data
@@ -896,21 +898,22 @@ try {
     `.catch(() => {})
     await sql`delete from meetings where ${TAG} = any(tags)`.catch(() => {})
     /*
-     * §V2-14d — put the calendar picker back.
+     * §V2-14d — the calendar picker is put back, by the run's sweep.
      *
      * This suite unticks Holidays, and `plannerSettings` is a column on the
      * SHARED fixture user rather than a tagged row that can be deleted. Left
      * behind, every later run of every planner suite would start with a
      * workspace calendar switched off — a fixture that quietly changes the
      * product for the next suite is the "one runner at a time" trap arriving
-     * by a different door. Only this key is touched, so a setting some other
-     * suite left is not disturbed.
+     * by a different door.
+     *
+     * WHOLE, AS IT WAS FOUND (`found-7-oct/shared-rows-keep-what-runs-changed`).
+     * Taking back here the one key it knew it wrote left whatever else its
+     * pages wrote there: the run's end found the admin's planner settings
+     * changed every run, and lane 7's held a rail without "Meet with" from an
+     * earlier one. `changesShared` above has the sweep write the column back as
+     * the run found it, however the run ends.
      */
-    await sql`
-      update users
-         set planner_settings = coalesce(planner_settings, '{}'::jsonb) - 'hiddenCalendarIds'
-       where email = ${ME.email}
-    `.catch(() => {})
     await sql.end({ timeout: 5 }).catch(() => {})
   }
   await browser.close().catch(() => {})

@@ -21,7 +21,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, changesShared } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -61,6 +61,9 @@ let browser = null
 let digestWas = null
 
 try {
+  // The digest it switches on is in the shared admin's notification preferences: put back whole as this
+  // run found them, however it ends (`found-7-oct/shared-rows-keep-what-runs-changed`).
+  changesShared('users', { email: ADMIN.email }, ['notification_preferences'])
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })

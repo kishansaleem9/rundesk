@@ -129,11 +129,18 @@ test('the person remembered is whom the tab named when its store was cleared, ke
  * again heard its own channel and nothing of the list it showed. `roomLedger`
  * keeps what the pages hold, from the socket's outgoing events, and says what
  * to ask for again when the socket opens.
+ *
+ * And the first opening asks again for every room a page asked for before it
+ * (`found-7-oct/a-socket-that-opens-late-misses-what-was-said`): the pages read
+ * their data while the socket was not yet open, and what was said in between
+ * reached nothing. Asked again, the rooms are answered, and the pages read
+ * afresh (`rejoinAndCatchUp`).
  */
-test('the rooms a page holds when the socket drops are asked for again when it opens; those let go, those sent while it was down, and the first opening ask for nothing', () => {
+test('the rooms a page holds when the socket drops are asked for again when it opens; those let go and those sent while it was down ask for nothing; the first opening asks again for every room asked for before it', () => {
   const rooms = roomLedger()
   rooms.sent('subscribe', { rooms: ['list:a', 'task:b'] })
-  assert.deepEqual(rooms.rejoin(), [], 'the first opening asked for rooms its pages are asking for themselves')
+  assert.deepEqual(rooms.rejoin(), ['list:a', 'task:b'], 'the first opening did not ask again for the rooms its pages asked for before it, so nothing reads afresh what they read meanwhile')
+  assert.deepEqual(rooms.rejoin(), [], 'the same rooms were asked for twice for the first opening')
   rooms.sent('unsubscribe', { rooms: ['task:b'] })
   rooms.sent('presence.ping', undefined)
   rooms.dropped()

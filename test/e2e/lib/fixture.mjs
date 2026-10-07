@@ -29,7 +29,7 @@ import { madeWorkspace, madeSpace, madeRow } from './made.mjs'
  * WHAT A RUN MAKES, REGISTERED FOR REMOVAL (`made.mjs`, which says how and
  * why). Here so a suite imports its fixtures and its cleanup from one place.
  */
-export { madeAccount, madeWorkspace, madeSpace, madeRow } from './made.mjs'
+export { madeAccount, madeWorkspace, madeSpace, madeRow, changesShared } from './made.mjs'
 
 /*
  * THE ROUTES WHOSE ANSWER IS A NEW ROW, by path: `apiAs` registers what they

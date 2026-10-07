@@ -99,7 +99,8 @@ const PROBE = `
 const lib = await import(process.env.MADE_LIB_URL)
 const plan = JSON.parse(process.env.PROBE_PLAN)
 for (const r of plan.register) {
-  if (r.t === 'users') lib.madeAccount(r)
+  if (r.shared) lib.changesShared(r.t, r.match ? { match: r.match } : r.id, r.cols)
+  else if (r.t === 'users') lib.madeAccount(r)
   else lib.madeRow(r.t, r.id)
 }
 console.log('REGISTERED')
@@ -139,7 +140,7 @@ const sweepByHand = (file) => {
 const HAND = mkdtempSync(join(tmpdir(), 'made-hand-'))
 const journals = () => {
   if (!existsSync(JOURNALS)) return []
-  return readdirSync(JOURNALS, { recursive: true }).map(String).filter((f) => f.includes('.jsonl'))
+  return readdirSync(JOURNALS, { recursive: true }).map(String).filter((f) => f.includes('.jsonl') && !f.endsWith('.found.json'))
 }
 
 /* ── planting ─────────────────────────────────────────────────────────── */
@@ -606,12 +607,13 @@ try {
     let out = ''
     w.stdout.on('data', (d) => { out += d })
     w.stderr.on('data', (d) => { out += d })
+    // Heard from the start: a probe that ends before it is ready has ended, and is not waited for.
+    const ended = new Promise((resolve) => w.on('exit', (code) => resolve(code)))
     const up = await new Promise((resolve) => {
       const t = setInterval(() => { if (out.includes('READY')) { clearInterval(t); resolve(true) } }, 100)
-      w.on('exit', () => { clearInterval(t); resolve(false) })
+      void ended.then(() => { clearInterval(t); resolve(false) })
     })
     const made = up ? await make() : null
-    const ended = new Promise((resolve) => w.on('exit', (code) => resolve(code)))
     w.stdin.end('go')
     return { up, code: await ended, out, made }
   }
@@ -679,6 +681,75 @@ try {
     if (r.made) await sql`delete from spaces where id = ${r.made}`
   }
 
+  console.log('\n▶ what a run left changed of the rows it found')
+  {
+    // A task and a tag older than the run, as every run shares; and an account older than the run, which signs in.
+    const [found] = await sql`insert into tasks (list_id, title, created_at)
+      select l.id, ${slug('found-task')}, now() - interval '1 day' from lists l join projects p on p.id = l.project_id join spaces s on s.id = p.space_id
+      where s.workspace_id = ${shared} limit 1 returning id::text as id, title`
+    const [tag] = await sql`insert into labels (workspace_id, name, color, created_at) values (${shared}, ${slug('found-tag')}, '#888888', now() - interval '1 day') returning id::text as id, name`
+    const [signer] = await sql`insert into users (email, display_name, created_at) values (${`${slug('found-signer')}@rundesk.invalid`}, 'Made check signer', now() - interval '1 day') returning id::text as id`
+    const a = await account('finder')
+    const changes = await whileRunning('probe-changes', [{ t: 'users', id: a.id }], async () => {
+      await sql`update tasks set title = ${`${found.title} changed`}, priority = 'urgent', updated_at = now() where id = ${found.id}`
+      return null
+    })
+    chk(changes.up && changes.code === 1 && /✗ this run left 1 row it found changed: tasks \S+ \(title, priority\)/.test(changes.out),
+      'a run that changes a row it found and leaves it so fails, naming the row and what changed, not its updated_at',
+      `ready ${changes.up}; it exited ${changes.code}; it said ${JSON.stringify(changes.out.trim().slice(-300))}`)
+    await sql`update tasks set title = ${found.title}, priority = 'normal' where id = ${found.id}`
+    const restores = await whileRunning('probe-restores', [{ t: 'users', id: (await account('restorer')).id }], async () => {
+      await sql`update tasks set title = ${`${found.title} for now`} where id = ${found.id}`
+      await sql`update tasks set title = ${found.title}, updated_at = now() where id = ${found.id}`
+      return null
+    })
+    chk(restores.up && restores.code === 0 && !/✗ this run left/.test(restores.out),
+      'and one that puts back what it changed passes, though the row’s updated_at moved',
+      `ready ${restores.up}; it exited ${restores.code}; it said ${JSON.stringify(restores.out.trim().slice(-300))}`)
+    const removes = await whileRunning('probe-removes', [{ t: 'users', id: (await account('remover')).id }], async () => {
+      await sql`delete from labels where id = ${tag.id}`
+      return null
+    })
+    chk(removes.up && removes.code === 1 && new RegExp(`✗ this run left 1 row it found changed: labels ${tag.name} \\(gone\\)`).test(removes.out),
+      'and one that removes a row it found fails, saying it is gone',
+      `ready ${removes.up}; it exited ${removes.code}; it said ${JSON.stringify(removes.out.trim().slice(-300))}`)
+    const signs = await whileRunning('probe-signs-in', [{ t: 'users', id: (await account('signer-run')).id }], async () => {
+      await sql`update users set last_seen_at = now() where id = ${signer.id}`
+      return null
+    })
+    chk(signs.up && signs.code === 0 && !/✗ this run left/.test(signs.out),
+      'and one that only signs an account in (its last_seen_at) passes',
+      `ready ${signs.up}; it exited ${signs.code}; it said ${JSON.stringify(signs.out.trim().slice(-300))}`)
+    // Said before it changes them, the run's changes to a shared row are put back as it found them, a NULL a NULL.
+    await sql`update tasks set description = null where id = ${found.id}`
+    const says = await whileRunning('probe-says', [{ t: 'users', id: (await account('sayer')).id }, { shared: true, t: 'tasks', match: { title: found.title }, cols: ['description', 'priority'] }], async () => {
+      await sql`update tasks set description = ${'changed'}, priority = 'urgent' where id = ${found.id}`
+      return null
+    })
+    const [after] = await sql`select description, priority from tasks where id = ${found.id}`
+    chk(says.up && says.code === 0 && !/✗ this run left/.test(says.out) && after?.description === null && after?.priority === 'normal' && /put back as this run found them: tasks \S+ \(description, priority\)/.test(says.out),
+      'and one that said, before, which columns of a shared row it changes has them put back as it found them, a NULL a NULL, and passes',
+      `ready ${says.up}; it exited ${says.code}; now ${JSON.stringify(after)}; it said ${JSON.stringify(says.out.trim().slice(-300))}`)
+    const foundLeft = readdirSync(JOURNALS, { recursive: true }).filter((f) => String(f).endsWith('.found.json'))
+    chk(foundLeft.length === 0,
+      'and what each run found is read once, at its end, and not kept',
+      `still kept: ${foundLeft.join(', ')}`)
+    await sql`delete from tasks where id = ${found.id}`
+    await sql`delete from users where id = ${signer.id}`
+  }
+  {
+    // A run killed before its end: what it found is removed with its journal by the next run.
+    const a = await account('killed-finder')
+    const killed = run('probe-killed-finder', { register: [{ t: 'users', id: a.id }], end: 'kill' })
+    const kept = readdirSync(JOURNALS, { recursive: true }).filter((f) => String(f).includes('probe-killed-finder') && String(f).endsWith('.found.json'))
+    const b = await account('after-killed')
+    run('probe-after-killed', { register: [{ t: 'users', id: b.id }], end: 'fall' })
+    const after = readdirSync(JOURNALS, { recursive: true }).filter((f) => String(f).includes('probe-killed-finder') && String(f).endsWith('.found.json'))
+    chk(killed.code !== 0 && kept.length === 1 && after.length === 0,
+      'and what a killed run found is removed by the next run, with its journal',
+      `the killed run exited ${killed.code}; its file ${kept.length ? 'was' : 'was not'} kept, and after the next run ${after.length ? 'still is' : 'is gone'}`)
+  }
+
   console.log('\n▶ a row the sweep cannot remove')
   {
     // After a row the database has (so the run has seen it is the right one), a table it has not.
@@ -705,7 +776,7 @@ try {
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)
-const MIN_CASES = 39
+const MIN_CASES = 46
 if (pass + fail < MIN_CASES) {
   console.log(`\x1b[31mnot ok\x1b[0m only ${pass + fail} case(s) ran, below the floor of ${MIN_CASES}`)
   fail += 1
@@ -733,6 +804,8 @@ if (process.argv.includes('--mutate') && !process.env.MADE_LIB_UNDER_TEST && !pr
       ['keep-ignored', "if (process.env.E2E_KEEP_MADE === '1') {", 'if (false) {'],
       ['place-unchecked', 'if (journal && entry.id && !placed) checkPlace(entry)', 'void placed'],
       ['held-unsaid', 'fs.appendFileSync(journal, `${JSON.stringify({ held: { t: entry.t, id: entry.id } })}\\n`)', 'void 0'],
+      ['shared-unsaid', "  if (journal) fs.appendFileSync(journal, `${JSON.stringify({ shared })}\\n`)", '  void shared'],
+      ['nothing-found', "    runSweeper(['--found', journal], url)\n", ''],
       ['elsewhere-swept-here', '  if (elsewhere) {\n    console.log(`  ✗ cleanup removed nothing', '  if (false) {\n    console.log(`  ✗ cleanup removed nothing'],
     ],
   })
@@ -743,6 +816,14 @@ if (process.argv.includes('--mutate') && !process.env.MADE_LIB_UNDER_TEST && !pr
     label: 'the sweep',
     alive,
     mutations: [
+      ['shared-not-put-back', 'const back = shared.length ? await putBack(sql, found, shared) : []', 'const back = []'],
+      ['found-changes-pass', "      if (changed.length) {\n        status = 1", "      if (changed.length) {\n        void 0"],
+      ['found-all-by-use', '.filter((k) => !byUse.has(k) &&', '.filter((k) => false &&'],
+      ['found-none-by-use', "const byUse = new Set([...CHANGED_BY_USE['*'], ...(CHANGED_BY_USE[table] ?? [])])", 'const byUse = new Set()'],
+      ['found-gone-passes', "      if (!is) {\n        out.push({ table, id, label, cols: null })\n        continue\n      }", '      if (!is) continue'],
+      ['found-young-read', 'if (at && Date.parse(was[at]) >= started - 60_000) continue', 'void at'],
+      ['found-kept', "      } finally {\n        fs.rmSync(file, { force: true })\n      }", '      } finally {\n        void file\n      }'],
+      ['killed-found-kept', "if (!stillRunning(Number(f[2]), `${f[1]}.mjs`) && !names.includes(name.replace(/\\.found\\.json$/, ''))) fs.rmSync(path.join(dir, name), { force: true })", 'void f'],
       ['live-runs-swept', 'if (stillRunning(Number(pid), `${suite}.mjs`)) continue', 'void suite'],
       ['co-owned-organizations-go', "and not exists (select 1 from organization_members m\n                          where m.organization_id = o.id and m.role = 'owner' and not (m.user_id = any(${accountIds}::uuid[])))", ''],
       ['older-organizations-go', "o.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'", 'true'],

@@ -34,7 +34,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
 import { openDb } from './lib/db.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, changesShared } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -78,6 +78,9 @@ let call = null
 try {
   sql = await openDb()
   if (!sql) throw new Error('no DATABASE_URL — where each task landed is read by SQL')
+  // Its Default list lives in the shared admin's planner settings: put back whole as this run found them,
+  // however it ends (`found-7-oct/shared-rows-keep-what-runs-changed`).
+  changesShared('users', { email: ADMIN.email }, ['planner_settings'])
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   token = auth.accessToken
   const me = auth.user.id

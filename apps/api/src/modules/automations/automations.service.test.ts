@@ -131,3 +131,28 @@ describe('post_to_channel action execution (Plan §7.7)', () => {
     assert.equal(realtime.emitToWorkspace.mock.callCount(), 0)
   })
 })
+
+describe('send_notification action (found-7-oct/automation-notifications-reach-every-member)', () => {
+  it('writes a notification only for the members who may open the task, and never for the one who made the change', async () => {
+    const db = makeDb([
+      [{ id: 'task1', listId: 'list1' }], // the task
+      [{ userId: 'actor' }, { userId: 'reader' }, { userId: 'outsider' }, { userId: 'guest' }], // the workspace's members
+    ])
+    const svc = new AutomationsService(db, makeRealtime())
+    const asked: string[] = []
+    ;(svc as any).mayOpenTask = async (workspaceId: string, userId: string, taskId: string) => {
+      asked.push(`${workspaceId}/${userId}/${taskId}`)
+      return userId === 'reader'
+    }
+
+    await (svc as any).runAction(
+      { type: 'send_notification', params: { message: 'A task moved.' } },
+      { workspaceId: 'ws1', taskId: 'task1', userId: 'actor' },
+    )
+
+    assert.deepEqual(db._inserts.map((i: any) => i.values.userId), ['reader'], 'only the member who may open the task is written to')
+    assert.equal(db._inserts[0].values.body, 'A task moved.')
+    assert.deepEqual(db._inserts[0].values.target, { entityType: 'task', entityId: 'task1' })
+    assert.deepEqual(asked.sort(), ['ws1/guest/task1', 'ws1/outsider/task1', 'ws1/reader/task1'], 'each member but the actor is asked, about this task in this workspace')
+  })
+})

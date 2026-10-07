@@ -18,6 +18,7 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { readableTaskIds } from '../../common/permissions/read-access'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 
 type TriggerContext = {
@@ -299,20 +300,28 @@ export class AutomationsService {
 
       case 'send_notification': {
         if (!ctx.taskId) break
-        // Notify all assignees and creator of the task
         const taskRow = await this.db.select().from(tasks).where(eq(tasks.id, ctx.taskId)).limit(1)
         const task = taskRow[0]
         if (!task) break
         const message = (action.params.message as string | undefined) ?? `Automation triggered on task`
 
-        // Get workspace members to notify
+        /*
+         * The workspace's members but the one who made the change — and only
+         * those who may open the task (`found-7-oct/automation-notifications-reach-every-member`).
+         * Every member was written to: a guest with nothing shared, and a member
+         * outside a private list, heard of a task the API refuses them, by its
+         * id and the rule's message. Whether the team hears or only the task's
+         * people (its assignees and creator, as this said before) is the
+         * owner's to settle; the rule's suggestions say "the team".
+         */
         const members = await this.db
-          .select()
+          .select({ userId: workspaceMembers.userId })
           .from(workspaceMembers)
           .where(eq(workspaceMembers.workspaceId, ctx.workspaceId))
 
         for (const member of members) {
           if (member.userId === ctx.userId) continue // don't notify the actor
+          if (!(await this.mayOpenTask(ctx.workspaceId, member.userId, ctx.taskId))) continue
           await this.db.insert(notifications).values({
             userId: member.userId,
             workspaceId: ctx.workspaceId,
@@ -364,6 +373,11 @@ export class AutomationsService {
       default:
         break
     }
+  }
+
+  /** Whether this member may open this task (`readableTaskIds`); a seam the action's tests answer. */
+  private async mayOpenTask(workspaceId: string, userId: string, taskId: string): Promise<boolean> {
+    return (await readableTaskIds(this.db, workspaceId, userId, [taskId])).has(taskId)
   }
 
   // ─── post_to_channel helpers ───────────────────────────────────────────────

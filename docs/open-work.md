@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 518 items: 14 open · 3 partly fixed · 444 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 518 items: 11 open · 3 partly fixed · 447 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -9190,7 +9190,7 @@ Checks:
 - `settings-depth` keeps its 62 checks. "Arriving at a named tab keeps it" now also requires the tabs drawn, and the two tab-address checks run once they are. After: 62 of 62 in both of this batch's regressions, on lanes 7 and 6 at the sweep's load.
 - No patch claimed the three tab-address checks. `sd-5` (choosing a tab no longer writes it to the address) reddens the two tab-address checks (60 of 62 on lane 2), and `sd-6` (an address naming a tab is rewritten to the landing tab) reddens "arriving at a named tab keeps it" and, with nothing to move from, the two after it (59 of 62).
 
-### `found-7-oct/shared-rows-keep-what-runs-changed` — open (test tooling, medium; found closing `found-30-sep/suite-leftovers-unmeasured`)
+### `found-7-oct/shared-rows-keep-what-runs-changed` — **closed** (test tooling, medium; found closing `found-30-sep/suite-leftovers-unmeasured`)
 
 **A run that changes a row every run shares, and does not put it back, leaves the lane unlike pristine, and nothing notices**
 
@@ -9203,7 +9203,20 @@ The leftovers check (`leftSince`) reads the rows a run made, not the rows it cha
 
 *To close:* at the end of each suite's run, say which shared rows it left changed, column by column, outside what using the product writes (`updated_at`, `last_seen_at`); and make each suite that changes one put it back, or work on an account or a workspace of its own.
 
-### `found-7-oct/automation-notifications-reach-every-member` — open (security, small; read in the handoff's list of findings not yet reproduced, reproduced closing `found-30-sep/suite-leftovers-unmeasured`) · reproduced 7 October
+*Closed, 7 October* (lanes 2, 3, 4, 5, 6 and 7).
+
+- Every suite's run reads, as it begins, every row of every table with an id but those using the product makes (`LEFT_BY_USE`), and writes them beside its journal (`--found`, run by `lib/made.mjs` as the journal opens). As it ends, after its own rows are removed and its leftovers read, each is read again: one changed outside what using the product writes, or gone, fails the run, named with its columns (`changedSince`, `made-sweep.mjs`). Written by use and not counted: `updated_at`, an account's `last_seen_at`, and a dock's `nav_recents` (the pages a person last visited). A row made, or last written, within the minute before the run began is the run's, as the sweep takes it, and is not read so.
+- A suite that changes a shared row on purpose says so before it does (`changesShared(table, row, columns)`, `lib/made.mjs`): the row by its id, an account by its email, or any row by the values of some of its columns. As the run ends the sweep writes those columns back from what the run found, as it found them, a NULL a NULL, which no route of the product writes back; the run's end says what it put back. A change a suite did not say still fails it.
+- Suites that changed one: `calendar-accounts`, `planner-blocks`, `planner-default-list` and `planner-gates` (the admin's planner settings), `routes-with-readers` and `video-regression` (notification preferences), `panel-collapse` (panels, sidebar, and the dock's pinned links) and `settings-depth` (high contrast, the pinned top bar). Each now says so as it begins; `calendar-accounts` no longer takes back the one key of the planner settings it knew it wrote, and `panel-collapse` and `settings-depth` no longer reset theirs to what they took for defaults.
+
+Measured:
+- Before: after the eleventh batch's regression four of five lanes held an admin's settings changed (the evidence above). In this batch's first regression with the check, all 271 suites on lanes 2, 4, 5, 6 and 7, the lanes brought to pristine first, 8 suites passed every check and left a shared row changed: four the admin's planner settings, two its notification preferences, `panel-collapse` the panels, the sidebar and the dock's pinned links, and `settings-depth` high contrast and the pinned top bar. No other suite changed one: 261 of 271 green at once, 4,227 of 4,229 checks (`password-hash-time`'s timing under the load, and `task-values` reading a date box's bound within a second; `task-values` green alone, twice, and with its socket held back 2.5 s and 4 s).
+- After: each of the eight, saying what it changes, run again on its lane: green (37, 3, 57, 3, 62, 19, 13 and 94 checks), its end saying what it put back, and nothing found changed. Lanes 2, 5 and 7, compared with pristine after them, differed in nothing but what signing in and visiting pages write (`updated_at`, `last_seen_at`, `nav_recents`).
+
+Checks:
+- `check-made-sweep.mjs` 39 → 46 cases: a run that changes a row it found and leaves it so fails, naming the row and what changed but not its `updated_at`; one that changes it and puts it back passes, its `updated_at` moved; one that removes a row it found fails, saying it is gone; one that only signs an account in passes; one that said which columns of a shared row it changes has them put back, a NULL a NULL, and passes; what each run found is read once at its end and not kept, and a killed run's is removed by the next. Mutations 50 → 60 (the registry 10 → 12, the sweep 40 → 48), each caught on its own.
+
+### `found-7-oct/automation-notifications-reach-every-member` — **closed** (security, small; read in the handoff's list of findings not yet reproduced, reproduced closing `found-30-sep/suite-leftovers-unmeasured`) · reproduced 7 October
 
 **An automation's "Send notification" writes to every member of the workspace, whoever may open the task**
 
@@ -9214,13 +9227,42 @@ The action reads every row of `workspace_members` and skips only the one who mad
 
 *To close:* write only for members who may open the task (the task read rule, as the other notices ask it), and check it with a private list's task and a guest. Whether the team hears it or only the task's people is the owner's to settle.
 
-### `found-7-oct/a-socket-that-opens-late-misses-what-was-said` — open (visible bug, small; found reproducing `task-sheet-fetches`' failure under load) · reproduced 7 October
+*Closed, 7 October* (lane 3). ClickUp: the help centre is blocked here, and the one excerpt found (search, not the page) says an automation's notification goes to the task's assignees, its watchers or chosen addresses; nothing of anybody who may not open the task. Rundesk's rule, as for every other notice: none of it reaches somebody refused the task.
+
+- The "Send notification" action now asks, of each member but the one who made the change, whether they may open the task (`readableTaskIds`, the same rule the task notices ask, through the seam `mayOpenTask`), and writes only for those who may. Its comment no longer says "assignees and creator": it says what it does.
+- Whom it is for stays as it was, the workspace's members: the rule's suggestions say "the team", and its old comment said the task's people. Which of the two is the owner's to settle; nothing else was changed.
+
+Measured on lane 3 with a new suite, `automation-notices`: a rule on status changes, a task in an open list assigned to a member, a task in the admin's private list, a member and a guest with nothing shared.
+- Before, on the API without the change: 1 of 3. The private list's task was told to the member, the guest and the assignee, each refused it (403); the open list's to the guest, refused it too.
+- After: 3 of 3 in 3 runs of 3. The private list's task was told to nobody (only the admin, who moved it, may open it), and the open list's to the two members, not to the guest.
+
+Checks:
+- `automation-notices` (new, 3 checks; registered in CI's database job).
+- `automations.service.test.ts` 5 → 6: only the members who may open the task are written to, never the one who made the change, and each member but them is asked about this task in this workspace.
+- Patches `atn-1` (the question dropped) reddens the suite's two notification checks (1 of 3 on lane 2); the unit claim `atn-2` (the answer turned round) reddens the unit test.
+
+### `found-7-oct/a-socket-that-opens-late-misses-what-was-said` — **closed** (visible bug, small; found reproducing `task-sheet-fetches`' failure under load) · reproduced 7 October
 
 **A tab whose realtime socket opens after its page has read its data is never told what changed in between**
 
 *Evidence, 7 October, lane 3 (`tsf-probe.mjs`):* `task-sheet-fetches`' two sheets on one task, each tab's socket held back 6 s, what either side said held and passed on once the server is reached. The watching sheet's socket joined 8.8–9.5 s after its tab opened, after the other sheet had changed the priority. It never showed the change, and fetched nothing in the 14 s after it, in 4 runs of 4. With no hold it showed the change and fetched the task and its attachments once, 2 runs of 2. Traced: on its first connect the tab sends the subscribes its page made while the socket was down, and nothing more. `rejoinAndCatchUp` reads a page's queries afresh only for the rooms it held before a disconnect (`found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), and a first connect has none. A socket opening late under a sweep's load is what `task-sheet-fetches` met once ("its second sheet missed the change").
 
 *To close:* on the first connect too, once the server holds the page's rooms, read afresh the active queries read before it did; check it with a tab's socket held back.
+
+*Closed, 7 October* (lanes 6 and 2). ClickUp's help is blocked here, and how its web app catches up on a socket that joins late is not described in what search shows; a page that never shows a change made while it was open, until reloaded, is the defect whatever the product.
+
+- A tab's first opening now asks again for every room its pages asked for before it, as a reopening asks for the rooms it held when it dropped (`roomLedger`, `lib/realtime.ts`). The server answers once it holds them, and the page's active queries are read afresh (`rejoinAndCatchUp`), so whatever was said before the socket joined is drawn. A socket that opens before any page asks for a room asks for nothing again, and reads nothing twice.
+- `task-sheet-fetches` opens a third sheet with its socket held back until after the change, and it must show the change once its socket joins. Its two counting sheets now count once their sockets have joined and their panels have asked for nothing for a moment (a socket that joins reads the page afresh, and that read is not the change's), and after the change until each panel has fetched, and then nothing, for a moment; before, a fixed 3 s and a fixed 4 s.
+
+Measured, the sockets held, not dropped (what either side says waits, and goes through once the server is reached):
+- Before (`tsf-probe.mjs`, the suite's two sheets, each tab's socket held 6 s on lane 3): the watching sheet's socket joined 8.8–9.5 s after its tab opened, after the change; it never showed the change, and fetched nothing in the 14 s after, 4 runs of 4. With no hold it showed it, 2 runs of 2. The new suite on the bundle without the change (lane 6): the third sheet showed the old priority after its socket joined, 2 runs of 2 (2 of 3).
+- After, on lane 6: 3 of 3 in 3 runs of 3, the counts as before (the editing sheet 2 and 2, the watching sheet 1 and 1). Read as the suite read it before (the fixed waits) with every socket held 6 s, it passed too, 3 runs of 3: a sheet whose socket joins after the change now reads it on joining, once, where it heard nothing.
+
+Checks:
+- `task-sheet-fetches` 2 → 3: "a sheet whose socket joins only after the change shows it once it does, without a reload".
+- `realtime.test.ts`: the first opening asks again for every room asked for before it, and for none twice (13 tests).
+- Patch `tsf-5` (a first opening asks for no room) reddens the new check (2 of 3 on lane 2); the unit claim `sib-25` reddens the ledger's test.
+- Patch `sib-11` (a reopening asks for no room) lost its line to the change and was re-aimed at the reopening alone, the first opening kept; it reddens the renamed test again (12 of 13).
 
 ### `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change` — **closed** (security, small; found closing `found-5-oct/import-merge-resets-fields-the-file-lacks`) · reproduced 6 October
 

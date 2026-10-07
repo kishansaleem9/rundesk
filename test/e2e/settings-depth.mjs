@@ -18,7 +18,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
 import { makeChain } from './lib/chain.mjs'
-import { apiAs as apiAsAt, watchMade } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, watchMade, changesShared } from './lib/fixture.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -171,6 +171,14 @@ try {
   const admin = await signInApi(API, ADMIN.email, ADMIN.password)
   const A = apiAs(admin.accessToken)
   const workspaceId = admin.workspaces[0].id
+  /*
+   * WHAT THIS CHANGES OF THE SHARED ADMIN'S, PUT BACK AS IT WAS FOUND
+   * (`found-7-oct/shared-rows-keep-what-runs-changed`): high contrast, put
+   * back to off where it may have been on, and the pinned top bar, which the
+   * route refuses to set back to nothing (a null) once anything is pinned. Said
+   * before anything changes them, the run's sweep writes them back whole.
+   */
+  changesShared('users', { email: ADMIN.email }, ['high_contrast', 'topbar_pinned'])
 
   // Known starting point, and put it back afterwards.
   await A('/presence/me/status', { method: 'PUT', body: { emoji: null, text: null } })

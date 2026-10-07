@@ -10,7 +10,7 @@
  */
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
-import { apiClient, login, pickWorkspace, ensureSweepFixture, ensureDm, ensureNotification } from './lib/fixture.mjs'
+import { apiClient, login, pickWorkspace, ensureSweepFixture, ensureDm, ensureNotification, changesShared } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
@@ -58,6 +58,9 @@ if (!BASE) {
 }
 let WS = process.env.WS
 if (!WS) {
+  // Its notification preferences are the shared account's: put back whole as this run found them,
+  // however it ends (`found-7-oct/shared-rows-keep-what-runs-changed`).
+  changesShared('users', { email: EMAIL }, ['notification_preferences'])
   const auth = await login(`${BASE}/api/v1`, EMAIL, PASSWORD)
   const api = apiClient(`${BASE}/api/v1`, auth.accessToken)
   API = api
