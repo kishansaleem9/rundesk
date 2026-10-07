@@ -57,7 +57,7 @@
  * `MADE_LIB_UNDER_TEST` and `MADE_SWEEP_UNDER_TEST` aim it at other copies;
  * `--mutate` breaks each one rule at a time and requires a case to notice.
  */
-import { mkdtempSync, writeFileSync, readdirSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, rmSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -397,9 +397,11 @@ try {
     const ended = new Promise((resolve) => w.on('exit', (code) => resolve(code)))
     w.stdin.end('go')
     const code = await ended
-    chk(up && code === 0 && wOut.includes('made on this database while this run ran that no run registered') && wOut.includes(stray.email),
-      'an account made on the database while a run ran, that no run registered, is named when the run ends',
+    chk(up && code === 1 && wOut.includes('made on this database while this run ran that no run registered') && wOut.includes(stray.email) &&
+      /✗ this run left 1 row that nothing it registered removes: 1 account/.test(wOut),
+      'an account made on the database while a run ran, that no run registered, is named when the run ends, and the run fails for it',
       `ready ${up}; it exited ${code}; it said ${JSON.stringify(wOut.trim().slice(-400))}`)
+    await sql`delete from users where id = ${stray.id}`
   }
 
   console.log('\n▶ rows made in another database than the one the run cleans')
@@ -465,6 +467,218 @@ try {
       `it exited ${r2.code}; the young account ${(await accountExists(young)) ? 'is still there' : 'is gone'}; the elder ${(await accountExists(elder)) ? 'is there' : 'was DELETED'}; it said ${JSON.stringify(r2.out.trim().slice(-300))}`)
   }
 
+  console.log('\n▶ what goes with a registered row, and what is not the run’s')
+  {
+    // A notification names what it is about only in `target`: by `entityId`, or along its `url`.
+    const p = await person('noted')
+    // Caused by somebody outside the run, so only what they are about can take them (the run's own go as its account goes).
+    const note = async (target) => (await sql`insert into notifications (user_id, workspace_id, actor_id, type, title, target)
+      values (${outsider.id}, ${shared}, ${outsider.id}, 'task_assigned', ${slug('about')}, ${sql.json(target)}) returning id::text as id`)[0].id
+    const byId = await note({ entityType: 'space', entityId: p.sp, url: `/app/${shared}/${p.sp}` })
+    const byUrl = await note({ entityType: 'task', entityId: randomUUID(), url: `/app/${shared}/${p.sp}/x?task=y` })
+    const [other] = await sql`insert into notifications (user_id, workspace_id, actor_id, type, title, target)
+      values (${outsider.id}, ${shared}, ${outsider.id}, 'task_assigned', ${slug('other')}, ${sql.json({ entityType: 'task', entityId: randomUUID(), url: `/app/${shared}` })}) returning id::text as id`
+    const r = run('probe-noted', { register: [{ t: 'users', id: p.a.id }, { t: 'spaces', id: p.sp }], end: 'fall' })
+    chk(r.code === 0 && !(await exists('notifications', byId)) && !(await exists('notifications', byUrl)),
+      'the notifications about a registered row go with it, whether they name it as what they are about or along their address',
+      `it exited ${r.code}; by id ${(await exists('notifications', byId)) ? 'STAYED' : 'gone'}, by address ${(await exists('notifications', byUrl)) ? 'STAYED' : 'gone'}; it said ${JSON.stringify(r.out.trim().slice(-300))}`)
+    chk(await exists('notifications', other.id), 'and a notification about something else stays', 'a notification about nothing the run made was removed')
+    await sql`delete from notifications where id = ${other.id}`
+  }
+  {
+    // Registered though the run did not make it: a route answered with a row it already had.
+    const [old] = await sql`insert into spaces (workspace_id, name, created_at) values (${shared}, ${slug('old-space')}, now() - interval '1 day') returning id::text as id`
+    const oldOrg = await org('old-org', [outsider], { old: true })
+    const a = await account('old-row')
+    const r = run('probe-old-row', { register: [{ t: 'users', id: a.id }, { t: 'spaces', id: old.id }, { t: 'organizations', id: oldOrg }], end: 'fall' })
+    chk(r.code === 0 && (await exists('spaces', old.id)) && /kept .*1 space\b.* older than the run/.test(r.out),
+      'a registered row older than the run is not deleted, and the run says it kept it',
+      `it exited ${r.code}; the space ${(await exists('spaces', old.id)) ? 'is there' : 'was DELETED'}; it said ${JSON.stringify(r.out.trim().slice(-300))}`)
+    chk(await exists('organizations', oldOrg), 'and so is a registered organization older than the run (the admin’s holds Main)',
+      'an organization older than the run was DELETED because the run registered it')
+  }
+
+  console.log('\n▶ what a registered row filed elsewhere')
+  {
+    const a = await account('filer')
+    const sp = await space(shared, 'filer-space')
+    // An older project (as Main's General is), the run's list in it, and a project the server made for a list made under the space alone.
+    const [oldProject] = await sql`insert into projects (space_id, name, created_at) values (${sp}, ${slug('old-project')}, now() - interval '1 day') returning id::text as id`
+    const [list] = await sql`insert into lists (project_id, name) values (${oldProject.id}, ${slug('list')}) returning id::text as id`
+    const [youngProject] = await sql`insert into projects (space_id, name) values (${sp}, ${slug('young-project')}) returning id::text as id`
+    const [underSpace] = await sql`insert into lists (project_id, name) values (${youngProject.id}, ${slug('list-under-space')}) returning id::text as id`
+    const [task] = await sql`insert into tasks (list_id, title) values (${list.id}, ${slug('task')}) returning id::text as id`
+    const [oldLabel] = await sql`insert into labels (workspace_id, name, color, created_at) values (${shared}, ${slug('old-label')}, '#888888', now() - interval '1 day') returning id::text as id`
+    const [youngLabel] = await sql`insert into labels (workspace_id, name, color) values (${shared}, ${slug('young-label')}, '#888888') returning id::text as id`
+    for (const l of [oldLabel, youngLabel]) await sql`insert into task_label_assignments (task_id, label_id) values (${task.id}, ${l.id})`
+    const [meeting] = await sql`insert into meetings (workspace_id, title) values (${shared}, ${slug('meeting')}) returning id::text as id`
+    const [call] = await sql`insert into calls (workspace_id, started_by_id, meeting_id) values (${shared}, ${a.id}, ${meeting.id}) returning id::text as id`
+    const [form] = await sql`insert into forms (workspace_id, title, slug) values (${shared}, ${slug('form')}, ${slug('form-slug')}) returning id::text as id`
+    // In a list nobody registered, so only the form can take it.
+    const [elsewhere] = await sql`insert into lists (project_id, name, created_at) values (${oldProject.id}, ${slug('list-elsewhere')}, now() - interval '1 day') returning id::text as id`
+    const [filed] = await sql`insert into tasks (list_id, title) values (${elsewhere.id}, ${slug('filed-task')}) returning id::text as id`
+    await sql`insert into form_submissions (form_id, data, created_task_id) values (${form.id}, ${sql.json({})}, ${filed.id})`
+    const [indexed] = await sql`insert into knowledge_embeddings (workspace_id, source_type, source_id, content_hash, embedding, dim) values (${shared}, 'task', ${task.id}, ${slug('hash')}, ${[0.1]}, 1) returning id::text as id`
+    const r = run('probe-filer', {
+      register: [{ t: 'users', id: a.id }, { t: 'lists', id: list.id }, { t: 'lists', id: underSpace.id }, { t: 'tasks', id: task.id }, { t: 'calls', id: call.id }, { t: 'forms', id: form.id }],
+      end: 'fall',
+    })
+    const stayed = []
+    if (await exists('meetings', meeting.id)) stayed.push('the meeting its call filed')
+    if (await exists('tasks', filed.id)) stayed.push('the task its form filed')
+    if (await exists('labels', youngLabel.id)) stayed.push('the tag its task made')
+    if (await exists('projects', youngProject.id)) stayed.push('the project made for its list')
+    if (await exists('knowledge_embeddings', indexed.id)) stayed.push('what the AI index held of its task')
+    chk(r.code === 0 && stayed.length === 0,
+      'what a registered row filed elsewhere goes with it: the meeting its call filed, the task its form filed, the tag its task made, the project made for its list, and what the AI index held of it',
+      `it exited ${r.code}; still there: ${stayed.join(', ') || 'nothing'}; it said ${JSON.stringify(r.out.trim().slice(-300))}`)
+    const takenUp = /kept[^)]*(label|projects? row)/.test(r.out)
+    chk((await exists('labels', oldLabel.id)) && (await exists('projects', oldProject.id)) && !takenUp,
+      'and a tag or a project older than the run, which other rows share, stays, not even taken up as the run’s',
+      `the older tag ${(await exists('labels', oldLabel.id)) ? 'is there' : 'was DELETED'}, the older project ${(await exists('projects', oldProject.id)) ? 'is there' : 'was DELETED'}; it said ${JSON.stringify(r.out.trim().slice(-300))}`)
+    await sql`delete from labels where id = ${oldLabel.id}`
+  }
+
+  {
+    // The mail in and out of a task and a list that go, and what was opened of the task from a search.
+    const a = await account('mailed')
+    const sp = await space(shared, 'mailed-space')
+    const [project] = await sql`insert into projects (space_id, name) values (${sp}, ${slug('mailed-project')}) returning id::text as id`
+    const [list] = await sql`insert into lists (project_id, name) values (${project.id}, ${slug('mailed-list')}) returning id::text as id`
+    const [task] = await sql`insert into tasks (list_id, title) values (${list.id}, ${slug('mailed-task')}) returning id::text as id`
+    const [inbound] = await sql`insert into inbound_email_messages (list_id, task_id, message_id, from_address, recipient, subject, bytes, attachment_count, outcome)
+      values (${list.id}, ${task.id}, ${slug('in')}, 'a@rundesk.invalid', 'list@rundesk.invalid', 'in', 1, 0, 'created') returning id::text as id`
+    const [outbound] = await sql`insert into outbound_email_messages (message_id, task_id, list_id, recipient) values (${slug('out')}, ${task.id}, ${list.id}, 'b@rundesk.invalid') returning id::text as id`
+    const [opened] = await sql`insert into search_engagement (workspace_id, user_id, entity_type, entity_id) values (${shared}, ${outsider.id}, 'task', ${task.id}) returning id::text as id`
+    // Mail refused names neither: to the list's address once it was cut, and replies naming the task in their address.
+    const local = `list-${String(stamp).slice(-12)}${Math.floor(Math.random() * 1e6)}`
+    await sql`insert into list_email_aliases (list_id, local_part, revoked_at) values (${list.id}, ${local}, now())`
+    const refusedTo = async (recipient, what, outcome) => (await sql`insert into inbound_email_messages (message_id, from_address, recipient, subject, bytes, attachment_count, outcome)
+      values (${slug(what)}, 'a@rundesk.invalid', ${recipient}, 'refused', 1, 0, ${outcome}) returning id::text as id`)[0]
+    const cut = await refusedTo(`${local.toUpperCase()}@inbound.rundesk.local`, 'cut', 'rejected_no_alias')
+    const viaList = await refusedTo(`${local}+task-${task.id}@inbound.rundesk.local`, 'via-list', 'rejected_unknown_task')
+    const madeUp = await refusedTo(`list-madeup${stamp}+task-${task.id}@inbound.rundesk.local`, 'made-up', 'rejected_unknown_task')
+    const r = run('probe-mailed', { register: [{ t: 'users', id: a.id }, { t: 'tasks', id: task.id }, { t: 'lists', id: list.id }], end: 'fall' })
+    const stayed = []
+    if (await exists('inbound_email_messages', inbound.id)) stayed.push('the mail in')
+    if (await exists('inbound_email_messages', cut.id)) stayed.push('the mail to its cut address')
+    if (await exists('inbound_email_messages', viaList.id)) stayed.push('the reply to the task through the list’s address')
+    if (await exists('inbound_email_messages', madeUp.id)) stayed.push('the reply to the task through an address made up')
+    if (await exists('outbound_email_messages', outbound.id)) stayed.push('the mail out')
+    if (await exists('search_engagement', opened.id)) stayed.push('the search open')
+    chk(r.code === 0 && stayed.length === 0,
+      'and so do the mail in and out of a task and a list that go, the mail refused at the list’s cut address and the replies refused that name the task in their address, and what was opened of the task from a search',
+      `it exited ${r.code}; still there: ${stayed.join(', ') || 'nothing'}; it said ${JSON.stringify(r.out.trim().slice(-300))}`)
+  }
+
+  {
+    // The mail in from an account the run made that names nothing (a reply refused as answering nothing of ours), and out to it about a task that stays; an older account's stays.
+    const a = await account('replier')
+    const sp = await space(shared, 'replier-space')
+    const [project] = await sql`insert into projects (space_id, name) values (${sp}, ${slug('replier-project')}) returning id::text as id`
+    const [list] = await sql`insert into lists (project_id, name) values (${project.id}, ${slug('replier-list')}) returning id::text as id`
+    const [task] = await sql`insert into tasks (list_id, title) values (${list.id}, ${slug('replier-task')}) returning id::text as id`
+    const elderEmail = `${slug('elder-replier')}@rundesk.invalid`
+    const [elder] = await sql`insert into users (email, display_name, created_at) values (${elderEmail}, 'Made check elder replier', now() - interval '1 day') returning id::text as id`
+    const inbound = async (from, what) => (await sql`insert into inbound_email_messages (message_id, from_address, recipient, subject, bytes, attachment_count, outcome)
+      values (${slug(what)}, ${from}, 'notifications@rundesk.invalid', 'Re: a notice', 1, 0, 'rejected_no_alias') returning id::text as id`)[0]
+    const refused = await inbound(a.email.toUpperCase(), 'refused')
+    const fromElder = await inbound(elderEmail, 'from-elder')
+    const [toThem] = await sql`insert into outbound_email_messages (message_id, task_id, list_id, recipient) values (${slug('to-them')}, ${task.id}, ${list.id}, ${a.email}) returning id::text as id`
+    const r = run('probe-replier', { register: [{ t: 'users', id: a.id }, { t: 'users', email: elderEmail }], end: 'fall' })
+    const stayed = []
+    if (await exists('inbound_email_messages', refused.id)) stayed.push('the refused reply from its account')
+    if (await exists('outbound_email_messages', toThem.id)) stayed.push('the mail out to its account')
+    const elderStays = (await exists('inbound_email_messages', fromElder.id)) && (await exists('users', elder.id))
+    chk(r.code === 0 && stayed.length === 0 && elderStays,
+      'and the mail in from an account the run made, filed nowhere (a reply refused), and out to it about a task that stays, go with the account; an older account’s mail stays',
+      `it exited ${r.code}; still there: ${stayed.join(', ') || 'nothing'}; the older account’s mail ${elderStays ? 'stayed' : 'went'}; it said ${JSON.stringify(r.out.trim().slice(-300))}`)
+    await sql`delete from inbound_email_messages where id = ${fromElder.id}`
+    await sql`delete from outbound_email_messages where id = ${toThem.id}`
+    await sql`delete from users where id = ${elder.id}`
+    await sql`delete from tasks where id = ${task.id}`
+  }
+
+  console.log('\n▶ what a run leaves that nothing registered')
+  /** A probe that waits, while this check makes rows as the run would; then it ends. */
+  const whileRunning = async (name, register, make, file = probeFile(name)) => {
+    const w = spawn(process.execPath, [file], { env: env({ register, end: 'wait' }), stdio: ['pipe', 'pipe', 'pipe'] })
+    let out = ''
+    w.stdout.on('data', (d) => { out += d })
+    w.stderr.on('data', (d) => { out += d })
+    const up = await new Promise((resolve) => {
+      const t = setInterval(() => { if (out.includes('READY')) { clearInterval(t); resolve(true) } }, 100)
+      w.on('exit', () => { clearInterval(t); resolve(false) })
+    })
+    const made = up ? await make() : null
+    const ended = new Promise((resolve) => w.on('exit', (code) => resolve(code)))
+    w.stdin.end('go')
+    return { up, code: await ended, out, made }
+  }
+  {
+    const a = await account('leaves')
+    const r = await whileRunning('probe-leaves', [{ t: 'users', id: a.id }], () => space(shared, 'left-space'))
+    chk(r.up && r.code === 1 && /✗ this run left 1 row that nothing it registered removes: 1 space/.test(r.out),
+      'a run that leaves a row made while it ran, that it never registered, fails and names the table',
+      `ready ${r.up}; it exited ${r.code}; it said ${JSON.stringify(r.out.trim().slice(-300))}`)
+    if (r.made) await sql`delete from spaces where id = ${r.made}`
+  }
+  {
+    // A table with no created_at says when its row came by a time of its own: a watcher added to a task older than the run.
+    const a = await account('watching')
+    const [old] = await sql`insert into tasks (list_id, title, created_at)
+      select l.id, ${slug('old-task')}, now() - interval '1 day' from lists l join projects p on p.id = l.project_id join spaces s on s.id = p.space_id
+      where s.workspace_id = ${shared} limit 1 returning id::text as id`
+    const r = old ? await whileRunning('probe-watching', [{ t: 'users', id: a.id }], async () => {
+      await sql`insert into task_watchers (task_id, user_id) values (${old.id}, ${outsider.id})`
+      return null
+    }) : { up: false, code: null, out: 'no list in the shared workspace to put the older task in' }
+    chk(r.up && r.code === 1 && /✗ this run left 1 row that nothing it registered removes: 1 task_watchers row/.test(r.out),
+      'and a row of a table with no created_at, read by its own time of making (a watcher added), fails it too',
+      `ready ${r.up}; it exited ${r.code}; it said ${JSON.stringify(String(r.out).trim().slice(-300))}`)
+    if (old) await sql`delete from tasks where id = ${old.id}`
+  }
+  {
+    // What using the product as somebody writes: a sign-in, a counted request, an AI call, the audit trail; and what the API's own schedules write.
+    const a = await account('uses')
+    const r = await whileRunning('probe-uses', [{ t: 'users', id: a.id }], async () => {
+      await sql`insert into sessions (user_id, refresh_token, expires_at) values (${outsider.id}, ${slug('session')}, now() + interval '1 day')`
+      await sql`insert into ai_usage (workspace_id, user_id, feature, model) values (${shared}, ${outsider.id}, ${slug('feature')}, 'stub')`
+      await sql`insert into notifications (user_id, workspace_id, type, title) values (${outsider.id}, ${shared}, 'task_overdue', ${slug('due')})`
+      return null
+    })
+    chk(r.up && r.code === 0 && !/✗ this run left/.test(r.out),
+      'and one that leaves only a sign-in, an AI call counted toward the hourly limit, and a notification the API’s own schedule wrote (no actor) passes',
+      `ready ${r.up}; it exited ${r.code}; it said ${JSON.stringify(r.out.trim().slice(-300))}`)
+    await sql`delete from sessions where user_id = ${outsider.id}`
+    await sql`delete from ai_usage where feature like ${`${stamp}-%`}`
+    await sql`delete from notifications where title like ${`${stamp}-due-%`}`
+  }
+  {
+    // A notification a request writes for nobody: a test notification has no actor, and is no schedule's.
+    const a = await account('tests')
+    const r = await whileRunning('probe-tests', [{ t: 'users', id: a.id }], async () => {
+      await sql`insert into notifications (user_id, workspace_id, type, title) values (${outsider.id}, ${shared}, 'test_notification', ${slug('test')})`
+      return null
+    })
+    chk(r.up && r.code === 1 && /✗ this run left 1 row that nothing it registered removes: 1 notifications row/.test(r.out),
+      'but one that leaves a notification with no actor of a kind no schedule writes (a test notification) fails',
+      `ready ${r.up}; it exited ${r.code}; it said ${JSON.stringify(r.out.trim().slice(-300))}`)
+    await sql`delete from notifications where title like ${`${stamp}-test-%`}`
+  }
+  {
+    // A suite that registers nothing is armed as it begins: a script in a test/e2e directory of its own.
+    const dir = join(PROBES, 'test', 'e2e')
+    mkdirSync(dir, { recursive: true })
+    const suite = join(dir, 'probe-suite.mjs')
+    writeFileSync(suite, PROBE)
+    const r = await whileRunning('probe-suite', [], () => space(shared, 'suite-left-space'), suite)
+    chk(r.up && r.code === 1 && /✗ this run left 1 row that nothing it registered removes: 1 space/.test(r.out) && journals().length === 0,
+      'a suite that registers nothing is still read when it ends: the row it left fails it',
+      `ready ${r.up}; it exited ${r.code}; it said ${JSON.stringify(r.out.trim().slice(-300))}; journals: ${journals().join(', ') || 'none'}`)
+    if (r.made) await sql`delete from spaces where id = ${r.made}`
+  }
+
   console.log('\n▶ a row the sweep cannot remove')
   {
     // After a row the database has (so the run has seen it is the right one), a table it has not.
@@ -491,7 +705,7 @@ try {
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)
-const MIN_CASES = 26
+const MIN_CASES = 39
 if (pass + fail < MIN_CASES) {
   console.log(`\x1b[31mnot ok\x1b[0m only ${pass + fail} case(s) ran, below the floor of ${MIN_CASES}`)
   fail += 1
@@ -511,6 +725,8 @@ if (process.argv.includes('--mutate') && !process.env.MADE_LIB_UNDER_TEST && !pr
     alive,
     mutations: [
       ['no-exit-hook', "process.on('exit', () => removeAtExit(url))", 'void removeAtExit'],
+      ['exit-unsaid', "const r = runSweeper(['--exit', journal], url)", 'const r = runSweeper([journal], url)'],
+      ['suites-not-armed', "if (/[\\\\/]test[\\\\/]e2e[\\\\/][^\\\\/]+\\.mjs$/.test(path.resolve(process.argv[1] ?? ''))) arm()", 'void 0'],
       ['no-sweep-of-ended-runs', "const swept = runSweeper(['--ended', dir], url)", 'const swept = { status: 0 }'],
       ['nothing-journaled', 'if (journal) fs.appendFileSync(journal, `${JSON.stringify(entry)}\\n`)', 'void entry'],
       ['a-leftover-passes', 'if (!process.exitCode) process.exitCode = 1', 'void 0'],
@@ -544,6 +760,29 @@ if (process.argv.includes('--mutate') && !process.env.MADE_LIB_UNDER_TEST && !pr
       ['avatars-left', '    ...accountIds.map((id) => `avatars/${id}-`),\n', ''],
       ['workspace-objects-left', '    ...ws.flatMap((id) => [`workspaces/${id}/`, `calls/${id}/`, `chat/${id}/`, `workspace-logos/${id}-`]),\n', ''],
       ['every-avatar-goes', '    ...accountIds.map((id) => `avatars/${id}-`),\n', "    ...accountIds.map(() => 'avatars/'),\n"],
+      ['notifications-about-them-kept', 'if (gone.length) {', 'if (false) {'],
+      ['notifications-by-id-only', "             or exists (select 1 from regexp_matches(coalesce(n.target->>'url', ''), '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', 'g') m\n                        where m[1] in (select id from gone)))`).count)", '             )`).count)'],
+      ['call-meetings-left', "  if (j.rows.has('calls')) {", "  if (false) {"],
+      ['form-tasks-left', "  if (j.rows.has('forms')) {", "  if (false) {"],
+      ['list-projects-left', "  if (j.rows.has('lists')) {", "  if (false) {"],
+      ['task-tags-left', "  if (j.rows.has('tasks')) {\n    await filedBy('tags their tasks made'", "  if (false) {\n    await filedBy('tags their tasks made'"],
+      ['shared-projects-taken', "where l.id = any(${[...j.rows.get('lists')]}::uuid[]) and p.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'`)", "where l.id = any(${[...j.rows.get('lists')]}::uuid[])`)"],
+      ['shared-tags-taken', "where a.task_id = any(${[...j.rows.get('tasks')]}::uuid[]) and l.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'`)", "where a.task_id = any(${[...j.rows.get('tasks')]}::uuid[])`)"],
+      ['mail-left', "  if (j.rows.has('tasks') || j.rows.has('lists') || j.rows.has('list_email_aliases')) {", "  if (false) {"],
+      ['mail-to-cut-addresses-left', "         or lower(split_part(split_part(recipient, '@', 1), '+', 1)) in (\n           select lower(local_part) from list_email_aliases\n           where list_id = any(${named('lists')}::uuid[]) or id = any(${named('list_email_aliases')}::uuid[]))\n", ''],
+      ['mail-naming-their-tasks-left', "\n         or substring(lower(recipient) from '\\\\+task-([0-9a-f-]{36})@') = any(${named('tasks')}::text[])`)", '`)'],
+      ['mail-from-their-accounts-left', '  if (j.accountIds.length || j.emails.length) {\n    const theirs', '  if (false) {\n    const theirs'],
+      ['elder-accounts-mail-taken', "      where (id = any(${j.accountIds}::uuid[]) or lower(email) = any(${j.emails}::text[]))\n        and created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'`", "      where (id = any(${j.accountIds}::uuid[]) or lower(email) = any(${j.emails}::text[]))`"],
+      ['search-opens-left', "(await sql`delete from search_engagement where entity_id in (select unnest(${gone}::text[]))`).count)", '0)'],
+      ['made-at-only-created', "and (c.column_name = 'created_at' or (c.column_default like 'now()%' and c.column_name <> 'updated_at' and c.column_name not like 'last\\\\_%'))", "and c.column_name = 'created_at'"],
+      ['index-left', "(await sql`delete from knowledge_embeddings where source_id::text in (select unnest(${gone}::text[]))`).count)", '0)'],
+      ['elder-organizations-deleted', "where id = any(${registeredOrgs}::uuid[]) and created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'", 'where id = any(${registeredOrgs}::uuid[])'],
+      ['elder-rows-deleted', 'if (elder.length) kept.push(said(table, elder.length))\n      return ids.filter((id) => !elder.includes(id))', 'return ids'],
+      ['leftovers-read-by-hand', "const atExit = argv[0] === '--exit'", 'const atExit = true'],
+      ['leftovers-pass', '      if (left.length) {\n        status = 1', '      if (false) {\n        status = 1'],
+      ['use-counted-as-left', "c.ordinal_position`).filter((r) => !(r.t in LEFT_BY_USE))", 'c.ordinal_position`)'],
+      ['unscheduled-notifications-pass', "and (actor_id is not null or not (type::text = any(${SCHEDULED}::text[])))", 'and actor_id is not null'],
+      ['scheduled-notifications-counted', 'created_at >= to_timestamp(${started} / 1000.0) and (actor_id is not null or not (type::text = any(${SCHEDULED}::text[])))`', 'created_at >= to_timestamp(${started} / 1000.0)`'],
     ],
   })
 }

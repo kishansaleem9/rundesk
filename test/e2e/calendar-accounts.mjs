@@ -880,11 +880,14 @@ try {
      * suite's litter, another suite's refusal, with nothing connecting them.
      * The name carries this run's TAG now as well, so a leftover cannot collide
      * with a later one either.
+     *
+     * TAKEN BACK BY THE RUN'S SWEEP, NOT HERE (`found-30-sep/suite-leftovers-unmeasured`).
+     * `signUpApi` registered them, and the sweep removes the account with the
+     * organization and workspace sign-up made for it, and its membership here.
+     * Deleted here by SQL first, the account took its owner's membership with
+     * it, and nothing could say the organization was the run's any more: it
+     * stayed, with its workspace, every run.
      */
-    if (otherEmail) {
-      await sql`delete from workspace_members where user_id in (select id from users where email = ${otherEmail})`.catch(() => {})
-      await sql`delete from users where email = ${otherEmail}`.catch(() => {})
-    }
     // Attendees first: the fixture meetings are tagged, and leaving them behind
     // would put busy time on this user's calendar in every later run.
     await sql`

@@ -153,6 +153,8 @@ function removeAtExit(url) {
     return
   }
   if (!journal) {
+    // Armed as the suite began (no database to read): nothing made, nothing to say.
+    if (!counted.size) return
     const what = [...counted].map(([t, n]) => `${n} ${t}`).join(', ')
     console.log(`  (made by this run and NOT removed — there is no DATABASE_URL to remove it through: ${what})`)
     return
@@ -161,7 +163,7 @@ function removeAtExit(url) {
     console.log(`  (E2E_KEEP_MADE: kept what this run made, listed in ${journal}; the next run on this database removes it)`)
     return
   }
-  const r = runSweeper([journal], url)
+  const r = runSweeper(['--exit', journal], url)
   if (r.status !== 0) {
     if (r.error) console.log(`  ✗ cleanup did not run: ${r.error.message}; ${journal} keeps the list for the next run`)
     // A run that leaves what it made is not clean, whatever its checks said.
@@ -229,3 +231,13 @@ export function madeRow(table, id) {
 export const madeWorkspace = (id) => madeRow('workspaces', id)
 /** A space this run made, removed for good (archiving keeps it). */
 export const madeSpace = (id) => madeRow('spaces', id)
+
+/*
+ * A SUITE'S RUN IS ARMED AS IT BEGINS, whether it registers anything or not:
+ * the end of the run reads what it left that nothing registered, and a suite
+ * that registered nothing left most of all (`made-sweep.mjs`'s `leftSince`,
+ * `found-30-sep/suite-leftovers-unmeasured`). A suite is a script in
+ * `test/e2e/` itself; a gate that imports this to read it is not, and touches
+ * nothing.
+ */
+if (/[\\/]test[\\/]e2e[\\/][^\\/]+\.mjs$/.test(path.resolve(process.argv[1] ?? ''))) arm()

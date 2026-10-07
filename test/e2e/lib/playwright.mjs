@@ -21,6 +21,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
+import { watchMade } from './fixture.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -93,6 +94,13 @@ export async function resolveChromium({ exitIfMissing = true } = {}) {
       chromium = await fromDir(dir)
       if (chromium) break
     }
+  }
+
+  // Every browser it launches registers what its pages make (`watchMade`, fixture.mjs).
+  if (chromium && typeof chromium.launch === 'function' && !chromium.__madeWatched) {
+    const launch = chromium.launch.bind(chromium)
+    chromium.launch = async (...args) => watchMade(await launch(...args))
+    chromium.__madeWatched = true
   }
 
   if (!chromium && exitIfMissing) {

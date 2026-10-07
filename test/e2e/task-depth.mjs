@@ -26,7 +26,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, watchMade } from './lib/fixture.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -202,7 +202,8 @@ try {
         return stack.base
       })()
 
-  browser = await chromium.launch(LAUNCH)
+  // What its pages make is registered, as `apiAs` registers its own (`watchMade`).
+  browser = watchMade(await chromium.launch(LAUNCH))
   const page = await (await browser.newContext({ viewport: { width: 1680, height: 1000 } })).newPage()
   await page.goto(`${origin}/login`, { waitUntil: 'domcontentloaded' })
   await page.fill('input[type=email]', ADMIN.email)

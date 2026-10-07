@@ -18,6 +18,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
+import { apiAs } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -56,12 +57,10 @@ let token = null
 try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   token = auth.accessToken
-  const made = await fetch(`${API}/workspaces`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ name: TAG }),
-  }).then((r) => r.json()).catch(() => null)
-  WS = made?.data?.id
+  // Through the one client, which registers the workspace, and the organization
+  // it came with, for removal when the run ends (`found-30-sep/suite-leftovers-unmeasured`).
+  const made = await apiAs(API)(token)('/workspaces', { method: 'POST', body: { name: TAG } })
+  WS = made.data?.id
   if (!WS) throw new Error('could not make the workspace')
 
   browser = await chromium.launch(launchOptions())

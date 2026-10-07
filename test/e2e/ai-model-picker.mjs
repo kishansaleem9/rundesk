@@ -38,7 +38,8 @@
  */
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
-import { apiClient, login, pickWorkspace } from './lib/fixture.mjs'
+import { apiClient, login, pickWorkspace, madeRow } from './lib/fixture.mjs'
+import { openDb } from './lib/db.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
@@ -503,11 +504,19 @@ try {
 } finally {
   /*
    * The preference is this account's real setting, not the suite's to keep.
-   * There is no DELETE, so "never set" is restored by putting back whatever
-   * was there; when nothing was, the default is restored, which is what an
-   * unset preference resolves to anyway.
+   * There is no DELETE route: a setting there was before is put back; when
+   * there was none, the row this run made is registered, and goes when the run
+   * ends (`found-30-sep/suite-leftovers-unmeasured`) — putting the default back
+   * kept a row "never set" never had.
    */
-  await api(prefRoute, { method: 'PUT', body: { preferredTier: originalPreference ?? 'deep' } })
+  if (originalPreference !== null) {
+    await api(prefRoute, { method: 'PUT', body: { preferredTier: originalPreference } })
+  } else {
+    const sql = await openDb()
+    const [row] = sql ? await sql`select id::text as id from ai_model_preferences where workspace_id = ${WS} and user_id = ${auth.user?.id ?? null}` : []
+    if (row) madeRow('ai_model_preferences', row.id)
+    await sql?.end({ timeout: 5 })
+  }
   await ctx?.close().catch(() => {})
   await browser.close().catch(() => {})
 }

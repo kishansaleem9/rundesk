@@ -22,7 +22,7 @@
  */
 import { signInApi, signUpApi } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeRow } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -56,14 +56,20 @@ const TAG = `flr${stamp}`
 let sql = null
 let WS = null
 let A = null
+/** The platform switch's row as the run found it: its id, or null where there was none. */
+let platformBefore
 /** The platform's forms switch, put back on however the run ends; its answer, or null with no client. */
 const platformOn = async () => (A ? A('/feature-flags/forms', { method: 'PUT', body: { enabled: true, scope: 'global' } }) : null)
+const platformRowOf = async (db) => (await db`
+  select id::text as id from feature_flags
+  where flag_key = 'forms' and scope = 'global' and scope_id is null and workspace_id is null`)[0] ?? null
 
 try {
   sql = await openDb()
   if (!sql) throw new Error('no DATABASE_URL — the switches stored are counted by SQL')
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
+  platformBefore = (await platformRowOf(sql))?.id ?? null
   // A run killed half-way leaves the platform's forms off: healed before anything is read.
   await platformOn()
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
@@ -147,6 +153,11 @@ try {
     'and the platform’s Forms switch is back on for every workspace after this run',
     `PUT /feature-flags/forms ${healed ? said(healed) : 'was never sent'}`,
   )
+  // The switch's row, when this run's PUT made it: a lane that had none (the
+  // default, on) is left with none. One the run found was switched in place and
+  // is back on; pristine has it, and it stays (`found-30-sep/suite-leftovers-unmeasured`).
+  const platformRow = sql && platformBefore === null ? await platformRowOf(sql) : null
+  if (platformRow) madeRow('feature_flags', platformRow.id)
   if (WS && A) {
     const gone = await A(`/workspaces/${WS}`, { method: 'DELETE' })
     if (![200, 204, 404].includes(gone.status)) console.log(`  cleanup left behind: DELETE /workspaces/${WS} answered ${gone.status || 'nothing'}`)

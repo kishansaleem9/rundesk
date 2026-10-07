@@ -32,11 +32,10 @@ import { madeWorkspace, madeSpace, madeRow } from './made.mjs'
 export { madeAccount, madeWorkspace, madeSpace, madeRow } from './made.mjs'
 
 /*
- * THE ROUTES WHOSE ANSWER IS A NEW WORKSPACE, SPACE, LIST OR INVITATION, by
- * exact path: `apiAs` registers what they made, so every suite that makes its
- * own workspace (155 did, 136 of them archiving it at the end and none
- * deleting it) or a space or list in the shared one has it removed when the
- * run ends, without a line of its own
+ * THE ROUTES WHOSE ANSWER IS A NEW ROW, by path: `apiAs` registers what they
+ * made, so every suite that makes its own workspace (155 did, 136 of them
+ * archiving it at the end and none deleting it) or a space or list in the
+ * shared one has it removed when the run ends, without a line of its own
  * (`found-30-sep/suite-runs-leave-accounts-behind`). `DELETE /lists/:id`, like
  * the space's, only archives: `list-filters`, `view-visibility` and
  * `planner-blocks` left a list in Main Workspace a run. An invitation belongs
@@ -44,15 +43,116 @@ export { madeAccount, madeWorkspace, madeSpace, madeRow } from './made.mjs'
  * `DELETE /invitations/:id` only revokes it: `auth-route-limits` left three a
  * run.
  *
- * NOT TASKS: `ensureSweepFixture` and `ensureShared` keep tasks in the shared
- * workspace from run to run on purpose, and a suite beside this one may be
- * reading them. A suite registers the tasks it makes there itself.
+ * AND WHAT A SUITE MAKES IN THE SHARED WORKSPACE (`found-30-sep/suite-leftovers-unmeasured`).
+ * After the lanes were brought to pristine's hierarchy, a sweep of the 268
+ * suites left 559 rows there, from 53 suites: tasks above all (`person-panel`
+ * left 34 a run, deleted through the product, which only bins them, with 103
+ * rows of their activity), then the comments, messages, channels, projects,
+ * docs and meetings they made. Tasks were left out of this on purpose:
+ * `ensureSweepFixture` and `ensureShared` kept theirs from run to run, for a
+ * suite beside this one to read. No suite runs beside another on a database
+ * now (a lane runs one at a time, and CI one after another), so they make
+ * their own each run, as everything else here does.
+ *
+ * A route here answers with the row it made, or, for a direct message, the
+ * one it found: a row older than the run is not the run's, and the sweep keeps
+ * it (`made-sweep.mjs`). A route that answers with another row than the one it
+ * made (the task an assignee joined) is not here.
  */
-const MADE_BY_POST = {
-  '/workspaces': madeWorkspace,
-  '/spaces': madeSpace,
-  '/lists': (id) => madeRow('lists', id),
-  '/invitations': (id) => madeRow('invitations', id),
+const UUID_IN_PATH = '[0-9a-fA-F-]{36}'
+const ROW_ID = /^[0-9a-f-]{36}$/i
+const MADE_BY_POST = [
+  // And its organization: the admin is in none, so a workspace the admin makes comes with one of its own.
+  ['/workspaces', (id, made) => {
+    if (!ROW_ID.test(String(id ?? ''))) return
+    madeWorkspace(id)
+    if (ROW_ID.test(String(made?.organizationId ?? ''))) madeRow('organizations', made.organizationId)
+  }],
+  ['/spaces', (id) => ROW_ID.test(String(id ?? '')) && madeSpace(id)],
+  ['/lists', 'lists'],
+  ['/invitations', 'invitations'],
+  ['/projects', 'projects'],
+  ['/tasks', 'tasks'],
+  ['/tasks/:id/comments', 'task_comments'],
+  ['/tasks/:id/checklists', 'task_checklists'],
+  ['/workspaces/:id/chat/channels', 'chat_channels'],
+  ['/workspaces/:id/chat/dms', 'chat_channels'],
+  ['/workspaces/:id/chat/group-dms', 'chat_channels'],
+  ['/chat/messages/:id/create-task', 'tasks'],
+  ['/chat/channels/:id/messages', 'chat_messages'],
+  ['/workspaces/:id/docs', 'docs'],
+  ['/workspaces/:id/docs/import', 'docs'],
+  ['/workspaces/:id/labels', 'labels'],
+  ['/support/tickets', 'support_tickets'],
+  ['/workspaces/:id/meetings', 'meetings'],
+  ['/workspaces/:id/calls', 'calls'],
+  ['/workspaces/:id/forms', 'forms'],
+  ['/workspaces/:id/bookmarks', 'workspace_bookmarks'],
+  ['/workspaces/:id/announcements', 'announcements'],
+  ['/workspaces/:id/ai-chats', 'ai_chat_threads'],
+  ['/workspaces/:id/canvases', 'workspace_canvases'],
+  ['/workspaces/:id/projects/:id/custom-fields', 'custom_field_definitions'],
+  // A call that ends — by its End, or as its last person leaves — files a meeting, which the answer names.
+  ['/workspaces/:id/calls/:id/end', (id, made) => ROW_ID.test(String(made?.meetingId ?? '')) && madeRow('meetings', made.meetingId)],
+  ['/workspaces/:id/calls/:id/leave', (id, made) => ROW_ID.test(String(made?.meetingId ?? '')) && madeRow('meetings', made.meetingId)],
+  ['/workspaces/:id/reminders', 'reminders'],
+  // A list's email address: its DELETE turns it off and keeps the row.
+  ['/lists/:id/inbound-email', 'list_email_aliases'],
+  ['/lists/:id/views', 'task_views'],
+  ['/lists/:id/filters', 'list_filter_presets'],
+].map(([route, made]) => [
+  new RegExp(`^${route.replace(/:id/g, UUID_IN_PATH)}$`),
+  typeof made === 'string' ? (id) => ROW_ID.test(String(id ?? '')) && madeRow(made, id) : made,
+])
+/** What `route` makes, registered as made, when it answers with a new row's id. */
+const madeBy = (route) => MADE_BY_POST.find(([path]) => path.test(route.split('?')[0]))?.[1] ?? null
+
+/*
+ * WHAT A PAGE MAKES, REGISTERED AS `apiAs` REGISTERS IT (`found-30-sep/suite-leftovers-unmeasured`).
+ * A suite drives the product through its pages as much as through the client,
+ * and a page makes rows by the same routes: the AI dock its threads, the space
+ * wizard its space, the meeting form its meeting, the list's add row its task.
+ * After the client registered its own, 21 suites still left rows, most of them
+ * made so. So every answer a browser's page gets from one of `MADE_BY_POST`'s
+ * routes is registered too. `lib/playwright.mjs` watches every browser it
+ * launches; a suite that launches one itself watches it with this.
+ */
+export function watchMade(browser) {
+  if (!browser || typeof browser.newContext !== 'function' || browser.__madeWatched) return browser
+  browser.__madeWatched = true
+  const watch = (context) => {
+    if (context && typeof context.on === 'function' && !context.__madeWatched) {
+      context.__madeWatched = true
+      context.on('response', (res) => void registerAnswer(res))
+    }
+    return context
+  }
+  const newContext = browser.newContext.bind(browser)
+  browser.newContext = async (...args) => watch(await newContext(...args))
+  if (typeof browser.newPage === 'function') {
+    const newPage = browser.newPage.bind(browser)
+    browser.newPage = async (...args) => {
+      const page = await newPage(...args)
+      watch(page.context())
+      return page
+    }
+  }
+  return browser
+}
+
+/** A page's answer from a route that makes a row, registered by the id it answered with. */
+async function registerAnswer(res) {
+  try {
+    if (res.request().method() !== 'POST' || res.status() < 200 || res.status() >= 300) return
+    const { pathname } = new URL(res.url())
+    const at = pathname.indexOf('/api/v1/')
+    const made = at < 0 ? null : madeBy(pathname.slice(at + '/api/v1'.length))
+    if (!made) return
+    const data = (await res.json())?.data
+    if (data && typeof data === 'object') made(data.id, data)
+  } catch {
+    /* an answer no longer readable (the page closed, the body streamed) names nothing */
+  }
 }
 
 /**
@@ -88,9 +188,10 @@ const MADE_BY_POST = {
  *   · When nothing answers (the API is down, the connection dropped), a status
  *     of 0: `{ status: 0, ok: false, data: null, error: { message: 'no answer',
  *     cause } }`. A setup reads it as a refusal; `must` below names it.
- *   · A workspace, space, list or invitation it is answered with a new id of
- *     (`POST /workspaces`, `/spaces`, `/lists`, `/invitations`, 2xx) is
- *     registered with `made.mjs`, and removed for good when the run ends.
+ *   · A row it is answered with a new id of, from a route that makes one
+ *     (`POST /workspaces`, `/spaces`, `/lists`, `/tasks` and the rest of
+ *     `MADE_BY_POST`, 2xx), is registered with `made.mjs`, and removed for
+ *     good when the run ends.
  *
  * WHAT A SUITE MAY STILL ASK FOR, where its own copy did something else and a
  * check stood on it. Each is an option, so the difference is written where the
@@ -130,8 +231,8 @@ export function apiAs(base, { noAnswer = 'status', emptyBodyOn = [], dataOrBody 
       /* not JSON: a CSV, a PDF, a page, or no body at all */
     }
     const said = json?.message ?? json?.error?.message
-    const made = init.method === 'POST' && res.status >= 200 && res.status < 300 ? MADE_BY_POST[route] : null
-    if (made && /^[0-9a-f-]{36}$/i.test(String(json?.data?.id ?? ''))) made(json.data.id)
+    const made = init.method === 'POST' && res.status >= 200 && res.status < 300 ? madeBy(route) : null
+    if (made && json?.data && typeof json.data === 'object') made(json.data.id, json.data)
     return {
       status: res.status,
       ok: res.status >= 200 && res.status < 300,
@@ -345,7 +446,8 @@ export async function ensureNotification(api, apiBase, workspaceId, myUserId, li
  * `A39 open task for the pair` and `A39 Sprint sync with colleague` were for:
  * two rows that existed in one database and nowhere else.
  *
- * Idempotent by title, so repeated runs do not pile up rows.
+ * Found by title within a run; what it makes is registered (`apiAs`) and goes
+ * when the run ends, so runs do not pile up rows.
  */
 export async function ensureShared(
   api,

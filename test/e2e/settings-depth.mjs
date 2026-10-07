@@ -18,7 +18,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
 import { makeChain } from './lib/chain.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, watchMade } from './lib/fixture.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -189,7 +189,8 @@ try {
         return stack.base
       })()
 
-  browser = await chromium.launch(LAUNCH)
+  // What its pages make is registered, as `apiAs` registers its own (`watchMade`).
+  browser = watchMade(await chromium.launch(LAUNCH))
   const page = await (await browser.newContext({ viewport: { width: 1680, height: 1000 } })).newPage()
   await page.goto(`${origin}/login`, { waitUntil: 'domcontentloaded' })
   await page.fill('input[type=email]', ADMIN.email)
@@ -495,24 +496,35 @@ try {
    * all sixteen values; only the write was missing.
    */
   await page.goto(`${origin}/app/${workspaceId}/settings?tab=members`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(3000)
-  check(/[?&]tab=members/.test(page.url()), 'arriving at a named tab keeps it', page.url())
+  /*
+   * READ ONCE THE TABS ARE DRAWN, NOT THREE SECONDS AFTER THE PAGE BEGAN
+   * (`found-7-oct/settings-depth-reads-the-tabs-after-a-fixed-wait`). Under a
+   * sweep's load the page had not drawn its tabs three seconds in, and the
+   * Trash tab's absence was read as the product's. The tab the page lands on
+   * is drawn with the rest; after it, the address is watched for three seconds
+   * for a rewrite, and the Trash tab looked for.
+   */
+  const tabsDrawn = await page.getByTestId('settings-tab-members').first().waitFor({ timeout: 30_000 }).then(() => true, () => false)
+  const rewritten = tabsDrawn && (await page.waitForURL((u) => !/[?&]tab=members/.test(u.search), { timeout: 3_000 }).then(() => true, () => false))
+  check(tabsDrawn && !rewritten && /[?&]tab=members/.test(page.url()), 'arriving at a named tab keeps it',
+    tabsDrawn ? page.url() : `the settings tabs were never drawn: ${page.url()}`)
 
   const trashTab = page.getByTestId('settings-tab-trash')
   const tabAddress = chain(
     'moving to another tab replaces it in the address',
     'and reopening that address returns the same tab',
   )
-  if ((await trashTab.count()) === 0) {
-    tabAddress.rest('skipped: there was no Trash tab to move to')
+  if (!tabsDrawn || (await trashTab.count()) === 0) {
+    tabAddress.rest(tabsDrawn ? 'skipped: there was no Trash tab to move to' : 'skipped: the settings tabs were never drawn')
   } else {
     await trashTab.first().click()
-    await page.waitForTimeout(2000)
+    await page.waitForURL(/[?&]tab=trash/, { timeout: 10_000 }).then(() => true, () => false)
     tabAddress.step(/[?&]tab=trash/.test(page.url()) && !/tab=members/.test(page.url()), page.url())
     // The point of the address: reopening it returns the same tab.
     await page.goto(page.url(), { waitUntil: 'domcontentloaded' })
-    await page.waitForTimeout(3000)
-    tabAddress.step(/[?&]tab=trash/.test(page.url()), page.url())
+    const reopened = await trashTab.first().waitFor({ timeout: 30_000 }).then(() => true, () => false)
+    const moved = reopened && (await page.waitForURL((u) => !/[?&]tab=trash/.test(u.search), { timeout: 3_000 }).then(() => true, () => false))
+    tabAddress.step(reopened && !moved && /[?&]tab=trash/.test(page.url()), reopened ? page.url() : `the settings tabs were never drawn: ${page.url()}`)
   }
 
   // ---------------------------------------------------------------------

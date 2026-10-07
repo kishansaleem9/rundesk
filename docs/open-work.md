@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 515 items: 13 open · 3 partly fixed · 442 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 518 items: 14 open · 3 partly fixed · 444 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -2026,7 +2026,7 @@ Two passes, counted by SQL lane by lane. The first took what this item names: th
 
 What is inside pristine's own containers (a task or a doc in General › To do) is not taken: that is `found-30-sep/suite-leftovers-unmeasured`'s. Neither are objects in a lane's store whose rows were deleted before the sweep purged the store: nothing names them now, and they go when the lane's stub restarts. The regression sweep after the removal shows no suite relied on what was removed (all 268 suites on lanes 2, 4, 5, 6 and 7, 4,179 checks, 266 green at once, and `create-menu-ai` (24) and `task-ai-bar` (19) on lane 4, which has no model. `password-hash-time` failed under the sweep's load and was green alone twice; `session-in-the-browser`'s failure is `found-7-oct/a-tab-that-saw-the-sign-out-misses-the-sign-in`).
 
-### `found-30-sep/suite-leftovers-unmeasured` — open (test tooling, medium; found closing `found-30-sep/suite-runs-leave-accounts-behind`) · reproduced 5 October
+### `found-30-sep/suite-leftovers-unmeasured` — **closed** (test tooling, medium; found closing `found-30-sep/suite-runs-leave-accounts-behind`) · reproduced 5 October
 
 **What a run leaves was measured for 36 of 259 suites**
 
@@ -2035,6 +2035,32 @@ What is inside pristine's own containers (a task or a doc in General › To do) 
 *To close:* run every suite once on a lane with every table counted before and after (the scratch `run.sh`/`content.sh` do it), register what each leaves (`madeRow`), and add a check that a run adds no row outside the admin's sessions, rate-limit counters and Main's audit trail.
 
 *Triage, 5 October:* reproduced on a lane. Suites still leave rows the cleanup library never sees (task-provenance leaves a form and three tasks in Main on every run), and nothing counts every table to catch it. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 7 October* (lanes 2, 4, 5, 6 and 7). Measured first, in the ninth batch's sweep, the lanes brought to pristine's hierarchy: the 268 suites left 559 rows in 43 tables, from 53 suites (`person-panel` 138, `task-depth` 73, `task-merge` 48, `chat-message-actions` 28 first). Most were tasks: a suite made them through `apiAs`, which registered workspaces, spaces, lists and invitations alone, and deleted them through the product, which only bins them.
+
+What now registers, and removes, what a run makes:
+- `apiAs` registers what more routes make (`MADE_BY_POST`, `lib/fixture.mjs`): tasks, projects, comments, checklists, channels and direct messages, messages, docs and imported docs, labels, support tickets, meetings, calls, forms, bookmarks, announcements, AI chats, canvases, custom fields, reminders, list email addresses, list views and filter presets. A workspace comes with its organization: the admin is in none, so a workspace the admin makes brings one of its own, which nothing registered. A call that ends names the meeting it filed. What `ensureSweepFixture` and `ensureShared` make is registered too, and goes when the run ends: they kept it from run to run for a suite beside, and no suite runs beside another on a database now.
+- Every browser a suite launches through `resolveChromium` registers what its pages make, from the same routes (`watchMade`); a suite that launches one itself watches it so. The AI dock's threads, the space wizard's space, the meeting form's meeting and the list's add row's task were made so, and left.
+- The sweep (`made-sweep.mjs`) removes what a registered row filed elsewhere: a call's meeting, a form's submitted tasks, the tags a task made by name, the project the server made for a list made under a space alone, the mail in and out of a task or a list, the mail refused that names neither but is still the run's (sent to a list's address once it was cut, or naming a task in its address's plus tag, or from one of the run's own accounts), the notifications about any of it (by `target.entityId` or along `target.url`), what the AI index held of it, what was opened of it from a search, and the files and cover of a task removed from a workspace that stays. It keeps a registered row older than the run, as it kept an older account: a route that answers with a row it already had (a direct message found again) registers that row, and it stays; so does an older organization, tag or project.
+- The end of every suite's run is read: a suite is armed as it starts (`made.mjs`), whether it registers anything or not, and when its journal is swept, every row made since it began fails it, named by table (`leftSince`). A row's time of making is its `created_at`, or, in a table without one, the time set as it is written (`received_at`, `joined_at`…). Not counted: sessions, rate-limit counters, AI calls (the AI hourly limit's own counter, which reads the last hour), the audit trails, what was opened from a search, a notification with no actor of a kind only the API's schedules write (a reminder, the overdue notice, the briefing, the workload alert), and the built-in templates an API writes as it starts. A journal swept by hand is not read so.
+- `lane-leftovers.mjs` also removes what runs left inside pristine's own containers: every other table's rows pristine lacks, but those using the product makes and the API's own templates.
+
+Suites changed for what they did themselves:
+- `calendar-accounts` no longer deletes its colleague by SQL: that took the owner's membership with the account, and the organization sign-up made stayed with its workspace every run.
+- `ai-model-picker` registers the preference row it made when there was none (there is no DELETE route, and putting the default back kept a row).
+- `flag-resolution` registers the platform's Forms switch when its run made it (the `PUT` answers with nothing), and leaves the one it found, switched back on.
+- `panel-collapse` registers the test notification it sends to the admin's inbox in Main: the route answers with no id, and the notification has no actor.
+- `list-address-readers` registers the mail it sends by message id: mail to a task's address cut from its task names no task, no list and no list's address.
+- `create-ai-results` makes its workspace through the client; `settings-depth` and `task-depth` watch the browsers they launch.
+
+Measured:
+- Step by step on the same lanes: of the 53 suites that left rows, 32 left nothing once `apiAs` registered more; 14 of the other 21 once the pages were watched, what rows file elsewhere was taken, and the lanes were cleared of what earlier runs left; the last 8 after their own fixes.
+- Then all 270 suites, twice, the lanes brought to pristine before each. The first regression failed `flag-resolution` (the platform switch's row, which its `PUT` makes and does not name), `private-object-urls` (its own API wrote the built-in templates the cleanup had taken) and `task-menu` (a list's email address, which its `DELETE` only turns off); each was fixed, and left nothing run again. The second, with each table's own time of making read, failed `email-reply-routing`, `list-address-readers` and `mail-comments-by-level` on refused mail, every check of theirs passing: 266 of 270 suites green at once, 4,224 of 4,225 checks (`task-menu`'s "the task menu opens", green run again). With the mail rules above, each of the three left nothing run again.
+- The lanes compared with pristine after it held, inside pristine's own containers, the API's own overdue notice on each, the AI index of pristine's own tasks on lane 4 (use, which no run removes), and a test notification `panel-collapse` left in the admin's inbox on lane 2, which the check passed for having no actor: it is registered now, and a notification with no actor counts unless it is of a kind only the schedules write. `panel-collapse` (57 of 57) and `inbox-scope` (23 of 23), run again, left nothing.
+- On lane 7, `calendar-accounts` failed once the lanes held pristine's rows, its planner's "Meet with" box never drawn: lane 7's admin held a rail without it, from an earlier run (`found-7-oct/shared-rows-keep-what-runs-changed`). Put back, 37 of 37.
+
+Checks:
+- `check-made-sweep.mjs` 26 → 39 cases. New: the notifications about a registered row go with it (by id, along the address), a notification about something else stays; a registered row and a registered organization older than the run stay; what a registered row filed elsewhere goes with it, and an older tag or project stays, not even taken up as the run's; the mail in and out of a task and a list that go goes with them, and so does mail refused at the list's cut address or naming the task in its own; the mail in from an account the run made, filed nowhere, and out to it goes with the account, and an older account's stays; what was opened of a task from a search goes with it; a run that leaves a row it never registered fails and names the table, and so does one that leaves a row of a table with no `created_at`, or a notification with no actor of a kind no schedule writes; one that leaves only a sign-in, an AI call and a scheduled notification passes; a suite that registers nothing is read when it ends. Mutations 25 → 50 (the registry 8 → 10, the sweep 17 → 40), each caught: a full run caught 44 of the first 45 and found the line of the 45th moved; re-aimed, it, the five added after and the two re-aimed with them were each caught on their own.
 
 ### `found-30-sep/legacy-break-patches-directory` — **closed** (test tooling, small; found closing `ledger-rows/row-1874`)
 
@@ -9146,13 +9172,55 @@ Checks:
 
 The regression sweep after it: all 270 suites on lanes 2, 4, 5, 6 and 7, 4,225 checks, 269 suites green at once. `settings-depth` failed 2 checks under the sweep's load and was green alone twice: it reads the settings tabs after a fixed wait (`found-7-oct/settings-depth-reads-the-tabs-after-a-fixed-wait`).
 
-### `found-7-oct/settings-depth-reads-the-tabs-after-a-fixed-wait` — open (test tooling, small; found in the regression of `found-7-oct/a-tab-that-saw-the-sign-out-misses-the-sign-in`)
+### `found-7-oct/settings-depth-reads-the-tabs-after-a-fixed-wait` — **closed** (test tooling, small; found in the regression of `found-7-oct/a-tab-that-saw-the-sign-out-misses-the-sign-in`)
 
 **settings-depth decides the Trash tab is missing three seconds after the settings page starts loading**
 
 *Evidence, 7 October, lane 6:* in the tenth batch's sweep `settings-depth` failed 2 of 62 checks, "moving to another tab replaces it in the address" and "and reopening that address returns the same tab", both "skipped: there was no Trash tab to move to". Run alone on the same lane and build, it passed 62 of 62 twice. The section loads `/settings?tab=members`, waits a fixed 3 s, and counts `settings-tab-trash` once. Under the sweep's load (five lanes on four cores) the page had not drawn its tabs by then, and the suite read their absence as the product's. The suite has 33 fixed waits.
 
 *To close:* wait for the settings page's tabs to be drawn (or for the Trash tab itself, within a bound) before deciding it is absent, and read the address after a click by waiting for it to change, not after a fixed wait. Measure the race with the page's answer held back.
+
+*Closed, 7 October* (lane 6). The section now reads the settings tabs once the tab it lands on is drawn: the page draws its tabs together, from the role the session holds, as soon as its code is in. It then watches the address for three seconds for a rewrite, and only then looks for the Trash tab. After the click it waits for the address to change, and on reopening for the Trash tab to be drawn again. A page that never draws its tabs fails "arriving at a named tab keeps it" and says so; before, it read as a missing Trash tab.
+
+Measured with a probe on lane 6 that holds back the settings route's code for 4 s (the browser's service workers blocked, so the hold applies), three runs alike:
+- Read as the suite read it (3 s, then counted once), the Trash tab was absent each time.
+- Read as it reads now (the landing tab drawn, then counted), it was there each time, 7.8 to 8.1 s in all.
+
+Checks:
+- `settings-depth` keeps its 62 checks. "Arriving at a named tab keeps it" now also requires the tabs drawn, and the two tab-address checks run once they are. After: 62 of 62 in both of this batch's regressions, on lanes 7 and 6 at the sweep's load.
+- No patch claimed the three tab-address checks. `sd-5` (choosing a tab no longer writes it to the address) reddens the two tab-address checks (60 of 62 on lane 2), and `sd-6` (an address naming a tab is rewritten to the landing tab) reddens "arriving at a named tab keeps it" and, with nothing to move from, the two after it (59 of 62).
+
+### `found-7-oct/shared-rows-keep-what-runs-changed` — open (test tooling, medium; found closing `found-30-sep/suite-leftovers-unmeasured`)
+
+**A run that changes a row every run shares, and does not put it back, leaves the lane unlike pristine, and nothing notices**
+
+*Evidence, 7 October, lanes 1 to 7:* each lane compared with `rundesk_pristine` row by row, column by column, in every table with an id of its own:
+- After one regression of all 270 suites from pristine's rows (the eleventh batch's, on lanes 2, 4, 5, 6 and 7), four of the five lanes held an admin's account changed outside what signing in writes: `panels_collapsed`, `planner_settings`, `sidebar_collapsed` and `notification_preferences` on lane 2; `planner_settings` and `notification_preferences` on lane 4; `planner_settings` on lane 5; `high_contrast` and `topbar_pinned` on lane 6. The admins' docks held other `nav_recents` on every lane, and other `pinned_links` on lane 2.
+- Lane 1, never written back, held the same, and three task types' `is_default`. On lane 5 pristine's platform Forms switch was gone, a newer one in its place, which a run then removed.
+- Lane 7's admin held a planner rail of `backlog` and `priorities` alone, from an earlier run, and `calendar-accounts`, which looks for its "Meet with" box, failed there and nowhere else (37 of 37 once it was put back).
+
+The leftovers check (`leftSince`) reads the rows a run made, not the rows it changed. `lane-leftovers.mjs --remove` now writes pristine's rows back on a lane, which repairs what is already done.
+
+*To close:* at the end of each suite's run, say which shared rows it left changed, column by column, outside what using the product writes (`updated_at`, `last_seen_at`); and make each suite that changes one put it back, or work on an account or a workspace of its own.
+
+### `found-7-oct/automation-notifications-reach-every-member` — open (security, small; read in the handoff's list of findings not yet reproduced, reproduced closing `found-30-sep/suite-leftovers-unmeasured`) · reproduced 7 October
+
+**An automation's "Send notification" writes to every member of the workspace, whoever may open the task**
+
+*Evidence, 7 October, lane 3 (`auto-notify-probe.mjs`):* a workspace with a member, a guest and a member assigned to a task in an open list, and a task in the admin's private list. A rule on status changes sends a notification, and the admin moved both tasks. The rule ran twice, and wrote 6 notifications, none with an actor:
+- the private list's task: to the member, the guest and the assignee, each of whom `GET /tasks/:id` refuses (403);
+- the open list's task: to the guest, refused it too (403), and to both members.
+The action reads every row of `workspace_members` and skips only the one who made the change (`AutomationsService.runAction`, `send_notification`); its comment says it notifies "all assignees and creator of the task". Each notification names the task (`target.entityId`) and carries the rule's message. The AI's suggested rules ("Announce new tasks", "Keep the team aware as new work comes in") send it to the team.
+
+*To close:* write only for members who may open the task (the task read rule, as the other notices ask it), and check it with a private list's task and a guest. Whether the team hears it or only the task's people is the owner's to settle.
+
+### `found-7-oct/a-socket-that-opens-late-misses-what-was-said` — open (visible bug, small; found reproducing `task-sheet-fetches`' failure under load) · reproduced 7 October
+
+**A tab whose realtime socket opens after its page has read its data is never told what changed in between**
+
+*Evidence, 7 October, lane 3 (`tsf-probe.mjs`):* `task-sheet-fetches`' two sheets on one task, each tab's socket held back 6 s, what either side said held and passed on once the server is reached. The watching sheet's socket joined 8.8–9.5 s after its tab opened, after the other sheet had changed the priority. It never showed the change, and fetched nothing in the 14 s after it, in 4 runs of 4. With no hold it showed the change and fetched the task and its attachments once, 2 runs of 2. Traced: on its first connect the tab sends the subscribes its page made while the socket was down, and nothing more. `rejoinAndCatchUp` reads a page's queries afresh only for the rooms it held before a disconnect (`found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), and a first connect has none. A socket opening late under a sweep's load is what `task-sheet-fetches` met once ("its second sheet missed the change").
+
+*To close:* on the first connect too, once the server holds the page's rooms, read afresh the active queries read before it did; check it with a tab's socket held back.
 
 ### `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change` — **closed** (security, small; found closing `found-5-oct/import-merge-resets-fields-the-file-lacks`) · reproduced 6 October
 

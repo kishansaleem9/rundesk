@@ -27,7 +27,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
 import { waitUntil } from './lib/wait.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeRow } from './lib/fixture.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -575,6 +575,8 @@ try {
    */
   await A('/notifications/test', { method: 'POST', body: { workspaceId } })
   const seeded = ((await A('/notifications?view=inbox')).data ?? []).find((n) => n.type === 'test_notification')
+  // The route answers with no id, and the row is the admin's, in Main: registered as found, it goes when the run ends.
+  if (seeded?.id) madeRow('notifications', seeded.id)
   /*
    * FOUR CHECKS WHICHEVER WAY THIS GOES, and it used to be one, two, three or
    * four depending on how far the chain got. `EXPECTED_CHECKS` is compared with

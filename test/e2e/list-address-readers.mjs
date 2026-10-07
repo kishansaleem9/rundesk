@@ -29,7 +29,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeRow } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -148,11 +148,15 @@ try {
   let mailN = 0
   const mail = async (from, to, subject) => {
     mailN += 1
+    const messageId = `<${TAG}-${mailN}@mail.example.test>`
     const res = await fetch(`${API}/inbound/email`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ messageId: `<${TAG}-${mailN}@mail.example.test>`, fromAddress: from, recipient: to, subject, textBody: `${TAG} ${subject}` }),
+      body: JSON.stringify({ messageId, fromAddress: from, recipient: to, subject, textBody: `${TAG} ${subject}` }),
     }).catch(() => null)
+    // What the mail left on record, registered by its message id: mail to a task's address cut from its
+    // task names no task, no list and no address of a list, and nothing else takes it when the run ends.
+    for (const row of await sql`select id::text as id from inbound_email_messages where message_id = ${messageId}`) madeRow('inbound_email_messages', row.id)
     return res?.status ?? 0
   }
   const [adminRow] = await sql`select email from users where email = ${ADMIN.email}`

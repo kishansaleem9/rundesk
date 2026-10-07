@@ -4,7 +4,12 @@
  * this; `found-30-sep/suite-runs-leave-accounts-behind`,
  * `found-30-sep/killed-suites-leave-members-behind`).
  *
- *   node test/e2e/lib/made-sweep.mjs <journal>…      the exit: these runs' own
+ *   node test/e2e/lib/made-sweep.mjs --exit <journal>
+ *                                                    a run's own end (made.mjs):
+ *                                                    its journal, and then what
+ *                                                    it left that nothing
+ *                                                    registered (`leftSince`)
+ *   node test/e2e/lib/made-sweep.mjs <journal>…      these journals, by hand
  *   node test/e2e/lib/made-sweep.mjs --ended <dir>   every journal in <dir>
  *                                                    whose process is gone
  *   node test/e2e/lib/made-sweep.mjs --holds <table> <id>
@@ -71,7 +76,8 @@
  * avatar and the logo of an account and a workspace that no longer existed.
  * So, read before the rows go, as `WorkspacesService.storedKeysOf` reads a
  * workspace deleted for good: for each workspace this removes, the keys its
- * rows name and the prefixes it owns, and `avatars/<id>-` for each account;
+ * rows name and the prefixes it owns, `avatars/<id>-` for each account, and
+ * the files and cover of each task it removes from a workspace that stays;
  * deleted once the rows are gone, and listed again. Only from a stub: the
  * lane's (`91<k>`, bucket `rundesk-v<k>`, for the database `rundesk_v<k>`) or
  * the one `E2E_STORE_PORT` and `E2E_STORE_BUCKET` name, which must answer as
@@ -242,7 +248,7 @@ export function storeOf(url = databaseUrl(), env = process.env) {
  * for each workspace — registered, or in an organization the sweep removes —
  * and `avatars/<id>-` for each account (`UsersService`'s avatar keys).
  */
-async function storedOf(sql, workspaceIds, orgIds, accountIds) {
+async function storedOf(sql, workspaceIds, orgIds, accountIds, taskIds = []) {
   const ws = (await sql`
     select id::text as id from workspaces
     where id = any(${workspaceIds}::uuid[]) or organization_id = any(${orgIds}::uuid[])`).map((r) => r.id)
@@ -263,6 +269,19 @@ async function storedOf(sql, workspaceIds, orgIds, accountIds) {
         .map((r) => r.k)
         .filter(Boolean)
     : []
+  // And the files and covers of the tasks it removes in a workspace that stays
+  // (Main's), when no other task names the same object (a copy may).
+  if (taskIds.length) {
+    keys.push(...(await sql`
+      with k as (
+        select storage_key as k from task_attachments where task_id = any(${taskIds}::uuid[])
+        union select cover_storage_key from tasks where id = any(${taskIds}::uuid[]) and cover_storage_key is not null)
+      select k.k from k
+      where not exists (select 1 from task_attachments o where o.storage_key = k.k and not (o.task_id = any(${taskIds}::uuid[])))
+        and not exists (select 1 from tasks o where o.cover_storage_key = k.k and not (o.id = any(${taskIds}::uuid[])))`)
+      .map((r) => r.k)
+      .filter(Boolean))
+  }
   const prefixes = [
     ...ws.flatMap((id) => [`workspaces/${id}/`, `calls/${id}/`, `chat/${id}/`, `workspace-logos/${id}-`]),
     ...accountIds.map((id) => `avatars/${id}-`),
@@ -352,6 +371,72 @@ export async function sweepJournal(sql, j) {
       return null
     }
   }
+  /*
+   * WHAT A REGISTERED ROW FILED ELSEWHERE, which its key does not take with it
+   * (`found-30-sep/suite-leftovers-unmeasured`): a call that ends files a
+   * meeting, and the server can end it with no answer anybody registered (the
+   * browser left the page); a form's submission files a task, whose link to
+   * it is set null when the form goes; a task or a list has mail in and out,
+   * whose link is set null too; a task made with tags typed by name
+   * makes each tag it did not find, and answers with the task; a list made
+   * straight under a space is filed in a project the server makes for it. A
+   * label or a project is shared, so only one made since the run began is
+   * taken.
+   */
+  const filedBy = async (what, table, read) => {
+    const filed = (await step(`read the ${what}`, read)) ?? []
+    if (!filed.length) return
+    if (!j.rows.has(table)) j.rows.set(table, new Set())
+    for (const r of filed) j.rows.get(table).add(r.id)
+  }
+  if (j.rows.has('calls')) {
+    await filedBy('meetings their calls filed', 'meetings', () => sql`
+      select meeting_id::text as id from calls where id = any(${[...j.rows.get('calls')]}::uuid[]) and meeting_id is not null`)
+  }
+  if (j.rows.has('forms')) {
+    await filedBy('tasks their forms filed', 'tasks', () => sql`
+      select created_task_id::text as id from form_submissions where form_id = any(${[...j.rows.get('forms')]}::uuid[]) and created_task_id is not null`)
+  }
+  if (j.rows.has('lists')) {
+    await filedBy('projects their lists were filed in', 'projects', () => sql`
+      select distinct p.id::text as id from projects p join lists l on l.project_id = p.id
+      where l.id = any(${[...j.rows.get('lists')]}::uuid[]) and p.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'`)
+  }
+  // The mail in and out of a task or list that goes: its key to them is set null as they go, so it is read first.
+  // Mail refused names neither, and is read by its address: a list's (revoked), or a task's (`list-…+task-<id>@`).
+  if (j.rows.has('tasks') || j.rows.has('lists') || j.rows.has('list_email_aliases')) {
+    const named = (t) => [...(j.rows.get(t) ?? [])]
+    await filedBy('mail in about them', 'inbound_email_messages', () => sql`
+      select id::text as id from inbound_email_messages
+      where task_id = any(${named('tasks')}::uuid[]) or list_id = any(${named('lists')}::uuid[])
+         or lower(split_part(split_part(recipient, '@', 1), '+', 1)) in (
+           select lower(local_part) from list_email_aliases
+           where list_id = any(${named('lists')}::uuid[]) or id = any(${named('list_email_aliases')}::uuid[]))
+         or substring(lower(recipient) from '\\+task-([0-9a-f-]{36})@') = any(${named('tasks')}::text[])`)
+    await filedBy('mail out about them', 'outbound_email_messages', () => sql`
+      select id::text as id from outbound_email_messages where task_id = any(${named('tasks')}::uuid[]) or list_id = any(${named('lists')}::uuid[])`)
+  }
+  /*
+   * And the mail in from the run's own accounts, and out to them, filed or
+   * not: a reply refused as answering nothing of ours names no task and no
+   * list (`email-reply-routing` left one a run). Only an account made since the
+   * run began is the run's, as below.
+   */
+  if (j.accountIds.length || j.emails.length) {
+    const theirs = () => sql`
+      select lower(email) from users
+      where (id = any(${j.accountIds}::uuid[]) or lower(email) = any(${j.emails}::text[]))
+        and created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'`
+    await filedBy('mail in from their accounts', 'inbound_email_messages', () => sql`
+      select id::text as id from inbound_email_messages where lower(from_address) in (${theirs()})`)
+    await filedBy('mail out to their accounts', 'outbound_email_messages', () => sql`
+      select id::text as id from outbound_email_messages where lower(recipient) in (${theirs()})`)
+  }
+  if (j.rows.has('tasks')) {
+    await filedBy('tags their tasks made', 'labels', () => sql`
+      select distinct l.id::text as id from labels l join task_label_assignments a on a.label_id = l.id
+      where a.task_id = any(${[...j.rows.get('tasks')]}::uuid[]) and l.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'`)
+  }
   const tables = [...j.rows.keys()].filter((t) => t !== 'organizations')
   // Before anything goes: which accounts are the run's, and which organizations
   // only they own — read while their memberships still say so. AN ACCOUNT OLDER
@@ -372,19 +457,43 @@ export async function sweepJournal(sql, j) {
           and not exists (select 1 from organization_members m
                           where m.organization_id = o.id and m.role = 'owner' and not (m.user_id = any(${accountIds}::uuid[])))`)) ?? []).map((o) => o.id)
     : []
-  const orgIds = [...new Set([...owned, ...(j.rows.get('organizations') ?? [])])]
+  // A registered organization older than the run is not the run's either: the admin's holds Main.
+  const registeredOrgs = [...(j.rows.get('organizations') ?? [])]
+  const youngOrgs = registeredOrgs.length
+    ? ((await step('read the organizations registered', () => sql`
+        select id::text as id from organizations
+        where id = any(${registeredOrgs}::uuid[]) and created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'`)) ?? []).map((o) => o.id)
+    : []
+  const orgIds = [...new Set([...owned, ...youngOrgs])]
+  const kept = []
+  if (registeredOrgs.length > youngOrgs.length) kept.push(said('organizations', registeredOrgs.length - youngOrgs.length))
   // What the store holds for the workspaces and accounts that go, read while their rows say so.
   const holding = await step('read what the store holds for them', () =>
-    storedOf(sql, [...(j.rows.get('workspaces') ?? [])], orgIds, accountIds))
+    storedOf(sql, [...(j.rows.get('workspaces') ?? [])], orgIds, accountIds, [...(j.rows.get('tasks') ?? [])]))
 
   // 1. What was registered by table: other tables first, then spaces, then workspaces.
+  // A ROW OLDER THAN THE RUN IS NOT THE RUN'S, as an account is not: a route
+  // that answers with a row it already had (the task an assignee was added to)
+  // registers that row, and it stays. Kept rows are said, and not read back.
   const order = [...tables.filter((t) => t !== 'spaces' && t !== 'workspaces'), ...tables.filter((t) => t === 'spaces'), ...tables.filter((t) => t === 'workspaces')]
+  const ours = new Map()
   for (const table of order) {
     const ids = [...j.rows.get(table)]
-    const n = await step(`remove ${said(table, ids.length)}`, async () => {
+    const young = await step(`read the ${table} by age`, async () => {
       if (!(await sql`select to_regclass(${`public.${table}`}) is not null as ok`)[0].ok) throw new Error(`there is no table ${table}`)
-      await clearRestricting(sql, table, ids)
-      return (await sql`delete from ${sql(table)} where id = any(${ids}::uuid[])`).count
+      const dated = (await sql`select 1 from information_schema.columns where table_schema = 'public' and table_name = ${table} and column_name = 'created_at'`).length > 0
+      if (!dated) return ids
+      const elder = (await sql`
+        select id::text as id from ${sql(table)}
+        where id = any(${ids}::uuid[]) and created_at < to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'`).map((r) => r.id)
+      if (elder.length) kept.push(said(table, elder.length))
+      return ids.filter((id) => !elder.includes(id))
+    })
+    ours.set(table, young ?? ids)
+    if (!young?.length) continue
+    const n = await step(`remove ${said(table, young.length)}`, async () => {
+      await clearRestricting(sql, table, young)
+      return (await sql`delete from ${sql(table)} where id = any(${young}::uuid[])`).count
     })
     if (n) removed.push(said(table, n))
   }
@@ -396,6 +505,28 @@ export async function sweepJournal(sql, j) {
       return (await sql`delete from organizations where id = any(${orgIds}::uuid[])`).count
     })
     if (n) removed.push(`${said('organizations', n)}${inside ? ` with ${said('workspaces', inside)}` : ''}`)
+  }
+  // The notifications about what went: a notification names what it is about
+  // only in `target` (its `entityId`, and the ids along its `url`), which no key
+  // holds, so it outlived the task, channel or list it pointed at.
+  const gone = [...new Set([...ours.values()].flat())]
+  if (gone.length) {
+    const about = await step('remove the notifications about them', async () => (await sql`
+      with gone as (select unnest(${gone}::text[]) as id)
+      delete from notifications n
+      where n.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'
+        and (n.target->>'entityId' in (select id from gone)
+             or exists (select 1 from regexp_matches(coalesce(n.target->>'url', ''), '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', 'g') m
+                        where m[1] in (select id from gone)))`).count)
+    if (about) removed.push(plural(about, 'notification'))
+    // And what the AI's index holds of them: an embedding names its source by id alone, and has no time of its own to be read by.
+    const indexed = await step('remove what the AI index holds of them', async () =>
+      (await sql`delete from knowledge_embeddings where source_id::text in (select unnest(${gone}::text[]))`).count)
+    if (indexed) removed.push(plural(indexed, 'indexed passage'))
+    // What was opened of them from a search: it names them by id, under no key that takes it.
+    const opened = await step('remove what was opened of them from a search', async () =>
+      (await sql`delete from search_engagement where entity_id in (select unnest(${gone}::text[]))`).count)
+    if (opened) removed.push(plural(opened, 'search open'))
   }
   // 3. The accounts. First the notifications they caused in inboxes outside the
   // run ("… asked for access", to the admin): `actor_id` is SET NULL, so they
@@ -424,12 +555,14 @@ export async function sweepJournal(sql, j) {
       and created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'`)
   if (still?.length) left.push(`${said('users', still.length)} (${still.map((r) => r.email).join(', ')})`)
   if (elder.length) removed.push(`and kept ${said('users', elder.length)} older than the run, registered though it did not make them (${elder.join(', ')})`)
+  if (kept.length) removed.push(`and kept ${kept.join(', ')} older than the run, registered though it did not make them`)
   if (orgIds.length) {
     const o = await step('read back the organizations', () => sql`select count(*)::int as n from organizations where id = any(${orgIds}::uuid[])`)
     if (o?.[0]?.n) left.push(said('organizations', o[0].n))
   }
   for (const table of order) {
-    const ids = [...j.rows.get(table)]
+    const ids = ours.get(table)
+    if (!ids.length) continue
     const r = await step(`read back the ${table}`, async () => {
       if (!(await sql`select to_regclass(${`public.${table}`}) is not null as ok`)[0].ok) return [{ n: ids.length }]
       return sql`select count(*)::int as n from ${sql(table)} where id = any(${ids}::uuid[])`
@@ -486,8 +619,75 @@ async function unregisteredSince(sql, dir, started) {
     order by created_at`).map((r) => r.email)
 }
 
+/*
+ * WHAT A RUN LEFT THAT NOTHING REGISTERED (`found-30-sep/suite-leftovers-unmeasured`).
+ * Removal reaches what a journal names, and suites made more than they named:
+ * after the lanes were brought to pristine's hierarchy, a sweep of the 268
+ * suites left 559 rows in 43 tables, from 53 suites — `person-panel` 138 (its
+ * tasks, deleted through the product, which only bins them), `task-depth` 73,
+ * `task-merge` 48. So at the end of a run, once its journal is swept: every
+ * row made on this database since the run began, in any table with a
+ * `created_at`, but these, which using the product as somebody makes and
+ * which hold nothing a later run reads as its own:
+ */
+export const LEFT_BY_USE = {
+  sessions: 'a sign-in',
+  rate_limit_counters: 'a request counted toward a limit',
+  ai_usage: 'an AI call counted toward the hourly AI limit, which reads only the last hour',
+  audit_logs: "the audit trail (a workspace's own goes with it)",
+  flag_audit_log: "the feature flags' audit trail",
+  search_engagement: 'what somebody opened from a search (one about a row the run removes goes with it)',
+}
+/*
+ * And a notification the API's own schedules write (task reminders every
+ * minute, the hourly briefing, the daily workload alert), about what is due,
+ * not about what a run did: one with no actor, of a kind only they write
+ * (`SCHEDULED`). A run's notifications have an actor, its people or the admin
+ * it signs in as, but for what a request writes for nobody: a test
+ * notification (`panel-collapse` left one in the admin's inbox every run), an
+ * automation's. Those are counted. And a built-in project template,
+ * which every API writes as it starts when its database lacks one: a suite
+ * that starts an API of its own (`private-object-urls`) starts that too.
+ *
+ * Every other row fails the run: register it (`madeRow`, lib/made.mjs) and it
+ * goes at the end. Read on the assumption the lanes and CI keep, that one run
+ * at a time writes to a database: a script run beside this one makes rows this
+ * cannot tell from the run's.
+ */
+/** The kinds of notification the API's schedules write, with no actor (`reminders`, `task-reminders`, `briefing`, `workload-alert`). */
+export const SCHEDULED = ['task_due_soon', 'task_overdue', 'task_updated', 'message_reminder', 'ai_briefing', 'workload_alert']
+
+export async function leftSince(sql, started) {
+  /*
+   * Each table's own time of making: `created_at`, or, where it has none, the
+   * time its row says it came (`received_at`, `joined_at`, `added_at`…), the
+   * first column that is a time set as the row is written. A table with only
+   * `updated_at` cannot say a row is new, and is not read.
+   */
+  const madeAt = (await sql`
+    select distinct on (c.table_name) c.table_name as t, c.column_name as at
+    from information_schema.columns c
+    join information_schema.tables x on x.table_schema = c.table_schema and x.table_name = c.table_name and x.table_type = 'BASE TABLE'
+    where c.table_schema = 'public' and c.data_type like 'timestamp%'
+      and (c.column_name = 'created_at' or (c.column_default like 'now()%' and c.column_name <> 'updated_at' and c.column_name not like 'last\\_%'))
+    order by c.table_name, (c.column_name = 'created_at') desc, c.ordinal_position`).filter((r) => !(r.t in LEFT_BY_USE))
+  const left = []
+  for (const { t, at } of madeAt) {
+    const [{ n }] = t === 'notifications'
+      ? await sql`select count(*)::int as n from notifications where created_at >= to_timestamp(${started} / 1000.0) and (actor_id is not null or not (type::text = any(${SCHEDULED}::text[])))`
+      : t === 'project_templates'
+        ? await sql`select count(*)::int as n from project_templates where created_at >= to_timestamp(${started} / 1000.0) and not is_built_in`
+        : await sql`select count(*)::int as n from ${sql(t)} where ${sql(at)} >= to_timestamp(${started} / 1000.0)`
+    if (n) left.push({ table: t, n })
+  }
+  return left
+}
+
 async function main(argv) {
   if (argv[0] === '--holds') return holds(argv[1], argv[2])
+  // A run's own end reads what it left; a journal swept by hand has no run around it to read.
+  const atExit = argv[0] === '--exit'
+  if (atExit) argv = argv.slice(1)
   const ended = argv[0] === '--ended'
   const files = []
   const claimed = new Map() // claimed path -> path to put it back at
@@ -581,6 +781,20 @@ async function main(argv) {
       if (nobody.length) {
         console.log(`  ! ${plural(nobody.length, 'account was', 'accounts were')} made on this database while this run ran that no run registered, and stay: ${nobody.join(', ')}` +
           ' — if this run made them (through a page, say), register them with madeAccount({ email }) before they are made (lib/made.mjs)')
+      }
+      if (!atExit) continue
+      let left
+      try {
+        left = await leftSince(sql, started)
+      } catch (e) {
+        status = 1
+        console.log(`  ✗ could not read what this run left: ${String(e?.message ?? e).split('\n')[0]}`)
+        continue
+      }
+      if (left.length) {
+        status = 1
+        console.log(`  ✗ this run left ${plural(left.reduce((n, l) => n + l.n, 0), 'row')} that nothing it registered removes: ${left.map((l) => `${said(l.table, l.n)}`).join(', ')}` +
+          ' — register what it makes (madeRow, lib/made.mjs), as it is made')
       }
     }
   }
