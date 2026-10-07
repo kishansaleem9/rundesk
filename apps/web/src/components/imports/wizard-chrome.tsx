@@ -31,7 +31,9 @@ export function WizardStep({
 }) {
   const { t } = useTranslation()
   return (
-    <div className={cn('mx-auto w-full', wide ? 'max-w-none' : 'max-w-[560px]')} data-testid={`import-step-${step}`}>
+    // pb-40: room to scroll Back and the primary button clear of a corner banner (cookie consent,
+    // announcements) — §10, nothing may cover the wizard.
+    <div className={cn('mx-auto w-full pb-40', wide ? 'max-w-none' : 'max-w-[560px]')} data-testid={`import-step-${step}`}>
       <div className="text-center">
         <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground" data-testid="import-step-indicator">
           {t('ie.stepOf', { step, of })}

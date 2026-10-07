@@ -13,6 +13,8 @@ import { apiLogin, createTree, deleteTree, uiLogin, type Tree } from './helpers'
  */
 const FIXTURES = join(__dirname, '..', 'test', 'fixtures', 'imports')
 test.skip(!process.env.PW_IMPORTS_E2E, 'Writes data: set PW_IMPORTS_E2E=1 against a non-production stack.')
+// A run waits on a real import and a real export; a dev server compiles the settings page on first visit.
+test.describe.configure({ timeout: 300_000 })
 
 let tree: Tree | undefined
 let token = ''
@@ -29,9 +31,13 @@ test('spreadsheet: destination → upload → map fields → review grid → imp
   await uiLogin(page)
 
   await page.goto(`/app/${wsId}/settings?tab=importsExports`)
-  await expect(page.getByTestId('imports-exports')).toBeVisible()
-  // History if there is one, else the source grid.
-  if (await page.getByTestId('history-new-import').isVisible().catch(() => false)) await page.getByTestId('history-new-import').click()
+  await expect(page.getByTestId('imports-exports')).toBeVisible({ timeout: 120_000 })
+  // A first visit is asked about cookies; answer it as a person would.
+  await page.getByRole('button', { name: 'Accept' }).click({ timeout: 5_000 }).catch(() => undefined)
+  // History if there is one, else the source grid: wait for whichever the page draws.
+  const newImport = page.getByTestId('history-new-import')
+  await expect(newImport.or(page.getByTestId('source-spreadsheet'))).toBeVisible({ timeout: 60_000 })
+  if (await newImport.isVisible()) await newImport.click()
   await page.getByTestId('source-spreadsheet').click()
 
   // STEP 2 — Import Destination.
@@ -90,7 +96,7 @@ test('export: choose a location, start, and get a download link', async ({ page,
   const wsId = login.workspaces[0].id
   await uiLogin(page)
   await page.goto(`/app/${wsId}/settings?tab=importsExports&import=false`)
-  await expect(page.getByTestId('export-panel')).toBeVisible()
+  await expect(page.getByTestId('export-panel')).toBeVisible({ timeout: 120_000 })
   await expect(page.getByTestId('export-start')).toBeDisabled()
   await page.getByTestId('export-location-picker').click()
   await page.getByTestId('export-select-all').click()
