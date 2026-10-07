@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 514 items: 14 open · 4 partly fixed · 439 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 515 items: 13 open · 3 partly fixed · 442 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1698,7 +1698,7 @@ Found while closing it: `found-30-sep/status-floor-placeholders-by-name`.
 - Merged here onto `bac7eae`. The gate then named one guard the dropdown batch had added since (`menu-reopen:478`, a channel made for the run), rewritten the same way; over the merged tree it names none, and 71 of 71 mutations bite.
 - Regression on lanes 1 and 3, 38 of the 116 suites (the nine grant guards, `data-transfer-keys`, and a spread of the rest): all green, 409 checks. The other 78 were not run here; each rewritten guard is the same test as before on any answer that came.
 
-### `found-30-sep/status-floor-placeholders-by-name` — open (test tooling, small; found closing `found-30-sep/status-zero-slips-setup-guards`) · reproduced 5 October
+### `found-30-sep/status-floor-placeholders-by-name` — **closed** (test tooling, small; found closing `found-30-sep/status-zero-slips-setup-guards`) · reproduced 5 October
 
 **The gate reads a placeholder by name, file-wide, so it names the wrong reason, and could miss one passed under another name**
 
@@ -1715,6 +1715,17 @@ none exists today (every root of the 187 guards left as "cannot be 0" was traced
 parameter to its callers' arguments), with a planted case each way and mutations that bite.
 
 *Triage, 5 October:* reproduced on a lane. The status-floor gate still decides a placeholder by name across the whole file: on crafted suites it blames a throw-bound `res` for another `res`'s `{ status: 0 }`, and it misses a placeholder passed to a helper parameter under another name. No real suite is affected now. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 7 October*. The gate reads a status's name where it is compared. It resolves the name to the nearest function around the comparison that declares it or takes it as a parameter, else to the file's top level. A declared name is bound to what is written to it in that scope; a parameter is bound to what its callers pass in its place, each followed the same way, up to four calls deep. A name nothing declares, and a parameter whose function is never called by name (a callback handed on), are read file-wide, as before. Blocks inside one function are not told apart. One rule says what a value as written can hold (`zeroText`), and the file-wide reading and the scoped one both ask it.
+
+Measured with planted suites, the committed gate against this one:
+- A `res` from a client that rejects, beside a helper's own `res` caught into `{ status: 0 }`: before, "✗ c.mjs:9 PLACEHOLDER res.status < 300", with the wrong reason; after, it passes.
+- A placeholder handed to a helper under a parameter of another name: before, it passed, the placeholder unseen; after, "✗ c.mjs:4 PLACEHOLDER answer.status < 300".
+- Over the 270 suites, the tallies are the same before and after: 207 comparisons with an upper bound, 163 of them on a status that cannot be 0; 200 guards and 37 notes, 218 on a status that cannot be 0. The eight guards the item named were rewritten to `!res.ok` on 30 September, and nothing slips now.
+
+Checks:
+- `check-suite-status-floor.mjs` has three new planted cases: the `res` beside a helper's passes, and a placeholder handed to a helper's parameter is caught, both compared and guarded.
+- Its `--mutate` list gains three mutations, each caught: names read file-wide again, another scope's bindings counted, and parameters not followed to their callers — names read file-wide reddens 3 cases, another scope counted 1, parameters not followed 2; 74 of 74 mutations bite.
 
 ### `found-30-sep/status-floor-blind-to-other-names` — **closed** (test tooling, small; found closing `found-30-sep/status-zero-passes-status-only-checks`)
 
@@ -7246,7 +7257,7 @@ Found while closing it: `found-30-sep/status-zero-passes-status-only-checks`.
 - `docs/e2e-shared-state-audit.md` §3 and its table, and `docs/video2-resume.md` §3, carry the measured split instead of 292.
 - The 133 suites on lane 6 at the agent's tree: each `N passed, 0 failed` at its `EXPECTED_CHECKS`. At this tree, with the text-read and stale-doc changes merged in, on lanes 1, 3, 5 and 7 at once: 137 of 138 (the changed suites and `a39-dm-tabs`, whose fixture changed). `doc-level-controls` read its editor before the doc's capabilities had answered under that load; it now waits for them (see `doc-editor-open-to-readers`), then 7/7.
 
-### `commit-log/log-944e47f-1` — partly-fixed, medium · reproduced 5 October
+### `commit-log/log-944e47f-1` — **closed**, medium · reproduced 5 October
 
 **Shared-database hazards in the e2e suites are only partly fixed**
 
@@ -7255,6 +7266,17 @@ Found while closing it: `found-30-sep/status-zero-passes-status-only-checks`.
 *To close:* Re-measure the catches that follow an apiClient call, then replace them with status assertions. Move the remaining suites to pickWorkspace or a tagged workspace. Give comment-recording its own account.
 
 *Triage, 5 October:* partly reproduced on a lane. Of the shared-database hazards, only one still reproduces: a killed comment-recording run leaves the shared admin in Urdu for every later suite. Picking workspaces[0] is now deterministic, and the inert catches are gone behind a gate. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 7 October* (lane 2). Of the three hazards this item names, the triage of 5 October found two already gone: the inert catches after an `apiClient` call are behind a gate, and picking `workspaces[0]` is deterministic. The third is closed here. `comment-recording` switched the shared admin to Urdu and put the language back only in a `finally`, which a killed run never reaches. The suite now signs up a recorder of its own (registered, so the run's sweep removes it) and makes it a workspace admin, as the shared admin was, so the task made private near the end is still theirs to read. It switches the recorder's language to Urdu; the admin's language is only read, at the start and at the end.
+
+Measured on lane 2 by killing a run (SIGKILL, to its whole process group) four seconds after it reached the composer section:
+- Before, the admin's language read `en` before the run, `ur` at the composer section, and `ur` after the kill: what every later suite on the lane would then have read.
+- After, it read `en` all three times, and the account left in Urdu was the killed run's own recorder, which the next run's sweep removed.
+- The changed suite passed 33 of 33, twice, and 33 of 33 again in the regression sweep, on lane 7.
+
+Checks:
+- `comment-recording` (33): "and the account gets its own language back" becomes "and the shared admin's language is the one this run found: the recording is made by an account of the run's own".
+- Patch `comment-recording-5` (the run switches the shared admin to Urdu again) reddens it, with the three Urdu checks the recorder no longer passes.
 
 ### `resume-defects/resume-3` — **closed** (test tooling, medium)
 
@@ -9097,7 +9119,7 @@ Found beside it: `found-6-oct/a-socket-sends-into-rooms-it-may-not-read`.
 
 *Merged, 6 October,* into the main checkout (onto `986c760`) with the batch's other builders' work, and run again there on lanes 2, 5 and 7: 63 suites, 60 green at once; `list-export` and `panel-collapse` failed once at a load of 14 and were green twice each when run again; `session-in-the-browser` failed 3 of 7 runs, its reconnect checks racing the server's admission of a reopened socket (fixed here: see `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), then 6 of 6. API unit tests 2063/2063, web 344/344, both typechecks clean.
 
-### `found-7-oct/a-tab-that-saw-the-sign-out-misses-the-sign-in` — open (visible bug, small; found in the regression of `found-30-sep/lanes-save-downloads-in-ascii`)
+### `found-7-oct/a-tab-that-saw-the-sign-out-misses-the-sign-in` — **closed** (visible bug, small; found in the regression of `found-30-sep/lanes-save-downloads-in-ascii`)
 
 **A tab that has noticed a sign-out made in another tab is not given its socket back when the person signs in again there**
 
@@ -9107,6 +9129,30 @@ Found beside it: `found-6-oct/a-socket-sends-into-rooms-it-may-not-read`.
 - The page stayed on its list with its socket closed. The suite's `stillHolds` reads the shared storage, which the other tab had filled again, so the suite called the tab signed in.
 
 *To close:* a tab that cleared itself after a sign-out elsewhere follows the next sign-in of the person it last held: it takes them from the shared storage and opens its socket again. Another person's sign-in stays the owner's to decide. Check it by holding the sign-in until the listening tab has cleared itself.
+
+*Closed, 7 October* (lanes 6 and 7). ClickUp's feedback board has "Auto-sign in all tabs + redirect to correct page" as an open request, still asked for in March 2026 (search excerpts; the board is blocked here). There, a person signed out of every tab who signs in again in one has to sign in, code and all, in each of the others too, and lands on their most recent page rather than the one that tab showed. Rundesk's tabs share one session, and its other tabs already follow a sign-in made while they still name the person (`found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`); this is the case where the tab has cleared itself first.
+
+- A tab remembers whom it named when its store was cleared, and forgets them once it names somebody (`whoItHeldWhenCleared`, `lib/realtime.ts`). While it names nobody, a write by another tab that is that person's sign-in, with the shared storage still naming them (`takesItsPersonBack`), is read back from the storage (`persist.rehydrate`), as a reload of the tab would read it. The store's change opens the socket again (`followSignedIn`) on the browser's session: the store holds no token now, and the handshake reads the cookie. The tab stays on the page it showed, and asks again for its rooms and what was said in them meanwhile (`rejoinAndCatchUp`).
+- Whatever cleared the store, a refresh that failed or the person signing out in that tab, the same person's next sign-in is followed: the browser's session is theirs again, and every tab shares it. Somebody else's sign-in leaves the tab signed out, as before; that is the owner's to decide.
+
+Measured with a new check that holds the sign-in until the listening tab has written nobody itself:
+- Before, on lanes 6 and 7: the tab wrote nobody 11.7 s and 11.6 s after the sign-out (the item's own 11.7 s), heard the sign-in and opened no socket; the message in the person's own channel went unheard and the task made in the list it showed was not drawn. 6 of 7 checks in both runs.
+- After: 7 of 7 in 6 runs of 6, on lanes 6 and 7 two at a time; the check holds the sign-in each time until the tab has written nobody, so each run is the case the item names.
+
+Checks:
+- `session-in-the-browser` 6 → 7: "when another tab of the same browser has signed itself out after the person signed out elsewhere, their next sign-in there gives it back its realtime socket without a reload: a message in their own private channel is heard there, and the list it shows draws a task made after, as before". The two-tab check before it races this case, and lost the race 1 run in 6.
+- `realtime.test.ts` 10 → 13: the person's sign-in taken back after nobody and after somebody else; eight writes not taken (somebody else's sign-in, the storage moved on to somebody else or to nobody, a refresh, a sign-out, another key, a tab that names somebody, a tab that held nobody); and whom the tab remembers.
+- Patch `sib-20` (the read-back dropped) reddens the new check (6 of 7 on lane 2, that check alone). `sib-21` to `sib-24` each redden their unit test: no write taken back, what is stored now not looked at, the person never forgotten, and the person forgotten at a second clear.
+
+The regression sweep after it: all 270 suites on lanes 2, 4, 5, 6 and 7, 4,225 checks, 269 suites green at once. `settings-depth` failed 2 checks under the sweep's load and was green alone twice: it reads the settings tabs after a fixed wait (`found-7-oct/settings-depth-reads-the-tabs-after-a-fixed-wait`).
+
+### `found-7-oct/settings-depth-reads-the-tabs-after-a-fixed-wait` — open (test tooling, small; found in the regression of `found-7-oct/a-tab-that-saw-the-sign-out-misses-the-sign-in`)
+
+**settings-depth decides the Trash tab is missing three seconds after the settings page starts loading**
+
+*Evidence, 7 October, lane 6:* in the tenth batch's sweep `settings-depth` failed 2 of 62 checks, "moving to another tab replaces it in the address" and "and reopening that address returns the same tab", both "skipped: there was no Trash tab to move to". Run alone on the same lane and build, it passed 62 of 62 twice. The section loads `/settings?tab=members`, waits a fixed 3 s, and counts `settings-tab-trash` once. Under the sweep's load (five lanes on four cores) the page had not drawn its tabs by then, and the suite read their absence as the product's. The suite has 33 fixed waits.
+
+*To close:* wait for the settings page's tabs to be drawn (or for the Trash tab itself, within a bound) before deciding it is absent, and read the address after a click by waiting for it to change, not after a fixed wait. Measure the race with the page's answer held back.
 
 ### `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change` — **closed** (security, small; found closing `found-5-oct/import-merge-resets-fields-the-file-lacks`) · reproduced 6 October
 

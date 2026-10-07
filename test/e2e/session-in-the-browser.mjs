@@ -3,12 +3,13 @@
  * ENDED AT ONCE WHEN A PASSWORD CHANGE ELSEWHERE ENDS IT, ONE MISTYPED
  * CURRENT PASSWORD COUNTED ONCE, AND THE TAB'S SOCKET OPENED AGAIN WHEN ITS
  * PERSON SIGNS OUT AND BACK IN — IN THAT TAB, AND IN ANOTHER TAB OF THE SAME
- * BROWSER
+ * BROWSER, EVEN ONE THAT HAS SIGNED ITSELF OUT MEANWHILE
  * (`found-30-sep/an-accepted-invitation-sets-no-cookies`,
  * `found-30-sep/revoked-sessions-keep-their-access-tokens`,
  * `found-30-sep/password-change-guesses-600-an-hour`,
  * `found-30-sep/an-open-socket-outlives-its-session`,
- * `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`).
+ * `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`,
+ * `found-7-oct/a-tab-that-saw-the-sign-out-misses-the-sign-in`).
  *
  * Measured first in a browser on lane 3, three runs alike (`9b5ced3`'s API
  * and web):
@@ -52,7 +53,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 6
+const EXPECTED_CHECKS = 7
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -385,6 +386,102 @@ try {
       twinSaidAfter.status === 201 && twinMadeAfter.status === 201 && twinHeardAfter && twinDrawnAfter,
     'when the person signs out and back in from one tab, another tab of the same browser opens its realtime socket again on the new session without a reload: a message in their own private channel is heard there, and the list it shows draws a task made after, as before',
     `before: the listening tab ${listened ? 'subscribed its list' : 'NEVER subscribed its list'} on ${onItsToken ? 'the token it signed in with' : 'NO token of its own (this measured nothing)'}, heard the message (${twinSaidBefore.status}) ${twinHeardBefore ? 'yes' : 'NO'}, drew the task (${twinMadeBefore.status}) ${twinDrawnBefore ? 'yes' : 'NO'}; the other tab signed out, and the server ${endedByServer ? 'closed' : 'did NOT close'} the listening tab's socket before the sign-in; the listening tab ${sameListeningTab ? 'was the same page' : 'was LOADED ANEW (this measured nothing)'}, ${stillOnTheList && stillHolds ? 'still on its list and signed in' : 'was SIGNED OUT or moved (this measured nothing)'}, with ${openAgain} socket(s) open since the sign-in; the message (${twinSaidAfter.status}) was ${twinHeardAfter ? 'heard' : 'NOT heard'} and the task (${twinMadeAfter.status}) ${twinDrawnAfter ? 'drawn' : 'NOT drawn'}`,
+  )
+
+  // -------------------------------------------------------------------------
+  console.log('\n▶ two tabs of one browser: the listening tab signs itself out before the person signs back in')
+  /*
+   * A TAB THAT CLEARED ITSELF AFTER THE SIGN-OUT TAKES ITS PERSON BACK AT THE
+   * NEXT SIGN-IN (`found-7-oct/a-tab-that-saw-the-sign-out-misses-the-sign-in`).
+   * After the other tab's sign-out the listening tab still names the person,
+   * until its own next request finds no session: its refresh fails and it
+   * clears its store. A sign-in made in the other tab after that names the
+   * person after nobody, but the tab names nobody, and nothing followed it. The
+   * check above races it: on lane 6, 1 run in 6 lost, the tab clearing itself
+   * 11.7 s after the sign-out and hearing the sign-in at 13.7 s, its socket
+   * left closed on its list. Here the sign-in waits until the listening tab
+   * has written nobody to the shared storage itself (a script the browser runs
+   * before the page logs each tab's own writes; its top bar asks the server
+   * every 15 s), so the race is lost every time.
+   */
+  const cleared = await account('cleared')
+  const K = apiAs(cleared.token)
+  const clearedSpace = await K('/spaces', { method: 'POST', body: { workspaceId: cleared.workspaceId, name: `Cleared ${TAG}` } })
+  const clearedProject = await K('/projects', { method: 'POST', body: { spaceId: clearedSpace.data?.id, name: `Cleared project ${TAG}` } })
+  const clearedList = await K('/lists', { method: 'POST', body: { projectId: clearedProject.data?.id, name: `Cleared list ${TAG}` } })
+  const clearedChannel = await K(`/workspaces/${cleared.workspaceId}/chat/channels`, { method: 'POST', body: { name: `cleared-${TAG}`, isPrivate: true } })
+  if (!clearedList.data?.id || !clearedChannel.data?.id) {
+    throw new Error(`could not make the cleared-tab check its list and channel: ${said(clearedSpace)} / ${said(clearedProject)} / ${said(clearedList)} / ${said(clearedChannel)}`)
+  }
+  const sayInCleared = (text) => K(`/chat/channels/${clearedChannel.data.id}/messages`, { method: 'POST', body: { body: text } })
+  const taskInCleared = (title) => K('/tasks', { method: 'POST', body: { listId: clearedList.data.id, title } })
+  const browserOfCleared = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'block' })
+  // Each write a tab makes itself to the shared storage's sign-in, and whom it names (what it hears is not a write of its own).
+  await browserOfCleared.addInitScript(() => {
+    const writes = []
+    window.__authWrites = writes
+    const setItem = Storage.prototype.setItem
+    Storage.prototype.setItem = function (key, value) {
+      if (key === 'rundesk.auth') {
+        let who = null
+        try { who = JSON.parse(value)?.state?.user?.id ?? null } catch { who = 'unreadable' }
+        writes.push({ at: Date.now(), who })
+      }
+      return setItem.call(this, key, value)
+    }
+  })
+  const clearingTab = await browserOfCleared.newPage()
+  const clearing = socketsOf(clearingTab)
+  await signInForm(clearingTab, cleared.email)
+  const clearedListPath = `/app/${cleared.workspaceId}/${clearedSpace.data.id}/${clearedProject.data.id}/${clearedList.data.id}`
+  await clearingTab.evaluate((to) => window.history.pushState({}, '', to), clearedListPath)
+  await clearingTab.evaluate(() => { window.__sameTab = 'the clearing tab as first loaded' })
+  const clearedRoom = `list:${clearedList.data.id}`
+  const clearingListened = await within(20_000, () => clearing.some((s) => !s.closed && s.sent.some((f) => f.includes('subscribe') && f.includes(clearedRoom))))
+  const clearingOnItsToken = clearing.some((s) => !s.closed && openedOnAToken(s))
+  const clearedDrawn = drawnIn(clearingTab)
+  const outTab = await browserOfCleared.newPage()
+  await outTab.goto(`${stack.base}/app/${cleared.workspaceId}`, { waitUntil: 'domcontentloaded' })
+  await outTab.locator('[data-testid=user-menu]').waitFor({ timeout: 30_000 })
+  const clearedBefore = { message: `${TAG}-cleared-heard-before`, task: `${TAG}-cleared-task-before` }
+  const clearedSaidBefore = await sayInCleared(clearedBefore.message)
+  const clearedMadeBefore = await taskInCleared(clearedBefore.task)
+  const clearedHeardBefore = await within(10_000, () => heardOn(clearing, clearedBefore.message))
+  const clearedDrawnBefore = await clearedDrawn(10_000, clearedBefore.task)
+  // The other tab signs out from its menu; the server ends the listening tab's socket with the session.
+  const outAt = Date.now()
+  await outTab.locator('[data-testid=user-menu]').click()
+  await outTab.getByRole('menuitem', { name: 'Sign out' }).click()
+  await outTab.waitForURL(/\/login/, { timeout: 30_000 })
+  const clearedEndedByServer = await within(15_000, () => clearing.length > 0 && clearing.filter((s) => s.at < outAt).every((s) => s.closed))
+  // Then the listening tab's own next request finds no session, and it writes nobody itself.
+  let clearedItselfAt = null
+  for (const end = Date.now() + 45_000; clearedItselfAt === null && Date.now() < end; await sleep(500)) {
+    const writes = await clearingTab.evaluate(() => window.__authWrites ?? []).catch(() => [])
+    clearedItselfAt = writes.find((w) => w.at >= outAt && w.who === null)?.at ?? null
+  }
+  // Only then does the person sign back in, through the other tab's form.
+  const backAt = Date.now()
+  await outTab.fill('input[type=email]', cleared.email)
+  await outTab.fill('input[type=password]', PASSWORD)
+  await outTab.click('button[type=submit]')
+  await outTab.waitForURL(/\/app\//, { timeout: LOGIN_NAV_TIMEOUT_MS })
+  const sinceBack = () => clearing.filter((s) => s.at >= backAt)
+  await within(15_000, () => sinceBack().some((s) => !s.closed))
+  const clearedOpenAgain = sinceBack().filter((s) => !s.closed).length
+  const clearedAfter = { message: `${TAG}-cleared-heard-after`, task: `${TAG}-cleared-task-after` }
+  const { said: clearedSaidAfter, heard: clearedHeardAfter } = await sayUntilHeard(sayInCleared, clearedAfter.message, sinceBack)
+  const clearedMadeAfter = await taskInCleared(clearedAfter.task)
+  const clearedDrawnAfter = await clearedDrawn(10_000, clearedAfter.task)
+  const sameClearingTab = await clearingTab.evaluate(() => window.__sameTab === 'the clearing tab as first loaded')
+  const clearingOnTheList = new URL(clearingTab.url()).pathname.endsWith(`/${clearedList.data.id}`)
+  await browserOfCleared.close()
+  chk(
+    clearingListened && clearingOnItsToken && clearedSaidBefore.status === 201 && clearedMadeBefore.status === 201 && clearedHeardBefore && clearedDrawnBefore &&
+      clearedEndedByServer && clearedItselfAt !== null && sameClearingTab && clearingOnTheList && clearedOpenAgain > 0 &&
+      clearedSaidAfter.status === 201 && clearedMadeAfter.status === 201 && clearedHeardAfter && clearedDrawnAfter,
+    'when another tab of the same browser has signed itself out after the person signed out elsewhere, their next sign-in there gives it back its realtime socket without a reload: a message in their own private channel is heard there, and the list it shows draws a task made after, as before',
+    `before: the listening tab ${clearingListened ? 'subscribed its list' : 'NEVER subscribed its list'} on ${clearingOnItsToken ? 'the token it signed in with' : 'NO token of its own (this measured nothing)'}, heard the message (${clearedSaidBefore.status}) ${clearedHeardBefore ? 'yes' : 'NO'}, drew the task (${clearedMadeBefore.status}) ${clearedDrawnBefore ? 'yes' : 'NO'}; the other tab signed out, the server ${clearedEndedByServer ? 'closed' : 'did NOT close'} the listening tab's socket, and the listening tab ${clearedItselfAt !== null ? `wrote nobody itself ${((clearedItselfAt - outAt) / 1000).toFixed(1)} s after the sign-out, before the sign-in` : 'NEVER wrote nobody itself in 45 s (this measured nothing)'}; it ${sameClearingTab ? 'was the same page' : 'was LOADED ANEW (this measured nothing)'}, ${clearingOnTheList ? 'still on its list' : 'MOVED off its list (this measured nothing)'}, with ${clearedOpenAgain} socket(s) open since the sign-in; the message (${clearedSaidAfter.status}) was ${clearedHeardAfter ? 'heard' : 'NOT heard'} and the task (${clearedMadeAfter.status}) ${clearedDrawnAfter ? 'drawn' : 'NOT drawn'}`,
   )
 
   // -------------------------------------------------------------------------

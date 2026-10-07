@@ -39,7 +39,10 @@
  *                 emptyBodyOn … })`), so any answer in it can be 0;
  *   PLACEHOLDER   in any suite, the name it is read from is bound to a value
  *                 holding a hand-made `status: 0` (`: { status: 0 }`,
- *                 `.catch(() => ({ status: 0 }))`, an assignment in a catch);
+ *                 `.catch(() => ({ status: 0 }))`, an assignment in a catch) —
+ *                 the binding in scope where it is compared, and for a
+ *                 parameter, what its callers pass in its place
+ *                 (`found-30-sep/status-floor-placeholders-by-name`);
  *   ZERO-HELPER   or to a call of a function in the suite whose body hands one
  *                 back (`file-exports`' `download`).
  *
@@ -339,7 +342,7 @@ function functionsIn(code, regexEnds) {
     const close = matchForward(code, m.index + m[0].length - 1)
     const b = close < 0 ? -1 : skipFwd(code, close + 1)
     const end = code[b] === '{' ? matchForward(code, b) : -1
-    if (end > 0) fns.push({ start: m.index, name: m[1] ?? null, bodyStart: b, end: end + 1 })
+    if (end > 0) fns.push({ start: m.index, name: m[1] ?? null, bodyStart: b, end: end + 1, params: [m.index + m[0].length, close] })
   }
   for (const m of code.matchAll(/=>/g)) {
     const j = skipBack(code, m.index - 1)
@@ -351,7 +354,8 @@ function functionsIn(code, regexEnds) {
     const before = wordBefore(code, skipBack(code, start - 1))
     const b = skipFwd(code, m.index + 2)
     const end = code[b] === '{' ? matchForward(code, b) + 1 : trimmed(code, b, exprEnd(code, b, regexEnds))[1]
-    if (end > b) fns.push({ start: before.word === 'async' ? before.at : start, name: null, bodyStart: b, end })
+    const params = code[j] === ')' ? [start + 1, j] : [start, j + 1]
+    if (end > b) fns.push({ start: before.word === 'async' ? before.at : start, name: null, bodyStart: b, end, params })
   }
   return fns
 }
@@ -512,15 +516,15 @@ export function floorlessIn(src) {
 
   /* WHAT EACH NAME IS BOUND TO: every declarator, every later `name = …`, every object key `name: …`. */
   const bindings = new Map()
-  const bind = (name, from) => {
+  const bind = (name, from, at) => {
     const [a, b] = trimmed(code, from, exprEnd(code, from, regexEnds))
     if (!bindings.has(name)) bindings.set(name, [])
-    bindings.get(name).push({ a, b })
+    bindings.get(name).push({ a, b, at })
   }
-  for (const m of code.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*=(?![=>])/g)) bind(m[1], m.index + m[0].length)
+  for (const m of code.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*=(?![=>])/g)) bind(m[1], m.index + m[0].length, m.index)
   for (const m of code.matchAll(/(?<![\w$])([A-Za-z_$][\w$]*)\s*:(?!:)/g)) {
     const before = skipBack(code, m.index - 1)
-    if (code[before] === '{' || code[before] === ',') bind(m[1], m.index + m[0].length)
+    if (code[before] === '{' || code[before] === ',') bind(m[1], m.index + m[0].length, null)
   }
   const fns = functionsIn(code, regexEnds)
   /** ZERO-HELPER: functions whose body hands back a hand-made status of 0, by name. */
@@ -530,13 +534,115 @@ export function floorlessIn(src) {
     if (f.name) zeroFns.add(f.name)
     for (const [name, vals] of bindings) if (vals.some((v) => v.a === f.start)) zeroFns.add(name)
   }
-  /** Why the name at the root of an operand can hold a 0, or null. */
+  /** Why a value as written can be a hand-made 0, or null. */
+  const zeroText = (text) => {
+    if (ZERO.test(text)) return 'PLACEHOLDER'
+    const call = /^(?:await\s+)?([A-Za-z_$][\w$]*)\s*\(/.exec(text)
+    if (call && zeroFns.has(call[1])) return 'ZERO-HELPER'
+    return null
+  }
+  /** Why the name at the root of an operand can hold a 0, read file-wide, or null. */
   const zeroRoot = (root) => {
     for (const v of bindings.get(root) ?? []) {
-      const text = code.slice(v.a, v.b)
-      if (ZERO.test(text)) return 'PLACEHOLDER'
-      const call = /^(?:await\s+)?([A-Za-z_$][\w$]*)\s*\(/.exec(text)
-      if (call && zeroFns.has(call[1])) return 'ZERO-HELPER'
+      const why = zeroText(code.slice(v.a, v.b))
+      if (why) return why
+    }
+    return null
+  }
+  /*
+   * A NAME IS READ WHERE IT IS COMPARED (`found-30-sep/status-floor-placeholders-by-name`).
+   * `zeroRoot` reads every binding of a name anywhere in the file, so a `res`
+   * from a client that rejects was called a placeholder for another
+   * function's `res`, one that caught a rejection into `{ status: 0 }` (8 of
+   * the 20 PLACEHOLDER guards first found), and a placeholder handed to a
+   * helper under a parameter of another name was not seen at all. So a name
+   * is resolved by function, as JavaScript resolves it: the nearest function
+   * around the comparison that declares it or takes it as a parameter, else
+   * the file's top level. A declared name is bound to what is written to it
+   * in that scope; a parameter, to what its callers pass in its place, each
+   * followed the same way (four calls deep). A name nothing declares, and a
+   * parameter whose function is never called by name (a callback handed on),
+   * are read file-wide, as before. Blocks inside one function are not told
+   * apart.
+   */
+  const paramsOf = (f) => {
+    const names = []
+    if (!f.params || f.params[1] <= f.params[0]) return names
+    let depth = 0
+    let from = f.params[0]
+    const piece = (a, b) => {
+      const name = /^\s*(?:\.\.\.)?([A-Za-z_$][\w$]*)/.exec(code.slice(a, b))?.[1]
+      names.push(name ?? null)
+    }
+    for (let i = f.params[0]; i < f.params[1]; i++) {
+      const c = code[i]
+      if ('([{'.includes(c)) depth += 1
+      else if (')]}'.includes(c)) depth -= 1
+      else if (c === ',' && depth === 0) {
+        piece(from, i)
+        from = i + 1
+      }
+    }
+    piece(from, f.params[1])
+    return names
+  }
+  for (const f of fns) f.names = paramsOf(f)
+  /** The functions around `p`, nearest first. */
+  const around = (p) => fns.filter((f) => f.bodyStart <= p && p < f.end).sort((x, y) => x.end - x.bodyStart - (y.end - y.bodyStart))
+  const ownerOf = (p) => around(p)[0] ?? null
+  const declared = [...code.matchAll(/(?<![\w$.])(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g)].map((m) => ({
+    name: m[1],
+    owner: ownerOf(m.index),
+  }))
+  /** Where `name`, read at `p`, is bound: `{ f, param }`, `f` null for the top level, or null when nothing declares it. */
+  const scopeAt = (name, p) => {
+    for (const f of around(p)) {
+      if (f.names.includes(name)) return { f, param: true }
+      if (declared.some((d) => d.name === name && d.owner === f)) return { f, param: false }
+    }
+    return declared.some((d) => d.name === name && d.owner === null) ? { f: null, param: false } : null
+  }
+  /** The names a function is called by: its own, or the names it is bound to. */
+  const calledBy = (f) => {
+    const names = new Set(f.name ? [f.name] : [])
+    for (const [name, vals] of bindings) if (vals.some((v) => v.a === f.start)) names.add(name)
+    return [...names]
+  }
+  /** `zeroRoot`, for the binding of `root` in scope at `p`. */
+  const zeroRootAt = (root, p, depth = 0) => {
+    const scope = scopeAt(root, p)
+    if (!scope) return zeroRoot(root)
+    if (!scope.param) {
+      for (const v of bindings.get(root) ?? []) {
+        if (v.at === null) continue
+        const there = scopeAt(root, v.at)
+        if (!there || there.f !== scope.f || there.param) continue
+        const why = zeroText(code.slice(v.a, v.b))
+        if (why) return why
+      }
+      return null
+    }
+    // A parameter: what its callers pass in its place.
+    const index = scope.f.names.indexOf(root)
+    const calls = []
+    for (const name of calledBy(scope.f)) {
+      for (const m of code.matchAll(new RegExp(`(?<![\\w$.])${name.replace(/\$/g, '\\$')}\\s*\\(`, 'g'))) {
+        const open = m.index + m[0].length - 1
+        if (open > scope.f.start && open < scope.f.bodyStart) continue // its own head
+        if (wordBefore(code, skipBack(code, m.index - 1)).word === 'function') continue
+        const close = matchForward(code, open)
+        if (close > 0) calls.push([open, close])
+      }
+    }
+    if (!calls.length || depth >= 4) return zeroRoot(root)
+    for (const [open, close] of calls) {
+      const arg = argSpans(code, open, close)[index]
+      if (!arg) continue
+      const text = code.slice(...arg).trim()
+      // A name, or a property read off one (`answers[0]`, `r.answer`), is followed where it stands; a call is not a name.
+      const name = /^([A-Za-z_$][\w$]*)\s*(?:$|\.|\?\.|\[)/.exec(text)?.[1]
+      const why = zeroText(text) ?? (name && name !== 'await' ? zeroRootAt(name, arg[0], depth + 1) : null)
+      if (why) return why
     }
     return null
   }
@@ -562,10 +668,10 @@ export function floorlessIn(src) {
     if (!last || !(last === 'status' || /Status$/.test(last) || (operand.includes('.') && statusFields.has(last)))) return false
     return !(last !== 'status' && !statusFields.has(last) && pageStatus(last))
   }
-  /** Why the status an operand reads can be 0 — its root's binding first, then the suite's client — or null. */
-  const canBeZero = (operand) => {
+  /** Why the status an operand reads at `at` can be 0 — its root's binding there first, then the suite's client — or null. */
+  const canBeZero = (operand, at) => {
     const root = /^([A-Za-z_$][\w$]*)/.exec(operand)?.[1] ?? null
-    return (root && zeroRoot(root)) ?? (zeroClient ? 'ZERO-CLIENT' : null)
+    return (root && zeroRootAt(root, at)) ?? (zeroClient ? 'ZERO-CLIENT' : null)
   }
 
   const checks = []
@@ -678,7 +784,7 @@ export function floorlessIn(src) {
       considered.floored += 1
       continue
     }
-    const why = canBeZero(operand)
+    const why = canBeZero(operand, opStart)
     if (!why) {
       considered.cannotBeZero += 1
       continue
@@ -910,7 +1016,7 @@ export function floorlessIn(src) {
       considered.caught += 1
       continue
     }
-    const zero = canBeZero(operand)
+    const zero = canBeZero(operand, lo)
     if (!zero) {
       considered.guardCannotBeZero += 1
       continue
@@ -1123,6 +1229,26 @@ const CASES = [
     "const csv = await download('/export')",
     "chk(csv.status < 300 && /csv/.test(csv.type), 'it downloads')",
   ), /✗ c\.mjs:10 {2}ZERO-HELPER {2}csv\.status < 300/],
+  ['passes', "a `res` from a client that rejects, beside a helper's own `res` caught into { status: 0 }", suite(THROWS,
+    'const tidy = async (id) => {',
+    "  const res = await A(`/files/${id}`, { method: 'DELETE' }).catch(() => ({ status: 0 }))",
+    '  return res.ok',
+    '}',
+    "const res = await A('/x')",
+    "chk(res.status < 300, 'x answers')",
+  )],
+  ['caught', 'a placeholder handed to a helper under a parameter of another name', suite(THROWS,
+    'const succeeded = (answer) => answer.status < 300',
+    "const removed = id ? await A(`/files/${id}`, { method: 'DELETE' }) : { status: 0 }",
+    "chk(succeeded(removed), 'the file is removed')",
+  ), /✗ c\.mjs:4 {2}PLACEHOLDER {2}answer\.status < 300/],
+  ['caught', 'and a guard on one, handed the same way', suite(THROWS,
+    'const stopUnless = (answer, what) => {',
+    '  if (answer.status >= 300) throw new Error(`could not ${what}`)',
+    '}',
+    "const granted = role ? await A('/grant', { method: 'POST' }) : { status: 0 }",
+    "stopUnless(granted, 'grant')",
+  ), /✗ c\.mjs:5 {2}PLACEHOLDER {2}answer\.status >= 300/],
   ['caught', 'a floor across an || does not count', suite(HEAD, "const r = await A('/x')", "chk(r.status >= 200 && fresh || r.status < 300, 'x')"), /✗ c\.mjs:5 {2}ZERO-CLIENT {2}r\.status < 300/],
   ['caught', "a floor on another answer's status does not count", suite(HEAD, "const r = await A('/x')", "const q = await A('/y')", "chk(q.status >= 200 && r.status < 300, 'x')"), /✗ c\.mjs:6 {2}ZERO-CLIENT {2}r\.status < 300/],
   ['caught', 'a floor in the statement before does not count', suite(HEAD,
@@ -1432,8 +1558,12 @@ if (process.env.STATUS_FLOOR_UNDER_TEST) {
         ['any-options-throw', at('if (!options || ', '!/noAnswer'), 'if (!options || false && !/noAnswer'],
         ['own-name-unread', at("if (s) local.add(s[1] ?? ", "'apiAs')"), 'if (s && s[1]) local.add(s[1])'],
         ['placeholders-unread', at('if (ZERO.test(text)) ', "return 'PLACEHOLDER'"), 'if (false) return null'],
-        ['every-name-a-placeholder', at("      if (ZERO.test(text)) return 'PLACE", "HOLDER'"), "      if (true) return 'PLACEHOLDER'"],
+        ['every-name-a-placeholder', at("    if (ZERO.test(text)) return 'PLACE", "HOLDER'"), "    if (true) return 'PLACEHOLDER'"],
         ['helpers-unread', at('if (call && zeroFns.has(call[1])) ', "return 'ZERO-HELPER'"), 'if (false) return null'],
+        // A name read where it is compared (`found-30-sep/status-floor-placeholders-by-name`).
+        ['names-read-file-wide', at('return (root && zeroRoot', 'At(root, at)) ?? (zeroClient'), 'return (root && zeroRoot(root)) ?? (zeroClient'],
+        ['other-scopes-counted', at('if (!there || there.f !== scope.f', ' || there.param) continue'), 'if (!there) continue'],
+        ['parameters-not-followed', at('const index = scope.f.names', '.indexOf(root)'), 'return zeroRoot(root)'],
         ['floors-unread', at('const floored = conjunctsAround(code, at).some(([a, b]) => ', 'floorLeaf(norm(src.slice(a, b))))'), 'const floored = false'],
         ['other-answers-floor', at('const same = (x) => ', 'x === operand'), 'const same = (x) => /status$/i.test(x)'],
         ['truthy-not-a-floor', at('if ((f = /^(?:!!)?(.+)$/.exec(t)) && same(f[1])) ', 'return true'), 'if (false) return true'],

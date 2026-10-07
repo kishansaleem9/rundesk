@@ -207,10 +207,62 @@ async function whoTheBrowserIsSignedInAs(): Promise<string | null> {
   return typeof id === 'string' ? id : null
 }
 
+/**
+ * A TAB THAT SIGNED ITSELF OUT TAKES ITS PERSON BACK WHEN THEY SIGN IN AGAIN IN
+ * ANOTHER TAB (`found-7-oct/a-tab-that-saw-the-sign-out-misses-the-sign-in`).
+ *
+ * Another tab's sign-out leaves this tab's store naming the person
+ * (`followOtherTab` follows only a sign-in) until its own next request finds
+ * no session: the refresh fails, and the tab clears its store (`api`). A
+ * sign-in in the other tab after that names the person after nobody, but this
+ * tab names nobody, and nothing followed it. Measured on lane 6 with the tab's
+ * storage logged: it cleared itself 11.7 s after the sign-out, heard the
+ * sign-in at 13.7 s, and stayed on its list with its socket closed — in 1 run
+ * of 6, whenever the sign-in came after the tab's own next request.
+ *
+ * So the tab remembers whom it named when its store was cleared
+ * (`whoItHeldWhenCleared`), and while it names nobody, that person's sign-in
+ * elsewhere (`takesItsPersonBack`) is read back from the shared storage, as a
+ * reload of the tab would read it. The store's change then opens the socket
+ * again (`followSignedIn`), on the browser's session: the store holds no token
+ * now, and the handshake reads the cookie. Whatever cleared the store — a
+ * refresh that failed, or the person signing out here — their next sign-in is
+ * the browser's, which every tab shares. Somebody else's sign-in leaves the
+ * tab signed out: that is the owner's to decide.
+ */
+export function whoItHeldWhenCleared(was: string | null, now: string | null, held: string | null): string | null {
+  if (now) return null
+  return was ?? held
+}
+
+export function takesItsPersonBack(
+  change: { key: string | null; oldValue: string | null; newValue: string | null },
+  authKey: string,
+  here: string | null,
+  held: string | null,
+  storedNow: () => string | null,
+): boolean {
+  if (here !== null || held === null || change.key !== authKey) return false
+  // Their sign-in, and still what is stored: what is read back is the storage now, and another write may have come since.
+  return signedInElsewhere(change.oldValue, change.newValue, held) && signedInElsewhere(null, storedNow(), held)
+}
+
+let heldWhenCleared: string | null = null
+
+useAuthStore.subscribe((state, prev) => {
+  heldWhenCleared = whoItHeldWhenCleared(prev.user?.id ?? null, state.user?.id ?? null, heldWhenCleared)
+})
+
 if (typeof window !== 'undefined') {
-  window.addEventListener('storage', (event) =>
-    followOtherTab(socket, event, useAuthStore.persist.getOptions().name ?? '', useAuthStore.getState().user?.id ?? null),
-  )
+  window.addEventListener('storage', (event) => {
+    const authKey = useAuthStore.persist.getOptions().name ?? ''
+    const here = useAuthStore.getState().user?.id ?? null
+    if (takesItsPersonBack(event, authKey, here, heldWhenCleared, () => window.localStorage.getItem(authKey))) {
+      void useAuthStore.persist.rehydrate()
+      return
+    }
+    followOtherTab(socket, event, authKey, here)
+  })
 }
 
 /**

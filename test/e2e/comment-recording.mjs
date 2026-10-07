@@ -19,6 +19,12 @@
  * Urdu, records, and reads back the language the recognizer was actually
  * started with. A `hi-IN` there is her exact bug, reproduced in our product.
  *
+ * AN ACCOUNT OF ITS OWN (`commit-log/log-944e47f-1`). It switched the shared
+ * admin to Urdu and put the language back in a `finally`, which a killed run
+ * never reaches: every later suite then found the admin in Urdu. The recording
+ * is made by a person this run signs up, a workspace admin as the shared admin
+ * was, and the run's sweep removes them; the admin's language is only read.
+ *
  * HOW THE MEDIA IS FAKED, and what that costs. Headless Chromium has no
  * microphone, no screen to share and no speech service, so `MediaRecorder`,
  * `getUserMedia`/`getDisplayMedia` and `SpeechRecognition` are replaced before
@@ -172,7 +178,8 @@ window.SpeechRecognition = FakeSpeechRecognition
 
 const stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
 const browser = await chromium.launch(launchOptions())
-let restoreLocale = null
+/** The shared admin's language as this run found it (undefined until read). The run never sets it. */
+let adminLocale
 /** The tasks a cleanup DELETE could not remove, said above the totals. */
 const leftBehind = []
 
@@ -180,7 +187,7 @@ try {
   const auth = await signInApi(API, ME.email, ME.password)
   const A = apiAs(auth.accessToken)
   const me = (await A('/users/me')).data
-  restoreLocale = me?.locale ?? 'en'
+  adminLocale = me?.locale ?? null
   const workspaces = (await A('/workspaces')).data ?? []
   const workspaceId = workspaces[0]?.workspace?.id ?? workspaces[0]?.id
   const stamp = Date.now()
@@ -347,16 +354,27 @@ try {
   // ── The composer on screen ───────────────────────────────────────────────
   console.log('\n▶ the composer records, and offers what frame `04:16` offers')
 
-  // The account is switched to Urdu BEFORE the page loads: the provider adopts
-  // the server's preference over any local guess, so this is the real path.
-  await A('/users/me', { method: 'PATCH', body: { locale: 'ur' } })
+  /*
+   * THE RECORDER, an account of this run's own: a workspace admin, as the
+   * shared admin was, so the task made private below is still theirs to read.
+   * Their language is switched to Urdu BEFORE the page loads: the provider
+   * adopts the server's preference over any local guess, so this is the real
+   * path. The shared admin's is never touched.
+   */
+  const RECORDER = { email: `recorder-${stamp}@rundesk.invalid`, password: 'Recorder@123!' }
+  await signUpApi(API, { email: RECORDER.email, fullName: `Rida Recorder ${stamp}`, password: RECORDER.password, organizationName: `Rida Recorder ${stamp}` })
+  const joined = await A(`/workspaces/${workspaceId}/members`, { method: 'POST', body: { email: RECORDER.email, role: 'workspace_admin' } })
+  if (!joined.ok) throw new Error(`could not make the recorder a workspace admin: POST /members answered ${joined.status}`)
+  const asRecorder = apiAs((await signInApi(API, RECORDER.email, RECORDER.password)).accessToken)
+  const toUrdu = await asRecorder('/users/me', { method: 'PATCH', body: { locale: 'ur' } })
+  if (!toUrdu.ok) throw new Error(`could not set the recorder's language to Urdu: PATCH /users/me answered ${toUrdu.status}`)
 
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
   await ctx.addInitScript(MEDIA_FAKES)
   const page = await ctx.newPage()
   await page.goto(`${stack.base}/login`, { waitUntil: 'domcontentloaded' })
-  await page.fill('input[type=email]', ME.email)
-  await page.fill('input[type=password]', ME.password)
+  await page.fill('input[type=email]', RECORDER.email)
+  await page.fill('input[type=password]', RECORDER.password)
   await page.click('button[type=submit]')
   await page.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS })
   await page.goto(`${stack.base}/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=${task.id}`, {
@@ -661,22 +679,20 @@ try {
   const where = lines.find((l) => l.includes('waiting for') || l.includes('getByTestId'))
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${lines[0]}${where ? `\n         ${where.trim()}` : ''}`)
 } finally {
-  // The account's language is this suite's to borrow, not to keep — every later
-  // suite reads it, so a refused restore is this run's failure. Nothing read,
-  // nothing borrowed.
-  let restored = null
-  if (restoreLocale) {
+  // The shared admin's language, read again: every later suite reads it, and this run never sets it.
+  let adminNow
+  if (adminLocale !== undefined) {
     try {
       const auth = await signInApi(API, ME.email, ME.password)
-      restored = await apiAs(auth.accessToken)('/users/me', { method: 'PATCH', body: { locale: restoreLocale } })
+      adminNow = (await apiAs(auth.accessToken)('/users/me')).data?.locale ?? null
     } catch (err) {
-      restored = { status: `no answer (${String(err?.message ?? err).split('\n')[0]})` }
+      adminNow = `no answer (${String(err?.message ?? err).split('\n')[0]})`
     }
   }
   chk(
-    !restoreLocale || restored.status < 300,
-    'and the account gets its own language back',
-    `putting the locale back to ${JSON.stringify(restoreLocale)} answered ${restored?.status}`,
+    adminLocale !== undefined && adminNow === adminLocale,
+    "and the shared admin's language is the one this run found: the recording is made by an account of the run's own",
+    `the admin's language was ${JSON.stringify(adminLocale ?? 'never read')} when the run began and is ${JSON.stringify(adminNow ?? 'unread')} now`,
   )
   await browser.close().catch(() => {})
   stack?.close()

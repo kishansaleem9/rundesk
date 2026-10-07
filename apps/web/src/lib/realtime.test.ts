@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { followOtherTab, followServerClose, followSignedIn, rejoinAndCatchUp, roomLedger } from './realtime'
+import { followOtherTab, followServerClose, followSignedIn, rejoinAndCatchUp, roomLedger, takesItsPersonBack, whoItHeldWhenCleared } from './realtime'
 
 /*
  * THE TAB'S SOCKET FOLLOWS WHO IS SIGNED IN
@@ -79,6 +79,48 @@ test('a write by another tab that is not this person signing in — a refresh, a
   followOtherTab(sock, { key: KEY, oldValue: stored(null), newValue: stored({ id: 'u1' }) }, KEY, null)
   assert.deepEqual(did, [], 'a write that is not this person’s sign-in closed or opened the socket')
   assert.doesNotThrow(() => followOtherTab(null, { key: KEY, oldValue: stored(null), newValue: stored({ id: 'u1' }) }, KEY, 'u1'))
+})
+
+/*
+ * A TAB THAT SIGNED ITSELF OUT TAKES ITS PERSON BACK WHEN THEY SIGN IN AGAIN IN
+ * ANOTHER TAB (`found-7-oct/a-tab-that-saw-the-sign-out-misses-the-sign-in`).
+ * After another tab's sign-out, this tab's own next request finds no session
+ * and the tab clears its store; a sign-in heard after that names the person
+ * after nobody, but this tab names nobody, and nothing followed it — measured
+ * on lane 6, 1 run in 6 lost so. The tab remembers whom it named when it was
+ * cleared (`whoItHeldWhenCleared`), and `takesItsPersonBack` says whether a
+ * write is that person's sign-in. `session-in-the-browser.mjs` holds the
+ * sign-in until the listening tab has cleared itself.
+ */
+test('a tab that signed itself out takes back the person it named when they sign in again in another tab, while the storage still names them', () => {
+  const now = () => stored({ id: 'u1' })
+  assert.equal(takesItsPersonBack({ key: KEY, oldValue: stored(null), newValue: stored({ id: 'u1' }) }, KEY, null, 'u1', now), true, 'the person’s sign-in after nobody was not taken back')
+  assert.equal(takesItsPersonBack({ key: KEY, oldValue: stored({ id: 'u2' }), newValue: stored({ id: 'u1' }) }, KEY, null, 'u1', now), true, 'the person’s sign-in after somebody else was not taken back')
+})
+
+test('somebody else’s sign-in is not taken, nor one the storage has moved on from, nor a write that is no sign-in, nor anything by a tab that names somebody or held nobody', () => {
+  const signIn = { key: KEY, oldValue: stored(null), newValue: stored({ id: 'u1' }) }
+  const cases: Array<[string, typeof signIn, string | null, string | null, string | null]> = [
+    ['somebody else signed in', { ...signIn, newValue: stored({ id: 'u2' }) }, null, 'u1', stored({ id: 'u2' })],
+    ['the storage names somebody else since', signIn, null, 'u1', stored({ id: 'u2' })],
+    ['the storage names nobody since', signIn, null, 'u1', stored(null)],
+    ['a write that names the person before and after (a refresh)', { ...signIn, oldValue: stored({ id: 'u1' }) }, null, 'u1', stored({ id: 'u1' })],
+    ['a sign-out', { ...signIn, oldValue: stored({ id: 'u1' }), newValue: stored(null) }, null, 'u1', stored(null)],
+    ['another key', { ...signIn, key: 'rundesk.theme' }, null, 'u1', stored({ id: 'u1' })],
+    ['the tab names somebody (followOtherTab’s to follow)', signIn, 'u1', 'u1', stored({ id: 'u1' })],
+    ['the tab held nobody when it was cleared', signIn, null, null, stored({ id: 'u1' })],
+  ]
+  for (const [why, change, here, held, storedNow] of cases) {
+    assert.equal(takesItsPersonBack(change, KEY, here, held, () => storedNow), false, `${why}: the person was taken back`)
+  }
+})
+
+test('the person remembered is whom the tab named when its store was cleared, kept while it names nobody, and forgotten once it names somebody', () => {
+  assert.equal(whoItHeldWhenCleared('u1', null, null), 'u1', 'a cleared store forgot whom it named')
+  assert.equal(whoItHeldWhenCleared(null, null, 'u1'), 'u1', 'clearing a store that names nobody again forgot whom it named')
+  assert.equal(whoItHeldWhenCleared(null, 'u1', 'u1'), null, 'a tab that names its person again still remembers them as cleared')
+  assert.equal(whoItHeldWhenCleared('u1', 'u2', null), null, 'a tab that names somebody remembers somebody as cleared')
+  assert.equal(whoItHeldWhenCleared('u1', 'u1', null), null, 'a tab that names somebody remembers somebody as cleared')
 })
 
 /*
