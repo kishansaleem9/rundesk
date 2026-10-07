@@ -4,7 +4,12 @@
  * without a database and the writer only carries them out.
  */
 
-import { IMPORTED_LIST_NAME, type RundeskImportBundle } from '@rundesk/imports'
+import { CSV_SOURCES, IMPORTED_LIST_NAME, isCsvSource, type RundeskImportBundle } from '@rundesk/imports'
+
+/** What a run is called in its notices: the app whose export it was, else "Spreadsheet". */
+export function sourceLabel(preset: string | null | undefined): string {
+  return isCsvSource(preset) ? CSV_SOURCES[preset].label : 'Spreadsheet'
+}
 
 /** The bundle list id every row without a `List` cell goes to. */
 export const DEFAULT_LIST_SOURCE = 'list:__default'

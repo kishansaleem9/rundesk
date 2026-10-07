@@ -6,7 +6,7 @@
 
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Copy, Download, FileSpreadsheet, FileUp, LifeBuoy, MoreHorizontal, Trash2, XCircle } from 'lucide-react'
+import { Copy, Download, FileUp, LifeBuoy, MoreHorizontal, Trash2, XCircle } from 'lucide-react'
 import {
   Button,
   Dialog,
@@ -35,6 +35,8 @@ import { refusalMessage } from '../../lib/api'
 import { useTranslation, type TranslationKey } from '../../lib/i18n'
 import { exportsApi, importsApi, type HistoryRow } from '../../lib/imports-exports-api'
 import { InlineSkeleton } from '../loading-skeletons'
+import { CSV_SOURCES, isCsvSource } from '@rundesk/imports'
+import { AppMark, sourceMark } from './source-grid'
 
 const SOURCE_KEYS: Record<string, TranslationKey> = {
   spreadsheet: 'ie.source.spreadsheet',
@@ -61,6 +63,12 @@ const STATUS_KEYS: Record<string, TranslationKey> = {
 }
 
 const fmt = (n: number) => n.toLocaleString('en-GB')
+
+/** "Asana" for an Asana export, else the importer's own name. */
+function sourceName(row: HistoryRow, t: (key: TranslationKey) => string): string {
+  if (row.sourcePreset && isCsvSource(row.sourcePreset)) return CSV_SOURCES[row.sourcePreset].label
+  return SOURCE_KEYS[row.source] ? t(SOURCE_KEYS[row.source]) : row.source
+}
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '—')
 
 export function StatusChip({ row }: { row: HistoryRow }) {
@@ -188,8 +196,8 @@ export function ImportHistory({
                   </td>
                   <td className="px-3 py-2 align-top">
                     <span className="inline-flex items-center gap-1.5">
-                      {row.kind === 'export' ? <Download className="h-4 w-4 text-muted-foreground" /> : <FileSpreadsheet className="h-4 w-4 text-muted-foreground" />}
-                      {SOURCE_KEYS[row.source] ? t(SOURCE_KEYS[row.source]) : row.source}
+                      {row.kind === 'export' ? <Download className="h-4 w-4 text-muted-foreground" /> : <AppMark mark={sourceMark(row.source, row.sourcePreset)} className="h-4 w-4" />}
+                      {sourceName(row, t)}
                     </span>
                     {row.fileName && <div className="max-w-[220px] truncate text-[11px] text-muted-foreground">{row.fileName}</div>}
                   </td>
@@ -391,7 +399,7 @@ export function ImportDetailsDialog({ workspaceId, id, onClose }: { workspaceId:
           <div className="space-y-4">
             <div className="grid gap-2 text-sm sm:grid-cols-2">
               <div>
-                <span className="text-muted-foreground">{t('ie.details.source')}:</span> {SOURCE_KEYS[r.source] ? t(SOURCE_KEYS[r.source]) : r.source}
+                <span className="text-muted-foreground">{t('ie.details.source')}:</span> {sourceName(r, t)}
                 {r.fileName && <span className="text-muted-foreground"> · {r.fileName}</span>}
               </div>
               <div>

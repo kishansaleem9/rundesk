@@ -15,6 +15,7 @@ import { Input, cn, toast } from '@rundesk/ui'
 import {
   autoMap,
   buildGrid,
+  CSV_SOURCES,
   DATE_FORMAT_OPTIONS,
   DELIMITER_OPTIONS,
   matchAssignee,
@@ -26,6 +27,7 @@ import {
   validateGrid,
   GOOGLE_SHEETS_HINT,
   type AutoMapTarget,
+  type CsvSourceKey,
   type DateFormatKey,
   type GridColumn,
   type GridRow,
@@ -34,7 +36,7 @@ import {
   type ValueMaps,
 } from '@rundesk/imports'
 import { refusalMessage } from '../../lib/api'
-import { useTranslation } from '../../lib/i18n'
+import { useTranslation, type TranslationKey } from '../../lib/i18n'
 import { chunkRows, importsApi, type ImportPreview, type LocationRef } from '../../lib/imports-exports-api'
 import { DataImportGrid } from './data-import-grid'
 import { LocationPicker } from './location-pickers'
@@ -46,11 +48,14 @@ const SELECT = 'h-10 w-full rounded-md border border-border bg-background px-3 t
 
 export function SpreadsheetWizard({
   workspaceId,
+  source,
   initialLocation,
   onExit,
   onStarted,
 }: {
   workspaceId: string
+  /** Importing an app's own export (Asana, Jira, …): its steps are shown and its columns pre-mapped. */
+  source?: CsvSourceKey
   /** Opened from a Space, Folder or List: that location is the destination already. */
   initialLocation?: (LocationRef & { path: string }) | null
   onExit: () => void
@@ -76,7 +81,8 @@ export function SpreadsheetWizard({
   const [table, setTable] = useState<SheetTable | null>(null)
   const [mapping, setMapping] = useState<Record<string, AutoMapTarget>>({})
   const [fieldTypes, setFieldTypes] = useState<Record<string, ImportableFieldType>>({})
-  const [valueMaps, setValueMaps] = useState<ValueMaps>({})
+  // An app's priority words (Todoist's 4 = its top priority), changeable on Map fields.
+  const [valueMaps, setValueMaps] = useState<ValueMaps>(() => (source ? { priority: { ...CSV_SOURCES[source].priorities } } : {}))
   const [columns, setColumns] = useState<GridColumn[]>([])
   const [rows, setRows] = useState<GridRow[]>([])
   const [invite, setInvite] = useState<Set<string>>(new Set())
@@ -85,6 +91,7 @@ export function SpreadsheetWizard({
     mutationFn: async () => {
       const made = await importsApi.create(workspaceId, {
         source: 'spreadsheet',
+        preset: source,
         options: { destination: { type: location!.type, id: location!.id }, dateFormat, delimiter },
       })
       return { made, preview: await importsApi.preview(workspaceId, made.id) }
@@ -107,6 +114,7 @@ export function SpreadsheetWizard({
       setMapping(
         autoMap(sheet.headers, {
           memory: preview?.mappingMemory,
+          columns: source ? CSV_SOURCES[source].columns : undefined,
           customFields: preview?.customFields.filter((f) => f.importable).map((f) => ({ id: f.id, name: f.name })),
         }),
       )
@@ -220,6 +228,7 @@ export function SpreadsheetWizard({
           testId: 'dest-continue',
         }}
       >
+        {source && <AppInstructions source={source} />}
         <div className="space-y-5">
           <div>
             <StepLabel>{t('ie.dest.whereLabel')}</StepLabel>
@@ -382,5 +391,23 @@ export function SpreadsheetWizard({
         }
       />
     </WizardStep>
+  )
+}
+
+/** §4 — how to get the file out of the app, before choosing where it goes. */
+function AppInstructions({ source }: { source: CsvSourceKey }) {
+  const { t } = useTranslation()
+  const app = CSV_SOURCES[source].label
+  const steps = ([1, 2, 3] as const).map((n) => t(`ie.app.${source}.${n}` as TranslationKey))
+  return (
+    <div className="mb-6 rounded-lg border border-border/60 bg-card/50 p-4 text-sm" data-testid={`app-instructions-${source}`}>
+      <div className="font-medium">{t('ie.app.exportFirst', { app })}</div>
+      <ol className="mt-2 list-decimal space-y-1 pl-5 text-muted-foreground">
+        {steps.map((step) => (
+          <li key={step}>{step}</li>
+        ))}
+      </ol>
+      <p className="mt-2 text-xs text-muted-foreground">{t('ie.app.thenUpload', { app, files: CSV_SOURCES[source].fileTypes })}</p>
+    </div>
   )
 }

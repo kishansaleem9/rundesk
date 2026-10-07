@@ -3,12 +3,14 @@ import { getWorkspaceRole } from '../hooks/use-workspace-role'
 import { permissionsQuery } from '../hooks/use-permissions'
 import { SETTINGS_TABS, landingTab, settingsTabsFor, type SettingsTabId } from '../hooks/use-settings-access'
 import type { ImportsExportsSearch } from '../components/imports/imports-exports-tab'
+import { CSV_SOURCE_KEYS, isCsvSource } from '@rundesk/imports'
 
 const LOCATION_TYPES = ['space', 'folder', 'project', 'list'] as const
 
 /**
  * Settings › Imports / Exports reads the spec's own parameters (§1.1):
- * `?import=false` (the Export tab), `?spreadsheet=true` (that importer),
+ * `?import=false` (the Export tab), `?spreadsheet=true` (that importer), `?asana=true`
+ * and the other apps whose export it reads,
  * `?importId=` (a report), `&via=` (analytics), and a destination handed in
  * from a Space's menu. Only present ones are kept, so other tabs' addresses
  * stay as they were.
@@ -19,6 +21,12 @@ function importsExportsSearch(search: Record<string, unknown>): ImportsExportsSe
   const out: ImportsExportsSearch = {}
   if (flag(search.import) !== undefined) out.import = flag(search.import)
   if (flag(search.spreadsheet)) out.spreadsheet = true
+  // An app's export: `?source=asana`, or the spec's own `?asana=true` (§1.1).
+  const app = isCsvSource(search.source) ? search.source : CSV_SOURCE_KEYS.find((key) => flag(search[key]))
+  if (app) {
+    out.spreadsheet = true
+    out.source = app
+  }
   if (uuid(search.importId)) out.importId = uuid(search.importId)
   if (typeof search.via === 'string') out.via = search.via.slice(0, 40)
   if ((LOCATION_TYPES as readonly string[]).includes(search.locationType as string) && uuid(search.locationId)) {

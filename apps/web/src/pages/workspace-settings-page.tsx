@@ -121,11 +121,17 @@ const TAB_GROUPS = [
     tabs: [
       { id: 'features', labelKey: 'settings.tabFeatures', icon: ToggleRight },
       { id: 'announcements', labelKey: 'settings.tabAnnouncements', icon: Megaphone },
-      { id: 'integrations', labelKey: 'settings.tabIntegrations', icon: Plug },
-      { id: 'importsExports', labelKey: 'settings.tabImportsExports', icon: Import },
       { id: 'labels', labelKey: 'settings.tabLabels', icon: Tag },
       { id: 'taskTypes', labelKey: 'settings.tabTaskTypes', icon: Shapes },
       { id: 'aiUsage', labelKey: 'settings.tabAiUsage', icon: Sparkles },
+    ],
+  },
+  {
+    // ClickUp's "Integrations & ClickApps": where its Imports / Exports lives (§1.1).
+    headingKey: 'settings.groupIntegrationsApps',
+    tabs: [
+      { id: 'integrations', labelKey: 'settings.tabIntegrations', icon: Plug },
+      { id: 'importsExports', labelKey: 'settings.tabImportsExports', icon: Import },
     ],
   },
   {

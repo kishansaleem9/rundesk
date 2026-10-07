@@ -19,6 +19,7 @@ import { usePermissions } from '../../hooks/use-permissions'
 import { useTranslation } from '../../lib/i18n'
 import { importsApi, type LocationType } from '../../lib/imports-exports-api'
 import { getRealtimeSocket } from '../../lib/realtime'
+import { isCsvSource, type CsvSourceKey } from '@rundesk/imports'
 import { ExportPanel } from './export-panel'
 import { ImportDetailsDialog, ImportHistory } from './import-history'
 import { flattenTree } from './location-tree'
@@ -29,6 +30,8 @@ import { SpreadsheetWizard } from './spreadsheet-wizard'
 export type ImportsExportsSearch = {
   import?: boolean
   spreadsheet?: boolean
+  /** An app whose own export is imported through the Spreadsheet importer (`?asana=true` arrives as this). */
+  source?: CsvSourceKey
   importId?: string
   via?: string
   locationType?: LocationType
@@ -81,7 +84,15 @@ export function ImportsExportsTab({ workspaceId }: { workspaceId: string }) {
 
   const items = history.data?.items ?? []
   const pick = (id: SourceId) => {
-    if (id === 'spreadsheet') return go({ spreadsheet: true, via: 'settings', locationType: search.locationType, locationId: search.locationId })
+    if (id === 'spreadsheet' || isCsvSource(id)) {
+      return go({
+        spreadsheet: true,
+        source: isCsvSource(id) ? id : undefined,
+        via: 'settings',
+        locationType: search.locationType,
+        locationId: search.locationId,
+      })
+    }
     navigate({ to: '/app/$workspaceId/import', params: { workspaceId }, search: { tab: id === 'document' ? 'doc' : 'clickup' } })
   }
 
@@ -143,7 +154,9 @@ export function ImportsExportsTab({ workspaceId }: { workspaceId: string }) {
           <div className="hidden md:block">
             {search.spreadsheet ? (
               <SpreadsheetWizard
+                key={search.source ?? 'spreadsheet'}
                 workspaceId={workspaceId}
+                source={search.source}
                 initialLocation={handed ? { type: handed.type, id: handed.id, path: handed.path } : null}
                 onExit={() => go({})}
                 onStarted={() => {

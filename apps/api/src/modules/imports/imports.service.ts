@@ -36,6 +36,7 @@ import type { Db } from '@rundesk/db'
 import {
   DATE_FORMAT_OPTIONS,
   IMPORTABLE_FIELD_TYPES,
+  isCsvSource,
   mappingProblem,
   normaliseHeader,
   type ColumnMapping,
@@ -54,7 +55,7 @@ import { SecurityService } from '../security/security.service'
 import { ImportCleanupService } from './import-cleanup.service'
 import { resolveDestination } from './import-destination'
 import { importLimitsFor } from './import-limits'
-import { supportReference } from './import-plan'
+import { sourceLabel, supportReference } from './import-plan'
 import { ImportRunnerService } from './import-runner.service'
 import { IMPORT_STATUS_LABELS, type ImportDestination, type SpreadsheetImportMapping, type SpreadsheetImportOptions, type StagedRow } from './imports.types'
 
@@ -117,7 +118,11 @@ export class ImportsService {
 
   // ── draft → queued ─────────────────────────────────────────────────────────
 
-  async create(workspaceId: string, actor: Actor, body: { source?: string; options?: Partial<SpreadsheetImportOptions>; fileName?: string }) {
+  async create(
+    workspaceId: string,
+    actor: Actor,
+    body: { source?: string; preset?: string; options?: Partial<SpreadsheetImportOptions>; fileName?: string },
+  ) {
     await assertMayImport(this.db, { workspaceId, actorId: actor.id })
     if ((body.source ?? SPREADSHEET) !== SPREADSHEET) throw new BadRequestException('This source cannot be imported yet.')
     const options = this.checkOptions(body.options)
@@ -129,7 +134,8 @@ export class ImportsService {
         createdById: actor.id,
         status: 'draft',
         source: SPREADSHEET,
-        sourcePreset: 'generic',
+        // An app's CSV export (Asana, Jira, …) is the spreadsheet importer with that app's columns.
+        sourcePreset: isCsvSource(body.preset) ? body.preset : 'generic',
         options: options as unknown as Record<string, unknown>,
         fileName: typeof body.fileName === 'string' ? body.fileName.slice(0, 255) : null,
         supportReference: supportReference(),
@@ -286,7 +292,7 @@ export class ImportsService {
         action: 'import.started',
         resourceType: 'import',
         resourceId: jobId,
-        description: `Started a Spreadsheet import of ${staged.n} rows into ${dest.path}`,
+        description: `Started a${/^[AEIOU]/.test(sourceLabel(job.sourcePreset)) ? 'n' : ''} ${sourceLabel(job.sourcePreset)} import of ${staged.n} rows into ${dest.path}`,
         metadata: { source: SPREADSHEET, rows: staged.n, file: job.fileName ?? null },
       })
       .catch(() => undefined)
@@ -389,6 +395,7 @@ export class ImportsService {
       .select({
         id: clickupImportJobs.id,
         source: clickupImportJobs.source,
+        sourcePreset: clickupImportJobs.sourcePreset,
         status: clickupImportJobs.status,
         phase: clickupImportJobs.phase,
         total: clickupImportJobs.total,
@@ -422,6 +429,8 @@ export class ImportsService {
       kind: 'import' as const,
       id: j.id,
       source: j.source,
+      /** The app whose export this was (`asana`, `jira`, …), or `generic`. */
+      sourcePreset: j.sourcePreset,
       status: j.status,
       statusLabel: IMPORT_STATUS_LABELS[j.status] ?? j.status,
       phase: j.phase,

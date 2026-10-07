@@ -15,11 +15,11 @@ export const SETTINGS_TABS = [
   'sso',
   'features',
   'announcements',
-  'integrations',
-  'importsExports',
   'labels',
   'taskTypes',
   'aiUsage',
+  'integrations',
+  'importsExports',
   'archived',
   'trash',
 ] as const

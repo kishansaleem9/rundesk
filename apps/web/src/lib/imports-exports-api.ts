@@ -13,6 +13,8 @@ export type HistoryRow = {
   kind: 'import' | 'export'
   id: string
   source: string
+  /** The app whose export it was (`asana`, `jira`, …) or `generic`. */
+  sourcePreset?: string | null
   status: string
   statusLabel: string
   phase: string | null
@@ -71,7 +73,7 @@ const base = (ws: string) => `/workspaces/${ws}/imports`
 
 export const importsApi = {
   history: (ws: string) => api<{ items: HistoryRow[] }>(`${base(ws)}?limit=100`),
-  create: (ws: string, body: { source: 'spreadsheet'; fileName?: string; options: { destination: LocationRef; dateFormat: DateFormatKey; delimiter: string } }) =>
+  create: (ws: string, body: { source: 'spreadsheet'; preset?: string; fileName?: string; options: { destination: LocationRef; dateFormat: DateFormatKey; delimiter: string } }) =>
     api<{ id: string; supportReference: string; destination: ImportPreview['destination'] }>(base(ws), { method: 'POST', body }),
   preview: (ws: string, id: string) => api<ImportPreview>(`${base(ws)}/${id}/preview`),
   upload: (ws: string, id: string, chunkIndex: number, rows: GridRow[]) =>

@@ -83,6 +83,7 @@ import {
   DEFAULT_LIST_SOURCE,
   matchAssignee,
   planLists,
+  sourceLabel,
   statusKeyFor,
   uniqueName,
   type EffectiveStatus,
@@ -982,7 +983,7 @@ export class ImportRunnerService {
         workspaceId: ctx.workspaceId,
         actorId: ctx.actor.id,
         type: 'import_completed',
-        title: `Your Spreadsheet import has finished: ${imported.toLocaleString('en-GB')} ${noun} imported`,
+        title: `Your ${sourceLabel(ctx.job.sourcePreset)} import has finished: ${imported.toLocaleString('en-GB')} ${noun} imported`,
         body: 'View details',
         target: { entityType: 'import', entityId: ctx.job.id, url },
       })
@@ -995,7 +996,7 @@ export class ImportRunnerService {
         action: 'import.completed',
         resourceType: 'import',
         resourceId: ctx.job.id,
-        description: `Spreadsheet import finished: ${imported} ${noun} imported into ${ctx.dest.path}`,
+        description: `${sourceLabel(ctx.job.sourcePreset)} import finished: ${imported} ${noun} imported into ${ctx.dest.path}`,
         metadata: { tasks: imported, skipped: report.counts.tasksSkipped, failed: report.counts.tasksFailed },
       })
       .catch(() => undefined)
@@ -1068,7 +1069,7 @@ export class ImportRunnerService {
         workspaceId: job.workspaceId,
         actorId: job.createdById,
         type: 'import_failed',
-        title: 'Your Spreadsheet import failed',
+        title: `Your ${sourceLabel(job.sourcePreset)} import failed`,
         body: error,
         target: { entityType: 'import', entityId: job.id, url: `/app/${job.workspaceId}/settings?tab=imports-exports&importId=${job.id}` },
       })

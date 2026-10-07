@@ -1,6 +1,7 @@
 /**
  * §2.4 — pre-map incoming headers to RUNDESK fields, in this order of trust:
  *   1. what this workspace chose for the same header last time (mapping memory),
+ *      then, importing an app's export, that app's own column names (`sources.ts`),
  *   2. the field's own label (`Task Name`, `Due Date`, …),
  *   3. ClickUp's export headers (§5.1/§6.1), so its CSV maps with no clicks,
  *   4. common synonyms, including the column names Asana, Jira, Monday, Notion,
@@ -114,7 +115,12 @@ export type MappingMemory = Record<string, string>
 
 export function autoMap(
   headers: string[],
-  opts: { memory?: MappingMemory; customFields?: Array<{ id: string; name: string }> } = {},
+  opts: {
+    memory?: MappingMemory
+    customFields?: Array<{ id: string; name: string }>
+    /** An app's own column names (`CSV_SOURCES[app].columns`), ahead of the generic ones. */
+    columns?: Record<string, AutoMapTarget>
+  } = {},
 ): Record<string, AutoMapTarget> {
   const fieldByName = new Map((opts.customFields ?? []).map((f) => [normaliseHeader(f.name), f.id]))
   const fieldIds = new Set((opts.customFields ?? []).map((f) => f.id))
@@ -127,7 +133,7 @@ export function autoMap(
     if (remembered && (!remembered.startsWith('cf:') || remembered === 'cf:new' || fieldIds.has(remembered.slice(3)))) {
       target = remembered as AutoMapTarget
     }
-    target ??= BY_LABEL.get(key) ?? CLICKUP_EXPORT[key] ?? SYNONYMS[key]
+    target ??= opts.columns?.[key] ?? BY_LABEL.get(key) ?? CLICKUP_EXPORT[key] ?? SYNONYMS[key]
     if (!target && fieldByName.has(key)) target = `cf:${fieldByName.get(key)}`
     target ??= 'skip'
     // One incoming field per target: a second "Name" column stays unmapped
