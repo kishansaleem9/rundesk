@@ -543,7 +543,7 @@ export class ImportsService {
       .where(eq(importErrors.jobId, jobId))
       .orderBy(asc(importErrors.createdAt))
     const fix = (severity: string) =>
-      severity === 'error' ? 'Correct the row and import it again.' : 'Correct the cell in RUNDESK, or in the file before importing again.'
+      severity === 'error' ? 'Correct the row and import it again.' : 'Correct the cell in Rundesk, or in the file before importing again.'
     return toCsv(
       ['Row', 'Field', 'Message', 'Severity', 'Suggested fix'],
       rows.map((r) => [r.rowRef ?? '', r.field ?? '', r.message, r.severity === 'error' ? 'Row not imported' : 'Warning', fix(r.severity)]),

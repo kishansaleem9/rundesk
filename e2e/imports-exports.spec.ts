@@ -100,8 +100,10 @@ test('export: choose a location, start, and get a download link', async ({ page,
   const href = await page.getByTestId('export-download').getAttribute('href')
   const res = await request.get(href!)
   expect(res.status()).toBe(200)
-  // ClickUp's header row, byte for byte, then one column per Custom Field.
-  const header = (await res.text()).split('\r\n')[0]
+  // UTF-8 with a BOM, then ClickUp's header row byte for byte, then one column per Custom Field.
+  const body = await res.body()
+  expect([...body.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf])
+  const header = '﻿' + body.subarray(3).toString('utf8').split('\r\n')[0]
   expect(
     header.startsWith(
       '﻿Task ID,Task Link,Task Type,Task Custom ID,Task Name,Task Description,Status,Date created,Date created Text,' +

@@ -116,7 +116,7 @@ export function buildHierarchy(rows: HierarchyInput[]): Hierarchy {
         key: r.key,
         column: 'subtaskIds',
         severity: 'info',
-        message: `RUNDESK subtasks nest one level, so this row will be a subtask of ${label.get(root)}, its top-level task.`,
+        message: `Rundesk subtasks nest one level, so this row will be a subtask of ${label.get(root)}, its top-level task.`,
       })
     }
   }

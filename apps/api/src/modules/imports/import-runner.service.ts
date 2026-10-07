@@ -135,6 +135,8 @@ type RunContext = {
   people: Map<string, string>
   users: ImportReport['users']
   seeList: Map<string, boolean>
+  /** Rows the bundle refused: counted from the rows themselves, so a resumed run counts them the same. */
+  skipped: number
 }
 
 @Injectable()
@@ -307,6 +309,7 @@ export class ImportRunnerService {
       people: new Map(),
       users: [],
       seeList: new Map(),
+      skipped: report.skipped.length,
     }
   }
 
@@ -734,7 +737,7 @@ export class ImportRunnerService {
     const limits = importLimitsFor((await this.plans.getWorkspacePlan(ctx.workspaceId)).id)
     const todo = ctx.bundle.tasks.filter((t) => !ctx.registry.get('task', t.sourceId))
     let done = ctx.bundle.tasks.length - todo.length
-    const skipped = ctx.job.rejectedCount ?? 0
+    const skipped = ctx.skipped
     const total = ctx.bundle.tasks.length + skipped
     // New tasks go after what a List already holds, in the file's order.
     const positions = new Map<string, number>()
@@ -939,7 +942,7 @@ export class ImportRunnerService {
       counts: {
         tasksCreated: counts.task ?? 0,
         subtasksCreated: counts.subtask ?? 0,
-        tasksSkipped: ctx.job.rejectedCount ?? 0,
+        tasksSkipped: ctx.skipped,
         tasksFailed: counts.failed ?? 0,
         listsCreated: counts.list ?? 0,
         projectsCreated: counts.project ?? 0,
