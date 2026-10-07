@@ -1,6 +1,7 @@
 import { pgTable, text, timestamp, uuid, boolean, integer, index, uniqueIndex } from 'drizzle-orm/pg-core'
 import { relations, sql } from 'drizzle-orm'
 import { workspaces } from './workspaces'
+import { clickupImportJobs } from './clickup-import-jobs'
 
 /**
  * What a task *is* — Task, Milestone, Campaign, Invoice. ClickUp calls these
@@ -53,6 +54,8 @@ export const taskTypes = pgTable(
      */
     origin:      text('origin'),
     position:    integer('position').notNull().default(0),
+    // Which import made this row (Settings › Imports / Exports); null for everything else.
+    importId: uuid('import_id').references(() => clickupImportJobs.id, { onDelete: 'set null' }),
     createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

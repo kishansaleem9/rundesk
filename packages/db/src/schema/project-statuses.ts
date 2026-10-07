@@ -2,6 +2,7 @@ import { pgTable, text, timestamp, uuid, integer, unique, index } from 'drizzle-
 import { relations } from 'drizzle-orm'
 import { projects } from './projects'
 import type { StatusCategory } from './tasks'
+import { clickupImportJobs } from './clickup-import-jobs'
 
 /**
  * Project-scoped status template (see 0036_scoped_statuses).
@@ -21,6 +22,8 @@ export const projectStatuses = pgTable(
     color:     text('color').notNull().default('#94a3b8'),
     category:  text('category').$type<StatusCategory>().notNull().default('open'),
     position:  integer('position').notNull().default(0),
+    // Which import made this row (Settings › Imports / Exports); null for everything else.
+    importId: uuid('import_id').references(() => clickupImportJobs.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

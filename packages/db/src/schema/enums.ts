@@ -157,6 +157,11 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   // to deliver it to. Adding the label with no emitter behind it is the exact
   // defect this audit keeps finding, so it waits for the feature it needs.
   'subtask_created',
+  // 0175 — Settings › Imports / Exports: "Your Spreadsheet import has finished:
+  // 1,240 tasks imported", the same when it failed, and an export's link.
+  'import_completed',
+  'import_failed',
+  'export_ready',
 ])
 
 export const viewTypeEnum = pgEnum('view_type', [

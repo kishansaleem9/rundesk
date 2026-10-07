@@ -4,6 +4,7 @@ import { workspaces } from './workspaces'
 import { projects } from './projects'
 import { users } from './users'
 import { containerVisibilityEnum } from './enums'
+import { clickupImportJobs } from './clickup-import-jobs'
 
 /**
  * The rungs a space's default permission can sit on — the same ladder as
@@ -62,6 +63,8 @@ export const spaces = pgTable('spaces', {
    * record of why is a space nobody can explain later.
    */
   presetKey:   text('preset_key'),
+  // Which import made this row (Settings › Imports / Exports); null for everything else.
+  importId: uuid('import_id').references(() => clickupImportJobs.id, { onDelete: 'set null' }),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [

@@ -4,6 +4,7 @@ import { spaces } from './spaces'
 import { lists } from './lists'
 import { users } from './users'
 import { containerVisibilityEnum } from './enums'
+import { clickupImportJobs } from './clickup-import-jobs'
 
 export const projects = pgTable('projects', {
   id:          uuid('id').primaryKey().defaultRandom(),
@@ -39,6 +40,8 @@ export const projects = pgTable('projects', {
    * on demand, never listed and never offered as a destination.
    */
   isDefaultContainer: boolean('is_default_container').notNull().default(false),
+  // Which import made this row (Settings › Imports / Exports); null for everything else.
+  importId: uuid('import_id').references(() => clickupImportJobs.id, { onDelete: 'set null' }),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [

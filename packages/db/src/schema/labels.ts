@@ -2,12 +2,15 @@ import { pgTable, text, timestamp, uuid, unique } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { tasks } from './tasks'
+import { clickupImportJobs } from './clickup-import-jobs'
 
 export const labels = pgTable('labels', {
   id:          uuid('id').primaryKey().defaultRandom(),
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   name:        text('name').notNull(),
   color:       text('color').notNull(),
+  // Which import made this row (Settings › Imports / Exports); null for everything else.
+  importId: uuid('import_id').references(() => clickupImportJobs.id, { onDelete: 'set null' }),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   unique('uq_label_name_per_workspace').on(t.workspaceId, t.name),

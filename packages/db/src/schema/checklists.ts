@@ -2,12 +2,15 @@ import { pgTable, text, timestamp, uuid, boolean, integer } from 'drizzle-orm/pg
 import { relations } from 'drizzle-orm'
 import { tasks } from './tasks'
 import { users } from './users'
+import { clickupImportJobs } from './clickup-import-jobs'
 
 export const taskChecklists = pgTable('task_checklists', {
   id:        uuid('id').primaryKey().defaultRandom(),
   taskId:    uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
   title:     text('title').notNull(),
   position:  integer('position').notNull().default(0),
+  // Which import made this row (Settings › Imports / Exports); null for everything else.
+  importId: uuid('import_id').references(() => clickupImportJobs.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
