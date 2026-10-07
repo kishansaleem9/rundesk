@@ -107,6 +107,15 @@ file places deeper keeps all its properties, becomes a subtask of its top-level
 task, and gets a note in the report. Subtasks always go into their parent's
 List.
 
+### App tiles
+
+"Select source of import" lists every app ClickUp lists:
+- **Asana, Jira, Monday, Notion, Todoist, Trello and Wrike** open the Spreadsheet importer for that app's own export file (`?asana=true`, or `?source=asana`). The wizard shows the app's three export steps, pre-maps its column names (`CSV_SOURCES` in `packages/imports/src/sources.ts`), and seeds its priority words; Todoist's `4` is Urgent. The job's `source_preset` records the app, so the history and notices name it.
+- **ClickUp** opens the existing ClickUp importer.
+- **Basecamp, Confluence and Slack** have no task-shaped export. They show "Coming soon" and can't be clicked until their connectors (§4, Phase 3) exist.
+
+Settings: Integrations and Imports / Exports sit under the **Integrations & Apps** heading. The workspace menu also offers Settings and Imports / Exports to whoever may open them.
+
 ### Destinations
 
 Space → the space's hidden list container. Folder → a new project, "Imported
