@@ -6,7 +6,7 @@ import {
   ConflictException,
 } from '@nestjs/common'
 import { eq, and, ne, asc, sql, type SQL } from 'drizzle-orm'
-import { lists, listStatuses, projects, spaces, folders, spaceStatuses } from '@rundesk/db'
+import { customFieldDefinitions, lists, listStatuses, projects, spaces, folders, spaceStatuses } from '@rundesk/db'
 import { holdersNotInTrash } from '../../common/permissions/task-create'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -405,11 +405,30 @@ export class ListsService {
     // project the actor can see. See assertCanPlaceIn.
     await assertCanPlaceIn(this.db, { spaceId: dest.spaceId, projectId: targetProjectId, actorId, kind: 'list' })
 
-    const [row] = await this.db
-      .update(lists)
-      .set({ projectId: targetProjectId, updatedAt: new Date() })
-      .where(eq(lists.id, listId))
-      .returning()
+    /*
+     * A LIST'S OWN FIELDS GO WITH IT (`found-6-oct/list-move-strands-its-fields`).
+     * Only the list's project changed: a field kept to the list stayed in the
+     * old project with the list's id, so the list's tasks stopped showing it,
+     * its values were kept where nothing read them, and a field kept to the
+     * list could not be made in the new project. ClickUp hangs Custom Fields on
+     * locations: a List's own go where it goes, and the fields of the place it
+     * left are hidden on its tasks, "no data is deleted". So the fields kept to
+     * this list move to the new project with it, in the same transaction; the
+     * old project's fields stay there, and their values on the moved tasks are
+     * kept, read again if the list comes back.
+     */
+    const row = await this.db.transaction(async (tx) => {
+      const [moved] = await tx
+        .update(lists)
+        .set({ projectId: targetProjectId, updatedAt: new Date() })
+        .where(eq(lists.id, listId))
+        .returning()
+      await tx
+        .update(customFieldDefinitions)
+        .set({ projectId: targetProjectId, updatedAt: new Date() })
+        .where(eq(customFieldDefinitions.listId, listId))
+      return moved
+    })
 
     if (actorId) {
       await this.security.logAuditEvent({

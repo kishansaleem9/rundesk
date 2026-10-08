@@ -93,7 +93,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 26
+const EXPECTED_CHECKS = 28
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -817,6 +817,52 @@ try {
     'that Escape closes the dialog opened on top of the leaving menu',
     mergeLanded ? `the dialog ${mergeShut ? 'closed' : 'is still open'} after the Escape` : 'the Escape never landed in the menu’s exit',
   )
+
+  /*
+   * A DOUBLE-CLICK IS ONE GESTURE (`found-30-sep/a-double-click-on-a-dialog-row-shuts-the-dialog`).
+   * Two presses on the task menu's "Merge" 156–218 ms apart, as a person
+   * double-clicks: the first opened the dialog, and the second landed on its
+   * overlay, a press outside, and shut it, 9 rounds of 9. ClickUp documents
+   * nothing on it, and a double-click is one gesture everywhere. So a dialog
+   * takes no press outside that comes within a double-click's interval of its
+   * opening; one after that still closes it.
+   */
+  const { opened: dblMenuOpened } = await openFresh(page, more)
+  const dblRow = await mergeRow.boundingBox({ timeout: 8000 }).catch(() => null)
+  if (dblRow) {
+    const [x, y] = [dblRow.x + dblRow.width / 2, dblRow.y + dblRow.height / 2]
+    await page.mouse.click(x, y).catch(() => {})
+    // A person's double-click, not Playwright's: the second press comes a beat after the first.
+    await page.waitForTimeout(180)
+    await page.mouse.click(x, y).catch(() => {})
+  }
+  const dblUp = await waitUntil(mergeShown, { timeoutMs: 8000 })
+  // Shut by the second press, it read closed within 40 ms and was gone within 450 (the ledger's measure).
+  const dblShut = await waitUntil(async () => !(await mergeShown()), { timeoutMs: 1500, lastLookGraceMs: 0 })
+  chk(
+    dblMenuOpened && !!dblRow && dblUp && !dblShut,
+    'a person-paced double-click on the task menu’s “Merge” opens its dialog and leaves it open: the second press is the same gesture, not a press outside',
+    `the menu ${dblMenuOpened ? 'opened' : 'never opened'}; the row ${dblRow ? 'was pressed twice, 180 ms apart' : 'had no box to press'}; ` +
+      `the dialog ${dblUp ? (dblShut ? 'opened and was shut by the second press' : 'opened') : 'never opened'}`,
+  )
+  if (await mergeShown()) {
+    await page.keyboard.press('Escape').catch(() => {})
+    await waitUntil(async () => !(await mergeShown()), { timeoutMs: 5000 })
+  }
+
+  // A fresh dialog, opened with one press: a press on its overlay once the interval has passed is a press outside.
+  const { opened: oneMenuOpened } = await openFresh(page, more)
+  await mergeRow.click({ timeout: 8000 }).catch(() => {})
+  const oneUp = await waitUntil(mergeShown, { timeoutMs: 8000 })
+  await page.waitForTimeout(700)
+  if (oneUp) await page.mouse.click(4, 4).catch(() => {})
+  const oneShut = oneUp ? await waitUntil(async () => !(await mergeShown()), { timeoutMs: 5000 }) : false
+  chk(
+    oneMenuOpened && oneUp && oneShut,
+    'and a press outside a dialog, once a double-click’s interval has passed since it opened, still closes it',
+    `the menu ${oneMenuOpened ? 'opened' : 'never opened'}; the dialog ${oneUp ? (oneShut ? 'closed' : 'stayed open after a press on its overlay 0.7 s after opening') : 'never opened'}`,
+  )
+  if (!oneShut) await page.keyboard.press('Escape').catch(() => {})
 
   /*
    * THE CREATE MODAL, where an Escape that is not the menu's shows: the modal

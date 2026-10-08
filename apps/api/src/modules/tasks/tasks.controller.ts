@@ -523,9 +523,10 @@ export class TasksController {
   merge(
     @Param('taskId') taskId: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { targetTaskId: string },
+    @Body() body: { targetTaskId: string; addFields?: string[] },
   ) {
-    return this.tasks.mergeTask(taskId, body.targetTaskId, user.id)
+    // `addFields`: the merged task's fields the survivor lacks, to add to it ("Add selected"); left out, they stay on the binned task.
+    return this.tasks.mergeTask(taskId, body.targetTaskId, user.id, body.addFields)
   }
 
   /**

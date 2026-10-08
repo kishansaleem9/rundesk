@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 526 items: 5 open · 1 partly fixed · 463 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 527 items: 2 open · 0 partly fixed · 468 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -2405,7 +2405,7 @@ Found while closing it: `found-30-sep/comment-says-a-leaving-menu-keeps-its-esca
 - The two comments that still said a leaving menu takes the next Escape are reworded (`found-30-sep/comment-says-a-leaving-menu-keeps-its-escape`, below).
 - Merged here with the wait and zip changes below and run again on lane 6: `menu-reopen` 26/26 three runs in a row, and `list-export` 30, `comment-slash-commands` 10, `task-menu` 37, `folder-dialog` 29, `chat-message-actions` 73, `assign-to-priorities` 30, `create-modal-templates` 33, `task-header-status` 15 and `video1-fast-items` 92, all green, 427 checks.
 
-### `found-30-sep/a-double-click-on-a-dialog-row-shuts-the-dialog` — open (visible bug, small; found closing `found-30-sep/menu-items-take-a-press-while-closing`) · reproduced 5 October
+### `found-30-sep/a-double-click-on-a-dialog-row-shuts-the-dialog` — **closed** (visible bug, small; found closing `found-30-sep/menu-items-take-a-press-while-closing`) · reproduced 5 October
 
 **A double-click on a menu row that opens a dialog opens it and shuts it again**
 
@@ -2414,6 +2414,20 @@ Found while closing it: `found-30-sep/comment-says-a-leaving-menu-keeps-its-esca
 *To close:* research what ClickUp does with a double-click on a row that opens a dialog. Then decide what the second press does. Either nothing: the dialog refuses an outside press that follows its opening press within a double-click's interval, or it opens once the menu has gone, as the comment "+" menu's creators do. Or what it does now. Check a double-click on Merge leaves the dialog open.
 
 *Triage, 5 October:* reproduced on a lane. A person-paced double-click on the task menu's Merge or Convert row still opens the dialog and shuts it again (7/7 rounds on lane 7); what the second press should do is still the owner's call after ClickUp research. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October* (lane 3). ClickUp documents nothing on a double-click on a row that opens a dialog, and a double-click is one gesture everywhere: its second press does not undo its first.
+
+- The shared dialog (`DialogContent`, `packages/ui`) refuses a press outside that comes within a double-click's interval (500 ms, the systems' default) of its content being drawn: the second press lands on the overlay and nothing happens. The caller's `onPointerDownOutside` runs first, and a press after the interval closes the dialog as before. Every dialog drawn with it gets this.
+
+Measured on lane 3, with `menu-reopen`'s new section (two presses on the task menu's "Merge", 180 ms apart, as a person double-clicks):
+- Before (the bundle before the change): the dialog opened, and the second press shut it, 27 of 28, the new check red.
+- After: it stays open; a press on the overlay 0.7 s after a fresh dialog opened closes it; 28 of 28.
+
+Checks:
+- `menu-reopen` 26 → 28: "a person-paced double-click on the task menu’s “Merge” opens its dialog and leaves it open: the second press is the same gesture, not a press outside"; "and a press outside a dialog, once a double-click’s interval has passed since it opened, still closes it".
+- Patches `menu-reopen-13` (no interval: every press outside shuts it) and `menu-reopen-14` (an interval that never ends) each redden their check, 27 of 28.
+
+Regression on lane 3: the 62 suites that open a dialog, the user menu, a task's fields or a merge, or move a list (`menu-reopen`, `sw-api-cache`, `custom-field-access`, `task-merge`, `video1-fast-items` and 57 more), 1,531 checks: 61 suites green, and `activity-rail` failed one check, its own calendar's (`found-8-oct/activity-rail-reads-the-month-as-today`, closed beside these; 13 of 13 since).
 
 ### `found-30-sep/favorite-toggle-races-itself` — **closed** (behaviour, small; found closing `found-30-sep/menu-items-take-a-press-while-closing`) · reproduced 5 October
 
@@ -3091,13 +3105,28 @@ Checks:
 Found while closing it:
 - `found-6-oct/user-menu-hides-sign-out-below-a-scroll`
 
-### `found-6-oct/user-menu-hides-sign-out-below-a-scroll` — open (visible bug, small; found closing `found-30-sep/sw-api-cache-reads-the-menu-box-once`)
+### `found-6-oct/user-menu-hides-sign-out-below-a-scroll` — **closed** (visible bug, small; found closing `found-30-sep/sw-api-cache-reads-the-menu-box-once`)
 
 **In a 900 px window the user menu's Sign out is below its foot, reached only by scrolling the menu**
 
 *Evidence, 6 October, lane 2:* the user menu holds 897 px of rows, and has 840.5 px of room under the avatar at 1440×900, so it scrolls. Sign out, its last row, sits at 914 to 946 while the menu ends at 892.5, until the menu is scrolled, and nothing on the menu says there is more below it.
 
 *To close:* decide what the menu drops or folds so that it fits a 900 px window, as ClickUp's does, or show that it scrolls. Then check that Sign out is in view on opening at 1440×900.
+
+*Closed, 8 October* (lane 3). ClickUp's avatar menu is short: Settings, Themes, Keyboard shortcuts, Download, Help, Personal Tools, Trash, Log out (My Settings, through search excerpts). Its tools are one row, "Personal Tools", not a grid in the menu.
+
+- The eleven tools to pin open from one "Personal tools" row (a submenu, `menu-tools`), each pinned or unpinned there as before, the menu staying open. The grid was 185 px of the menu; folded, Sign out is in view as the menu opens in a 1440×900 window. All four locales name the row.
+
+Measured on lane 3, with `sw-api-cache`'s new check (the menu read once settled, at 1440×900):
+- Before: the menu settled at 52 to 892.5 and Sign out was drawn at 914 to 946, below its foot; 5 of 6.
+- After: Sign out inside the menu, nothing to scroll; 6 of 6.
+
+Checks:
+- `sw-api-cache` 5 → 6: "the user menu shows Sign out as it opens in a 1440×900 window: inside the menu, with nothing to scroll to reach it".
+- `video1-fast-items` opens the "Personal tools" row before pinning (92 of 92, before and after).
+- Patch `swc-9` (the tools a grid in the menu again) reddens the check, 5 of 6, Sign out drawn at 895 to 927 below a foot at 892.5.
+
+Regression on lane 3: the 62 suites that open a dialog, the user menu, a task's fields or a merge, or move a list (`menu-reopen`, `sw-api-cache`, `custom-field-access`, `task-merge`, `video1-fast-items` and 57 more), 1,531 checks: 61 suites green, and `activity-rail` failed one check, its own calendar's (`found-8-oct/activity-rail-reads-the-month-as-today`, closed beside these; 13 of 13 since).
 
 ### `found-30-sep/comment-files-unordered` — **closed** (visible bug, small; found closing `found-30-sep/attachments-unordered`)
 
@@ -3690,7 +3719,7 @@ For the owner: definitions stored before this fix with a list of another project
 
 *Merged, 6 October,* into the main checkout with the batch's other two builders' work (fields, clips, sign-in and sockets), and run again there on lanes 2, 5 and 7: 47 suites, all green — `password-hash-time`, which compares timings, failed once at a load of 13 on four cores and passed 4/4 twice on a quiet lane — and the API's 1984 unit tests and the web's 320, both typechecks clean.
 
-### `found-30-sep/merge-moves-values-onto-fields-the-target-lacks` — partly-fixed (visible bug, small; found closing `found-30-sep/field-route-takes-another-projects-field`) · reproduced 5 October
+### `found-30-sep/merge-moves-values-onto-fields-the-target-lacks` — **closed** (visible bug, small; found closing `found-30-sep/field-route-takes-another-projects-field`) · reproduced 5 October
 
 **Merging a task into one of another list or project moves its values onto fields the survivor does not have**
 
@@ -3732,6 +3761,23 @@ Regression on lane 7 after the review fix: 17 suites and 477 checks, all green; 
 *Why partly:* values no longer land on fields the survivor lacks. What is open is the owner's: whether the merge says what stayed on the binned task, or offers first to add those fields to the survivor's location as ClickUp's prompt does ("Add selected CFs" / "Do nothing"). Adding a field there needs rules of its own (a field here belongs to one project and at most one list). Found beside it: `found-6-oct/merge-drops-a-value-beside-an-emptied-one`, `found-6-oct/merge-moves-work-across-workspaces`.
 
 *Merged, 6 October,* into the main checkout with the batch's other two builders' work (fields, clips, sign-in and sockets), and run again there on lanes 2, 5 and 7: 47 suites, all green — `password-hash-time`, which compares timings, failed once at a load of 13 on four cores and passed 4/4 twice on a quiet lane — and the API's 1984 unit tests and the web's 320, both typechecks clean.
+
+*Closed, 8 October* (lane 3), with ClickUp's prompt. "If task A has a Custom Field that isn't available on task B", ClickUp asks to add it ("Add selected CFs") or to merge without it ("Do nothing"), and A's value goes in only where B holds nothing (help centre, "Merge tasks", through search excerpts).
+
+- The merge dialog, when the task merged holds values in fields the task picked lacks, asks first: it lists those fields with their values, each ticked, and offers "Add selected" and "Do nothing". Otherwise it merges at once, as before.
+- `POST /tasks/:id/merge` takes `addFields`: the merged task's fields to add to the survivor. Each must be one the merged task holds a value for and the survivor lacks, or the merge is refused in one sentence before anything moves. A field of the same name and type on the survivor takes the value; otherwise a copy (name, type, options and settings) is made in the survivor's project, kept to its list, which asks the rule for defining fields there. The value moves only where the survivor holds nothing in that field.
+- "Do nothing" is the merge as it was: such a value stays on the binned task.
+
+Measured on lane 3, with `task-merge`'s new checks:
+- Before: the merges asked to add Stage and Owner answered 201 and added nothing, the values staying on the binned tasks; a merge asked to add Note, which the survivor has, went through; the dialog merged at once, asking nothing; 37 of 42, the five new checks red.
+- After: 42 of 42.
+
+Checks:
+- `task-merge` 37 → 42: "a merge asked to add a field kept to another list adds it to the survivor’s list and moves the value there: the survivor shows it, a field of that name is now kept to its list, and the binned task holds it no more (read by SQL)"; "and from another project: its field is added to the survivor’s project, kept to its list, with the value — and a second merge asked to add it finds that field there and makes no other"; "and the survivor’s own value is kept where it holds one, the merged value staying on the binned task; a field the survivor has is refused in one sentence, and nothing is merged"; "picking a task that lacks one of this task’s fields with a value asks first: the dialog lists the field and its value, and offers “Add selected” and “Do nothing”, nothing merged yet"; "and “Add selected” merges with the field added: the survivor shows the value".
+- `tasks-merge-fields.test.ts` 8 → 10.
+- Patches: `mvf-8` (no copy made) reddens the three merge checks and the dialog's “Add selected”, 38 of 42; `mvf-9` (every add a new copy) the second and, building on it, the third, 40 of 42; `mvf-10` (the survivor's value overwritten) the third, 41 of 42; `mvf-12` (any field may be added) the third, 41 of 42; `mvf-11` (the dialog never asks) the dialog's two, 40 of 42. Unit claims `mvf-6` and `mvf-7`.
+
+Regression on lane 3: the 62 suites that open a dialog, the user menu, a task's fields or a merge, or move a list (`menu-reopen`, `sw-api-cache`, `custom-field-access`, `task-merge`, `video1-fast-items` and 57 more), 1,531 checks: 61 suites green, and `activity-rail` failed one check, its own calendar's (`found-8-oct/activity-rail-reads-the-month-as-today`, closed beside these; 13 of 13 since).
 
 ### `found-30-sep/search-finds-tasks-by-values-they-no-longer-show` — **closed** (visible bug, small; found closing the review of `found-30-sep/template-values-find-fields-by-name-alone`) · reproduced 5 October
 
@@ -8388,7 +8434,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 65, each reproduced
+## Found by the triage, 5 October, and since — 66, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -9055,13 +9101,27 @@ For the owner:
 
 *Merged, 6 October,* into the main checkout (onto `986c760`) with the batch's other builders' work, and run again there on lanes 2, 5 and 7: 63 suites, 60 green at once; `list-export` and `panel-collapse` failed once at a load of 14 and were green twice each when run again; `session-in-the-browser` failed 3 of 7 runs, its reconnect checks racing the server's admission of a reopened socket (fixed here: see `found-6-oct/a-second-tab-loses-realtime-after-a-sign-in`), then 6 of 6. API unit tests 2063/2063, web 344/344, both typechecks clean.
 
-### `found-6-oct/list-move-strands-its-fields` — open (visible bug, small; found reviewing `found-30-sep/field-definition-takes-a-foreign-list`) · reproduced 5 October
+### `found-6-oct/list-move-strands-its-fields` — **closed** (visible bug, small; found reviewing `found-30-sep/field-definition-takes-a-foreign-list`) · reproduced 5 October
 
 **Moving a list to another project leaves its own fields behind, and its tasks stop showing them**
 
 *Evidence, 5 October, lane 7, three runs alike:* the admin defined "Third stage" scoped to a list of project P, set it on a task, then `POST /lists/<list>/move {projectId: Q}` answered 201. By SQL the field still had project P and that list, whose project is now Q. The task's fields went from showing Third stage to none, while its value row was kept; P's field list still showed the field; a new field in P scoped to that list answered 404. `ListsService.moveList` changes `lists.project_id` alone. It is also how a definition with a list of another project is still made after `found-30-sep/field-definition-takes-a-foreign-list`.
 
 *To close:* research what ClickUp does with a List's own Custom Fields when the List moves (its move of tasks asks what to do with fields the destination lacks); the choice between moving the fields with the list, refusing the move, or asking is the owner's. Check it by SQL in a suite.
+
+*Closed, 8 October* (lane 3). ClickUp hangs Custom Fields on locations: a List's own go where it goes, and the fields of the place it left are hidden on its tasks, "no data is deleted" ("Move Custom Fields", through search excerpts).
+
+- `ListsService.moveList` moves the fields kept to the list to its new project, in the same transaction as the list. The old project's fields stay there, and their values on the moved tasks are kept, shown again if the list comes back.
+
+Measured on lane 3, with `custom-field-access`'s new section (a list of the open project with a field kept to it and the project's own field, each with a value on its task, moved to the other project and back):
+- Before: the move answered 201 and the list's field stayed in the old project, the task no longer showing it; 13 of 14.
+- After: the field is the new project's, the task shows its value, the old project's field is not shown and its value is kept; moved back, both show; 14 of 14.
+
+Checks:
+- `custom-field-access` 12 → 14: "a list moved to another project takes the field kept to it: the field is the new project’s, and the list’s task still shows its value — while the old project’s own field is no longer shown on it, its value kept"; "and moved back, it brings its field with it, and the old project’s field shows its kept value again".
+- Patch `cfa-8` (the list moves without its fields) reddens the first, 13 of 14.
+
+Regression on lane 3: the 62 suites that open a dialog, the user menu, a task's fields or a merge, or move a list (`menu-reopen`, `sw-api-cache`, `custom-field-access`, `task-merge`, `video1-fast-items` and 57 more), 1,531 checks: 61 suites green, and `activity-rail` failed one check, its own calendar's (`found-8-oct/activity-rail-reads-the-month-as-today`, closed beside these; 13 of 13 since).
 
 ### `found-6-oct/project-page-offers-field-edits-to-readers` — **closed** (visible bug, small; found reviewing `found-30-sep/field-definition-takes-a-foreign-list`) · reproduced 5 October
 
@@ -10132,6 +10192,18 @@ Regression on lanes 2, 4, 6 and 7: the 23 suites that open the App Center or Mee
 Measured: the copy with the late scroll put in, on the new suite, 23 of 23, twice; the new suite as it is, 23 of 23, three times on the rehearsal's bundle.
 
 Checks: `planner-grid` 23 (unchanged in number). Patch `pg-6` (a drop posts nothing) is new: it reddens the three drop checks, 20 of 23, saying "the drop landing on the day column". `pg-4` (the drop keeps pointer precision) still reddens the rounding check alone, 22 of 23.
+
+### `found-8-oct/activity-rail-reads-the-month-as-today` — **closed** (test tooling, small; found in batch 15's regression sweep, and failed the rehearsal of `bebc5c2`) · reproduced 8 October
+
+**`activity-rail` takes the created chip's month for today's day on the 8th of a month**
+
+*Evidence, 8 October:* batch 15's regression sweep on lane 3 failed `activity-rail`'s "and it shows when the task was really created, not today", 12 of 13: "the chip reads "Created 8/7/2026" for a task created 2026-08-07T10:00:00Z — it is rendering the current date rather than the task's". The chip was right. The check pulled the numbers out of the chip, dropped the year, and asked whether the seeded day, 7, was among them and today's not; on 8 October the month, 8, is today's day. The rehearsal of `bebc5c2` failed the Postgres job's "Activity rail and created chip" in the same words the same morning. The rule replayed in node over September and October: it failed a right chip on the 8th of each month, passed a chip with the day and month swapped on every day but the 8th, and passed a chip reading today on the 7th.
+
+*Closed, 8 October.* The page writes the task's date and today's as the chip does — `formatDateWith`'s switch, in the reader's own date format read from `/users/me`, the browser's locale for 'system' — and the chip must hold the task's label as words of its own, and today's only where the two are the same. Failing, it says what the chip reads, the task's date in that format, and today's.
+
+Measured on lane 3: before, 12 of 13 (the sweep, this morning); after, 13 of 13. Replayed over the same 61 days, the label check fails a right chip on none of them, and the swapped chip and a chip reading today on all.
+
+Checks: `activity-rail` 13 (unchanged in number). Patch `arail-1` (the chip reads today) reddens the check, 12 of 13: "the chip reads "Created 10/8/2026" … which is "8/7/2026" in this reader's date format (system); today is "10/8/2026"". Patch `arail-5` is new: the chip writes the date day first whatever the reader's format, "Created 07/08/2026", which the numbers passed on every day but the 8th; it reddens the check, 12 of 13.
 
 ## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
 

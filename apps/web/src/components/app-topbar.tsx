@@ -43,6 +43,9 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuLabel,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
   Popover,
   PopoverTrigger,
   PopoverContent,
@@ -1424,40 +1427,52 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
           when you are already changing preferences.
         */}
         <DropdownMenuSeparator />
-        <div className="px-2 py-1.5">
-          <div className="px-1 pb-1 text-[10px] uppercase tracking-widest text-muted-foreground">
+        {/*
+          * ONE ROW, AS CLICKUP'S "PERSONAL TOOLS" IS (`found-6-oct/user-menu-hides-sign-out-below-a-scroll`).
+          * Eleven tools in a grid were 185 px of a menu that, in a 900 px
+          * window, had 840 px of room under the avatar and 897 px of rows: it
+          * scrolled, and Sign out sat below its foot. ClickUp's avatar menu is
+          * short (Settings, Themes, Keyboard shortcuts, Download, Help,
+          * Personal Tools, Trash, Log out); the tools open from their own row,
+          * here as from there, and pin as they did.
+          */}
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger data-testid="menu-tools">
+            <Pin className="mr-2 h-4 w-4 text-muted-foreground" />
             {t('topbar.toolsHeading')}
-          </div>
-          <div className="grid grid-cols-2 gap-1">
-            {TOPBAR_ITEMS.map((item) => {
-              const isPinned = pinned.has(item)
-              return (
-                <button
-                  key={item}
-                  type="button"
-                  // The menu stays open: pinning several in a row is the point,
-                  // and closing after each would make it a chore.
-                  onClick={(e) => {
-                    e.preventDefault()
-                    setTool.mutate({ item, visible: !isPinned })
-                  }}
-                  disabled={setTool.isPending}
-                  aria-pressed={isPinned}
-                  data-testid={`menu-pin-${item}`}
-                  className={cn(
-                    'flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors text-left',
-                    isPinned
-                      ? 'bg-accent/15 text-foreground font-medium'
-                      : 'text-muted-foreground hover:bg-accent/10',
-                  )}
-                >
-                  <Pin className={cn('h-3 w-3 shrink-0', !isPinned && 'opacity-40')} />
-                  <span className="truncate">{t(TOPBAR_LABEL_KEY[item])}</span>
-                </button>
-              )
-            })}
-          </div>
-        </div>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-64 p-2" data-testid="menu-tools-pins">
+            <div className="grid grid-cols-2 gap-1">
+              {TOPBAR_ITEMS.map((item) => {
+                const isPinned = pinned.has(item)
+                return (
+                  <button
+                    key={item}
+                    type="button"
+                    // The menu stays open: pinning several in a row is the point,
+                    // and closing after each would make it a chore.
+                    onClick={(e) => {
+                      e.preventDefault()
+                      setTool.mutate({ item, visible: !isPinned })
+                    }}
+                    disabled={setTool.isPending}
+                    aria-pressed={isPinned}
+                    data-testid={`menu-pin-${item}`}
+                    className={cn(
+                      'flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors text-left',
+                      isPinned
+                        ? 'bg-accent/15 text-foreground font-medium'
+                        : 'text-muted-foreground hover:bg-accent/10',
+                    )}
+                  >
+                    <Pin className={cn('h-3 w-3 shrink-0', !isPinned && 'opacity-40')} />
+                    <span className="truncate">{t(TOPBAR_LABEL_KEY[item])}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
         <DropdownMenuSeparator />
         <div className="px-2 py-1.5">
           <div className="px-1 pb-1 text-[10px] uppercase tracking-widest text-muted-foreground">

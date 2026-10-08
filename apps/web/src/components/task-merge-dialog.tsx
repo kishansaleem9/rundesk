@@ -47,6 +47,16 @@ type MergeResult = {
   moved: Record<string, number>
 }
 
+/** A task's field as `GET …/tasks/:id/custom-fields` answers it: the field, and its value on the task. */
+type FieldRow = {
+  definition: { id: string; name: string; type: string; options?: Array<{ label: string; value: string }> | null }
+  value: unknown
+}
+
+/** Fields worked out on read: they hold no value of their own to carry. */
+const DERIVED = new Set(['formula', 'progress_auto'])
+const holdsSomething = (v: unknown) => v != null && v !== '' && !(Array.isArray(v) && v.length === 0)
+
 export function TaskMergeDialog({
   taskId,
   taskTitle,
@@ -66,18 +76,29 @@ export function TaskMergeDialog({
   const { t } = useTranslation()
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
+  /*
+   * "ADD SELECTED CFS" (`found-30-sep/merge-moves-values-onto-fields-the-target-lacks`).
+   * ClickUp's merge, when the task merged has a field the other lacks, asks
+   * whether to add it ("Add selected CFs") or merge without it ("Do nothing").
+   * Picked here: the task to merge into, and this task's fields it lacks that
+   * hold a value, each ticked to be added unless unticked.
+   */
+  const [pending, setPending] = useState<{ targetId: string; targetTitle: string; lacking: FieldRow[] } | null>(null)
+  const [chosen, setChosen] = useState<Set<string>>(new Set())
+  const [checking, setChecking] = useState(false)
 
   const candidatesQuery = useTaskSearch<Candidate>(workspaceId, search, { key: 'merge-targets', enabled: open })
 
   const merge = useMutation({
-    mutationFn: (targetTaskId: string) =>
+    mutationFn: ({ targetTaskId, addFields }: { targetTaskId: string; addFields?: string[] }) =>
       api<MergeResult>(`/tasks/${taskId}/merge`, {
         method: 'POST',
-        body: JSON.stringify({ targetTaskId }),
+        body: JSON.stringify(addFields ? { targetTaskId, addFields } : { targetTaskId }),
       }),
     onSuccess: async (result) => {
       const moved = result?.moved ?? {}
       const carried = (moved.comments ?? 0) + (moved.attachments ?? 0) + (moved.checklists ?? 0)
+      setPending(null)
       toast.success(t('taskMerge.merged', { count: String(carried) }))
       await qc.invalidateQueries({ queryKey: ['tasks'] })
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
@@ -92,6 +113,28 @@ export function TaskMergeDialog({
     },
   })
 
+  /** A task picked: merged at once, unless this task holds values in fields it lacks — then asked first. */
+  const pick = async (c: Candidate) => {
+    if (!workspaceId) return merge.mutate({ targetTaskId: c.id })
+    setChecking(true)
+    const fieldsOf = (id: string) => api<FieldRow[]>(`/workspaces/${workspaceId}/tasks/${id}/custom-fields`).catch(() => [] as FieldRow[])
+    const [mine, theirs] = await Promise.all([fieldsOf(taskId), fieldsOf(c.id)])
+    setChecking(false)
+    const theirIds = new Set((theirs ?? []).map((r) => r.definition.id))
+    const lacking = (mine ?? []).filter((r) => !theirIds.has(r.definition.id) && !DERIVED.has(r.definition.type) && holdsSomething(r.value))
+    if (lacking.length === 0) return merge.mutate({ targetTaskId: c.id })
+    setChosen(new Set(lacking.map((r) => r.definition.id)))
+    setPending({ targetId: c.id, targetTitle: c.title, lacking })
+  }
+  /** What a value reads as in the prompt: an option's label, a count of a list, or the value itself. */
+  const shown = (row: FieldRow): string => {
+    const v = row.value
+    if (Array.isArray(v)) return String(v.length)
+    if (typeof v === 'boolean') return v ? '✓' : '✗'
+    const option = row.definition.options?.find((o) => o.value === v)
+    return option ? option.label : String(v)
+  }
+
   const candidates = (candidatesQuery.data ?? [])
     .filter((c) => c.id !== taskId)
     // Narrowed by the server, which also matches the list's and project's
@@ -99,7 +142,13 @@ export function TaskMergeDialog({
     .slice(0, 50)
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) setPending(null)
+        onOpenChange(next)
+      }}
+    >
       <DialogContent className="max-w-lg" data-testid="task-merge-dialog">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -113,44 +162,94 @@ export function TaskMergeDialog({
           {t('taskMerge.direction', { name: taskTitle })}
         </p>
 
-        <Input
-          autoFocus
-          data-testid="task-merge-search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder={t('taskMerge.searchPlaceholder')}
-        />
-        <ul className="mt-2 max-h-[50vh] space-y-1 overflow-auto">
-          {candidatesQuery.isPending ? (
-            /* §2.9a — the shape of the list that is coming, not the word. */
-            <li aria-busy="true" aria-live="polite">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="mb-1 h-10 rounded bg-muted/30 animate-pulse" />
+        {pending ? (
+          <div data-testid="task-merge-fields" className="space-y-3">
+            <p className="text-sm">{t('taskMerge.fieldsPrompt', { name: pending.targetTitle })}</p>
+            <ul className="space-y-1">
+              {pending.lacking.map((row) => (
+                <li key={row.definition.id}>
+                  <label className="flex items-center gap-2 rounded px-2 py-1 text-sm hover:bg-muted">
+                    <input
+                      type="checkbox"
+                      data-testid={`task-merge-field-${row.definition.id}`}
+                      checked={chosen.has(row.definition.id)}
+                      onChange={(e) =>
+                        setChosen((now) => {
+                          const next = new Set(now)
+                          if (e.target.checked) next.add(row.definition.id)
+                          else next.delete(row.definition.id)
+                          return next
+                        })
+                      }
+                    />
+                    <span className="font-medium">{row.definition.name}</span>
+                    <span className="truncate text-muted-foreground">{shown(row)}</span>
+                  </label>
+                </li>
               ))}
-            </li>
-          ) : candidates.length === 0 ? (
-            <li className="py-6 text-center text-sm text-muted-foreground">{t('taskMerge.noMatches')}</li>
-          ) : (
-            candidates.map((c) => (
-              <li key={c.id}>
-                <button
-                  type="button"
-                  data-testid="task-merge-candidate"
-                  disabled={merge.isPending}
-                  onClick={() => merge.mutate(c.id)}
-                  className="w-full rounded px-2.5 py-2 text-left text-sm hover:bg-muted disabled:opacity-50"
-                >
-                  <div className="truncate font-medium">{c.title}</div>
-                  {(c.projectName || c.listName) && (
-                    <div className="truncate text-[11px] text-muted-foreground">
-                      {[c.projectName, c.listName].filter(Boolean).join(' / ')}
-                    </div>
-                  )}
-                </button>
-              </li>
-            ))
-          )}
-        </ul>
+            </ul>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                data-testid="task-merge-do-nothing"
+                disabled={merge.isPending}
+                onClick={() => merge.mutate({ targetTaskId: pending.targetId })}
+              >
+                {t('taskMerge.doNothing')}
+              </Button>
+              <Button
+                size="sm"
+                data-testid="task-merge-add-selected"
+                disabled={merge.isPending || chosen.size === 0}
+                onClick={() => merge.mutate({ targetTaskId: pending.targetId, addFields: [...chosen] })}
+              >
+                {t('taskMerge.addSelected')}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <Input
+              autoFocus
+              data-testid="task-merge-search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t('taskMerge.searchPlaceholder')}
+            />
+            <ul className="mt-2 max-h-[50vh] space-y-1 overflow-auto">
+              {candidatesQuery.isPending ? (
+                /* §2.9a — the shape of the list that is coming, not the word. */
+                <li aria-busy="true" aria-live="polite">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="mb-1 h-10 rounded bg-muted/30 animate-pulse" />
+                  ))}
+                </li>
+              ) : candidates.length === 0 ? (
+                <li className="py-6 text-center text-sm text-muted-foreground">{t('taskMerge.noMatches')}</li>
+              ) : (
+                candidates.map((c) => (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      data-testid="task-merge-candidate"
+                      disabled={merge.isPending || checking}
+                      onClick={() => void pick(c)}
+                      className="w-full rounded px-2.5 py-2 text-left text-sm hover:bg-muted disabled:opacity-50"
+                    >
+                      <div className="truncate font-medium">{c.title}</div>
+                      {(c.projectName || c.listName) && (
+                        <div className="truncate text-[11px] text-muted-foreground">
+                          {[c.projectName, c.listName].filter(Boolean).join(' / ')}
+                        </div>
+                      )}
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          </>
+        )}
 
         <div className="flex justify-end">
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>

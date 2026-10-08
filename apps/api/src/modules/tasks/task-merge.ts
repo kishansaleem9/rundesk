@@ -161,6 +161,10 @@ export const MERGE_REFUSAL_MESSAGE: Record<MergeRefusal, string> = {
   'already-binned': 'A task in the bin cannot be merged',
 }
 
+/** A merge asked to add a field that is not one the merged task holds a value for, which the survivor lacks. */
+export const MERGE_FIELD_NOT_ADDABLE =
+  'Only a field the merged task holds a value for, which the task it goes into does not have, can be added to it'
+
 /**
  * Whether a custom-field value holds nothing: cleared (null), an empty text, or
  * an empty list (Labels, People, Files, Tasks, votes). ClickUp's merge adds the

@@ -58,7 +58,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 37
+const EXPECTED_CHECKS = 42
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -442,6 +442,67 @@ try {
       `the survivor holds rows for ${JSON.stringify(staleOnSurvivor)} and shows Stage = ${JSON.stringify(survivorShown.Stage)}, the binned task holds rows for ${JSON.stringify(staleKept)}`,
   )
 
+  console.log('\n▶ “Add selected”: a merge asked to add the fields the survivor lacks')
+  /*
+   * ClickUp's merge, "if task A has a Custom Field that isn't available on task
+   * B", asks whether to add it to task B ("Add selected CFs") or merge without
+   * it ("Do nothing"), and A's value goes in only where B holds nothing (help
+   * centre, "Merge tasks"). Without being asked, the merges above leave such a
+   * value on the binned task; asked (`addFields`), the field goes to the
+   * survivor's list, or one of its name and type there takes the value.
+   */
+  const fieldsNamed = async (project, name) =>
+    sql`select list_id::text as list from custom_field_definitions where project_id = ${project} and name = ${name} order by created_at`
+  const addSideFrom = await taskIn(oneSide, 'From the side list, adding Stage')
+  const addSideInto = await taskIn(oneMain, 'Survivor taking Stage')
+  await put(addSideFrom, stage, `added stage ${stamp}`)
+  const addSide = await A(`/tasks/${addSideFrom}/merge`, { method: 'POST', body: { targetTaskId: addSideInto, addFields: [stage] } })
+  const stagesNow = await fieldsNamed(one, 'Stage')
+  const [addSideShown, addSideKept] = [await shownOn(addSideInto), await rowsOf(addSideFrom)]
+  chk(
+    addSide.ok && addSideShown.Stage === `added stage ${stamp}` && stagesNow.length === 2 && stagesNow.some((f) => f.list === oneMain) && !addSideKept.includes('Stage'),
+    'a merge asked to add a field kept to another list adds it to the survivor’s list and moves the value there: the survivor shows it, a field of that name is now kept to its list, and the binned task holds it no more (read by SQL)',
+    `the merge answered ${addSide.status} ${JSON.stringify(addSide.error?.message ?? null)}; the survivor shows Stage = ${JSON.stringify(addSideShown.Stage ?? null)}; ` +
+      `ONE has ${stagesNow.length} field(s) named Stage, kept to ${JSON.stringify(stagesNow.map((f) => f.list === oneMain ? 'the main list' : f.list === oneSide ? 'the side list' : f.list))}; the binned task holds rows for ${JSON.stringify(addSideKept)}`,
+  )
+
+  const addTwoFrom = await taskIn(twoList, 'From TWO, adding Owner')
+  const addTwoInto = await taskIn(oneMain, 'Survivor taking Owner')
+  await put(addTwoFrom, owner, `added owner ${stamp}`)
+  const addTwo = await A(`/tasks/${addTwoFrom}/merge`, { method: 'POST', body: { targetTaskId: addTwoInto, addFields: [owner] } })
+  const ownersAfterOne = await fieldsNamed(one, 'Owner')
+  const addTwoShown = await shownOn(addTwoInto)
+  const againFrom = await taskIn(twoList, 'From TWO again')
+  const againInto = await taskIn(oneMain, 'Second survivor taking Owner')
+  await put(againFrom, owner, `owner again ${stamp}`)
+  const again = await A(`/tasks/${againFrom}/merge`, { method: 'POST', body: { targetTaskId: againInto, addFields: [owner] } })
+  const ownersAfterTwo = await fieldsNamed(one, 'Owner')
+  const againShown = await shownOn(againInto)
+  chk(
+    addTwo.ok && addTwoShown.Owner === `added owner ${stamp}` && ownersAfterOne.length === 1 && ownersAfterOne[0].list === oneMain &&
+      again.ok && againShown.Owner === `owner again ${stamp}` && ownersAfterTwo.length === 1,
+    'and from another project: its field is added to the survivor’s project, kept to its list, with the value — and a second merge asked to add it finds that field there and makes no other',
+    `the first merge answered ${addTwo.status} ${JSON.stringify(addTwo.error?.message ?? null)}, the survivor showing Owner = ${JSON.stringify(addTwoShown.Owner ?? null)}, ONE then having ${ownersAfterOne.length} Owner field(s); ` +
+      `the second answered ${again.status} ${JSON.stringify(again.error?.message ?? null)}, its survivor showing Owner = ${JSON.stringify(againShown.Owner ?? null)}, ONE then having ${ownersAfterTwo.length}`,
+  )
+
+  const thirdFrom = await taskIn(twoList, 'From TWO a third time')
+  await put(thirdFrom, owner, `third owner ${stamp}`)
+  const keepsOwn = await A(`/tasks/${thirdFrom}/merge`, { method: 'POST', body: { targetTaskId: againInto, addFields: [owner] } })
+  const [keptShown, thirdKept] = [await shownOn(againInto), await rowsOf(thirdFrom)]
+  const refusedFrom = await taskIn(oneSide, 'Asked to add a field the survivor has')
+  await put(refusedFrom, note, `refused note ${stamp}`)
+  const refusedInto = await taskIn(oneMain, 'Survivor that has Note')
+  const refusedAdd = await A(`/tasks/${refusedFrom}/merge`, { method: 'POST', body: { targetTaskId: refusedInto, addFields: [note] } })
+  const refusedStill = (await A(`/tasks/${refusedFrom}`)).data?.isArchived === false
+  chk(
+    keepsOwn.ok && keptShown.Owner === `owner again ${stamp}` && thirdKept.includes('Owner') &&
+      refusedAdd.status === 400 && /^Only a field the merged task holds a value for/.test(refusedAdd.error?.message ?? '') && refusedStill,
+    'and the survivor’s own value is kept where it holds one, the merged value staying on the binned task; a field the survivor has is refused in one sentence, and nothing is merged',
+    `merged into a survivor holding Owner: ${keepsOwn.status}, it shows Owner = ${JSON.stringify(keptShown.Owner ?? null)}, the binned task holding rows for ${JSON.stringify(thirdKept)}; ` +
+      `asked to add Note, which the survivor has: ${refusedAdd.status} ${JSON.stringify(refusedAdd.error?.message ?? null)}, the task ${refusedStill ? 'not merged' : 'merged'}`,
+  )
+
   // ── An emptied value is no information ───────────────────────────────────
   console.log('\n▶ a survivor’s emptied value gives way to the merged task’s, and one that holds something stays')
   /*
@@ -653,6 +714,40 @@ try {
   )
   chk(done, 'and merging from the menu really merges',
     'the task was not binned — the dialog reported something the API never did')
+
+  /*
+   * And the dialog asks first, as ClickUp's does, when the task merged holds a
+   * value in a field the one picked lacks: Stage, kept to ONE's side list.
+   */
+  const uiFrom = await taskIn(oneSide, 'Merge with Stage from UI')
+  const uiInto = await taskIn(oneMain, 'UI survivor without Stage')
+  await put(uiFrom, stage, `ui stage ${stamp}`)
+  await page.goto(`${stack.base}/app/${fw.id}/${fSpace.id}/${one}/${oneSide}?task=${uiFrom}`, { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('task-more-menu').click({ timeout: 20000 }).catch(() => {})
+  await page.getByTestId('task-menu-merge').click({ timeout: 10000 }).catch(() => {})
+  await page.getByTestId('task-merge-search').fill(`UI survivor without Stage ${stamp}`).catch(() => {})
+  await waitUntil(async () => (await page.getByTestId('task-merge-candidate').count()) > 0, { timeoutMs: 10_000 })
+  await page.getByTestId('task-merge-candidate').first().click({ timeout: 8000 }).catch(() => {})
+  const prompt = page.getByTestId('task-merge-fields').filter({ visible: true })
+  const asked = await waitUntil(async () => (await prompt.count()) > 0, { timeoutMs: 10_000 })
+  const promptSays = asked ? await prompt.innerText().catch(() => '') : ''
+  const choices = asked &&
+    (await page.getByTestId('task-merge-add-selected').isVisible().catch(() => false)) &&
+    (await page.getByTestId('task-merge-do-nothing').isVisible().catch(() => false))
+  const notYet = (await A(`/tasks/${uiFrom}`)).data?.isArchived === false
+  chk(
+    asked && choices && promptSays.includes('Stage') && promptSays.includes(`ui stage ${stamp}`) && notYet,
+    'picking a task that lacks one of this task’s fields with a value asks first: the dialog lists the field and its value, and offers “Add selected” and “Do nothing”, nothing merged yet',
+    asked ? `the prompt says ${JSON.stringify(promptSays.slice(0, 200))}; both choices ${choices ? 'shown' : 'not shown'}; the task ${notYet ? 'not merged yet' : 'already merged'}` : 'nothing was asked: the dialog merged, or showed no prompt',
+  )
+  await page.getByTestId('task-merge-add-selected').click({ timeout: 8000 }).catch(() => {})
+  const uiDone = await waitUntil(async () => (await A(`/tasks/${uiFrom}`)).data?.isArchived === true, { timeoutMs: 15_000 })
+  const uiShown = uiDone ? await shownOn(uiInto) : {}
+  chk(
+    uiDone && uiShown.Stage === `ui stage ${stamp}`,
+    'and “Add selected” merges with the field added: the survivor shows the value',
+    uiDone ? `the survivor shows Stage = ${JSON.stringify(uiShown.Stage ?? null)}` : 'the task was not merged',
+  )
 
   for (const id of [source.id, target.id, third.id, child.id, live.id, liveTarget.id, family?.id, kid?.id].filter(Boolean)) {
     const gone = await A(`/tasks/${id}`, { method: 'DELETE' })

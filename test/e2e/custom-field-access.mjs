@@ -52,7 +52,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 12
+const EXPECTED_CHECKS = 14
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -341,6 +341,47 @@ try {
     noField(overCost, 'Private cost') && noField(overMargin, 'Secret margin') && noField(overNothing, 'Nothing by this name'),
     'a formula the member defines over a field kept to that list is told there is no field called it, in the words for one that does not exist — a number or a formula',
     `over the private number ${said(overCost)}; over the private formula ${said(overMargin)}; over nothing ${said(overNothing)}`,
+  )
+
+  console.log('\n▶ a list moved to another project')
+  /*
+   * `found-6-oct/list-move-strands-its-fields`. Moving a list changed only its
+   * project: a field kept to it stayed in the old project with its id, and the
+   * list's tasks stopped showing it. ClickUp hangs fields on locations: a
+   * List's own go where it goes, and the old place's are hidden on its tasks,
+   * "no data is deleted". A list of the open project, a field kept to it and
+   * the project's own field, each with a value on its task, moved to the other
+   * project and back.
+   */
+  const roving = await make(A, '/lists', { projectId: open.project, name: `${TAG} roving list` }, 'the list to move')
+  const rovingTask = await make(A, '/tasks', { listId: roving, title: `${TAG} roving task` }, 'its task')
+  const ownField = await make(A, `/workspaces/${WS}/projects/${open.project}/custom-fields`, { name: `${TAG} own stage`, type: 'text', listId: roving }, 'the list’s own field')
+  for (const [field, value] of [[ownField, `${TAG} own value`], [open.field, `${TAG} project value`]]) {
+    const set = await A(`/workspaces/${WS}/tasks/${rovingTask}/custom-fields/${field}`, { method: 'PUT', body: { value } })
+    if (!set.ok) throw new Error(`could not set a value on the list’s task: ${said(set)}`)
+  }
+  // By the field's id: a section above renames the open project's field.
+  const shownOn = async (task) => {
+    const res = await A(`/workspaces/${WS}/tasks/${task}/custom-fields`)
+    return Object.fromEntries((res.data ?? []).map((r) => [r.definition?.id, r.value]))
+  }
+  const away = await A(`/lists/${roving}/move`, { method: 'POST', body: { projectId: elsewhere } })
+  const [ownRow] = await sql`select project_id::text as project from custom_field_definitions where id = ${ownField}`
+  const shownAway = await shownOn(rovingTask)
+  const projectValueKept = await valueOf(rovingTask, open.field)
+  chk(
+    away.ok && ownRow?.project === elsewhere && shownAway[ownField] === `${TAG} own value` &&
+      !(open.field in shownAway) && JSON.stringify(projectValueKept).includes(`${TAG} project value`),
+    'a list moved to another project takes the field kept to it: the field is the new project’s, and the list’s task still shows its value — while the old project’s own field is no longer shown on it, its value kept',
+    `the move answered ${said(away)}; the list’s field is now in ${ownRow?.project === elsewhere ? 'the new project' : ownRow?.project === open.project ? 'the old project' : JSON.stringify(ownRow?.project ?? null)}; ` +
+      `the task shows ${JSON.stringify(shownAway)}; the old project’s value on it reads ${JSON.stringify(projectValueKept)}`,
+  )
+  const back = await A(`/lists/${roving}/move`, { method: 'POST', body: { projectId: open.project } })
+  const shownBack = await shownOn(rovingTask)
+  chk(
+    back.ok && shownBack[ownField] === `${TAG} own value` && shownBack[open.field] === `${TAG} project value`,
+    'and moved back, it brings its field with it, and the old project’s field shows its kept value again',
+    `the move back answered ${said(back)}; the task shows ${JSON.stringify(shownBack)}`,
   )
 } catch (e) {
   failed += 1

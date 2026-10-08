@@ -79,6 +79,7 @@ import {
 import { describeAttachments } from './comment-summary'
 import { canReachTask } from './mention-access'
 import {
+  MERGE_FIELD_NOT_ADDABLE,
   MERGE_REFUSAL_MESSAGE,
   emptyMergeTally,
   holdsNoInformation,
@@ -5110,7 +5111,7 @@ export class TasksService {
    * merge somebody can check; `{ ok: true }` is a merge you have to take on
    * faith, and this is the operation where faith is least warranted.
    */
-  async mergeTask(taskId: string, targetTaskId: string, actorId: string) {
+  async mergeTask(taskId: string, targetTaskId: string, actorId: string, addFields?: unknown) {
     // Each task with the workspace it is in, which the merge rule asks (`mergeRefusal`).
     const subject = async (id: string) =>
       (
@@ -5144,6 +5145,13 @@ export class TasksService {
     // task you may pour another one into.
     await this.assertTaskWriteAccess(taskId, actorId)
     await this.assertTaskWriteAccess(targetTaskId, actorId)
+    // The fields asked to go to the survivor ("Add selected"), checked before anything moves.
+    const adding = await this.planFieldsToAdd(
+      { id: taskId, listId: source.listId },
+      { id: targetTaskId, listId: target.listId, workspaceId: target.workspaceId },
+      addFields,
+      actorId,
+    )
 
     const moved = emptyMergeTally()
     const count = (rows: unknown) => (Array.isArray(rows) ? rows.length : 0)
@@ -5219,6 +5227,7 @@ export class TasksService {
      * the values of fields both tasks have move (`moveFieldValues`).
      */
     moved.customFields = await this.moveFieldValues({ id: taskId, listId: source.listId }, { id: targetTaskId, listId: target.listId })
+    moved.customFields += await this.addPlannedFields(adding, taskId, targetTaskId)
 
     /*
      * Dependencies point both ways and can turn into self-links. "A blocks B",
@@ -5295,6 +5304,119 @@ export class TasksService {
       (r) => movable.has(r.fieldId),
       (r, survivors) => this.fillEmptiedValue(r, survivors),
     )
+  }
+
+  /**
+   * "ADD SELECTED CFS" (`found-30-sep/merge-moves-values-onto-fields-the-target-lacks`).
+   *
+   * ClickUp's merge, "if task A has a Custom Field that isn't available on task
+   * B", asks whether to add the field to task B ("Add selected CFs") or merge
+   * without it ("Do nothing"); and A's value goes in "only … if task B doesn't
+   * have any information in the same Custom Field" (help centre, "Merge
+   * tasks", through search excerpts). Without `addFields` a merge does nothing
+   * with such a field: its value stays on the binned task (`moveFieldValues`).
+   *
+   * Each field named must be one the merged task shows and holds a value for,
+   * and the survivor lacks (400 otherwise). It goes to the survivor's place: a
+   * field there of the same name and type, when the survivor has one, takes the
+   * value; otherwise a copy is made in the survivor's project, kept to the
+   * survivor's list so no other list changes (its name, type, options and
+   * settings; not required). Making a copy asks the rule for defining fields
+   * there, and a refusal refuses the merge before anything has moved.
+   */
+  private async planFieldsToAdd(
+    from: { id: string; listId: string },
+    to: { id: string; listId: string; workspaceId: string },
+    addFields: unknown,
+    actorId: string,
+  ) {
+    if (addFields === undefined || addFields === null) return []
+    if (!Array.isArray(addFields) || addFields.some((id) => typeof id !== 'string' || !isUuid(id))) {
+      throw new BadRequestException('addFields is a list of custom field ids')
+    }
+    const wanted = [...new Set(addFields as string[])]
+    if (wanted.length === 0) return []
+    const homeOf = async (listId: string) =>
+      (await this.db.select({ projectId: lists.projectId }).from(lists).where(eq(lists.id, listId)).limit(1))[0]
+    const there = await homeOf(from.listId)
+    const home = await homeOf(to.listId)
+    if (!there || !home) throw new NotFoundException('Task not found')
+    const d = customFieldDefinitions
+    const held = await this.db
+      .select({ id: d.id, projectId: d.projectId, listId: d.listId, name: d.name, type: d.type, options: d.options, config: d.config })
+      .from(customFieldValues)
+      .innerJoin(d, eq(d.id, customFieldValues.fieldId))
+      .where(eq(customFieldValues.taskId, from.id))
+    const lacking = new Map(
+      held
+        .filter((f) => fieldIsOnTask(f, { projectId: there.projectId, listId: from.listId }))
+        .filter((f) => !fieldIsOnTask(f, { projectId: home.projectId, listId: to.listId }))
+        .map((f) => [f.id, f]),
+    )
+    if (wanted.some((id) => !lacking.has(id))) throw new BadRequestException(MERGE_FIELD_NOT_ADDABLE)
+    const own = (
+      await this.db
+        .select({ id: d.id, projectId: d.projectId, listId: d.listId, name: d.name, type: d.type })
+        .from(d)
+        .where(eq(d.projectId, home.projectId))
+    ).filter((g) => fieldIsOnTask(g, { projectId: home.projectId, listId: to.listId }))
+    const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
+    const plan = wanted.map((id) => {
+      const field = lacking.get(id)!
+      const reuse = own.find((g) => g.type === field.type && sameName(g.name, field.name))?.id ?? null
+      return { field, reuse, projectId: home.projectId, listId: to.listId }
+    })
+    if (plan.some((p) => !p.reuse)) {
+      const [account] = await this.db.select({ role: users.role }).from(users).where(eq(users.id, actorId)).limit(1)
+      await assertMayDefineFields(this.db, {
+        workspaceId: to.workspaceId,
+        projectId: home.projectId,
+        reader: { id: actorId, role: account?.role ?? 'member' },
+        listId: to.listId,
+      })
+    }
+    return plan
+  }
+
+  /**
+   * The planned fields, added: each copy made, and the merged task's value
+   * moved onto the survivor's field when the survivor holds nothing in it
+   * (an emptied value holds nothing, `holdsNoInformation`). One transaction
+   * per field. Answers how many values moved.
+   */
+  private async addPlannedFields(
+    plan: Awaited<ReturnType<TasksService['planFieldsToAdd']>>,
+    fromTaskId: string,
+    toTaskId: string,
+  ): Promise<number> {
+    let moved = 0
+    for (const { field, reuse, projectId, listId } of plan) {
+      moved += await this.db.transaction(async (tx) => {
+        let fieldId = reuse
+        if (!fieldId) {
+          const [last] = await tx
+            .select({ next: sql<number>`coalesce(max(${customFieldDefinitions.position}), -1) + 1` })
+            .from(customFieldDefinitions)
+            .where(eq(customFieldDefinitions.projectId, projectId))
+          const [made] = await tx
+            .insert(customFieldDefinitions)
+            .values({ projectId, listId, name: field.name, type: field.type, options: field.options, config: field.config, position: Number(last?.next ?? 0) })
+            .returning({ id: customFieldDefinitions.id })
+          fieldId = made.id
+        }
+        const v = customFieldValues
+        const [mine] = await tx.select({ id: v.id, value: v.value }).from(v).where(and(eq(v.taskId, fromTaskId), eq(v.fieldId, field.id))).limit(1)
+        if (!mine || holdsNoInformation(mine.value)) return 0
+        const [theirs] = await tx.select({ id: v.id, value: v.value }).from(v).where(and(eq(v.taskId, toTaskId), eq(v.fieldId, fieldId))).limit(1)
+        // The survivor's own value is kept when it holds something, as ClickUp keeps task B's.
+        if (theirs && !holdsNoInformation(theirs.value)) return 0
+        if (theirs) await tx.update(v).set({ value: mine.value, updatedAt: new Date() }).where(eq(v.id, theirs.id))
+        else await tx.insert(v).values({ taskId: toTaskId, fieldId, value: mine.value })
+        await tx.delete(v).where(eq(v.id, mine.id))
+        return 1
+      })
+    }
+    return moved
   }
 
   /**

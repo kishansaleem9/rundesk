@@ -170,28 +170,44 @@ try {
    * while being wrong about all but the newest.
    */
   /*
-   * PARSED, NOT SUBSTRING-MATCHED. This used to ask whether the chip text
-   * CONTAINED today's day-of-month, which is true of "8/7/2026" on the 20th of
-   * any month — because the year carries "20". It also matched on the 2nd, the
-   * 6th and the 26th. A check that fails on four days in thirty is not a check,
-   * it is a calendar, and it reported the failure as "it is rendering the
-   * current date" while the chip was right.
+   * THE LABEL ITSELF, NOT ITS NUMBERS. This asked whether the chip text
+   * CONTAINED today's day of the month, which "8/7/2026" does on the 20th — the
+   * year carries "20" — and then pulled the numbers out and dropped the year,
+   * which still read a MONTH as a day: on the 8th of any month the chip's "8"
+   * was taken for today, and the check said the chip was "rendering the current
+   * date" while it was right (the rehearsal of `bebc5c2` and batch 15's sweep,
+   * 8 October: `found-8-oct/activity-rail-reads-the-month-as-today`). And it
+   * passed a chip with the day and month the wrong way round, which holds both
+   * numbers.
    *
-   * The numbers are pulled out and compared as numbers, with the year dropped
-   * so it cannot stand in for a day.
+   * So the page writes both dates as the chip does — `formatDateWith`
+   * (`apps/web/src/lib/date-format.ts`) in the reader's own date format, the
+   * browser's locale for 'system' — and the chip must hold the task's label as
+   * words of its own, and, where today's is another, not today's.
    */
-  const seeded = new Date(CREATED_AT)
-  const todayYmd = new Date()
-  const nums = (chipText.match(/\d+/g) ?? []).map(Number)
-  const dayish = nums.filter((n) => n !== seeded.getFullYear() && n !== todayYmd.getFullYear())
-  const hasSeededDay = dayish.includes(seeded.getDate())
-  const looksLikeToday =
-    dayish.includes(todayYmd.getDate()) && todayYmd.getDate() !== seeded.getDate()
+  const dateFormat = (await A('/users/me')).data?.dateFormat ?? 'system'
+  const labels = await page.evaluate(({ iso, format }) => {
+    // `formatDateWith`'s switch, as the chip runs it: a suite cannot import the app's TypeScript.
+    const label = (d) => {
+      const yyyy = d.getFullYear()
+      const mm = String(d.getMonth() + 1).padStart(2, '0')
+      const dd = String(d.getDate()).padStart(2, '0')
+      switch (format) {
+        case 'MM/DD/YYYY': return `${mm}/${dd}/${yyyy}`
+        case 'DD/MM/YYYY': return `${dd}/${mm}/${yyyy}`
+        case 'YYYY-MM-DD': return `${yyyy}-${mm}-${dd}`
+        case 'DD MMM YYYY': return `${dd} ${d.toLocaleDateString(undefined, { month: 'short' })} ${yyyy}`
+        default: return d.toLocaleDateString()
+      }
+    }
+    return { task: label(new Date(iso)), today: label(new Date()) }
+  }, { iso: CREATED_AT, format: dateFormat })
+  const holds = (text, words) => ` ${text.replace(/\s+/g, ' ').trim()} `.includes(` ${words} `)
   chk(
-    hasSeededDay && !looksLikeToday,
+    holds(chipText, labels.task) && (labels.today === labels.task || !holds(chipText, labels.today)),
     'and it shows when the task was really created, not today',
-    `the chip reads "${chipText.trim()}" for a task created ${CREATED_AT} — it is ` +
-      'rendering the current date rather than the task\'s',
+    `the chip reads "${chipText.trim()}" for a task created ${CREATED_AT}, which is ` +
+      `"${labels.task}" in this reader's date format (${dateFormat}); today is "${labels.today}"`,
   )
 
   // -------------------------------------------------------------------------

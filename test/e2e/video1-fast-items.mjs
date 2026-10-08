@@ -1001,8 +1001,11 @@ console.log('\n§6b  pinning from the avatar menu, where she does it')
   // Open the avatar menu. Addressed directly: `header button` .last() is a
   // guess about layout, and it guessed wrong.
   await page.locator('[data-testid="user-menu"]').click()
-  await page.waitForTimeout(800)
+  // Its tools open from a row of their own, as ClickUp's "Personal Tools" do
+  // (`found-6-oct/user-menu-hides-sign-out-below-a-scroll`).
+  await page.locator('[data-testid="menu-tools"]').click({ timeout: 10_000 }).catch(() => {})
   const pinDocs = page.locator('[data-testid="menu-pin-docs"]')
+  await waitUntil(async () => (await pinDocs.count()) > 0, { timeoutMs: 8000 })
   const menuPin = chain(
     'the avatar menu offers Tools',
     'and shows docs as pinned',

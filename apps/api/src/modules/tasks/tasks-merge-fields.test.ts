@@ -207,3 +207,36 @@ describe('TasksService.moveFieldValues — a survivor’s emptied value gives wa
     assert.deepEqual(inTransaction, ['update', 'delete'])
   })
 })
+
+/**
+ * `found-30-sep/merge-moves-values-onto-fields-the-target-lacks` — "Add selected
+ * CFs": ClickUp's merge asks whether to add to task B a field task A has and B
+ * lacks. A field asked for must be one the merged task holds a value for and
+ * the survivor lacks, and a field of its name and type on the survivor takes
+ * the value, rather than a copy that would ask for the right to make one.
+ */
+describe('TasksService.planFieldsToAdd — what a merge may add to the survivor, checked before anything moves', () => {
+  const STAGE = '11111111-1111-4111-8111-111111111111'
+  const OTHER = '22222222-2222-4222-8222-222222222222'
+  const MAINS = '33333333-3333-4333-8333-333333333333'
+  const stage = { id: STAGE, projectId: 'P1', listId: 'L-side', name: 'Stage', type: 'text', options: null, config: null }
+  const from = { id: 'merged', listId: 'L-side' }
+  const to = { id: 'survivor', listId: 'L-main', workspaceId: 'W' }
+
+  it('refuses a field the merged task holds no value for, with one sentence, before reading anything more', async () => {
+    const { db } = scriptedDb([[{ projectId: 'P1' }], [{ projectId: 'P1' }], [stage]])
+    await assert.rejects(
+      service(db).planFieldsToAdd(from, to, [OTHER], 'actor'),
+      (err: any) => err?.status === 400 && /^Only a field the merged task holds a value for/.test(err.message),
+    )
+    assert.equal(db.select.mock.callCount(), 3)
+  })
+
+  it('takes a field of the same name and type the survivor has, whatever its case, and asks no rule for making one', async () => {
+    const own = [{ id: MAINS, projectId: 'P1', listId: 'L-main', name: ' stage', type: 'text' }]
+    const { db } = scriptedDb([[{ projectId: 'P1' }], [{ projectId: 'P1' }], [stage], own])
+    const plan = await service(db).planFieldsToAdd(from, to, [STAGE], 'actor')
+    assert.deepEqual(plan.map((p: any) => [p.field.id, p.reuse, p.projectId, p.listId]), [[STAGE, MAINS, 'P1', 'L-main']])
+    assert.equal(db.select.mock.callCount(), 4)
+  })
+})

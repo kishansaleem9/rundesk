@@ -35,7 +35,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a branch that skipped is a failure. */
-const EXPECTED_CHECKS = 5
+const EXPECTED_CHECKS = 6
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -213,7 +213,10 @@ try {
       const box = { top: r.top, bottom: r.bottom }
       const still = !!last && box.top === last.top && box.bottom === last.bottom && menu.getAnimations().length === 0
       if (still || performance.now() - began > 5000) {
-        resolve({ ...box, settled: still, windowHeight: window.innerHeight })
+        // Where Sign out is drawn as the menu settles, before anything scrolls it.
+        const out = document.querySelector('[data-testid="menu-sign-out"]')
+        const o = out ? out.getBoundingClientRect() : null
+        resolve({ ...box, settled: still, windowHeight: window.innerHeight, signOut: o ? { top: o.top, bottom: o.bottom } : null })
         return
       }
       last = box
@@ -222,6 +225,13 @@ try {
     requestAnimationFrame(read)
   })).catch(() => null)
   const menuFits = !!menuBox?.settled && menuBox.bottom <= menuBox.windowHeight
+  /*
+   * AND SIGN OUT IS IN IT (`found-6-oct/user-menu-hides-sign-out-below-a-scroll`).
+   * Inside the window, the menu held 897 px of rows in 840.5 px of room under
+   * the avatar, so it scrolled, and Sign out, its last row, sat at 914 to 946
+   * below a foot at 892.5, with nothing saying there was more.
+   */
+  const signOutInView = !!menuBox?.settled && !!menuBox.signOut && menuBox.signOut.top >= menuBox.top && menuBox.signOut.bottom <= menuBox.bottom
   const saidOfMenu = !menuBox
     ? 'no menu was drawn'
     : `the menu ${menuBox.settled ? 'settled' : 'had not settled in 5 s'} at ${menuBox.top} to ${menuBox.bottom} in a ${menuBox.windowHeight} px window`
@@ -230,6 +240,13 @@ try {
   await waitUntil(async () => !(await mt.evaluate((name) => caches.has(name), API_CACHE).catch(() => true)), { timeoutMs: 10_000 })
   const memberCache = await mt.evaluate((name) => caches.has(name), API_CACHE).catch(() => true)
   const memberRefresh = await refreshStatus(mt)
+  chk(
+    signOutInView,
+    'the user menu shows Sign out as it opens in a 1440×900 window: inside the menu, with nothing to scroll to reach it',
+    menuBox?.signOut
+      ? `${saidOfMenu}; Sign out is drawn at ${menuBox.signOut.top} to ${menuBox.signOut.bottom}`
+      : `${saidOfMenu}; no Sign out was drawn`,
+  )
   chk(
     menuFits && memberPlanted && /\/login/.test(mt.url()) && !memberCache && memberRefresh === 401,
     'and the topbar’s Sign out — its menu inside a 1440×900 window — does the same for a member',
