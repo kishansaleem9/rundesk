@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 531 items: 0 open · 0 partly fixed · 480 closed, and 51 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 534 items: 0 open · 0 partly fixed · 488 closed, and 46 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 70, each reproduced
+## Found by the triage, 5 October, and since — 73, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10294,7 +10294,31 @@ Checks: `person-panel` 60 → 61: "the tasks the bucket checks look for are made
 
 Checks: `check-ledger-ids-cases.mjs` 11 → 13: "a day's find of another month, its day in one digit, is read and names its item" and "and an October id the ledger does not have is a failure too, not passed unread". Mutation `september-only` (the September pattern again) reddens both; 10 of 10 mutations bite.
 
-## Closed from the uncounted list, as ClickUp works them (8 October) — 6
+### `found-8-oct/panel-collapse-reads-the-address-after-a-fixed-wait` — **closed** (test tooling, small; found in batch 19's regression sweep) · reproduced 8 October
+
+**`panel-collapse` reads the docs page's address once, after sleeping 3.5 seconds**
+
+*Evidence, 8 October:* batch 19's sweep (97 suites on lanes 1, 2, 3 and 5, beside the CI rehearsal of `0cb8d81`) failed `panel-collapse` on lane 2, one check: "landing on /docs names the doc it opened", the address read as `…/docs` with no `?doc=`. The page writes the doc it opened into the address once its docs have loaded; the suite slept 3.5 seconds and read the address once, and under the sweep's load the page had not written it yet. Alone on lane 1 it passed, 57 of 57, and the next two checks of the same chain, which slept 1.8 and 3.5 seconds, pass or fail the same way. Batch 19 changes nothing of the docs page.
+
+*Closed, 8 October.* Each of the three reads waits, bounded, for what it reads: the `?doc=` in the address (20 s), the second doc's id in it after the click (10 s, the click itself bounded), and the second doc's title on the editor after the address is opened again (20 s); the move to Inbox between them waits for its own address. `panel-collapse` 57 of 57 on lane 1 after it.
+
+### `found-8-oct/task-depth-reads-the-sheet-after-a-fixed-wait` — **closed** (test tooling, small; found in batch 19's regression sweep) · reproduced 8 October
+
+**`task-depth` reads the tag badge and the date fields before the sheet has drawn them**
+
+*Evidence, 8 October:* the same sweep failed `task-depth` on lane 2, five checks: "and the tag is visible on the task" — with its own message saying the tag row read the tag — and the four of the date chain from "the sheet has a due and a start field", "one or both fields are missing from the sheet". The tag check waited five seconds for the whole page's text and then read it once, and the row drew the badge a moment after the read; the date chain slept four seconds and read the fields once, and the sheet had not drawn them. Alone on lane 2 it passed, 92 of 92. A rehearsal of CI on 1 October failed the tag check once the same way.
+
+*Closed, 8 October.* The tag check reads the tag row itself, once it has drawn the tag (20 s), and the date chain waits for both fields to be drawn (20 s) before reading them. `task-depth` 92 of 92 on lane 2 after it.
+
+### `found-8-oct/archived-tasks-access-reads-a-private-restore-as-not-found` — **closed** (test tooling, small; found by the CI rehearsal of `0cb8d81`) · reproduced 8 October
+
+**`archived-tasks-access` reads a restore refused for a private space as 404, where a refused write now says 403 and why**
+
+*Evidence, 8 October:* the rehearsal of `0cb8d81` (batch 18) passed `verify` 73 of 73 and `browser-suites` 6 of 6, and failed one step of 279 in `postgres-harnesses`: "Archived tasks are read by every member, as the read rule allows", 6 of 7 — "a member restores the archived task of a space they may edit (2xx, back in its list), and is refused the view-only space’s (403) and the private space’s (404), which stay archived" answered the private space's restore 403 "This space or project is private". Batch 18 closed `found-6-oct/task-writes-answer-a-refusal-as-not-found` as the owner decided: a write refused is refused as its read is, 403 with the reason. The suite still read the restore's refusal as 404, and no sweep of batch 18 ran it. So `0cb8d81` was not pushed alone.
+
+*Closed, 8 October.* The check reads both refusals as 403 and the private space's in the read's words, "This space or project is private", the task left archived. `archived-tasks-access` 7 of 7 on lane 1 after it. `ata-9-restore-skips-the-write-rule` quoted the check's old words; re-aimed at its new ones, it reddens it on lane 1 (6 of 7, the open, view-only and private tasks each restored).
+
+## Closed from the uncounted list, as ClickUp works them (8 October) — 11
 
 On the owner's word of 8 October ("close all of these properly … close them as they work on clickup"), the
 items the triage set aside as features and decisions are closed one by one: as ClickUp works each where its
@@ -10428,35 +10452,7 @@ Checks:
 - `clip-library-access` 10 → 11: "a guest makes no link that opens for anybody, even of their own clip — …"; the checks of sections 9 and 10 now read a guest's own public link as refused.
 - Patches `clacc-32` (a guest's public link is made) reddens the three, 8 of 11; `clacc-33` (Share drawn on every card) reddens the new one, 10 of 11. `clacc-21`–`clacc-25` are re-claimed, each still reddening its check, 10 of 11.
 
-## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
-
-Moved here by the triage of 5 October, at the owner's request: these are not open defects and are not in the
-counts. Each says what it is in its heading, with the status it had before. Their full evidence is in
-`docs/triage-2026-10-05.md`.
-
-#### Features and ClickUp gaps — 35
-
-### `found-30-sep/no-save-list-or-folder-as-template` — feature, not counted (triage, 5 October; was: open (feature, medium; found closing `ledger-rows/row-1874`))
-
-**A Folder or a List cannot be saved as a template from the sidebar**
-
-*Evidence, 30 September:* ClickUp saves a Folder or a List as a template from the sidebar (⋯ › Templates › Save as Template, with tags). Rundesk's only save dialog is the Template Center's "Save project as template". It never sends `targetType: 'list'`, though the API makes a list template of a one-list project when asked, so a list template can only be made through the API.
-
-*To close:* research ClickUp's sidebar save, then offer Save as Template on a folder's and a list's menu, with tags, and check that each makes a template of the right kind.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Nothing is broken here; the feature is missing. No folder, project or list menu in the sidebar offers Save as Template, and the Template Center's dialog always saves a folder template, so a list template can only be made through the API. ClickUp saves a Folder or List as a template from the sidebar (⋯ › Templates › Save as Template, with tags). Evidence: `docs/triage-2026-10-05.md`.
-
-### `found-30-sep/load-template-takes-every-attribute` — feature, not counted (triage, 5 October; was: open (parity, medium; found closing `found-30-sep/template-submit-ignores-the-form`))
-
-**Use Template brings everything the template holds, where ClickUp lets you choose**
-
-*Evidence, 30 September:* a search summary of ClickUp's "Use task templates" reads "When you load a Template, you can choose which attributes you'd like to inherit". Here, a template chosen in the create modal brings everything: its checklists, subtasks and custom-field values, and its one values wherever the form left them alone. Only the form can win over it.
-
-*To close:* research ClickUp's attribute choice (which attributes, and where it is offered), then offer the same under Use Template, and check it with a suite.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). This is a missing feature (a parity gap), not a defect. Use Template brings everything the template holds, and nothing in the modal or the instantiate API lets the person choose which attributes to inherit. ClickUp: "When you load a Template, you can choose which attributes you'd like to inherit". Evidence: `docs/triage-2026-10-05.md`.
-
-### `found-30-sep/save-as-template-asks-no-description` — feature, not counted (triage, 5 October; was: open (feature, small; found closing `ledger-rows/row-1060`))
+### `found-30-sep/save-as-template-asks-no-description` — **closed** (feature, small; found closing `ledger-rows/row-1060`; was not counted, a feature) · reproduced 8 October
 
 **Save as template in the create modal takes no description, and Update's picker has no search**
 
@@ -10466,7 +10462,60 @@ counts. Each says what it is in its heading, with the status it had before. Thei
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). This is a missing feature. In the create modal, Save as template asks for a name only, with no optional description (the API already accepts one), and the Update existing template picker cannot be searched. ClickUp's save offers an optional description, and its update picker can be searched. Evidence: `docs/triage-2026-10-05.md`.
 
-### `found-30-sep/duplicate-copies-no-attachments` — feature, not counted (triage, 5 October; was: open (parity, small; found closing `found-30-sep/duplicate-copies-votes-and-files`))
+*Closed, 8 October* (lane 3), on the owner's word of 8 October. ClickUp's save asks "a name first, and adding a description … is optional", and its update dialog lets you look the existing template up (help centre, "Use task templates", through search excerpts). The create modal's Save as template panel asks an optional description under the name (`quick-create-tpl-description`, empty to begin with), and the save and the update send it; an update starts from the template's own description, so pressing it keeps that. Update existing template's list has a search box (`quick-create-tpl-search-update`): part of a name, in any case, narrows the list, and a name no template has leaves it empty with a note (`quick-create-tpl-search-none`). Four locales.
+
+Measured on lane 3 with `create-modal-templates`:
+- Before (batch 18's build): no description box, the template's description null; no search box, every template listed; create-modal-templates 48 of 60 on batch 18’s build, the twelve checks of this batch failing and no other.
+- After: the three checks pass; create-modal-templates 60 of 60 on the batch’s own build (lane 7, served from its worktree).
+
+Checks (`create-modal-templates` 48 → 60 with the two items below):
+- "and the panel asks for a description beside the name, empty to begin with and optional, and the template keeps the one typed there";
+- "Update existing template is searched: part of a template’s name, in any case, narrows the list to it, and a name no template has leaves none and says so";
+- "and its panel starts from the template’s own description, which the update keeps".
+- Patches `create-modal-templates-35` (the save sends no description), `-36` (an update starts from none) and `-37` (the list is not searched) each redden their own, 59 of 60 each, on lane 4.
+
+### `found-30-sep/load-template-takes-every-attribute` — **closed** (parity, medium; found closing `found-30-sep/template-submit-ignores-the-form`; was not counted, a feature) · reproduced 8 October
+
+**Use Template brings everything the template holds, where ClickUp lets you choose**
+
+*Evidence, 30 September:* a search summary of ClickUp's "Use task templates" reads "When you load a Template, you can choose which attributes you'd like to inherit". Here, a template chosen in the create modal brings everything: its checklists, subtasks and custom-field values, and its one values wherever the form left them alone. Only the form can win over it.
+
+*To close:* research ClickUp's attribute choice (which attributes, and where it is offered), then offer the same under Use Template, and check it with a suite.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). This is a missing feature (a parity gap), not a defect. Use Template brings everything the template holds, and nothing in the modal or the instantiate API lets the person choose which attributes to inherit. ClickUp: "When you load a Template, you can choose which attributes you'd like to inherit". Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October* (lane 3). ClickUp makes the choice when a task is SAVED as a template: Import options, "Import everything" or "Customize import items" (assignees, attachments, checklists, comments, status settings, custom fields and the like), and "Keep checked items"; Use Template then brings what the template holds (help centre, "Use task templates", through search excerpts). The search summary this item was opened on ("When you load a Template, you can choose which attributes …") describes that save-time choice. So:
+- the task sheet's Save as template offers Import everything (chosen to begin with) or Customize import items, with a box for each of the eight things a Rundesk template holds (description, priority, dates, time estimate, tags, checklists, subtasks, custom fields), and Keep checked items, off to begin with;
+- `POST …/task-templates/from-task/:taskId` takes `include` and `keepCheckedItems`; an item a template cannot hold is refused 400 "Unknown import item: …" and nothing is made; a template's checklist item may now carry `done`, and a task made from it is ticked where the item was kept ticked.
+Assignees, attachments, comments and status settings are not offered: a Rundesk template holds none of them, and a box for them would promise what nothing keeps.
+
+Measured on lane 3 with `create-modal-templates`' new section, a task with a description, a priority, a field value, a ticked and an open checklist item and a subtask, saved from the sheet with Subtasks and Custom fields off and Keep checked items on:
+- Before: no import options; the template held the subtask, the value and both items unticked; the unknown item was ignored (the four checks failing, 48 of 60 with the rest of the batch’s).
+- After: the template holds no subtask and no value, keeps the rest and the ticked item ticked; a task made from it is ticked so; the unknown item refused.
+
+Checks: "Save as template from the task sheet offers ClickUp’s import options: …", "customized, subtasks and custom fields off and Keep checked items on, the template holds …", "and a task made from it carries the ticked item ticked …", "an import item a template cannot hold is refused in words, 400 “Unknown import item: attachments”, and no template is made". Unit: `chooseTemplateItems` and `readTemplateImportItems` (`task-templates.service.test.ts`).
+- Patches `create-modal-templates-38` (the API takes everything), `-39` (ticks left behind), `-40` (the sheet sends no choice), `-41` (an unknown item passed over) and `-42` (Keep checked items starts on) each redden their checks — `-38` and `-40` the two Customize checks (58 of 60), `-39` those two and the duplicate’s Keep checked items check, which reads the same snapshot (57), `-41` the refusal and `-42` the options’ first state (59 each).
+
+### `found-30-sep/no-save-list-or-folder-as-template` — **closed** (feature, medium; found closing `ledger-rows/row-1874`; was not counted, a feature) · reproduced 8 October
+
+**A Folder or a List cannot be saved as a template from the sidebar**
+
+*Evidence, 30 September:* ClickUp saves a Folder or a List as a template from the sidebar (⋯ › Templates › Save as Template, with tags). Rundesk's only save dialog is the Template Center's "Save project as template". It never sends `targetType: 'list'`, though the API makes a list template of a one-list project when asked, so a list template can only be made through the API.
+
+*To close:* research ClickUp's sidebar save, then offer Save as Template on a folder's and a list's menu, with tags, and check that each makes a template of the right kind.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Nothing is broken here; the feature is missing. No folder, project or list menu in the sidebar offers Save as Template, and the Template Center's dialog always saves a folder template, so a list template can only be made through the API. ClickUp saves a Folder or List as a template from the sidebar (⋯ › Templates › Save as Template, with tags). Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October* (lane 3). ClickUp saves a List from its ⋯ › Templates › Save as Template, asking "a name first, and adding a description or tags is optional" (help centre, "Use List templates", through search excerpts), and a Folder the same way. The sidebar's list menu and folder (project) menu each offer Save as template to those who may manage templates (`template.manage`); it asks a name (the list's or folder's to begin with), an optional description and tags, and saves a List template of that list alone, or a Folder template of the folder with its lists. `save-from-project` takes `listId`: a list of that project, which its saver may open, or 404 "List not found in this project" with nothing saved.
+
+Measured on lane 3 with `template-center`'s new section, a space of the run's own with a folder of two lists, a task in each:
+- Before: neither menu offered a save (template-center 82 of 85, the three new checks failing and no other; the foreign list was saved, 201, the folder whole).
+- After: the list's ⋯ makes a List template holding that list and its task, with the tags typed (lower case); the folder's makes a Folder template of both lists; another folder's list is refused 404 and saves nothing.
+
+Checks (`template-center` 82 → 85): "a list’s ⋯ in the sidebar saves it as a List template, …", "and a folder’s ⋯ saves it as a Folder template, with both its lists and their tasks", "and a list of another folder, named with this one, is refused as not found in it (404), and no template is made".
+- Patches `template-center-38` (`listId` names nothing), `-39` (no list menu item), `-40` (no folder menu item) and `-41` (a foreign list saves an empty template) redden them — `-38` the list’s save and the foreign list’s refusal (83 of 85), `-39`, `-40` and `-41` one each (84).
+
+### `found-30-sep/duplicate-copies-no-attachments` — **closed** (parity, small; found closing `found-30-sep/duplicate-copies-votes-and-files`; was not counted, a feature) · reproduced 8 October
 
 **Duplicate copies none of a task's attachments, and offers no choice of what to copy**
 
@@ -10475,6 +10524,48 @@ counts. Each says what it is in its heading, with the status it had before. Thei
 *To close:* find which items ClickUp's dialog offers, offer them, and copy attachments as objects of the copy's own (as `attachClip` copies a clip), carrying a Files value over to the copies; check it.
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Duplicate still copies no attachments, so the copy's Files field comes out empty, and it gives no choice of what to copy (seen on lane 6). Both are unbuilt ClickUp parity, not a broken behaviour: the code drops files on purpose. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October* (lane 3). ClickUp's Duplicate asks you to "choose what you want to include in the new task", "with pre-selected boxes of what to keep" (help centre "Duplicate a task", and its feedback board, through search excerpts). Its modal pairs Checklists with "Keep checked items" (a reply on its feedback board). The task sheet's Duplicate opens a dialog of nine boxes, every one ticked — description, assignees, watchers (followers), tags, dates, checklists, subtasks, custom fields and attachments — and Keep checked items, off. The route takes `include` and `keepCheckedItems`; an item no copy can take is refused 400 "Unknown duplicate item: …" before anything is made.
+- Followers are copied where they may see the copy (`TasksService.copyFollowersTo`); one who may not is left off, as `addWatcher` would refuse them.
+- With Keep checked items, the copy's ticked checklist items stay ticked; without it, all start unticked, as before.
+- Attachments are copied as objects of the copy's own (`TasksService.copyAttachmentsTo`, as `attachClip` copies a clip), so removing one task's file never takes the other's; a linked file is linked again; files posted in comments stay with their comments. A Files field's value names the copy's own copies.
+- A file the copy cannot take — its object gone from the store, a file still arriving, or no store — is left out and NAMED: the answer carries `filesNotCopied`, and the sheet warns "Task duplicated. These files could not be copied: …" (four locales). Measured while building it: such a file made the duplicate a 500 after the copy existed, half made.
+
+Measured on lane 3 with `create-modal-templates`' new section (a source with a linked file, a stored file whose object is gone and a subtask) and `custom-field-progress` (a file uploaded through presign, PUT and record):
+- Before: one button, no dialog; the copy held no file; the five checks failing, and custom-field-progress’s Files check, 59 of 60.
+- After: the dialog's nine boxes, all ticked, and Keep checked items off; with Subtasks off and Keep checked items on, the copy takes the linked file and no subtask, keeps the ticked item ticked, is followed by the member who follows the original, names the gone file in a warning and is made; with Attachments off, no file; an unknown item 400; the uploaded file copied to an object of the copy's own, its Files field naming it.
+
+Checks: "Duplicate in the task sheet asks what the copy takes, nine boxes, …, and Keep checked items, off", "with Subtasks unticked, the copy takes the linked file and no subtask (read by SQL)", "and a stored file whose object is gone is left out of the copy and named in a warning, the copy made all the same", "and with Keep checked items ticked the copy keeps the ticked item ticked and the other not, and the member who follows the original follows the copy (read by SQL)", "and with Attachments off the copy takes no file and keeps its subtask, while an item a copy cannot take is refused in words, …"; `custom-field-progress` "and its Files field names the copy’s own copy of the file and none of the original’s attachments — while its other values are copied" (was: names none). Unit: `readDuplicateItems`, the answer naming the files not copied, the followers taken unless Watchers is off, and a Keep checked items that is not true or false refused (`task-templates.service.test.ts`).
+- Patches `create-modal-templates-43`–`-55` and `dcv-4` (the copy names the original's object) redden them — each its own check, 59 of 60; `-44` its three and the Keep checked items check whose boxes it unticks (56); `-43` its two (58) once its first build, which failed on a narrowing (a literal `false ?` made the task possibly null), was rewritten; `dcv-4` 59 of 60 on custom-field-progress; `dcv-2` and `dcv-3` are re-aimed to the copy’s own Files value and its votes, and redden their checks, 59 of 60 each.
+- Re-aimed where this moved their anchors, each shown failing its own again on lane 1 (the preflight of 8 October found them): `dcv-1-duplicate-writes-unchecked`, custom-field-progress 58 of 60, its votes and files checks; `ddr-1-duplicate-asks-no-read-rule` and `ddr-2-save-as-template-asks-no-read-rule`, create-modal-templates 59 of 60, each its own; `task-values-27-a-duplicate-drops-the-late-start`, task-values 26 of 27; and the unit claims `dcv-4-duplicate-writes-unchecked-unit` and `ddr-5-save-asks-no-read-rule-unit`, each failing its test.
+
+### `found-30-sep/comment-clips-have-no-copy-link` — **closed** (feature, small; found closing `resume-defects/resume-7`; was not counted, a feature) · reproduced 8 October
+
+**A clip in a comment has no Copy link**
+
+*Evidence, 30 September:* ClickUp's share icon on an expanded comment clip copies its URL. A comment clip is the task's own attachment, not a library clip, so a link to it needs the task's read rule on the route rather than the library's.
+
+*To close:* give comment clips a link under the task's read rule, and check that it opens for those who may read the task and nobody else.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). A clip in a comment still has no Copy link: its card offers only the native player (seen on lane 6), and no route links to a task attachment under the task's read rule. Unbuilt. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October* (lane 3). ClickUp's clip card copies the clip's link. A clip in a comment here is the task's own attachment, signed for 900 seconds, so a link to the file itself would die within the quarter-hour. Its card now has a Copy link (`comment-clip-copy-link`) that copies the comment's link: the page's address with the task and this comment named (`?task=…&comment=…`), which the sheet already opens on its Comments tab with that comment marked. It opens under the task's own read rule — for whoever may read the task, and refused for anybody else, as the task's page is (`workspace-read-access`, `refused-as-forbidden`) — and it lasts.
+
+Measured on lane 3 with `clip-created-card`:
+- Before: the clip card offered no Copy link (clip-created-card 26 of 27; after, 27 of 27).
+- After: Copy link copies a link naming the task and the comment, and opening it shows the clip.
+
+Checks (`clip-created-card` 26 → 27): "and the card's Copy link copies the comment's link, which opens on the clip".
+- Patches `ccc-10` (the link names no comment) and `ccc-11` (no Copy link) redden it, 26 of 27 each.
+- `cfo-3-comment-draws-files-by-name`, whose line this moved (a comment's files are drawn after the clip's note), re-aimed and shown failing its own again on lane 2, task-attachments 33 of 34.
+
+## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
+
+Moved here by the triage of 5 October, at the owner's request: these are not open defects and are not in the
+counts. Each says what it is in its heading, with the status it had before. Their full evidence is in
+`docs/triage-2026-10-05.md`.
+
+#### Features and ClickUp gaps — 30
 
 ### `found-30-sep/ai-page-fields-checked-only-by-a-unit` — feature, not counted (triage, 5 October; was: open (test tooling, small; found closing `found-30-sep/field-route-takes-another-projects-field`))
 
@@ -10487,16 +10578,6 @@ counts. Each says what it is in its heading, with the status it had before. Thei
 *To close:* on a model lane, generate a task for a list whose project has a field scoped to another list, and check that no box is offered for it and that saving writes no refused value.
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The AI page's Generate task correctly offers and writes only the chosen list's fields; what is missing is a suite check, so this is unbuilt coverage and not an open defect. Evidence: `docs/triage-2026-10-05.md`.
-
-### `found-30-sep/comment-clips-have-no-copy-link` — feature, not counted (triage, 5 October; was: open (feature, small; found closing `resume-defects/resume-7`))
-
-**A clip in a comment has no Copy link**
-
-*Evidence, 30 September:* ClickUp's share icon on an expanded comment clip copies its URL. A comment clip is the task's own attachment, not a library clip, so a link to it needs the task's read rule on the route rather than the library's.
-
-*To close:* give comment clips a link under the task's read rule, and check that it opens for those who may read the task and nobody else.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). A clip in a comment still has no Copy link: its card offers only the native player (seen on lane 6), and no route links to a task attachment under the task's read rule. Unbuilt. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `found-25-sep/view-only-individual-permissions` — feature, not counted (triage, 5 October; was: open, feature, medium (found closing `guest-guard-reads-the-account-role`))
 

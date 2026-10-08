@@ -212,11 +212,16 @@ try {
   const restoreView = await member.as(`/tasks/${VIEW.id}/restore`, { method: 'POST' })
   const restorePriv = await member.as(`/tasks/${PRIV.id}/restore`, { method: 'POST' })
   const after = { open: await isArchived(OPEN.id), view: await isArchived(VIEW.id), priv: await isArchived(PRIV.id) }
+  // A write refused is refused as its read is, 403 with the reason — the
+  // owner's rule of 1 October, carried to writes on 8 October
+  // (`found-6-oct/task-writes-answer-a-refusal-as-not-found`). This read 404 for
+  // the private space's task until the rehearsal of 0cb8d81 found it
+  // (`found-8-oct/archived-tasks-access-reads-a-private-restore-as-not-found`).
   chk(
     restoreOpen.status >= 200 && restoreOpen.status < 300 && after.open === false
       && restoreView.status === 403 && after.view === true
-      && restorePriv.status === 404 && after.priv === true,
-    'a member restores the archived task of a space they may edit (2xx, back in its list), and is refused the view-only space’s (403) and the private space’s (404), which stay archived',
+      && restorePriv.status === 403 && restorePriv.error?.message === 'This space or project is private' && after.priv === true,
+    'a member restores the archived task of a space they may edit (2xx, back in its list), and is refused the view-only space’s and the private space’s, each 403 saying why, which stay archived',
     `open ${said(restoreOpen)}, view-only ${said(restoreView)}, private ${said(restorePriv)}; archived after ${JSON.stringify(after)}`,
   )
 } catch (err) {

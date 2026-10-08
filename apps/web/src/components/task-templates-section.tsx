@@ -56,6 +56,21 @@ type TaskTemplate = {
 }
 
 type Space = { id: string; name: string }
+
+/** What a template saved from a task may carry, as the API names them (`TEMPLATE_IMPORT_ITEMS`). */
+const TEMPLATE_IMPORT_ITEMS = ['description', 'priority', 'dates', 'timeEstimate', 'tags', 'checklists', 'subtasks', 'customFields'] as const
+type TemplateImportItem = (typeof TEMPLATE_IMPORT_ITEMS)[number]
+const ALL_IMPORT_ITEMS = Object.fromEntries(TEMPLATE_IMPORT_ITEMS.map((item) => [item, true])) as Record<TemplateImportItem, boolean>
+const IMPORT_ITEM_LABEL_KEYS: Record<TemplateImportItem, TranslationKey> = {
+  description: 'taskTemplates.importItem.description',
+  priority: 'taskTemplates.importItem.priority',
+  dates: 'taskTemplates.importItem.dates',
+  timeEstimate: 'taskTemplates.importItem.timeEstimate',
+  tags: 'taskTemplates.importItem.tags',
+  checklists: 'taskTemplates.importItem.checklists',
+  subtasks: 'taskTemplates.importItem.subtasks',
+  customFields: 'taskTemplates.importItem.customFields',
+}
 type Project = { id: string; name: string }
 type ListRow = { id: string; name: string }
 
@@ -476,11 +491,24 @@ export function SaveTaskAsTemplateDialog({
   const qc = useQueryClient()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  /*
+   * ClickUp's Import options (help centre, "Use task templates"): "Import
+   * everything", or "Customize import items" to pick what the template
+   * carries, and "Keep checked items". The choice is made here, when the
+   * template is saved, so Use Template later brings what it holds
+   * (`found-30-sep/load-template-takes-every-attribute`).
+   */
+  const [customize, setCustomize] = useState(false)
+  const [items, setItems] = useState<Record<TemplateImportItem, boolean>>(ALL_IMPORT_ITEMS)
+  const [keepChecked, setKeepChecked] = useState(false)
 
   useEffect(() => {
     if (open) {
       setName('')
       setDescription('')
+      setCustomize(false)
+      setItems(ALL_IMPORT_ITEMS)
+      setKeepChecked(false)
     }
   }, [open])
 
@@ -490,7 +518,13 @@ export function SaveTaskAsTemplateDialog({
         `/workspaces/${workspaceId}/task-templates/from-task/${taskId}`,
         {
           method: 'POST',
-          body: { name: name.trim(), description: description.trim() || null },
+          body: {
+            name: name.trim(),
+            description: description.trim() || null,
+            ...(customize ? { include: items } : {}),
+            // A tick is kept only where checklists are carried at all.
+            keepCheckedItems: keepChecked && (!customize || items.checklists),
+          },
         },
       ),
     onSuccess: () => {
@@ -519,6 +553,7 @@ export function SaveTaskAsTemplateDialog({
               onChange={(e) => setName(e.target.value)}
               placeholder={t('taskTemplates.namePlaceholder')}
               autoFocus
+              data-testid="save-template-name"
             />
           </div>
           <div>
@@ -530,11 +565,47 @@ export function SaveTaskAsTemplateDialog({
               placeholder={t('taskTemplates.descriptionPlaceholder')}
             />
           </div>
+          <fieldset className="space-y-1.5" data-testid="save-template-import">
+            <legend className="text-xs font-medium">{t('taskTemplates.importOptions')}</legend>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="radio" name="save-template-import" checked={!customize} onChange={() => setCustomize(false)} data-testid="save-template-import-everything" />
+              {t('taskTemplates.importEverything')}
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="radio" name="save-template-import" checked={customize} onChange={() => setCustomize(true)} data-testid="save-template-import-customize" />
+              {t('taskTemplates.importCustomize')}
+            </label>
+            {customize && (
+              <div className="grid grid-cols-2 gap-1 pl-5">
+                {TEMPLATE_IMPORT_ITEMS.map((item) => (
+                  <label key={item} className="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={items[item]}
+                      onChange={(e) => setItems((now) => ({ ...now, [item]: e.target.checked }))}
+                      data-testid={`save-template-item-${item}`}
+                    />
+                    {t(IMPORT_ITEM_LABEL_KEYS[item])}
+                  </label>
+                ))}
+              </div>
+            )}
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={keepChecked}
+                disabled={customize && !items.checklists}
+                onChange={(e) => setKeepChecked(e.target.checked)}
+                data-testid="save-template-keep-checked"
+              />
+              {t('taskTemplates.keepCheckedItems')}
+            </label>
+          </fieldset>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
               {t('common.cancel')}
             </Button>
-            <Button onClick={() => save.mutate()} disabled={!name.trim() || save.isPending}>
+            <Button onClick={() => save.mutate()} disabled={!name.trim() || save.isPending} data-testid="save-template-confirm">
               {save.isPending ? t('common.saving') : t('taskTemplates.saveTemplate')}
             </Button>
           </div>

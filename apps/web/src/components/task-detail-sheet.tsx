@@ -125,6 +125,7 @@ import {
 } from '../lib/collapse-empty-fields'
 import { getRealtimeSocket, joinRooms } from '../lib/realtime'
 import { SaveAsTemplateButton } from './task-templates-section'
+import { DuplicateTaskDialog, type DuplicateItem } from './duplicate-task-dialog'
 import { CoverImagePicker, type CoverChoice } from './cover-image-picker'
 import { CommentRecorder } from './comment-recorder'
 import { TaskDescriptionHistoryDialog } from './task-description-history'
@@ -1292,11 +1293,20 @@ export function TaskDetailSheet({
     },
   })
 
+  // Duplicate asks what the copy takes first (`DuplicateTaskDialog`).
+  const [duplicateOpen, setDuplicateOpen] = useState(false)
   const duplicateTask = useMutation({
-    mutationFn: () =>
-      api(`/workspaces/${fallbackWorkspaceId}/task-templates/duplicate/${taskId}`, { method: 'POST' }),
-    onSuccess: async () => {
-      toast.success(t('taskDetail.taskDuplicated'))
+    mutationFn: ({ include, keepCheckedItems }: { include: Record<DuplicateItem, boolean>; keepCheckedItems: boolean }) =>
+      api<{ taskId: string; filesNotCopied?: string[] }>(`/workspaces/${fallbackWorkspaceId}/task-templates/duplicate/${taskId}`, {
+        method: 'POST',
+        body: { include, keepCheckedItems },
+      }),
+    onSuccess: async (made) => {
+      // A file the copy could not take is named, not dropped in silence (`copyAttachmentsTo`).
+      const notCopied = made?.filesNotCopied ?? []
+      if (notCopied.length) toast.warning(t('duplicateTask.filesNotCopied', { files: notCopied.join(', ') }))
+      else toast.success(t('taskDetail.taskDuplicated'))
+      setDuplicateOpen(false)
       await qc.invalidateQueries()
       onOpenChange(false)
     },
@@ -1564,13 +1574,20 @@ export function TaskDetailSheet({
                 type="button"
                 size="sm"
                 variant="secondary"
-                onClick={() => duplicateTask.mutate()}
+                onClick={() => setDuplicateOpen(true)}
                 disabled={duplicateTask.isPending || !fallbackWorkspaceId || !caps.edit}
+                data-testid="task-duplicate"
                 className="absolute left-3 top-3 h-7 gap-1.5 px-2.5 text-xs opacity-90 hover:opacity-100"
               >
                 <Copy className="h-3.5 w-3.5" />
                 {t('taskDetail.duplicate')}
               </Button>
+              <DuplicateTaskDialog
+                open={duplicateOpen}
+                pending={duplicateTask.isPending}
+                onOpenChange={setDuplicateOpen}
+                onDuplicate={(include, keepCheckedItems) => duplicateTask.mutate({ include, keepCheckedItems })}
+              />
               <Button
                 type="button"
                 size="sm"
@@ -6503,10 +6520,31 @@ function EstimateInput({
 
 function CommentAttachments({
   files,
+  commentId,
 }: {
   files?: Array<{ id: string; fileName: string; fileSize?: number | null; mimeType?: string | null; url?: string | null }>
+  /** The comment the files are on: a clip's Copy link is this comment's link (`?comment=`). */
+  commentId?: string
 }) {
+  const { t } = useTranslation()
   if (!files || files.length === 0) return null
+  /*
+   * A CLIP'S LINK IS ITS COMMENT'S (`found-30-sep/comment-clips-have-no-copy-link`).
+   * ClickUp copies a clip's URL from its card; a clip in a comment here is the
+   * task's own attachment, signed for 900 seconds, so its own URL would die
+   * within the quarter-hour. The link copied is the page's, with the task and
+   * this comment named (`?task=…&comment=…`, which the sheet already opens and
+   * marks): it opens for whoever may read the task, and for nobody else, as
+   * the task itself does, and it lasts.
+   */
+  const copyClipLink = () => {
+    if (!commentId) return
+    const url = new URL(window.location.href)
+    url.searchParams.set('comment', commentId)
+    void navigator.clipboard?.writeText(url.toString())
+      .then(() => toast.success(t('taskDetail.copiedLink')))
+      .catch(() => toast.error(t('taskDetail.copyFailed')))
+  }
   return (
     <div className="mt-2 flex flex-wrap gap-2">
       {files.map((f) => {
@@ -6535,28 +6573,36 @@ function CommentAttachments({
            *    match a screenshot would replace working controls with a worse
            *    copy.
            *
-           *  · COPY LINK is absent on purpose, and this is the interesting one.
-           *    An attachment's URL is signed by `r2.getObjectUrl` for 900
-           *    seconds. A "Copy link" here would hand somebody a link that dies
-           *    in fifteen minutes — it pastes, it looks right, and it stops
-           *    working over lunch. That is a worse failure than not offering it.
-           *    The "Clip created!" card CAN offer one because its clip is in the
-           *    library, and a library clip has a link of its own, `/clips/<token>`,
+           *  · COPY LINK copies the COMMENT'S link, not the file's (`copyClipLink`,
+           *    `found-30-sep/comment-clips-have-no-copy-link`). An attachment's
+           *    URL is signed by `r2.getObjectUrl` for 900 seconds: a link to the
+           *    file would paste, look right, and stop working over lunch. The
+           *    "Clip created!" card copies a library link, `/clips/<token>`,
            *    signed again on every view (`POST /clips/link`,
-           *    `resume-defects/resume-7`). A clip in a comment is the task's own
-           *    attachment, and a link to it would need the task's read rule on
-           *    the route, not the library's; that is not built.
+           *    `resume-defects/resume-7`); a clip in a comment is the task's own
+           *    attachment, read under the task's rule, so its lasting link is
+           *    the comment's.
            *
            *  · "More" would be a menu with nothing in it.
            */
           return (
             <div key={f.id} data-testid="comment-video" className="w-full max-w-sm">
-              <div
-                className="truncate rounded-t-md border border-b-0 border-border bg-muted/40 px-2 py-1 text-[11px] font-medium"
-                data-testid="comment-clip-title"
-                title={f.fileName}
-              >
-                {f.fileName}
+              <div className="flex items-center gap-1 rounded-t-md border border-b-0 border-border bg-muted/40 px-2 py-1">
+                <div className="min-w-0 flex-1 truncate text-[11px] font-medium" data-testid="comment-clip-title" title={f.fileName}>
+                  {f.fileName}
+                </div>
+                {commentId && (
+                  <button
+                    type="button"
+                    onClick={copyClipLink}
+                    data-testid="comment-clip-copy-link"
+                    aria-label={t('taskDetail.copyLink')}
+                    title={t('taskDetail.copyLink')}
+                    className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent/20 hover:text-foreground"
+                  >
+                    <LinkIcon className="h-3 w-3" />
+                  </button>
+                )}
               </div>
               <video
                 src={f.url ?? undefined}
@@ -7201,7 +7247,7 @@ function CommentsPanel({
                   the `hasBlockMarkdown` note in MentionText.
                 */}
                 <MentionText markdown text={c.body} namesById={namesById} className="mt-1 text-sm" />
-                <CommentAttachments files={c.attachments} />
+                <CommentAttachments files={c.attachments} commentId={c.id} />
                 <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                   {c.assignee?.displayName && (
                     <Badge variant="outline" className="text-[10px]">{t('taskDetail.assignedBadge', { name: c.assignee.displayName })}</Badge>
@@ -7337,7 +7383,7 @@ function CommentsPanel({
                           </span>
                         </div>
                         <MentionText markdown text={reply.body} namesById={namesById} className="mt-1 text-sm" />
-                        <CommentAttachments files={reply.attachments} />
+                        <CommentAttachments files={reply.attachments} commentId={reply.id} />
                         <div className="mt-2 flex gap-2">
                           <button
                             type="button"
@@ -10263,7 +10309,7 @@ function CommentThreadPanel({
           <span className="text-xs text-muted-foreground">{new Date(root.createdAt).toLocaleString()}</span>
         </div>
         <MentionText markdown text={root.body} namesById={namesById} className="mt-1 text-sm" />
-        <CommentAttachments files={root.attachments} />
+        <CommentAttachments files={root.attachments} commentId={root.id} />
         {/* The frame carries the comment's reactions INSIDE the thread. Reading
             them on the list and answering them here would be two places for one
             comment, which is the split this panel is closing. */}
@@ -10307,7 +10353,7 @@ function CommentThreadPanel({
                 </span>
               </div>
               <MentionText markdown text={r.body} namesById={namesById} className="mt-1 text-sm" />
-              <CommentAttachments files={r.attachments} />
+              <CommentAttachments files={r.attachments} commentId={r.id} />
             </li>
           ))}
         </ul>

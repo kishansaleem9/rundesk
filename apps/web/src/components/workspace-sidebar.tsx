@@ -93,6 +93,7 @@ import { usePermissions } from '../hooks/use-permissions'
 import { useCreatable } from '../hooks/use-creatable'
 import { useSettingsAccess } from '../hooks/use-settings-access'
 import { MoveDialog, type MovableKind } from './move-dialog'
+import { SaveContainerTemplateDialog, type ContainerToSave } from './save-container-template-dialog'
 import { SharePanel, type ShareObjectType } from './share-panel'
 import { CreateSpaceWizard } from './create-space-wizard'
 import { QuickCreateModal } from './quick-create-modal'
@@ -351,6 +352,9 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
   // the Create menu's own answer): a permission key once held, and for a guest
   // a list only in a space they may add to.
   const permissions = usePermissions(workspaceId)
+  // A list's or a folder's Save as template asks what saving any template asks (`template.manage`).
+  const mayManageTemplates = permissions.can('template.manage') === true
+  const [saveTemplateOf, setSaveTemplateOf] = useState<ContainerToSave | null>(null)
   const creatable = useCreatable(workspaceId)
   const typesForSpace = (spaceId: string) => SPACE_CREATE_TYPES.filter((type) => creatable(type, spaceId))
   // §5 ClickApps — hide nav entries for features a workspace admin turned off.
@@ -2254,6 +2258,16 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                                 <Share2 className="h-3.5 w-3.5" />
                                 {t('share.menuAction')}
                               </DropdownMenuItem>
+                              {/* ClickUp's list ⋯ › Templates › Save as Template (`found-30-sep/no-save-list-or-folder-as-template`). */}
+                              {mayManageTemplates && ownerProjectId && (
+                              <DropdownMenuItem
+                                data-testid={`list-save-template-${list.id}`}
+                                onClick={() => setSaveTemplateOf({ kind: 'list', id: list.id, projectId: ownerProjectId, name: list.name })}
+                              >
+                                <LayoutTemplate className="h-3.5 w-3.5" />
+                                {t('sidebarTemplate.menuAction')}
+                              </DropdownMenuItem>
+                              )}
                               {offer.manage !== false && (
                               <DropdownMenuItem
                                 disabled={offer.manage === null}
@@ -2384,6 +2398,16 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                           <Share2 className="h-3.5 w-3.5" />
                           {t('share.menuAction')}
                         </DropdownMenuItem>
+                        {/* And a Folder's: the project with its lists (`found-30-sep/no-save-list-or-folder-as-template`). */}
+                        {mayManageTemplates && (
+                        <DropdownMenuItem
+                          data-testid={`project-save-template-${project.id}`}
+                          onClick={() => setSaveTemplateOf({ kind: 'project', id: project.id, projectId: project.id, name: project.name })}
+                        >
+                          <LayoutTemplate className="h-3.5 w-3.5" />
+                          {t('sidebarTemplate.menuAction')}
+                        </DropdownMenuItem>
+                        )}
                         {offer.manage !== false && (
                         <DropdownMenuItem
                           disabled={offer.manage === null}
@@ -3256,6 +3280,14 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
           objectType={shareItem.type}
           objectId={shareItem.id}
           objectName={shareItem.name}
+        />
+      )}
+
+      {workspaceId && (
+        <SaveContainerTemplateDialog
+          workspaceId={workspaceId}
+          target={saveTemplateOf}
+          onClose={() => setSaveTemplateOf(null)}
         />
       )}
 

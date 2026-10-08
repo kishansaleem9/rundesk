@@ -3776,6 +3776,93 @@ export class TasksService {
   }
 
   /**
+   * A DUPLICATE'S OWN COPIES OF ITS ORIGINAL'S FILES
+   * (`found-30-sep/duplicate-copies-no-attachments`). ClickUp's Duplicate
+   * offers attachments among what the new task takes ("choose what you want to
+   * include in the new task", help centre "Duplicate a task", through search
+   * excerpts); Rundesk's copied none. Each stored file is copied to an object of
+   * the copy's own, as `attachClip` copies a clip, so removing one task's file
+   * never takes the other's; a linked file is linked again. Files posted in
+   * comments stay with their comments, which a duplicate does not take. The
+   * caller must be able to write the copy; the original's files are read only
+   * because its reader made the copy (`duplicateTask` asks that first).
+   * Answers each original file's id with its copy's, for the Files field.
+   *
+   * A FILE IT CANNOT COPY IS LEFT OUT AND NAMED, not a 500 after the copy was
+   * made: a stored file needs the store, and its object must be there to copy
+   * (a file still arriving has none; the stub answers a copy of a missing
+   * object 404, as S3 does). The copy keeps every file that could be copied,
+   * and `notCopied` names the rest for the person who asked.
+   */
+  async copyAttachmentsTo(
+    fromTaskId: string,
+    toTaskId: string,
+    actorId: string,
+  ): Promise<{ copied: Map<string, string>; notCopied: string[] }> {
+    const ctx = await this.assertTaskWriteAccess(toTaskId, actorId)
+    const rows = await this.db
+      .select()
+      .from(taskAttachments)
+      .where(and(eq(taskAttachments.taskId, fromTaskId), isNull(taskAttachments.commentId)))
+      .orderBy(asc(taskAttachments.createdAt))
+    const copied = new Map<string, string>()
+    const notCopied: string[] = []
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]
+      let storageKey = row.storageKey
+      if (!isLinkAttachmentKey(row.storageKey)) {
+        if (!this.r2.configured || !row.storageKey) {
+          notCopied.push(row.fileName)
+          continue
+        }
+        storageKey = `workspaces/${ctx.workspaceId}/tasks/${toTaskId}/attachments/${Date.now()}-${i}-${safeFileName(row.fileName)}`
+        try {
+          await this.r2.copyObject(row.storageKey, storageKey, {
+            contentType: row.contentType,
+            metadata: { uploadedby: actorId, taskid: toTaskId },
+          })
+        } catch (e) {
+          console.error(`[tasks.copyAttachmentsTo] ${row.storageKey} was not copied:`, e)
+          notCopied.push(row.fileName)
+          continue
+        }
+      }
+      const made = await this.recordAttachment(toTaskId, actorId, {
+        fileName: row.fileName,
+        contentType: row.contentType,
+        sizeBytes: row.sizeBytes,
+        storageKey,
+      })
+      if (made?.id) copied.set(row.id, made.id)
+    }
+    return { copied, notCopied }
+  }
+
+  /**
+   * A DUPLICATE'S FOLLOWERS (`found-30-sep/duplicate-copies-no-attachments`):
+   * ClickUp's Duplicate offers followers among what the new task takes. Each
+   * follower of the original who may see the copy follows it too; one who may
+   * not is left off, as `addWatcher` would refuse them. Nobody is told: the
+   * copy is new, and its maker chose who comes with it.
+   */
+  async copyFollowersTo(fromTaskId: string, toTaskId: string, actorId: string): Promise<void> {
+    await this.assertTaskWriteAccess(toTaskId, actorId)
+    const followers = await this.db
+      .select({ userId: taskWatchers.userId })
+      .from(taskWatchers)
+      .where(eq(taskWatchers.taskId, fromTaskId))
+    for (const { userId } of followers) {
+      try {
+        await this.assertTaskReadAccess(toTaskId, userId)
+      } catch (err) {
+        if (err instanceof ForbiddenException || err instanceof NotFoundException) continue
+        throw err
+      }
+      await this.db.insert(taskWatchers).values({ taskId: toTaskId, userId }).onConflictDoNothing()
+    }
+  }
+
+  /**
    * The row, its activity entry and its search entry, however the object got
    * there. `addAttachment` records what a client uploaded or linked;
    * `attachClip` records a copy it made itself.

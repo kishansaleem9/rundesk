@@ -3,19 +3,18 @@
 # right to add to the list are all it asks, so a member refused a private task
 # copies it and reads its words from the copy.
 #
+# Re-aimed 8 October (batch 19): Duplicate reads what the copy takes before the task (`duplicate-copies-no-attachments`)
 # Reddens: create-modal-templates: "a member refused a private task cannot duplicate it: 404, no copy is made, and none of its words come back"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/task-templates/task-templates.service.ts'
-a = """  async duplicateTask(workspaceId: string, taskId: string, actor: { id: string; email?: string; role?: string | null }) {
-    const ctx = await this.resolveTaskContext(taskId)
-    if (!ctx) throw new NotFoundException('Task not found')
-    if (ctx.workspaceId !== workspaceId) throw new NotFoundException('Task not found in this workspace')
+a = """    if (ctx.workspaceId !== workspaceId) throw new NotFoundException('Task not found in this workspace')
     await this.assertTaskOpenTo(workspaceId, taskId, actor)
+
+    const [src] = await this.db
 """
-b = """  async duplicateTask(workspaceId: string, taskId: string, actor: { id: string; email?: string; role?: string | null }) {
-    const ctx = await this.resolveTaskContext(taskId)
-    if (!ctx) throw new NotFoundException('Task not found')
-    if (ctx.workspaceId !== workspaceId) throw new NotFoundException('Task not found in this workspace')
+b = """    if (ctx.workspaceId !== workspaceId) throw new NotFoundException('Task not found in this workspace')
+
+    const [src] = await this.db
 """
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

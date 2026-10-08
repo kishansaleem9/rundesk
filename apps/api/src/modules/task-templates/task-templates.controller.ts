@@ -99,7 +99,7 @@ export class TaskTemplatesController {
   saveFromTask(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Param('taskId', new ParseUUIDPipe()) taskId: string,
-    @Body() body: { name: string; description?: string | null; icon?: string | null },
+    @Body() body: { name: string; description?: string | null; icon?: string | null; include?: unknown; keepCheckedItems?: unknown },
     @CurrentUser() user: any,
   ) {
     return this.templates.saveFromTask(
@@ -117,8 +117,13 @@ export class TaskTemplatesController {
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Param('taskId', new ParseUUIDPipe()) taskId: string,
     @CurrentUser() user: any,
+    // What the copy takes, each kept unless turned off (`readDuplicateItems`), and whether ticks stay ticked.
+    @Body() body: { include?: unknown; keepCheckedItems?: unknown } = {},
   ) {
-    return this.templates.duplicateTask(workspaceId, taskId, { id: user.id, email: user.email, role: user.role })
+    return this.templates.duplicateTask(workspaceId, taskId, { id: user.id, email: user.email, role: user.role }, {
+      include: body?.include,
+      keepCheckedItems: body?.keepCheckedItems,
+    })
   }
 
   /*

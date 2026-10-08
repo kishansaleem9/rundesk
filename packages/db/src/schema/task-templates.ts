@@ -60,7 +60,13 @@ export type TaskTemplatePayload = {
   labels: string[] // label names, resolved against target workspace at instantiate
   checklists: Array<{
     title: string
-    items: Array<{ content: string }>
+    /*
+     * `done` only where the template keeps ticked items ticked — ClickUp's
+     * "Keep checked items" when a task is saved as a template
+     * (`found-30-sep/load-template-takes-every-attribute`); absent, an item
+     * comes unticked, as every item did before.
+     */
+    items: Array<{ content: string; done?: boolean }>
   }>
   subtasks: Array<{
     title: string

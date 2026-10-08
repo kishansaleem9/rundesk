@@ -62,6 +62,13 @@
  * where a field of the same name is of another kind, so the route's rule is
  * the one kept: nothing is written that the field itself would refuse.
  *
+ * AND A TEMPLATE SAVED FROM A TASK CARRIES WHAT WAS CHOSEN,
+ * `found-30-sep/load-template-takes-every-attribute`: the sheet's Save as
+ * template offers ClickUp's import options — everything, or the items chosen,
+ * and ticked checklist items kept ticked — and Use Template brings what the
+ * template holds. And the modal's Save as template asks a description, and
+ * Update existing template is searched (`found-30-sep/save-as-template-asks-no-description`).
+ *
  * AND WHAT IS LEFT OUT IS SAID, `found-30-sep/template-leaves-values-out-silently`:
  * the answer names each value left out, with why (the field route's own words
  * where it refused), and the toast names the fields — the modal's, and the
@@ -136,7 +143,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 48
+const EXPECTED_CHECKS = 60
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -392,7 +399,9 @@ try {
   await closeMenu(page)
 
   const T1_ID = must('make the first template', await A(`/workspaces/${WS}/task-templates`, { method: 'POST', body: { name: T1_NAME, payload: T1 } }))?.id
-  const T2_ID = must('make the second template', await A(`/workspaces/${WS}/task-templates`, { method: 'POST', body: { name: T2_NAME, payload: T2 } }))?.id
+  // With a description of its own, which Update existing template starts from and keeps.
+  const T2_NOTE = `Kept note ${TAG}`
+  const T2_ID = must('make the second template', await A(`/workspaces/${WS}/task-templates`, { method: 'POST', body: { name: T2_NAME, description: T2_NOTE, payload: T2 } }))?.id
   // As the server keeps it, so what Update must keep is compared with what was there.
   const T2_BEFORE = (await templateNamed(T2_NAME))?.payload ?? null
   if (!T1_ID || !T2_ID || !T2_BEFORE) throw new Error('the templates came back without ids, or could not be read back')
@@ -584,6 +593,15 @@ try {
     `the menu opened ${saveMenu}; the panel asked ${saveAsked}, offering the name ${JSON.stringify(offeredName)}; ${dialogs} browser dialog(s)`,
   )
 
+  /*
+   * `found-30-sep/save-as-template-asks-no-description` — ClickUp's save takes
+   * an optional description beside the name ("Use task templates", through
+   * search excerpts), which the API took and the panel never asked for.
+   */
+  const SAVED_NOTE = `Saved note ${TAG}`
+  const noteBox = page.getByTestId('quick-create-tpl-description').filter({ visible: true })
+  const noteOffered = await noteBox.inputValue({ timeout: 3000 }).catch(() => null)
+  await noteBox.fill(SAVED_NOTE, { timeout: 5000 }).catch(() => {})
   await nameBox.press('Enter', { timeout: 5000 }).catch(() => {})
   let saved = null
   await waitUntil(async () => !!(saved = await templateNamed(SAVED)), { timeoutMs: 10_000 })
@@ -591,6 +609,11 @@ try {
     !!saved && JSON.stringify(formFields(saved.payload)) === JSON.stringify(FORM),
     'Save as template makes a template holding the form’s fields: title, description, priority, the estimate in seconds, start and due as days from today, and the tags',
     `the server holds ${saved ? JSON.stringify(formFields(saved.payload)) : 'no template so named'}; the form said ${JSON.stringify(FORM)}`,
+  )
+  chk(
+    noteOffered === '' && saved?.description === SAVED_NOTE,
+    'and the panel asks for a description beside the name, empty to begin with and optional, and the template keeps the one typed there',
+    `the description box offered ${JSON.stringify(noteOffered)}; the template's description is ${JSON.stringify(saved?.description ?? null)}`,
   )
 
   const panelGone = await waitUntil(async () => !(await panel.isVisible().catch(() => false)), { timeoutMs: 5000 })
@@ -620,9 +643,31 @@ try {
   const WRITTEN = { ...FORM, title: UPDATED, priority: 'urgent' }
   const updateMenu = await openMenu(page)
   const updateSub = updateMenu && await openSub(page, 'update')
+  /*
+   * `found-30-sep/save-as-template-asks-no-description` — and the picker is
+   * searched, as ClickUp's update dialog lets you look the template up: typed
+   * in lower case, the second template's name narrows the list to it alone; a
+   * name nobody has leaves nothing, and says so.
+   */
+  const searchBox = page.getByTestId('quick-create-tpl-search-update').filter({ visible: true })
+  await searchBox.click({ timeout: 5000 }).catch(() => {})
+  await searchBox.fill(T2_NAME.toLowerCase().slice(0, 12), { timeout: 5000 }).catch(() => {})
+  let narrowed = []
+  await waitUntil(async () => JSON.stringify(narrowed = await listed(page, 'update')) === JSON.stringify([T2_NAME]), { timeoutMs: 5000 })
+  await searchBox.fill(`nothing named ${TAG}`, { timeout: 5000 }).catch(() => {})
+  let emptied = null
+  await waitUntil(async () => (emptied = await listed(page, 'update')).length === 0, { timeoutMs: 5000 })
+  const noneSaid = await page.getByTestId('quick-create-tpl-search-none').filter({ visible: true }).count().catch(() => 0)
+  chk(
+    updateSub && JSON.stringify(narrowed) === JSON.stringify([T2_NAME]) && emptied?.length === 0 && noneSaid === 1,
+    'Update existing template is searched: part of a template’s name, in any case, narrows the list to it, and a name no template has leaves none and says so',
+    `the submenu opened ${updateSub}; typing listed ${JSON.stringify(narrowed)}, then ${JSON.stringify(emptied)}, the note drawn ${noneSaid} time(s)`,
+  )
+  await searchBox.fill('', { timeout: 5000 }).catch(() => {})
   await page.getByTestId(`quick-create-tpl-update-${T2_ID}`).click({ timeout: 5000 }).catch(() => {})
   const updateAsked = await waitUntil(async () => (await panel.getAttribute('data-action', { timeout: 1000 }).catch(() => null)) === 'update', { timeoutMs: 5000 })
   const updateName = await nameBox.inputValue({ timeout: 2000 }).catch(() => null)
+  const updateNote = await page.getByTestId('quick-create-tpl-description').filter({ visible: true }).inputValue({ timeout: 2000 }).catch(() => null)
   // Read while the panel waits: choosing a template is not yet writing to it.
   const titleBeforePress = (await templateNamed(T2_NAME))?.payload?.title ?? null
   // What the panel promises is kept, as shown beside the button, before it is pressed.
@@ -637,6 +682,11 @@ try {
     'Update existing template asks in the modal under the template’s own name, writes nothing until it is pressed, and then holds the form’s fields',
     `the submenu opened ${updateSub}; the panel asked ${updateAsked} under ${JSON.stringify(updateName)}; before the press the template’s title was ` +
       `${JSON.stringify(titleBeforePress)}; after, it holds ${JSON.stringify(formFields(updated?.payload))} against the form’s ${JSON.stringify(WRITTEN)}`,
+  )
+  chk(
+    updateNote === T2_NOTE && updated?.payload?.title === UPDATED && updated?.description === T2_NOTE,
+    'and its panel starts from the template’s own description, which the update keeps',
+    `the description box read ${JSON.stringify(updateNote)}; after the update the template's description is ${JSON.stringify(updated?.description ?? null)}`,
   )
   chk(
     updated?.payload?.title === UPDATED && JSON.stringify(beyondForm(updated.payload)) === JSON.stringify(beyondForm(T2_BEFORE)),
@@ -864,6 +914,166 @@ try {
     'and so does the Template Center’s Apply: applied into that list, it makes the task and its toast names the Estimate, the Severity and the Contact as not applied, and not the Note',
     `the route answered ${centreStatus ?? 'nothing'}; ${centreRows.length} task(s) so titled${centreRows[0] ? `, in ${centreRows[0].list_id === OTHER_LIST ? 'that list' : `list ${centreRows[0].list_id}`}` : ''}; ` +
       `the toast ${centreSeen ? `read ${JSON.stringify(centreToast)}` : 'never said what was not applied'}`,
+  )
+
+  // ══ 26–29. WHAT A TEMPLATE SAVED FROM A TASK CARRIES ═════════════════════
+  console.log('\n▶ Save as template from the task sheet, with ClickUp’s import options')
+  /*
+   * `found-30-sep/load-template-takes-every-attribute`. ClickUp chooses what a
+   * template carries when it is SAVED: Import options, "Import everything" or
+   * "Customize import items", and "Keep checked items" (help centre, "Use task
+   * templates", through search excerpts); Use Template then brings what the
+   * template holds. The sheet's Save as template asked for a name and a
+   * description and took everything, ticks left behind.
+   */
+  const SOURCE_BODY = `Source body ${TAG}`
+  const sheetSourceId = must('make the source task', await A('/tasks', { method: 'POST', body: { listId: LIST, title: `Source ${TAG}`, description: SOURCE_BODY, priority: 'high' } }))?.id
+  const SHEET_POINTS = `Points ${TAG}`
+  const sheetPointsId = must('make the Points field', await A(`/workspaces/${WS}/projects/${PROJECT}/custom-fields`, { method: 'POST', body: { name: SHEET_POINTS, type: 'number' } }))?.id
+  if (!sheetSourceId || !sheetPointsId) throw new Error('the source task or its field came back without an id')
+  must('set the Points value', await A(`/workspaces/${WS}/tasks/${sheetSourceId}/custom-fields/${sheetPointsId}`, { method: 'PUT', body: { value: 8 } }))
+  const sheetSteps = must('make the checklist', await A(`/tasks/${sheetSourceId}/checklists`, { method: 'POST', body: { title: 'Steps' } }))
+  const sheetTicked = must('add the ticked item', await A(`/tasks/${sheetSourceId}/checklists/${sheetSteps?.id}/items`, { method: 'POST', body: { content: 'Ticked' } }))
+  must('add the open item', await A(`/tasks/${sheetSourceId}/checklists/${sheetSteps?.id}/items`, { method: 'POST', body: { content: 'Open' } }))
+  must('tick it', await A(`/tasks/${sheetSourceId}/checklists/items/${sheetTicked?.id}`, { method: 'PATCH', body: { isDone: true } }))
+  must('make the subtask', await A('/tasks', { method: 'POST', body: { listId: LIST, title: `Source sub ${TAG}`, parentTaskId: sheetSourceId } }))
+
+  await page.goto(`${B}/app/${WS}/${SPACE}/${PROJECT}/${LIST}?task=${sheetSourceId}`, { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('task-sheet').getByRole('button', { name: /Save as template/ }).first().click({ timeout: 25_000 }).catch(() => {})
+  const SHEET_TPL = `From the sheet ${TAG}`
+  await page.getByTestId('save-template-name').fill(SHEET_TPL, { timeout: 10_000 }).catch(() => {})
+  const offeredImportOptions = {
+    everything: await page.getByTestId('save-template-import-everything').isChecked({ timeout: 5000 }).catch(() => null),
+    keep: await page.getByTestId('save-template-keep-checked').isChecked({ timeout: 2000 }).catch(() => null),
+  }
+  await page.getByTestId('save-template-import-customize').check({ timeout: 5000 }).catch(() => {})
+  let importItemBoxes = 0
+  await waitUntil(async () => (importItemBoxes = await page.locator('[data-testid^="save-template-item-"]').filter({ visible: true }).count().catch(() => 0)) === 8, { timeoutMs: 5000 })
+  await page.getByTestId('save-template-item-subtasks').uncheck({ timeout: 5000 }).catch(() => {})
+  await page.getByTestId('save-template-item-customFields').uncheck({ timeout: 5000 }).catch(() => {})
+  await page.getByTestId('save-template-keep-checked').check({ timeout: 5000 }).catch(() => {})
+  await page.getByTestId('save-template-confirm').click({ timeout: 5000 }).catch(() => {})
+  let sheetTpl = null
+  await waitUntil(async () => !!(sheetTpl = await templateNamed(SHEET_TPL)), { timeoutMs: 10_000 })
+  chk(
+    offeredImportOptions.everything === true && offeredImportOptions.keep === false && importItemBoxes === 8,
+    'Save as template from the task sheet offers ClickUp’s import options: Import everything to begin with, or Customize import items, each of the eight; and Keep checked items, off',
+    `Import everything chosen at first: ${offeredImportOptions.everything}; Keep checked items: ${offeredImportOptions.keep}; ${importItemBoxes} item box(es) once Customize was chosen`,
+  )
+  const sheetHeld = sheetTpl?.payload ?? null
+  // Read key by key: the column is jsonb, which keeps an object's keys in its own order.
+  const stepsHeld = (sheetHeld?.checklists ?? []).map((c) => ({ title: c.title, items: (c.items ?? []).map((i) => ({ content: i.content, done: i.done === true })) }))
+  const SHEET_STEPS_HELD = [{ title: 'Steps', items: [{ content: 'Ticked', done: true }, { content: 'Open', done: false }] }]
+  chk(
+    !!sheetHeld && sheetHeld.subtasks?.length === 0 && sheetHeld.customFieldValues?.length === 0 && sheetHeld.description === SOURCE_BODY && sheetHeld.priority === 'high'
+      && JSON.stringify(stepsHeld) === JSON.stringify(SHEET_STEPS_HELD),
+    'customized, subtasks and custom fields off and Keep checked items on, the template holds no subtask and no field value, and keeps the description, the priority and the checklist with its ticked item ticked',
+    `the server holds ${sheetHeld ? JSON.stringify({ description: sheetHeld.description, priority: sheetHeld.priority, checklists: sheetHeld.checklists, subtasks: sheetHeld.subtasks, customFieldValues: sheetHeld.customFieldValues }) : 'no template so named'}`,
+  )
+  const FROM_SHEET = `Made from the sheet’s template ${TAG}`
+  const madeFromSheet = sheetTpl ? await A(`/workspaces/${WS}/task-templates/${sheetTpl.id}/instantiate`, { method: 'POST', body: { listId: LIST, titleOverride: FROM_SHEET } }) : null
+  const madeFromSheetId = madeFromSheet?.data?.taskId ?? null
+  const sheetMadeItems = madeFromSheetId
+    ? await sql`select i.content, i.is_done from task_checklist_items i join task_checklists c on c.id = i.checklist_id where c.task_id = ${madeFromSheetId} order by i.position`
+    : []
+  const sheetMadeSubs = madeFromSheetId ? (await sql`select count(*)::int as n from tasks where parent_task_id = ${madeFromSheetId}`)[0].n : -1
+  const sheetItemsSaid = sheetMadeItems.map((r) => `${r.content}:${r.is_done}`).join(',')
+  chk(
+    sheetItemsSaid === 'Ticked:true,Open:false' && sheetMadeSubs === 0,
+    'and a task made from it carries the ticked item ticked and the other not, and no subtask (read by SQL)',
+    `making it answered ${madeFromSheet ? said(madeFromSheet) : 'nothing (no template)'}; its items ${JSON.stringify(sheetItemsSaid)}; ${sheetMadeSubs} subtask(s)`,
+  )
+  const REFUSED_IMPORT_TPL = `Refused import ${TAG}`
+  const unknownImportItem = await A(`/workspaces/${WS}/task-templates/from-task/${sheetSourceId}`, { method: 'POST', body: { name: REFUSED_IMPORT_TPL, include: { attachments: true } } })
+  chk(
+    unknownImportItem.status === 400 && unknownImportItem.error?.message === 'Unknown import item: attachments' && !(await templateNamed(REFUSED_IMPORT_TPL)),
+    'an import item a template cannot hold is refused in words, 400 “Unknown import item: attachments”, and no template is made',
+    `the route answered ${said(unknownImportItem)}`,
+  )
+
+  // ══ DUPLICATE ASKS WHAT THE COPY TAKES ════════════════════════════════════
+  console.log('\n▶ Duplicate from the task sheet asks what the copy takes, every box ticked to begin with')
+  /*
+   * `found-30-sep/duplicate-copies-no-attachments`. ClickUp's Duplicate asks
+   * "what you want to include in the new task", with the boxes pre-selected,
+   * attachments among them (help centre "Duplicate a task", through search
+   * excerpts). Rundesk's was one button that copied a fixed set and no file.
+   * The source above gets a linked file, which a copy takes without the store;
+   * the sheet's copy is made with Subtasks unticked, and the route's with
+   * Attachments unticked, so each box is seen to decide.
+   */
+  const LINKED = `Spec ${TAG}`
+  must('link a file to the source', await A(`/tasks/${sheetSourceId}/attachments`, { method: 'POST', body: { fileName: LINKED, url: `https://example.com/spec-${Date.now()}` } }))
+  /*
+   * And a stored file whose object is not in the store — a file still
+   * arriving, or one gone from the bucket. No copy can take it: it is left
+   * out and named, and the copy is made all the same (it was a 500 after the
+   * copy existed, half made).
+   */
+  const GONE = `Gone ${TAG}.pdf`
+  await sql`
+    insert into task_attachments (task_id, file_name, content_type, size_bytes, storage_key)
+    values (${sheetSourceId}, ${GONE}, 'application/pdf', 1024, ${`workspaces/${WS}/tasks/${sheetSourceId}/attachments/gone-${TAG}.pdf`})`
+  // And somebody who follows it, whom ClickUp's Followers box takes along.
+  must('the member follows the source', await A(`/tasks/${sheetSourceId}/watchers`, { method: 'POST', body: { userId: memberId } }))
+  const COPY_TITLE = `Source ${TAG} (copy)`
+  const copiesTitled = async () => sql`select id from tasks where title = ${COPY_TITLE} and parent_task_id is null order by created_at`
+  await page.goto(`${B}/app/${WS}/${SPACE}/${PROJECT}/${LIST}?task=${sheetSourceId}`, { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('task-duplicate').click({ timeout: 25_000 }).catch(() => {})
+  const offeredDuplicate = await waitUntil(() => page.getByTestId('duplicate-dialog').isVisible().catch(() => false), { timeoutMs: 10_000 })
+  const duplicateBoxes = await page.locator('[data-testid^="duplicate-item-"]').filter({ visible: true }).evaluateAll((boxes) => boxes.map((b) => `${b.getAttribute('data-testid').slice('duplicate-item-'.length)}:${b.checked}`)).catch(() => [])
+  const keepOffered = await page.getByTestId('duplicate-keep-checked').isChecked({ timeout: 2000 }).catch(() => null)
+  await page.getByTestId('duplicate-item-subtasks').uncheck({ timeout: 5000 }).catch(() => {})
+  await page.getByTestId('duplicate-keep-checked').check({ timeout: 5000 }).catch(() => {})
+  await page.getByTestId('duplicate-confirm').click({ timeout: 5000 }).catch(() => {})
+  let sheetCopies = []
+  await waitUntil(async () => (sheetCopies = await copiesTitled()).length === 1, { timeoutMs: 15_000 })
+  let goneSaid = ''
+  await waitUntil(
+    async () => (goneSaid = (await page.locator('[data-sonner-toast]', { hasText: GONE }).filter({ visible: true }).allInnerTexts().catch(() => [])).join(' | ')).length > 0,
+    { timeoutMs: 10_000 },
+  )
+  const toastsAfterCopy = await page.locator('[data-sonner-toast]').allInnerTexts().catch(() => [])
+  const sheetCopyId = sheetCopies[0]?.id ?? null
+  const sheetCopyFiles = sheetCopyId ? await sql`select file_name, storage_key from task_attachments where task_id = ${sheetCopyId}` : []
+  const sheetCopySubs = sheetCopyId ? (await sql`select count(*)::int as n from tasks where parent_task_id = ${sheetCopyId}`)[0].n : -1
+  const ALL_TICKED = ['description', 'assignees', 'watchers', 'tags', 'dates', 'checklists', 'subtasks', 'customFields', 'attachments'].map((item) => `${item}:true`)
+  chk(
+    offeredDuplicate && JSON.stringify(duplicateBoxes) === JSON.stringify(ALL_TICKED) && keepOffered === false,
+    'Duplicate in the task sheet asks what the copy takes, nine boxes, watchers and attachments among them, every one ticked to begin with, and Keep checked items, off',
+    offeredDuplicate ? `the dialog's boxes read ${JSON.stringify(duplicateBoxes)}; Keep checked items: ${keepOffered}` : 'Duplicate opened no dialog',
+  )
+  chk(
+    sheetCopies.length === 1 && sheetCopyFiles.length === 1 && sheetCopyFiles[0].file_name === LINKED && sheetCopySubs === 0,
+    'with Subtasks unticked, the copy takes the linked file and no subtask (read by SQL)',
+    `${sheetCopies.length} copy(ies) so titled; its files ${JSON.stringify(sheetCopyFiles.map((f) => f.file_name))}; ${sheetCopySubs} subtask(s)`,
+  )
+  chk(
+    sheetCopies.length === 1 && goneSaid.length > 0 && !sheetCopyFiles.some((f) => f.file_name === GONE),
+    'and a stored file whose object is gone is left out of the copy and named in a warning, the copy made all the same',
+    `${sheetCopies.length} copy(ies) so titled, holding ${JSON.stringify(sheetCopyFiles.map((f) => f.file_name))}; the toasts read ${JSON.stringify(toastsAfterCopy).slice(0, 240)}`,
+  )
+  const sheetCopyItems = sheetCopyId
+    ? await sql`select i.content, i.is_done from task_checklist_items i join task_checklists c on c.id = i.checklist_id where c.task_id = ${sheetCopyId} order by i.position`
+    : []
+  const copyItemsSaid = sheetCopyItems.map((r) => `${r.content}:${r.is_done}`).join(',')
+  const sheetCopyFollowers = sheetCopyId ? (await sql`select user_id from task_watchers where task_id = ${sheetCopyId}`).map((r) => r.user_id) : []
+  chk(
+    copyItemsSaid === 'Ticked:true,Open:false' && sheetCopyFollowers.includes(memberId),
+    'and with Keep checked items ticked the copy keeps the ticked item ticked and the other not, and the member who follows the original follows the copy (read by SQL)',
+    `the copy's items ${JSON.stringify(copyItemsSaid)}; its followers ${JSON.stringify(sheetCopyFollowers)}, the member being ${memberId}`,
+  )
+  const routeCopy = await A(`/workspaces/${WS}/task-templates/duplicate/${sheetSourceId}`, { method: 'POST', body: { include: { attachments: false } } })
+  const routeCopyId = routeCopy.data?.taskId ?? null
+  const routeCopyFiles = routeCopyId ? (await sql`select count(*)::int as n from task_attachments where task_id = ${routeCopyId}`)[0].n : -1
+  const routeCopySubs = routeCopyId ? (await sql`select count(*)::int as n from tasks where parent_task_id = ${routeCopyId}`)[0].n : -1
+  const unknownDuplicateItem = await A(`/workspaces/${WS}/task-templates/duplicate/${sheetSourceId}`, { method: 'POST', body: { include: { comments: true } } })
+  const copiesAfterRefusal = (await copiesTitled()).length
+  chk(
+    routeCopyFiles === 0 && routeCopySubs === 1 && unknownDuplicateItem.status === 400
+      && unknownDuplicateItem.error?.message === 'Unknown duplicate item: comments' && copiesAfterRefusal === 2,
+    'and with Attachments off the copy takes no file and keeps its subtask, while an item a copy cannot take is refused in words, 400 “Unknown duplicate item: comments”, and no copy is made',
+    `the copy without attachments holds ${routeCopyFiles} file(s) and ${routeCopySubs} subtask(s); the unknown item answered ${said(unknownDuplicateItem)}; ${copiesAfterRefusal} copies so titled`,
   )
 
   // ══ ONLY THE FIELDS THE TASK HAS, AND WHICH OF TWO OF ONE NAME ═══════════

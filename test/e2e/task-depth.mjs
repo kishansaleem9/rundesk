@@ -494,16 +494,22 @@ try {
   check(!!applied, 'pressing Enter creates the tag AND puts it on the task', JSON.stringify(detail.data?.labels))
 
   await page.keyboard.press('Escape')
-  await waitUntil(async () => (await page.locator('body').innerText().catch(() => '')).includes(TAG), { timeoutMs: 5_000 })
-  const sheetText = await page.locator('body').innerText()
-  // Said on failure: whether the Escape left the sheet open, and what its tag
-  // row drew. A rehearsal of CI on 1 October failed here once, with only the
-  // page's first words to go on, and passed on a fresh stack.
+  /*
+   * READ FROM THE TAG ROW, ONCE IT HAS DRAWN THE TAG, BOUNDED AT 20 SECONDS
+   * (`found-8-oct/task-depth-reads-the-sheet-after-a-fixed-wait`). It waited
+   * five seconds for the whole page's text and then read it once; under batch
+   * 19's sweep (lane 2) the row drew the tag a moment after that read, and the
+   * check failed with the row reading the tag. A rehearsal of CI on 1 October
+   * failed here once the same way and passed on a fresh stack.
+   */
   const tagRow = page.getByTestId('task-tags').filter({ visible: true }).first()
+  await waitUntil(async () => (await readText(tagRow, { timeoutMs: 1_000 })).includes(TAG), { timeoutMs: 20_000 })
+  const sheetText = await page.locator('body').innerText().catch(() => '')
+  // Said on failure: whether the Escape left the sheet open, and what its tag row drew.
   const tagRowOpen = await tagRow.isVisible().catch(() => false)
   const tagRowText = tagRowOpen ? await readText(tagRow, { timeoutMs: 1_000 }) : ''
   check(
-    sheetText.includes(TAG),
+    tagRowText.includes(TAG),
     'and the tag is visible on the task',
     tagRowOpen
       ? `the sheet is open and its tag row reads ${JSON.stringify(tagRowText)}`
@@ -663,7 +669,6 @@ try {
       waitUntil: 'domcontentloaded',
     },
   )
-  await page.waitForTimeout(4000)
 
   // Field labels are plain divs, not <label>s, so this reads the label text.
   const dateField = (label) =>
@@ -674,6 +679,10 @@ try {
       return null
     }, label).then((h) => h.asElement())
 
+  // Waited for, not slept (`found-8-oct/task-depth-reads-the-sheet-after-a-fixed-wait`):
+  // it slept four seconds and read once, and under batch 19's sweep the sheet
+  // had not drawn its fields by then.
+  await waitUntil(async () => Boolean(await dateField('Due date')) && Boolean(await dateField('Start date')), { timeoutMs: 20_000 })
   const dueEl = await dateField('Due date')
   const startEl = await dateField('Start date')
   const dates = chain(

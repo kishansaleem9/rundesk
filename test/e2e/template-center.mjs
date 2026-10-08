@@ -72,7 +72,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure. */
-const EXPECTED_CHECKS = 82
+const EXPECTED_CHECKS = 85
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -934,6 +934,86 @@ try {
   chk(noTarget.status === 400,
     'and a List template refuses to apply with nowhere to put the list',
     `it answered HTTP ${noTarget.status} instead of 400`)
+
+  console.log('\n▶ a list, and a folder, saved as a template from the sidebar (found-30-sep/no-save-list-or-folder-as-template)')
+  /*
+   * ClickUp saves a List or a Folder as a template from its ⋯ in the sidebar,
+   * Templates › Save as Template: "a name first, and adding a description or
+   * tags is optional" (help centre, "Use List templates", through search
+   * excerpts). The only save here was the page's "Save project as template",
+   * which never made a list template. A space of this run's own (registered,
+   * so it goes when the run ends) with a folder of two lists, a task in each,
+   * so that "the list alone" is a fact about the template.
+   */
+  const sbSpace = (await api('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} sidebar space` } })).data?.id
+  const sbProject = sbSpace ? (await api('/projects', { method: 'POST', body: { spaceId: sbSpace, name: `${TAG} sidebar folder` } })).data?.id : null
+  const SB_LISTS = [`${TAG} first list`, `${TAG} second list`]
+  const sbLists = []
+  for (const name of SB_LISTS) {
+    const list = sbProject ? (await api('/lists', { method: 'POST', body: { projectId: sbProject, name } })).data?.id : null
+    if (list) await api('/tasks', { method: 'POST', body: { listId: list, title: `${name} task` } })
+    sbLists.push(list)
+  }
+  const templateRow = async (name) => {
+    const [row] = sql ? await sql`select id, target_type, payload, tags from project_templates where workspace_id = ${WS} and name = ${name}`.catch(() => []) : []
+    if (row?.id && !created.includes(row.id)) {
+      created.push(row.id)
+      madeRow('project_templates', row.id)
+    }
+    return row ?? null
+  }
+  const listsHeld = (row) => (row?.payload?.lists ?? []).map((l) => ({ name: l.name, tasks: (l.tasks ?? []).map((t) => t.title) }))
+  const fromSidebar = async (menuTestId, itemTestId, name, tags) => {
+    await page.goto(`${B}/app/${WS}/${sbSpace}/${sbProject}/${sbLists[0]}`, { waitUntil: 'domcontentloaded' })
+    /*
+     * The tree draws every space collapsed (`undo-delete` opens both levels by
+     * id for the same reason), so the space, then the folder, is opened where
+     * its row is not yet there — each asked first, since a toggle pressed on an
+     * open level closes it.
+     */
+    const shown = (testId) => page.getByTestId(testId).isVisible().catch(() => false)
+    if (!(await waitUntil(() => shown(`project-actions-${sbProject}`), { timeoutMs: 8000 }))) {
+      await page.getByTestId(`space-toggle-${sbSpace}`).click({ timeout: 15_000 }).catch(() => {})
+    }
+    if (!(await waitUntil(() => shown(`list-actions-${sbLists[0]}`), { timeoutMs: 8000 }))) {
+      await page.getByTestId(`project-toggle-${sbProject}`).click({ timeout: 15_000 }).catch(() => {})
+    }
+    await waitUntil(() => shown(menuTestId), { timeoutMs: 15_000 })
+    await page.getByTestId(menuTestId).click({ timeout: 15_000 }).catch(() => {})
+    await page.getByTestId(itemTestId).click({ timeout: 8000 }).catch(() => {})
+    const offered = await page.getByTestId('sidebar-save-template-name').inputValue({ timeout: 8000 }).catch(() => null)
+    await page.getByTestId('sidebar-save-template-name').fill(name, { timeout: 5000 }).catch(() => {})
+    await page.getByTestId('sidebar-save-template-tags').fill(tags, { timeout: 5000 }).catch(() => {})
+    await page.getByTestId('sidebar-save-template-confirm').click({ timeout: 5000 }).catch(() => {})
+    let row = null
+    await waitUntil(async () => !!(row = await templateRow(name)), { timeoutMs: 10_000 })
+    return { offered, row }
+  }
+  const SB_LIST_TPL = `${TAG} sidebar list template`
+  const viaList = await fromSidebar(`list-actions-${sbLists[0]}`, `list-save-template-${sbLists[0]}`, SB_LIST_TPL, 'Sprint, sidebar')
+  chk(viaList.offered === SB_LISTS[0] && viaList.row?.target_type === 'list'
+      && JSON.stringify(listsHeld(viaList.row)) === JSON.stringify([{ name: SB_LISTS[0], tasks: [`${SB_LISTS[0]} task`] }])
+      && JSON.stringify(viaList.row?.tags ?? null) === JSON.stringify(['sprint', 'sidebar']),
+    'a list’s ⋯ in the sidebar saves it as a List template, under the list’s name to begin with: the list alone, with its task, and the tags typed (read from the database)',
+    `the name box offered ${JSON.stringify(viaList.offered)}; the row ${viaList.row ? JSON.stringify({ type: viaList.row.target_type, lists: listsHeld(viaList.row), tags: viaList.row.tags }) : 'was not made'}`)
+  const SB_FOLDER_TPL = `${TAG} sidebar folder template`
+  const viaFolder = await fromSidebar(`project-actions-${sbProject}`, `project-save-template-${sbProject}`, SB_FOLDER_TPL, '')
+  chk(viaFolder.row?.target_type === 'folder'
+      && JSON.stringify(listsHeld(viaFolder.row)) === JSON.stringify(SB_LISTS.map((name) => ({ name, tasks: [`${name} task`] }))),
+    'and a folder’s ⋯ saves it as a Folder template, with both its lists and their tasks',
+    `the row ${viaFolder.row ? JSON.stringify({ type: viaFolder.row.target_type, lists: listsHeld(viaFolder.row) }) : 'was not made'}`)
+  // The list a save names is one of the folder's: another folder's list is not found in it, and nothing is saved.
+  const sbOtherProject = sbSpace ? (await api('/projects', { method: 'POST', body: { spaceId: sbSpace, name: `${TAG} other folder` } })).data?.id : null
+  const sbForeignList = sbOtherProject ? (await api('/lists', { method: 'POST', body: { projectId: sbOtherProject, name: `${TAG} other list` } })).data?.id : null
+  const SB_FOREIGN_TPL = `${TAG} foreign list template`
+  const foreign = await api(`/workspaces/${WS}/project-templates/save-from-project`, {
+    method: 'POST',
+    body: { projectId: sbProject, listId: sbForeignList, targetType: 'list', name: SB_FOREIGN_TPL },
+  })
+  const foreignRow = await templateRow(SB_FOREIGN_TPL)
+  chk(!!sbForeignList && foreign.status === 404 && foreign.message === 'List not found in this project' && !foreignRow,
+    'and a list of another folder, named with this one, is refused as not found in it (404), and no template is made',
+    `the route answered ${foreign.status} ${JSON.stringify(foreign.message)}; the row ${foreignRow ? 'was made' : 'was not made'}`)
 } catch (e) {
   bad(`threw: ${String(e?.message ?? e).split('\n')[0]}`)
   await page.screenshot({ path: '/tmp/claude-0/shots/template-center-fail.png', fullPage: true }).catch(() => {})

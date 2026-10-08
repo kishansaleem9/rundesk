@@ -113,6 +113,75 @@ export function fitTemplateValue(
 }
 
 /**
+ * WHAT A DUPLICATE TAKES — ClickUp's Duplicate asks you to "choose what you
+ * want to include in the new task", "with pre-selected boxes of what to keep"
+ * (help centre "Duplicate a task", and its feedback board, through search
+ * excerpts; `found-30-sep/duplicate-copies-no-attachments`). The title is the
+ * copy's own; everything else is one of these, each kept unless turned off.
+ * Its Checklists box comes with "Keep checked items" (its feedback board):
+ * `keepCheckedItems`, off unless asked, keeps the ticked items ticked.
+ */
+export const DUPLICATE_ITEMS = ['description', 'assignees', 'watchers', 'tags', 'dates', 'checklists', 'subtasks', 'customFields', 'attachments'] as const
+export type DuplicateItem = (typeof DUPLICATE_ITEMS)[number]
+
+/** The choice as sent: absent is everything; an item that is not one, or not true or false, is refused. */
+export function readDuplicateItems(raw: unknown): Record<DuplicateItem, boolean> {
+  const out = Object.fromEntries(DUPLICATE_ITEMS.map((item) => [item, true])) as Record<DuplicateItem, boolean>
+  if (raw === undefined || raw === null) return out
+  if (typeof raw !== 'object' || Array.isArray(raw)) throw new BadRequestException('include must name what the duplicate takes')
+  for (const [key, on] of Object.entries(raw as Record<string, unknown>)) {
+    if (!(DUPLICATE_ITEMS as readonly string[]).includes(key)) throw new BadRequestException(`Unknown duplicate item: ${key}`)
+    if (typeof on !== 'boolean') throw new BadRequestException(`Duplicate item ${key} must be true or false`)
+    out[key as DuplicateItem] = on
+  }
+  return out
+}
+
+/**
+ * WHAT A TEMPLATE SAVED FROM A TASK CARRIES — ClickUp's Import options when a
+ * task is saved as a template: "Import everything", or "Customize import
+ * items" to pick among them, and "Keep checked items" (help centre, "Use task
+ * templates", through search excerpts; `found-30-sep/load-template-takes-every-attribute`).
+ * The choice is made when the template is saved, so Use Template brings what
+ * the template holds. Rundesk's templates hold no assignees, attachments or
+ * comments, so these are what it can choose among. Absent, everything.
+ */
+export const TEMPLATE_IMPORT_ITEMS = ['description', 'priority', 'dates', 'timeEstimate', 'tags', 'checklists', 'subtasks', 'customFields'] as const
+export type TemplateImportItem = (typeof TEMPLATE_IMPORT_ITEMS)[number]
+export type TemplateImportItems = Partial<Record<TemplateImportItem, boolean>>
+
+/** The import choice as sent: absent is everything; an item that is not one, or not true or false, is refused. */
+export function readTemplateImportItems(raw: unknown): TemplateImportItems | null {
+  if (raw === undefined || raw === null) return null
+  if (typeof raw !== 'object' || Array.isArray(raw)) throw new BadRequestException('include must name the items to import')
+  const out: TemplateImportItems = {}
+  for (const [key, on] of Object.entries(raw as Record<string, unknown>)) {
+    if (!(TEMPLATE_IMPORT_ITEMS as readonly string[]).includes(key)) throw new BadRequestException(`Unknown import item: ${key}`)
+    if (typeof on !== 'boolean') throw new BadRequestException(`Import item ${key} must be true or false`)
+    out[key as TemplateImportItem] = on
+  }
+  return out
+}
+
+/** The payload with what was not chosen left out: an item not named is kept, as "Import everything" keeps it. */
+export function chooseTemplateItems(payload: TaskTemplatePayload, include: TemplateImportItems | null): TaskTemplatePayload {
+  if (!include) return payload
+  const keep = (item: TemplateImportItem) => include[item] !== false
+  return {
+    ...payload,
+    description: keep('description') ? payload.description : null,
+    priority: keep('priority') ? payload.priority : 'normal',
+    startDateOffsetDays: keep('dates') ? payload.startDateOffsetDays : null,
+    dueDateOffsetDays: keep('dates') ? payload.dueDateOffsetDays : null,
+    timeEstimate: keep('timeEstimate') ? payload.timeEstimate : null,
+    labels: keep('tags') ? payload.labels : [],
+    checklists: keep('checklists') ? payload.checklists : [],
+    subtasks: keep('subtasks') ? payload.subtasks : [],
+    customFieldValues: keep('customFields') ? payload.customFieldValues : [],
+  }
+}
+
+/**
  * A template's value its field did not take, and why, in words for the person
  * who applied it (`found-30-sep/template-leaves-values-out-silently`).
  */
@@ -445,14 +514,22 @@ export class TaskTemplatesService {
     workspaceId: string,
     taskId: string,
     actor: { id: string; email?: string; role?: string | null },
-    dto: { name: string; description?: string | null; icon?: string | null },
+    dto: { name: string; description?: string | null; icon?: string | null; include?: unknown; keepCheckedItems?: unknown },
   ): Promise<TaskTemplateView> {
+    // Read before the task is: a malformed choice is refused whatever it names.
+    const include = readTemplateImportItems(dto.include)
+    if (dto.keepCheckedItems !== undefined && typeof dto.keepCheckedItems !== 'boolean') {
+      throw new BadRequestException('keepCheckedItems must be true or false')
+    }
     const ctx = await this.resolveTaskContext(taskId)
     if (!ctx) throw new NotFoundException('Task not found')
     if (ctx.workspaceId !== workspaceId) throw new NotFoundException('Task not found in this workspace')
     await this.assertTaskOpenTo(workspaceId, taskId, actor)
 
-    const payload = await this.snapshotTask(taskId, ctx, { forTemplate: true })
+    const payload = chooseTemplateItems(
+      await this.snapshotTask(taskId, ctx, { forTemplate: true, keepChecked: dto.keepCheckedItems === true }),
+      include,
+    )
     return this.create(workspaceId, actor, {
       name: dto.name,
       description: dto.description ?? null,
@@ -545,8 +622,10 @@ export class TaskTemplatesService {
    * naming attachments of the original that the copy does not have. ClickUp's
    * help centre says a duplicate carries what you choose to include of the task,
    * and says nothing of a Voting or a Files field; the rules those fields' own
-   * route keeps decide it. The copy carries no votes and no files, and each
-   * other value as far as the field's route would take it now.
+   * route keeps decide it. The copy carries no votes; its Files value names the
+   * copy's own copies of the files when it takes them (`copyAttachmentsTo`),
+   * and nothing when it does not; each other value goes as far as the field's
+   * route would take it now.
    *
    * AND EACH INTO THE FIELD IT CAME FROM, the copy being in the same list with
    * the same fields (`found-30-sep/template-values-find-fields-by-name-alone`).
@@ -557,7 +636,17 @@ export class TaskTemplatesService {
    * field and none falls to a name: a value the task still held for a field it
    * no longer had went into another field of that name on the copy.
    */
-  async duplicateTask(workspaceId: string, taskId: string, actor: { id: string; email?: string; role?: string | null }) {
+  async duplicateTask(
+    workspaceId: string,
+    taskId: string,
+    actor: { id: string; email?: string; role?: string | null },
+    dto: { include?: unknown; keepCheckedItems?: unknown } = {},
+  ) {
+    // Read before the task is: a malformed choice is refused whatever it names.
+    const take = readDuplicateItems(dto.include)
+    if (dto.keepCheckedItems !== undefined && typeof dto.keepCheckedItems !== 'boolean') {
+      throw new BadRequestException('keepCheckedItems must be true or false')
+    }
     const ctx = await this.resolveTaskContext(taskId)
     if (!ctx) throw new NotFoundException('Task not found')
     if (ctx.workspaceId !== workspaceId) throw new NotFoundException('Task not found in this workspace')
@@ -590,29 +679,36 @@ export class TaskTemplatesService {
       .where(eq(taskLabelAssignments.taskId, taskId))
     const labelIds = tagged.map((t) => t.labelId)
 
-    const payload = await this.snapshotTask(taskId, ctx)
+    const payload = await this.snapshotTask(taskId, ctx, { keepChecked: take.checklists && dto.keepCheckedItems === true })
     const now = new Date()
 
     const task = await this.tasksService.createTask({
       listId: ctx.listId,
       title: `${payload.title || 'Task'} (copy)`,
-      description: payload.description ?? undefined,
+      description: take.description ? payload.description ?? undefined : undefined,
       priority: payload.priority,
       timeEstimate: payload.timeEstimate ?? undefined,
-      startDate: src?.startDate ?? undefined,
-      dueDate: src?.dueDate ?? undefined,
+      startDate: take.dates ? src?.startDate ?? undefined : undefined,
+      dueDate: take.dates ? src?.dueDate ?? undefined : undefined,
       // The copy's dates carry a time where the task's did (`taskDateTimeFlags`).
-      startDateHasTime: src?.startDateHasTime,
-      dueDateHasTime: src?.dueDateHasTime,
-      labelIds: labelIds.length ? labelIds : undefined,
-      assigneeIds: assigneeIds.length ? assigneeIds : undefined,
+      startDateHasTime: take.dates ? src?.startDateHasTime : undefined,
+      dueDateHasTime: take.dates ? src?.dueDateHasTime : undefined,
+      labelIds: take.tags && labelIds.length ? labelIds : undefined,
+      assigneeIds: take.assignees && assigneeIds.length ? assigneeIds : undefined,
       createdById: actor.id,
     })
     if (!task) throw new Error('Task creation returned no row')
 
-    await this.materialiseChecklists(task.id, payload.checklists)
-    await this.materialiseTemplateValues(task.id, { projectId: ctx.projectId, listId: ctx.listId }, workspaceId, payload.customFieldValues)
-    await this.materialiseSubtasks(ctx.listId, task.id, payload.subtasks, actor.id, now)
+    if (take.checklists) await this.materialiseChecklists(task.id, payload.checklists)
+    if (take.watchers) await this.tasksService.copyFollowersTo(taskId, task.id, actor.id)
+    // The files first, so the Files field can name the copy's own (`copyAttachmentsTo`).
+    const files = take.attachments
+      ? await this.tasksService.copyAttachmentsTo(taskId, task.id, actor.id)
+      : { copied: new Map<string, string>(), notCopied: [] as string[] }
+    if (take.customFields) {
+      await this.materialiseTemplateValues(task.id, { projectId: ctx.projectId, listId: ctx.listId }, workspaceId, payload.customFieldValues, files.copied)
+    }
+    if (take.subtasks) await this.materialiseSubtasks(ctx.listId, task.id, payload.subtasks, actor.id, now)
 
     await this.security.logAuditEvent({
       workspaceId,
@@ -625,7 +721,8 @@ export class TaskTemplatesService {
       metadata: { sourceTaskId: taskId },
     })
 
-    return { taskId: task.id, task }
+    // The files the copy could not take, by name, for the person who asked (`copyAttachmentsTo`).
+    return { taskId: task.id, task, filesNotCopied: files.notCopied }
   }
 
   // ----------------------------------------------------------- helpers
@@ -676,7 +773,7 @@ export class TaskTemplatesService {
   private async snapshotTask(
     taskId: string,
     place: { projectId: string; listId: string },
-    { forTemplate = false }: { forTemplate?: boolean } = {},
+    { forTemplate = false, keepChecked = false }: { forTemplate?: boolean; keepChecked?: boolean } = {},
   ): Promise<TaskTemplatePayload> {
     const [task] = await this.db
       .select()
@@ -754,7 +851,7 @@ export class TaskTemplatesService {
       labels: labelRows.map((l) => l.name),
       checklists: checklistRows.map((c) => ({
         title: c.title,
-        items: (itemsByChecklist.get(c.id) ?? []).map((i) => ({ content: i.content })),
+        items: (itemsByChecklist.get(c.id) ?? []).map((i) => ({ content: i.content, ...(keepChecked && i.isDone ? { done: true } : {}) })),
       })),
       subtasks: subtaskRows.map((s) => ({
         title: s.title,
@@ -788,6 +885,8 @@ export class TaskTemplatesService {
           checklistId: row.id,
           content: it.content,
           position: idx,
+          // Ticked only where the template keeps ticked items ticked (`chooseTemplateItems`).
+          isDone: it.done === true,
         })),
       )
     }
@@ -818,6 +917,8 @@ export class TaskTemplatesService {
     target: { projectId: string; listId: string },
     workspaceId: string,
     values: TaskTemplatePayload['customFieldValues'],
+    /** A duplicate's copies of its original's files: a Files value is carried over to them (`copyAttachmentsTo`). */
+    filesCopied?: ReadonlyMap<string, string>,
   ): Promise<TemplateValueLeftOut[]> {
     if (!values?.length) return []
     const defs = await this.db
@@ -873,6 +974,26 @@ export class TaskTemplatesService {
     const leftOut: TemplateValueLeftOut[] = []
     const rows: Array<typeof customFieldValues.$inferInsert> = []
     for (const { field: def, value: held } of planned) {
+      /*
+       * A FILES VALUE, ONTO THE COPIES OF ITS FILES (`found-30-sep/duplicate-copies-no-attachments`):
+       * a duplicate that took its original's files names its own copies, each
+       * as the field's route would take it (attached to the task itself). Any
+       * other Files value names files the new task does not have, and is left
+       * out, as before.
+       */
+      if (def.type === 'files' && filesCopied?.size && Array.isArray(held)) {
+        const ids = [...new Set(held.map((id) => filesCopied.get(String(id))).filter((id): id is string => !!id))]
+        if (!ids.length) continue
+        const taken = await this.customFields.checkValue(workspaceId, taskId, def, ids).then(
+          (checked) => ({ checked }),
+          (err: unknown) => {
+            if (err instanceof BadRequestException) return null
+            throw err
+          },
+        )
+        if (taken) rows.push({ taskId, fieldId: def.id, value: { v: taken.checked } })
+        continue
+      }
       if (held === null || held === undefined || NOT_FROM_TEMPLATES.has(def.type)) continue
       const value = fitTemplateValue(def, held, known)
       if (value === undefined) {
@@ -1002,7 +1123,7 @@ export class TaskTemplatesService {
           items: (c?.items ?? [])
             .filter((i: any) => i && typeof i.content === 'string')
             .slice(0, MAX_CHECKLIST_ITEMS)
-            .map((i: any) => ({ content: String(i.content).slice(0, 500) })),
+            .map((i: any) => ({ content: String(i.content).slice(0, 500), ...(i.done === true ? { done: true } : {}) })),
         })),
       subtasks: (raw.subtasks ?? [])
         .slice(0, MAX_SUBTASKS)

@@ -525,7 +525,7 @@ const CREATABLE_FIELD_TYPES: Array<{ value: string; labelKey: TranslationKey }> 
 ]
 
 /** §G15 frame #12 — what the create footer needs to know about. */
-type TaskTemplate = { id: string; name: string }
+type TaskTemplate = { id: string; name: string; description?: string | null }
 /**
  * What `POST …/task-templates/:id/instantiate` answers: the new task's id as
  * `taskId`, beside the task. Not a task, so it has no `id` of its own. With it,
@@ -585,6 +585,8 @@ function TemplatesMenu({
   onCloseAutoFocus: (e: Event) => void
 }) {
   const { t } = useTranslation()
+  // Before the return below: a hook is asked on every render or on none.
+  const [updateQuery, setUpdateQuery] = useState('')
   const chosen = templates.find((tpl) => tpl.id === chosenId)
   const any = templates.length > 0
   if (!any && !mayManage) return null
@@ -595,10 +597,38 @@ function TemplatesMenu({
    * throw away the half-filled task (the Create Task ▾ menu's rule, below).
    */
   const keepEscape = (e: KeyboardEvent) => e.stopPropagation()
+  /*
+   * UPDATE EXISTING TEMPLATE IS SEARCHED, as ClickUp's is: its update dialog
+   * lets you "look up the existing template" before picking it (help centre,
+   * "Use task templates", through search excerpts;
+   * `found-30-sep/save-as-template-asks-no-description`). The words typed
+   * filter the names, whatever their case; a key typed in the box is the box's,
+   * not the menu's type-ahead.
+   */
+  const shown = (prefix: string) => {
+    const q = prefix === 'update' ? updateQuery.trim().toLowerCase() : ''
+    return q ? templates.filter((tpl) => tpl.name.toLowerCase().includes(q)) : templates
+  }
   const listOf = (prefix: string, pick: (template: TaskTemplate) => void, checked?: string) => (
     <DropdownMenuPortal>
       <DropdownMenuSubContent className="z-[10002] w-60" data-testid={`quick-create-tpl-list-${prefix}`} onEscapeKeyDown={keepEscape}>
-        {templates.map((tpl) => (
+        {prefix === 'update' && (
+          <input
+            value={updateQuery}
+            onChange={(e) => setUpdateQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key !== 'Escape') e.stopPropagation() }}
+            data-testid="quick-create-tpl-search-update"
+            aria-label={t('quickCreate.templateSearchPlaceholder')}
+            placeholder={t('quickCreate.templateSearchPlaceholder')}
+            className="mb-1 h-7 w-full rounded-md border border-border bg-card px-1.5 text-[11px]"
+          />
+        )}
+        {prefix === 'update' && shown(prefix).length === 0 && (
+          <div className="px-2 py-1 text-[11px] text-muted-foreground" data-testid="quick-create-tpl-search-none">
+            {t('quickCreate.templateSearchNone')}
+          </div>
+        )}
+        {shown(prefix).map((tpl) => (
           <DropdownMenuItem
             key={tpl.id}
             data-testid={`quick-create-tpl-${prefix}-${tpl.id}`}
@@ -856,6 +886,8 @@ function TaskForm({
    */
   const [templatePanel, setTemplatePanel] = useState<TemplatePanel | null>(null)
   const [templateName, setTemplateName] = useState('')
+  // Optional, as ClickUp's save asks it (`found-30-sep/save-as-template-asks-no-description`).
+  const [templateDescription, setTemplateDescription] = useState('')
   const templateNameRef = useRef<HTMLInputElement>(null)
   /* Set when a menu item opens the panel, so the closing menu hands the cursor
    * to the name box rather than back to the Templates button. */
@@ -1408,10 +1440,13 @@ function TaskForm({
     focusTemplateName.current = true
     setTemplatePanel(panel)
     setTemplateName(name)
+    // An update starts from the template's own description; a save from none.
+    setTemplateDescription(panel.kind === 'update' ? panel.template.description ?? '' : '')
   }
   const closeTemplatePanel = () => {
     setTemplatePanel(null)
     setTemplateName('')
+    setTemplateDescription('')
   }
 
   /*
@@ -1421,7 +1456,7 @@ function TaskForm({
    */
   const saveTemplate = useMutation({
     mutationFn: (panel: TemplatePanel) => {
-      const body = { name: templateName.trim(), payload: formAsTemplate() }
+      const body = { name: templateName.trim(), description: templateDescription.trim() || null, payload: formAsTemplate() }
       return panel.kind === 'save'
         ? api<TaskTemplate>(`/workspaces/${workspaceId}/task-templates`, { method: 'POST', body })
         : api<TaskTemplate>(`/workspaces/${workspaceId}/task-templates/${panel.template.id}`, { method: 'PATCH', body })
@@ -2180,6 +2215,15 @@ function TaskForm({
               {t('common.cancel')}
             </Button>
           </div>
+          <textarea
+            value={templateDescription}
+            onChange={(e) => setTemplateDescription(e.target.value)}
+            data-testid="quick-create-tpl-description"
+            aria-label={t('quickCreate.templateDescriptionPlaceholder')}
+            placeholder={t('quickCreate.templateDescriptionPlaceholder')}
+            rows={2}
+            className="w-full resize-y rounded-md border border-border bg-card px-1.5 py-1 text-[11px]"
+          />
           <p className="text-[11px] text-muted-foreground" data-testid="quick-create-tpl-hint">
             {templatePanel.kind === 'save' ? t('quickCreate.templateSaveHint') : t('quickCreate.templateUpdateHint')}
           </p>

@@ -69,7 +69,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 26
+const EXPECTED_CHECKS = 27
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -661,6 +661,41 @@ try {
     'a clip on a comment is a card with its name on it',
     `the clip card's title reads "${await readText(page.getByTestId('comment-clip-title'))}" — the ` +
       'frame heads the card with the clip name rather than captioning it underneath',
+  )
+
+  /*
+   * AND THE CARD COPIES A LINK THAT LASTS (`found-30-sep/comment-clips-have-no-copy-link`).
+   * ClickUp's clip card copies the clip's URL. The file's own URL here is signed
+   * for 900 seconds, so the link is the comment's — the page's, naming the task
+   * and this comment — and it is opened again to show that it lands on the clip.
+   */
+  const copiesBeforeClipLink = (await page.evaluate(() => window.__clip)).copied.length
+  const copyButton = page.getByTestId('comment-clip-copy-link').filter({ visible: true }).first()
+  const offered = await copyButton.isVisible().catch(() => false)
+  if (offered) await copyButton.click()
+  const clipLink = offered && await waitUntil(
+    async () => (await page.evaluate(() => window.__clip)).copied.length > copiesBeforeClipLink,
+    { timeoutMs: 10_000 },
+  )
+    ? (await page.evaluate(() => window.__clip)).copied.at(-1)
+    : null
+  const namesIt = Boolean(clipLink) && clipLink.includes(`task=${task.id}`) && clipLink.includes(`comment=${posted.id}`)
+  let landsOnIt = false
+  if (namesIt) {
+    await page.goto(clipLink, { waitUntil: 'domcontentloaded' })
+    await settle()
+    landsOnIt = await waitUntil(
+      async () => (await readText(page.getByTestId('comment-clip-title').filter({ visible: true }))).includes('Stop Recording Guide'),
+      { timeoutMs: 25_000 },
+    )
+  }
+  chk(
+    namesIt && landsOnIt,
+    "and the card's Copy link copies the comment's link, which opens on the clip",
+    !offered
+      ? 'the clip card offers no Copy link'
+      : `the clipboard got ${JSON.stringify(clipLink)}` +
+        (namesIt ? ', which opened without showing the clip' : ` — it should name task=${task.id} and comment=${posted.id}`),
   )
 
   /*

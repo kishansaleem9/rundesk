@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { plainToInstance } from 'class-transformer'
 import { validate } from 'class-validator'
-import { TaskTemplatesService, fitTemplateValue, templateWithForm } from './task-templates.service'
+import { TaskTemplatesService, chooseTemplateItems, fitTemplateValue, readDuplicateItems, readTemplateImportItems, templateWithForm } from './task-templates.service'
 import { CreateTaskDto } from '../tasks/dto/task.dto'
 
 /**
@@ -53,7 +53,10 @@ function buildDb(opts: { selectQueues?: any[][]; insertReturning?: any[] } = {})
   } as any
 }
 
-const tasksServiceStub: any = { createTask: mock.fn(async () => ({ id: 'task-1' })) }
+/** A duplicate copies its original's files through TasksService; these stubs copy none. */
+const noFilesCopied = async () => ({ copied: new Map<string, string>(), notCopied: [] as string[] })
+const noFollowersCopied = async () => undefined
+const tasksServiceStub: any = { createTask: mock.fn(async () => ({ id: 'task-1' })), copyAttachmentsTo: noFilesCopied, copyFollowersTo: noFollowersCopied }
 const securityStub: any = { logAuditEvent: mock.fn(async () => undefined) }
 const ACTOR = { id: '00000000-0000-0000-0000-000000000001', email: 'a@b.com' }
 const WORKSPACE_ID = '00000000-0000-0000-0000-0000000000aa'
@@ -408,7 +411,7 @@ describe('TaskTemplatesService.instantiate — the template\'s lists reach the t
     // and then the field route's own check of the People list about to be written (`checkValue`).
     const { db, inserted } = recordingDb([[template], [{ workspaceId: WORKSPACE_ID, projectId: 'p' }], defs, [{ id: U1 }], [{ userId: U1 }]])
     const createTask = mock.fn(async () => ({ id: 'task-9' }))
-    await new TaskTemplatesService(db, { createTask } as any, securityStub).instantiate(WORKSPACE_ID, 'tpl-1', ACTOR, {
+    await new TaskTemplatesService(db, { createTask, copyAttachmentsTo: noFilesCopied, copyFollowersTo: noFollowersCopied } as any, securityStub).instantiate(WORKSPACE_ID, 'tpl-1', ACTOR, {
       listId: 'l',
     })
     assert.deepEqual(inserted[0], [
@@ -452,7 +455,7 @@ describe('TaskTemplatesService.instantiate — one value, only where the field o
     // The template, the list's place, the fields; no list names anybody, so nothing more is asked.
     const { db, inserted } = recordingDb([[template], [{ workspaceId: WORKSPACE_ID, projectId: 'p' }], defs])
     const createTask = mock.fn(async () => ({ id: 'task-9' }))
-    await new TaskTemplatesService(db, { createTask } as any, securityStub).instantiate(WORKSPACE_ID, 'tpl-1', ACTOR, {
+    await new TaskTemplatesService(db, { createTask, copyAttachmentsTo: noFilesCopied, copyFollowersTo: noFollowersCopied } as any, securityStub).instantiate(WORKSPACE_ID, 'tpl-1', ACTOR, {
       listId: 'l',
     })
     assert.deepEqual(inserted[0], [
@@ -485,7 +488,7 @@ describe('TaskTemplatesService — a task its caller may not open is not copied 
     const { db, inserted } = recordingDb([[{ workspaceId: WORKSPACE_ID, spaceId: 's', projectId: 'p', listId: 'l' }], []])
     const createTask = mock.fn(async () => ({ id: 'copy-1' }))
     await assert.rejects(
-      new TaskTemplatesService(db, { createTask } as any, securityStub).duplicateTask(WORKSPACE_ID, T1, ACTOR),
+      new TaskTemplatesService(db, { createTask, copyAttachmentsTo: noFilesCopied, copyFollowersTo: noFollowersCopied } as any, securityStub).duplicateTask(WORKSPACE_ID, T1, ACTOR),
       /Task not found in this workspace/,
     )
     assert.equal(createTask.mock.callCount(), 0)
@@ -529,12 +532,63 @@ describe('TaskTemplatesService.duplicateTask — the copy carries no votes and n
       defs, [{ id: U1 }], [{ userId: U1 }],
     ])
     const createTask = mock.fn(async () => ({ id: 'copy-1' }))
-    await new TaskTemplatesService(db, { createTask } as any, securityStub).duplicateTask(WORKSPACE_ID, T1, ACTOR)
+    await new TaskTemplatesService(db, { createTask, copyAttachmentsTo: noFilesCopied, copyFollowersTo: noFollowersCopied } as any, securityStub).duplicateTask(WORKSPACE_ID, T1, ACTOR)
     assert.deepEqual(inserted[0], [
       { taskId: 'copy-1', fieldId: 'f-people', value: { v: [U1] } },
       { taskId: 'copy-1', fieldId: 'f-tags', value: { v: ['red'] } },
       { taskId: 'copy-1', fieldId: 'f-budget', value: { v: 5 } },
     ])
+  })
+})
+
+/*
+ * `found-30-sep/duplicate-copies-no-attachments` — the copy takes the files it
+ * can and names the ones it could not (an object gone from the store, or no
+ * store), rather than failing after the copy exists; with Attachments off it
+ * asks for none.
+ */
+describe('TaskTemplatesService.duplicateTask — the files a copy could not take are named (found-30-sep/duplicate-copies-no-attachments)', () => {
+  // The task's place, the read rule, its dates, assignees and tags; then the task, its labels, checklists, subtasks and values.
+  const taskWithNoValues = () =>
+    recordingDb([
+      [{ workspaceId: WORKSPACE_ID, spaceId: 's', projectId: 'p', listId: 'l' }],
+      ...READABLE,
+      [{ startDate: null, dueDate: null }], [], [],
+      [{ title: 'Launch', description: null, priority: 'high', timeEstimate: null, startDate: null, dueDate: null }], [], [], [], [],
+    ]).db
+
+  it('answers the names of the files the copy does not have', async () => {
+    const copyAttachmentsTo = mock.fn(async () => ({ copied: new Map<string, string>(), notCopied: ['brief.pdf'] }))
+    const made = await new TaskTemplatesService(taskWithNoValues(), { createTask: mock.fn(async () => ({ id: 'copy-1' })), copyAttachmentsTo, copyFollowersTo: noFollowersCopied } as any, securityStub)
+      .duplicateTask(WORKSPACE_ID, T1, ACTOR)
+    assert.equal(copyAttachmentsTo.mock.callCount(), 1)
+    assert.deepEqual(made.filesNotCopied, ['brief.pdf'])
+  })
+
+  it('with Attachments off, asks for no file and names none', async () => {
+    const copyAttachmentsTo = mock.fn(noFilesCopied)
+    const made = await new TaskTemplatesService(taskWithNoValues(), { createTask: mock.fn(async () => ({ id: 'copy-1' })), copyAttachmentsTo, copyFollowersTo: noFollowersCopied } as any, securityStub)
+      .duplicateTask(WORKSPACE_ID, T1, ACTOR, { include: { attachments: false } })
+    assert.equal(copyAttachmentsTo.mock.callCount(), 0)
+    assert.deepEqual(made.filesNotCopied, [])
+  })
+
+  it('takes the followers along unless Watchers is off', async () => {
+    for (const watchers of [true, false]) {
+      const copyFollowersTo = mock.fn(noFollowersCopied)
+      await new TaskTemplatesService(taskWithNoValues(), { createTask: mock.fn(async () => ({ id: 'copy-1' })), copyAttachmentsTo: noFilesCopied, copyFollowersTo } as any, securityStub)
+        .duplicateTask(WORKSPACE_ID, T1, ACTOR, { include: { watchers } })
+      assert.equal(copyFollowersTo.mock.callCount(), watchers ? 1 : 0)
+    }
+  })
+
+  it('refuses a Keep checked items that is not true or false, before the task is read', async () => {
+    const { db, inserted } = recordingDb([])
+    await assert.rejects(
+      new TaskTemplatesService(db, tasksServiceStub, securityStub).duplicateTask(WORKSPACE_ID, T1, ACTOR, { keepCheckedItems: 'yes' }),
+      (e: unknown) => e instanceof BadRequestException && e.message === 'keepCheckedItems must be true or false',
+    )
+    assert.equal(inserted.length, 0)
   })
 })
 
@@ -561,7 +615,7 @@ describe('TaskTemplatesService — each value into a field the new task has (fou
   const applied = async (values: unknown[], defs: unknown[], listId: string) => {
     // The template, the list's place, then the project's fields.
     const { db, inserted } = recordingDb([[templateOf(values)], [{ workspaceId: WORKSPACE_ID, projectId: 'p' }], defs])
-    await new TaskTemplatesService(db, { createTask: mock.fn(async () => ({ id: 'task-9' })) } as any, securityStub)
+    await new TaskTemplatesService(db, { createTask: mock.fn(async () => ({ id: 'task-9' })), copyAttachmentsTo: noFilesCopied, copyFollowersTo: noFollowersCopied } as any, securityStub)
       .instantiate(WORKSPACE_ID, 'tpl-1', ACTOR, { listId })
     return inserted[0] ?? []
   }
@@ -621,7 +675,7 @@ describe('TaskTemplatesService — each value into a field the new task has (fou
       [task], [], [], [], values,
       [text(F_STAGE, 'Stage', null), text(F_STAGE_L2, 'Stage', 'l')],
     ])
-    await new TaskTemplatesService(db, { createTask: mock.fn(async () => ({ id: 'copy-1' })) } as any, securityStub).duplicateTask(WORKSPACE_ID, T1, ACTOR)
+    await new TaskTemplatesService(db, { createTask: mock.fn(async () => ({ id: 'copy-1' })), copyAttachmentsTo: noFilesCopied, copyFollowersTo: noFollowersCopied } as any, securityStub).duplicateTask(WORKSPACE_ID, T1, ACTOR)
     assert.deepEqual(inserted[0], [
       { taskId: 'copy-1', fieldId: F_STAGE, value: { v: 'project value' } },
       { taskId: 'copy-1', fieldId: F_STAGE_L2, value: { v: 'list value' } },
@@ -676,7 +730,7 @@ describe('TaskTemplatesService — each value into a field the new task has (fou
       [moved], [], [], [], values,
       fieldsOfP,
     ])
-    await new TaskTemplatesService(db, { createTask: mock.fn(async () => ({ id: 'copy-1' })) } as any, securityStub).duplicateTask(WORKSPACE_ID, T1, ACTOR)
+    await new TaskTemplatesService(db, { createTask: mock.fn(async () => ({ id: 'copy-1' })), copyAttachmentsTo: noFilesCopied, copyFollowersTo: noFollowersCopied } as any, securityStub).duplicateTask(WORKSPACE_ID, T1, ACTOR)
     return inserted[0] ?? []
   }
 
@@ -729,7 +783,7 @@ describe('TaskTemplatesService.instantiate — what the person set beside the te
       [{ workspaceId: WORKSPACE_ID, projectId: 'p' }],
     ])
     const createTask = mock.fn(async (_arg: any) => ({ id: 'task-9' }))
-    await new TaskTemplatesService(db, { createTask } as any, securityStub).instantiate(WORKSPACE_ID, 'tpl-1', ACTOR, {
+    await new TaskTemplatesService(db, { createTask, copyAttachmentsTo: noFilesCopied, copyFollowersTo: noFollowersCopied } as any, securityStub).instantiate(WORKSPACE_ID, 'tpl-1', ACTOR, {
       listId: 'l',
       ...form,
     })
@@ -803,7 +857,7 @@ describe('TaskTemplatesService.instantiate — a refused create makes no tag (fo
     const { db, inserted, set } = recordingDb([[template], [{ workspaceId: WORKSPACE_ID, projectId: 'p' }]])
     const createTask = mock.fn(async () => { throw new BadRequestException('That task type does not belong to this workspace') })
     await assert.rejects(
-      new TaskTemplatesService(db, { createTask } as any, securityStub).instantiate(WORKSPACE_ID, 'tpl-1', ACTOR, {
+      new TaskTemplatesService(db, { createTask, copyAttachmentsTo: noFilesCopied, copyFollowersTo: noFollowersCopied } as any, securityStub).instantiate(WORKSPACE_ID, 'tpl-1', ACTOR, {
         listId: 'l', taskTypeId: '44444444-4444-4444-8444-444444444444',
       }),
       /does not belong/,
@@ -824,7 +878,7 @@ describe('TaskTemplatesService.instantiate — a refused create makes no tag (fo
       [task], [{ name: 'A' }, { name: 'B' }], [], [], [],
     ])
     const createTask = mock.fn(async (_arg: any) => ({ id: 'copy-1' }))
-    await new TaskTemplatesService(db, { createTask } as any, securityStub).duplicateTask(WORKSPACE_ID, T1, ACTOR)
+    await new TaskTemplatesService(db, { createTask, copyAttachmentsTo: noFilesCopied, copyFollowersTo: noFollowersCopied } as any, securityStub).duplicateTask(WORKSPACE_ID, T1, ACTOR)
     const asked = createTask.mock.calls[0]?.arguments[0]
     assert.deepEqual(asked?.labelIds, ['label-a', 'label-b'])
     assert.equal(asked?.labelsByName, undefined)
@@ -881,7 +935,7 @@ describe('TaskTemplatesService.duplicateTask — each estimate copied as it is h
     ])
     const createTask = mock.fn(async (arg: any) => ({ id: arg.parentTaskId ? 'copy-sub' : 'copy-1' }))
     const audit = mock.fn(async () => undefined)
-    const answer = await new TaskTemplatesService(db, { createTask } as any, { logAuditEvent: audit } as any).duplicateTask(WORKSPACE_ID, T1, ACTOR)
+    const answer = await new TaskTemplatesService(db, { createTask, copyAttachmentsTo: noFilesCopied, copyFollowersTo: noFollowersCopied } as any, { logAuditEvent: audit } as any).duplicateTask(WORKSPACE_ID, T1, ACTOR)
     assert.equal(answer.taskId, 'copy-1')
     const asked = createTask.mock.calls.map((c) => c.arguments[0])
     assert.deepEqual(asked.map((a) => [a.title, a.parentTaskId, a.timeEstimate]), [['Launch (copy)', undefined, -600], ['Sub', 'copy-1', -60]])
@@ -985,5 +1039,69 @@ describe('TaskTemplatesService.requireTemplate', () => {
       () => svc.getById(WORKSPACE_ID, '00000000-0000-0000-0000-000000000099'),
       (e) => e instanceof NotFoundException,
     )
+  })
+})
+
+/*
+ * WHAT A TEMPLATE SAVED FROM A TASK CARRIES IS CHOSEN WHEN IT IS SAVED
+ * (`found-30-sep/load-template-takes-every-attribute`): ClickUp's "Import
+ * everything" or "Customize import items", and "Keep checked items".
+ */
+describe('chooseTemplateItems — the import options of a task saved as a template', () => {
+  const PAYLOAD = {
+    title: 'T', description: 'D', priority: 'high' as const, timeEstimate: 3600,
+    startDateOffsetDays: 1, dueDateOffsetDays: 4, labels: ['q3'],
+    checklists: [{ title: 'Steps', items: [{ content: 'one', done: true }, { content: 'two' }] }],
+    subtasks: [{ title: 'S', description: null, priority: 'low' as const, timeEstimate: null, dueDateOffsetDays: null }],
+    customFieldValues: [{ fieldName: 'Budget', value: 5 }],
+  }
+
+  it('keeps everything when nothing is chosen, as Import everything does', () => {
+    assert.deepEqual(chooseTemplateItems(PAYLOAD, null), PAYLOAD)
+    assert.deepEqual(chooseTemplateItems(PAYLOAD, {}), PAYLOAD)
+  })
+
+  it('leaves out each item turned off, and keeps the title and every item not named', () => {
+    const chosen = chooseTemplateItems(PAYLOAD, { subtasks: false, customFields: false, dates: false })
+    assert.deepEqual(chosen.subtasks, [])
+    assert.deepEqual(chosen.customFieldValues, [])
+    assert.equal(chosen.startDateOffsetDays, null)
+    assert.equal(chosen.dueDateOffsetDays, null)
+    assert.equal(chosen.title, 'T')
+    assert.deepEqual(chosen.checklists, PAYLOAD.checklists)
+    assert.equal(chosen.description, 'D')
+    assert.equal(chosen.priority, 'high')
+  })
+
+  it('refuses an item it does not know, or one that is not true or false, in words', () => {
+    assert.throws(() => readTemplateImportItems({ attachments: true }), (e: unknown) => e instanceof BadRequestException && e.message === 'Unknown import item: attachments')
+    assert.throws(() => readTemplateImportItems({ subtasks: 'no' }), (e: unknown) => e instanceof BadRequestException && e.message === 'Import item subtasks must be true or false')
+    assert.throws(() => readTemplateImportItems(['subtasks']), BadRequestException)
+    assert.equal(readTemplateImportItems(undefined), null)
+    assert.deepEqual(readTemplateImportItems({ tags: false }), { tags: false })
+  })
+})
+
+/*
+ * WHAT A DUPLICATE TAKES (`found-30-sep/duplicate-copies-no-attachments`):
+ * ClickUp's Duplicate asks what to include, every box ticked to begin with.
+ */
+describe('readDuplicateItems — what a duplicate takes', () => {
+  it('takes everything when nothing is said, attachments among it', () => {
+    const all = readDuplicateItems(undefined)
+    assert.deepEqual(Object.values(all), Object.values(all).map(() => true))
+    assert.equal(all.attachments, true)
+  })
+
+  it('leaves out what is turned off and keeps what is not named', () => {
+    const chosen = readDuplicateItems({ attachments: false, subtasks: false })
+    assert.equal(chosen.attachments, false)
+    assert.equal(chosen.subtasks, false)
+    assert.equal(chosen.checklists, true)
+  })
+
+  it('refuses an item it does not know, or one that is not true or false, in words', () => {
+    assert.throws(() => readDuplicateItems({ comments: true }), (e: unknown) => e instanceof BadRequestException && e.message === 'Unknown duplicate item: comments')
+    assert.throws(() => readDuplicateItems({ tags: 1 }), (e: unknown) => e instanceof BadRequestException && e.message === 'Duplicate item tags must be true or false')
   })
 })

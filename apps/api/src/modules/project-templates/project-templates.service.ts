@@ -777,6 +777,11 @@ export class ProjectTemplatesService implements OnModuleInit {
     actor: { id: string; role?: string | null },
     dto: {
       projectId: string
+      /**
+       * One list of the project, saved alone as a LIST template — ClickUp's
+       * list ⋯ › Templates › Save as Template (`found-30-sep/no-save-list-or-folder-as-template`).
+       */
+      listId?: string
       name: string
       description?: string
       icon?: string
@@ -795,11 +800,15 @@ export class ProjectTemplatesService implements OnModuleInit {
     if (!project) throw new NotFoundException('Project not found in this workspace')
     const isManager = await resolveIsManager(this.db, workspaceId, actor.id, actor.role)
 
+    // A list named is one of this project's, as its saver may open it, or nothing is saved.
+    const onlyList = dto.listId === undefined || dto.listId === null ? null : String(dto.listId)
+    if (onlyList !== null && !isUuid(onlyList)) throw new NotFoundException('List not found in this project')
     const projectLists = await this.db
       .select()
       .from(lists)
-      .where(and(eq(lists.projectId, dto.projectId), listVisibilityFilter(actor.id, isManager)))
+      .where(and(eq(lists.projectId, dto.projectId), listVisibilityFilter(actor.id, isManager), ...(onlyList ? [eq(lists.id, onlyList)] : [])))
       .orderBy(asc(lists.position))
+    if (onlyList && projectLists.length === 0) throw new NotFoundException('List not found in this project')
 
     const payload: TemplatePayload = { lists: [] }
     for (const list of projectLists) {

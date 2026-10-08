@@ -506,10 +506,29 @@ try {
     `they returned ${JSON.stringify([filesField, votingField])}`,
   )
 
-  const [att] = await sql`
-    insert into task_attachments (task_id, file_name, content_type, size_bytes, storage_key)
-    values (${task.id}, ${`brief-${TAG}.pdf`}, 'application/pdf', 1024, ${`k/${TAG}`})
-    returning id`
+  /*
+   * A file with bytes in the store, uploaded the product's way (presign, PUT,
+   * record): a duplicate copies the object itself (`copyAttachmentsTo`), and a
+   * row naming a key with nothing behind it is a file no copy can take.
+   */
+  const BRIEF = `brief-${TAG}.pdf`
+  const briefBytes = Buffer.from(`%PDF brief ${TAG}`)
+  const briefPre = await A(`/tasks/${task.id}/attachments/presign`, {
+    method: 'POST',
+    body: { fileName: BRIEF, contentType: 'application/pdf', sizeBytes: briefBytes.length },
+  })
+  const briefPut = briefPre.data?.uploadUrl
+    ? await fetch(briefPre.data.uploadUrl, { method: 'PUT', headers: { 'content-type': 'application/pdf' }, body: briefBytes })
+        .then((r) => r.status, () => 0)
+    : 0
+  const briefRecorded = briefPre.data?.storageKey && briefPut === 200
+    ? await A(`/tasks/${task.id}/attachments`, {
+        method: 'POST',
+        body: { fileName: BRIEF, storageKey: briefPre.data.storageKey, contentType: 'application/pdf', sizeBytes: briefBytes.length },
+      })
+    : null
+  const att = briefRecorded?.data?.id ? { id: briefRecorded.data.id } : null
+  if (!att) throw new Error(`the brief was not uploaded: presign ${briefPre.status}, PUT ${briefPut}, record ${briefRecorded?.status ?? 'not asked'}`)
   const [elsewhere] = await sql`
     insert into task_attachments (task_id, file_name, content_type, size_bytes, storage_key)
     values (${bare.id}, ${`other-${TAG}.pdf`}, 'application/pdf', 1024, ${`k/other-${TAG}`})
@@ -597,11 +616,27 @@ try {
     `the original held the votes ${JSON.stringify(votedBefore)}; ${copySaid}`,
   )
   const filesBefore = await readBack(filesField)
+  /*
+   * And the copy takes the file itself, as ClickUp's Duplicate offers
+   * attachments among what it takes (`found-30-sep/duplicate-copies-no-attachments`):
+   * an object of its own, so its Files field names the copy's file and none
+   * of the original's.
+   */
+  const copyFiles = copyId ? await sql`select id, storage_key from task_attachments where task_id = ${copyId}` : []
+  const copyFileIds = copyFiles.map((f) => f.id)
+  // Its own object, not a second row naming the original's: removing one task's file must not take the other's.
+  const ownObject = copyFiles.length === 1 && copyFiles[0].storage_key !== briefPre.data.storageKey
   chk(
-    JSON.stringify(filesBefore) === JSON.stringify([att.id]) && !!copyId && othersCopied && !(filesField in copied),
-    'and its Files field names none of the original’s attachments, which the copy does not have — while its other values are copied',
-    `the original's Files field held ${JSON.stringify(filesBefore)}; ${copySaid}`,
+    JSON.stringify(filesBefore) === JSON.stringify([att.id]) && !!copyId && othersCopied && ownObject
+      && copyFileIds.length === 1 && copyFileIds[0] !== att.id && JSON.stringify(copied[filesField]) === JSON.stringify(copyFileIds),
+    'and its Files field names the copy’s own copy of the file and none of the original’s attachments — while its other values are copied',
+    `the original's Files field held ${JSON.stringify(filesBefore)}; the copy's files are ${JSON.stringify(copyFiles)}; ${copySaid}`,
   )
+  // The two stored files go through the route that removes their objects too; the rows' cascade would leave them in the store.
+  for (const [onTask, file] of [[task.id, att.id], ...copyFiles.map((f) => [copyId, f.id])]) {
+    const gone = await A(`/tasks/${onTask}/attachments/${file}`, { method: 'DELETE' })
+    if (!gone.ok) console.log(`  cleanup left behind: attachment ${file} (DELETE answered ${gone.status})`)
+  }
 
   // ── §V2-01a — the field is created WHILE the task is being made ──────────
   /*

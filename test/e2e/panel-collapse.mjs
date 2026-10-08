@@ -369,12 +369,19 @@ try {
       `skipped: two docs could not be seeded to switch between (POST answered ${docA.status} / ${docB.status})`,
     )
   } else {
+    /*
+     * WAITED FOR, NOT SLEPT (`found-8-oct/panel-collapse-reads-the-address-after-a-fixed-wait`):
+     * the page writes the doc it opened into the address once the docs have
+     * loaded, and a sweep's load took longer than the 3.5 seconds this slept,
+     * so the address was read before it was written (batch 19's regression,
+     * lane 2). Each read below waits, bounded, for what it reads.
+     */
     await page.goto(`${origin}/app/${workspaceId}/docs`, { waitUntil: 'domcontentloaded' })
-    await page.waitForTimeout(3500)
+    await waitUntil(() => /[?&]doc=/.test(page.url()), { timeoutMs: 20_000 })
     docAddress.step(/[?&]doc=/.test(page.url()), page.url())
 
-    await page.getByTestId(`docs-tree-item-${idB}`).first().click()
-    await page.waitForTimeout(1800)
+    await page.getByTestId(`docs-tree-item-${idB}`).first().click({ timeout: 10_000 }).catch(() => {})
+    await waitUntil(() => page.url().includes(`doc=${idB}`), { timeoutMs: 10_000 })
     docAddress.step(page.url().includes(`doc=${idB}`), page.url())
 
     /*
@@ -386,10 +393,11 @@ try {
      */
     const opened = page.url()
     await page.goto(`${origin}/app/${workspaceId}/inbox`, { waitUntil: 'domcontentloaded' })
-    await page.waitForTimeout(1500)
+    await waitUntil(() => page.url().includes('/inbox'), { timeoutMs: 10_000 })
     await page.goto(opened, { waitUntil: 'domcontentloaded' })
-    await page.waitForTimeout(3500)
-    const activeTitle = await page.getByTestId('docs-active-title').filter({ visible: true }).innerText().catch(() => '')
+    const activeTitleNow = () => page.getByTestId('docs-active-title').filter({ visible: true }).innerText({ timeout: 1000 }).catch(() => '')
+    await waitUntil(async () => (await activeTitleNow()).includes(DOC_B), { timeoutMs: 20_000 })
+    const activeTitle = await activeTitleNow()
     docAddress.step(
       activeTitle.includes(DOC_B),
       `the editor opened "${activeTitle.trim()}" instead`,

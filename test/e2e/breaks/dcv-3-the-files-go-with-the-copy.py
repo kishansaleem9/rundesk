@@ -2,14 +2,17 @@
 # value is written onto a new task as it was held, so a duplicate's copy names attachments of the
 # original, which it does not have. Its votes are still left out.
 # Re-aimed 8 October: values left out are named in the answer (`found-30-sep/template-leaves-values-out-silently`).
-# Reddens: custom-field-progress: "and its Files field names none of the original’s attachments, which the copy does not have — while its other values are copied"
+# Re-aimed 8 October (batch 19): a duplicate's Files value goes to the copies of its files first (`found-30-sep/duplicate-copies-no-attachments`).
+# Reddens: custom-field-progress: "and its Files field names the copy’s own copy of the file and none of the original’s attachments — while its other values are copied"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/task-templates/task-templates.service.ts'
 a = ("    for (const { field: def, value: held } of planned) {\n"
-     "      if (held === null || held === undefined || NOT_FROM_TEMPLATES.has(def.type)) continue\n")
+     "      /*\n"
+     "       * A FILES VALUE, ONTO THE COPIES OF ITS FILES (`found-30-sep/duplicate-copies-no-attachments`):\n")
 b = ("    for (const { field: def, value: held } of planned) {\n"
      "      if (def.type === 'files' && Array.isArray(held)) { rows.push({ taskId, fieldId: def.id, value: { v: held } }); continue } // BROKEN: the files go with it\n"
-     "      if (held === null || held === undefined || NOT_FROM_TEMPLATES.has(def.type)) continue\n")
+     "      /*\n"
+     "       * A FILES VALUE, ONTO THE COPIES OF ITS FILES (`found-30-sep/duplicate-copies-no-attachments`):\n")
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

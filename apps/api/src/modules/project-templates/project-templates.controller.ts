@@ -74,6 +74,7 @@ export class ProjectTemplatesController {
     @CurrentUser() user: any,
     @Body() body: {
       projectId: string
+      listId?: string
       name: string
       description?: string
       icon?: string
