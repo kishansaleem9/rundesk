@@ -19,7 +19,7 @@ the ClickUp CSV importer and the older spreadsheet importer behind
 and appear in the same history; they cannot be deleted as a unit, because they
 never recorded what they made.
 
-## Data model (migration `0172_imports_exports.sql`)
+## Data model (migration `0175_imports_exports.sql`)
 
 - **`clickup_import_jobs`** — the one job table for every importer (kept under
   its old name: about a hundred break patches and suites anchor on it).
