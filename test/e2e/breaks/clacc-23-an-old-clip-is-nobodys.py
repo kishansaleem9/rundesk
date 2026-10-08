@@ -5,7 +5,7 @@
 # alone, so it is nobody's — its recorder is offered no Delete and refused one,
 # and a guest loses their old clips from their library and their search.
 #
-# Reddens: clip-library-access: "a clip stored before clips carried their recorder’s id is its recorder’s by their address — listed with Delete, found, linked and deleted by them — and nobody else’s"
+# Reddens: clip-library-access: "a clip stored before clips carried their recorder’s id is its recorder’s by their address — listed with Delete, found and deleted by them, its link refused them only as a guest’s public one — and nobody else’s"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/clips/clip-reader.ts'
 a = '    email: row?.email ?? null,\n'

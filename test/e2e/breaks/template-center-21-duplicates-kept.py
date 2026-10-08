@@ -4,7 +4,7 @@
 # the card for one word. The facet counts templates, so its numbers stay right,
 # and only the row says so.
 #
-# Reddens: template-center: "a template made with \" Q3 \", \"client\" and \"q3\" carries Q3 and client, trimmed and once each (read from the database)"
+# Reddens: template-center: "a template made with \" Q3 \", \"client\" and \"q3\" carries q3 and client, in lower case, trimmed and once each (read from the database)"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/project-templates/project-templates.service.ts'
 a = "    if (seen.has(key)) continue\n"

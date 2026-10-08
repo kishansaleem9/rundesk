@@ -2,11 +2,15 @@
 # The route's refusal is passed on instead of leaving that one field unset: applying a template
 # whose Estimate is words, where the Estimate is a Number, answers 400 — after the task has been
 # made — and none of the values its fields could hold is written onto it.
+# Re-aimed 8 October: values left out are named in the answer (`found-30-sep/template-leaves-values-out-silently`).
 # Reddens: create-modal-templates: "and words that are no address, where that field is an Email field, leave it unset — as its route refuses them (400) — while the Note, a Text field there too, is written"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/task-templates/task-templates.service.ts'
 a = ("        (err: unknown) => {\n"
-     "          if (err instanceof BadRequestException) return null\n"
+     "          if (err instanceof BadRequestException) {\n"
+     "            leftOut.push({ field: def.name, reason: err.message })\n"
+     "            return null\n"
+     "          }\n"
      "          throw err\n"
      "        },\n")
 b = ("        (err: unknown) => {\n"

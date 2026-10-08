@@ -38,10 +38,17 @@ describe('assertMayImport (found-6-oct/a-guest-who-may-import-makes-a-space)', (
     assert.equal(GUESTS_CANNOT_IMPORT, 'Guests cannot import data into a workspace')
   })
 
-  it('a member, a manager and an admin are not refused by it, nor a platform admin who is no member', async () => {
-    for (const rows of [[{ role: 'member' }], [{ role: 'manager' }], [{ role: 'workspace_admin' }], []]) {
+  it('a member, a manager and an admin are not refused by it', async () => {
+    for (const rows of [[{ role: 'member' }], [{ role: 'manager' }], [{ role: 'workspace_admin' }]]) {
       await assertMayImport(memberAs(rows), { workspaceId: WS, actorId: ACTOR })
     }
+  })
+
+  it('a platform admin who is no member is refused 403 “You are not a member of this workspace” (found-6-oct/super-admin-outside-makes-what-it-cannot-change)', async () => {
+    await assert.rejects(
+      () => assertMayImport(memberAs([]), { workspaceId: WS, actorId: ACTOR }),
+      (e: unknown) => e instanceof ForbiddenException && e.message === 'You are not a member of this workspace',
+    )
   })
 })
 

@@ -128,6 +128,29 @@ export async function readableTask(
   actor: ReadActor,
   opts: { asAssignee?: boolean } = {},
 ): Promise<{ taskId: string; listId: string; projectId: string } | null> {
+  const answer = await taskReadAnswer(db, workspaceId, taskId, actor, opts)
+  return answer && 'found' in answer ? answer.found : null
+}
+
+/**
+ * The read rule's answer for a task, WITH ITS REASON: the task when `actor` may
+ * open it; `{ refused }` in the words `ResourceMemberGuard` refuses the same
+ * read with, when they may not; null when no such task is in `workspaceId`.
+ *
+ * For a write, which is refused as its read is (the owner's rule of 1 October,
+ * carried to writes on 8 October: `found-6-oct/task-writes-answer-a-refusal-as-not-found`).
+ * The write rule answered a task its caller may not open as 404 "Task not
+ * found", as an id naming nothing, while the guard answered its read 403 with
+ * the reason. Asked in the guard's order: membership, the container, a guest's
+ * reach, the private list, the private task.
+ */
+export async function taskReadAnswer(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+  actor: ReadActor,
+  opts: { asAssignee?: boolean } = {},
+): Promise<{ found: { taskId: string; listId: string; projectId: string } } | { refused: string } | null> {
   const [row] = await db
     .select({
       taskId: tasks.id,
@@ -149,19 +172,21 @@ export async function readableTask(
     .limit(1)
   if (!row) return null
   const found = { taskId: row.taskId, listId: row.listId, projectId: row.projectId }
-  if (actor.role === 'super_admin') return found
+  if (actor.role === 'super_admin') return { found }
   const role = await workspaceRole(db, workspaceId, actor.id)
-  if (!role) return null
+  if (!role) return { refused: READ_REFUSALS.notMember }
   const inContainer = await checkContainerAccess(
     db,
     { spaceId: row.spaceId, spaceVisibility: row.spaceVisibility, projectId: row.projectId, projectVisibility: row.projectVisibility },
     { userId: actor.id, workspaceRole: role },
   )
-  if (!inContainer) return null
+  if (!inContainer) return { refused: READ_REFUSALS.privateContainer }
   // A guest reads only the tasks in their reach (`guest-reach.ts`).
-  if (role === 'guest' && !(await guestMayRead(db, actor.id, 'task', row.taskId))) return null
+  if (role === 'guest' && !(await guestMayRead(db, actor.id, 'task', row.taskId))) return { refused: READ_REFUSALS.notShared }
   const isManager = isManagerRole(role)
-  if (!canSeePrivateItem({ visibility: row.listVisibility, createdById: row.listCreatedById }, { userId: actor.id, isManager })) return null
+  if (!canSeePrivateItem({ visibility: row.listVisibility, createdById: row.listCreatedById }, { userId: actor.id, isManager })) {
+    return { refused: READ_REFUSALS.privateList }
+  }
   if (row.taskVisibility === 'private' && !isManager && row.taskCreatedById !== actor.id && !opts.asAssignee) {
     const [assigned] = await db
       .select({ userId: taskAssignees.userId })
@@ -171,10 +196,23 @@ export async function readableTask(
     if (!canSeePrivateItem(
       { visibility: row.taskVisibility, createdById: row.taskCreatedById },
       { userId: actor.id, isManager, isAssignee: !!assigned },
-    )) return null
+    )) return { refused: READ_REFUSALS.privateTask }
   }
-  return found
+  return { found }
 }
+
+/**
+ * What `ResourceMemberGuard` says when it refuses a read, one sentence for each
+ * thing that can stand in front of it — the owner's rule of 1 October: 403 with
+ * the reason. The write rule and the doc rule say the same (`taskReadAnswer`).
+ */
+export const READ_REFUSALS = {
+  notMember: 'You are not a member of this workspace',
+  privateContainer: 'This space or project is private',
+  notShared: 'This is not shared with you',
+  privateList: 'This list is private',
+  privateTask: 'This task is private',
+} as const
 
 /**
  * Of these task ids, the ones in `workspaceId` that this person may open — the

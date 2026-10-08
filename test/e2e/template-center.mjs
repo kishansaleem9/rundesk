@@ -72,7 +72,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure. */
-const EXPECTED_CHECKS = 81
+const EXPECTED_CHECKS = 82
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -278,8 +278,8 @@ const settle = async (expected) => waitForCount(cards(), expected, { timeoutMs: 
  * `ledger-rows/row-1874` — the top row's menus as [value, shown label], read
  * only while the menu itself is drawn (Playwright counts no <option> visible,
  * so the select is the guard), lower-cased where a check is about the words
- * and their counts. Which spelling is shown is a rule of its own, checked
- * unlowered (`found-30-sep/template-tags-spelled-by-collation`).
+ * and their counts. That tags are stored and shown in lower case is checked
+ * unlowered (`found-30-sep/template-tags-keep-their-case`).
  */
 const optionsOf = (testId) =>
   page.locator(`[data-testid="${testId}"]`).filter({ visible: true }).locator('option').evaluateAll(
@@ -298,31 +298,6 @@ const tagsInDb = async (id) => {
     return `unreadable: ${String(e?.message ?? e).split('\n')[0]}`
   }
 }
-/*
- * `found-30-sep/template-tags-spelled-by-collation` — the spelling of each of
- * this run's tag words that a collation sorts FIRST, which is what `min(t)`
- * showed. Asked with an explicit COLLATE each way, because the database's own
- * is one of the two: C on the lanes, en_US in CI. Or why it could not be read.
- */
-const firstSpellings = async () => {
-  if (!sql) return 'no DATABASE_URL to ask'
-  try {
-    const rows = await sql`
-      select lower(t) as word,
-             (array_agg(t order by t collate "C"))[1] as c,
-             (array_agg(t order by t collate "en-US-x-icu"))[1] as en_us
-      from project_templates, unnest(tags) as t
-      where workspace_id = ${WS} and name like ${`${TAG} %`}
-      group by lower(t)`
-    return {
-      C: Object.fromEntries(rows.map((r) => [r.word, r.c])),
-      enUS: Object.fromEntries(rows.map((r) => [r.word, r.en_us])),
-    }
-  } catch (e) {
-    return `unreadable: ${String(e?.message ?? e).split('\n')[0]}`
-  }
-}
-
 try {
   await page.goto(`${B}/login`, { waitUntil: 'domcontentloaded' })
   await page.fill('input[type=email]', EMAIL)
@@ -579,20 +554,17 @@ try {
     'Tags counts client 3, Q3 6 and Retro 1 — one word whatever the case it was tagged in, in alphabetical order',
     `it read ${JSON.stringify(await optionsOf('templates-facet-tag'))}`)
   /*
-   * `found-30-sep/template-tags-spelled-by-collation` — AND IN WHICH SPELLING,
-   * not lower-cased this time. "client" is on two of its three templates and
-   * "Client" on one; "Q3" on four of six and "q3" on two; "Retro" is spelled
-   * once. The rule shows client, Q3, Retro. C sorts Client first and en-US q3,
-   * so a menu spelled by either collation's `min()` differs from it on one
-   * word — the database is asked which, so the seed is seen to tell them apart.
+   * `found-30-sep/template-tags-keep-their-case` — AND IN LOWER CASE, as each is
+   * stored and as ClickUp keeps a tag, read unlowered: the seed typed "Q3",
+   * "Client" and "Retro", and each template kept its own spelling, so the facet
+   * had to choose one per word (`found-30-sep/template-tags-spelled-by-collation`).
    */
-  const SPELLED = [['client', 'client (3)'], ['Q3', 'Q3 (6)'], ['Retro', 'Retro (1)']]
+  const SPELLED = [['client', 'client (3)'], ['q3', 'q3 (6)'], ['retro', 'retro (1)']]
   const tagOptions = async () => (await optionsOf('templates-facet-tag')).slice(1)
   const spelledNow = await waitUntil(async () => JSON.stringify(await tagOptions()) === JSON.stringify(SPELLED), { timeoutMs: 8_000 })
-  const firsts = await firstSpellings()
-  chk(spelledNow && firsts?.C?.client === 'Client' && firsts?.enUS?.q3 === 'q3',
-    'and shows each word in the spelling most of its templates carry — client, Q3, Retro — which neither collation sorts first for every word: C puts Client first, en-US q3 (asked with an explicit COLLATE)',
-    `it read ${JSON.stringify(await tagOptions())}; sorted first by C ${JSON.stringify(firsts?.C ?? firsts)}, by en-US ${JSON.stringify(firsts?.enUS ?? firsts)}`)
+  chk(spelledNow,
+    'and shows each word in lower case, as the templates carry it — client, q3, retro — whatever case it was typed in',
+    `it read ${JSON.stringify(await tagOptions())}`)
   const q3Option = (await optionsOf('templates-facet-tag')).find(([v]) => v.toLowerCase() === 'q3')?.[0] ?? 'Q3'
   const q3Ids = TAGGED('q3').map((i) => created[i])
   mark = browseCalls.length
@@ -625,8 +597,8 @@ try {
     `from ${fromSix ? 'the six' : 'a grid that had not narrowed'}, the grid drew ${await cards().count()} cards`)
   // eng-a was made with " Q3 ", "client" and "q3": what the row holds is the cleaned list.
   const engA = await tagsInDb(created[0])
-  chk(JSON.stringify(engA) === JSON.stringify(['Q3', 'client']),
-    'a template made with " Q3 ", "client" and "q3" carries Q3 and client, trimmed and once each (read from the database)',
+  chk(JSON.stringify(engA) === JSON.stringify(['q3', 'client']),
+    'a template made with " Q3 ", "client" and "q3" carries q3 and client, in lower case, trimmed and once each (read from the database)',
     `the row holds ${JSON.stringify(engA)}`)
 
   console.log('\n▶ categories — sections with counts, and a "See N more" that means it')
@@ -812,6 +784,13 @@ try {
     await page.getByTestId('templates-save-tags-input').fill(word, { timeout: 8000 }).catch(() => {})
     await page.getByTestId('templates-save-tags-input').press('Enter', { timeout: 8000 }).catch(() => {})
   }
+  // Before Save, the chips say what will be kept: in lower case, one per word (`found-30-sep/template-tags-keep-their-case`).
+  const typedChips = () => page.getByTestId('templates-save-tags-chip').filter({ visible: true }).allInnerTexts().catch(() => [])
+  let chipsBeforeSave = []
+  await waitUntil(async () => JSON.stringify(chipsBeforeSave = (await typedChips()).map((s) => s.trim())) === JSON.stringify(['q3', 'launch day']), { timeoutMs: 5000 })
+  chk(JSON.stringify(chipsBeforeSave) === JSON.stringify(['q3', 'launch day']),
+    'typed into the save dialog, Q3, "  Launch   day " and q3 show as q3 and launch day before Save — as they will be kept',
+    `the dialog's chips read ${JSON.stringify(chipsBeforeSave)}`)
   await page.getByTestId('templates-save-submit').click({ timeout: 10_000 }).catch(() => {})
   // The row by its name alone, so it is found and taken back even where the tags cannot be read.
   let savedId = null
@@ -825,8 +804,8 @@ try {
     madeRow('project_templates', savedId)
   }
   const savedTags = await tagsInDb(savedId)
-  chk(JSON.stringify(savedTags) === JSON.stringify(['Q3', 'Launch day']),
-    'a template saved from the page with Q3, "  Launch   day " and q3 carries Q3 and Launch day (read from the database)',
+  chk(JSON.stringify(savedTags) === JSON.stringify(['q3', 'launch day']),
+    'a template saved from the page with Q3, "  Launch   day " and q3 carries q3 and launch day (read from the database)',
     `the row ${savedId ?? '(none saved)'} holds ${JSON.stringify(savedTags)}`)
   chk(await waitUntil(async () => (await makers()).some(([v, label]) => v === ADMIN.id && label === `${ADMIN.name} (8)`), { timeoutMs: 10_000 }),
     'and Created by counts it under the admin who saved it — 8 now',
@@ -846,28 +825,28 @@ try {
   await waitUntil(async () => (await page.locator(`[data-testid="templates-card"][data-template-id="${savedId}"]`).count()) === 1,
     { timeoutMs: 15_000 })
   await page.locator(`[data-testid="templates-card-edit-tags"][data-template-id="${savedId}"]`).click({ timeout: 10_000 }).catch(() => {})
-  await page.getByTestId('templates-tags-dialog').getByRole('button', { name: 'Remove tag Launch day' }).click({ timeout: 8000 }).catch(() => {})
-  await page.getByTestId('templates-tags-input').fill('retro', { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('templates-tags-dialog').getByRole('button', { name: 'Remove tag launch day' }).click({ timeout: 8000 }).catch(() => {})
+  // Typed in capitals: kept, as every tag is, in lower case (`found-30-sep/template-tags-keep-their-case`).
+  await page.getByTestId('templates-tags-input').fill('Retro', { timeout: 8000 }).catch(() => {})
   await page.getByTestId('templates-tags-input').press('Enter', { timeout: 8000 }).catch(() => {})
   await page.getByTestId('templates-tags-save').click({ timeout: 8000 }).catch(() => {})
   let editedTags = null
-  await waitUntil(async () => JSON.stringify(editedTags = await tagsInDb(savedId)) === JSON.stringify(['Q3', 'retro']), { timeoutMs: 10_000 })
-  chk(JSON.stringify(editedTags) === JSON.stringify(['Q3', 'retro']),
-    'the tag icon on its card changes a saved template\'s tags — Launch day off, retro on — and the database holds Q3 and retro',
+  await waitUntil(async () => JSON.stringify(editedTags = await tagsInDb(savedId)) === JSON.stringify(['q3', 'retro']), { timeoutMs: 10_000 })
+  chk(JSON.stringify(editedTags) === JSON.stringify(['q3', 'retro']),
+    'the tag icon on its card changes a saved template\'s tags — launch day off, Retro typed on — and the database holds q3 and retro',
     `the row holds ${JSON.stringify(editedTags)}`)
   const TAGS_AFTER_EDIT = [['client', 'client (3)'], ['q3', 'q3 (7)'], ['retro', 'retro (2)']]
   chk(await waitUntil(async () => JSON.stringify(await tagMenu()) === JSON.stringify(TAGS_AFTER_EDIT), { timeoutMs: 10_000 }),
     'and the Tags facet follows — Retro 2, and Launch day gone',
     `it read ${JSON.stringify(await optionsOf('templates-facet-tag'))}`)
   /*
-   * `found-30-sep/template-tags-spelled-by-collation` — the rule's second step.
-   * "Retro" has been on eng-c since the run began and "retro" was written on
-   * the saved template just now: one template each, so the one written last is
-   * shown. C sorts Retro first.
+   * `found-30-sep/template-tags-keep-their-case` — the tag typed in capitals in
+   * the dialog is one word with eng-c's, which the seed typed "Retro": both
+   * carry retro, and the facet shows retro twice, unlowered.
    */
-  const SPELLED_AFTER_EDIT = [['client', 'client (3)'], ['Q3', 'Q3 (7)'], ['retro', 'retro (2)']]
+  const SPELLED_AFTER_EDIT = [['client', 'client (3)'], ['q3', 'q3 (7)'], ['retro', 'retro (2)']]
   chk(await waitUntil(async () => JSON.stringify(await tagOptions()) === JSON.stringify(SPELLED_AFTER_EDIT), { timeoutMs: 10_000 }),
-    'and a word carried as often in two spellings is shown in the one written last — retro, just written, over Retro',
+    'and Retro typed in the dialog is kept in lower case, one word with the seed’s Retro — the facet shows retro (2)',
     `it read ${JSON.stringify(await tagOptions())}`)
   /*
    * WHO MAY. The route asks `template.manage`, the key that saves and deletes
@@ -885,7 +864,7 @@ try {
   // And the second maker, a manager, may — on a template somebody else made (eng-d, the admin's, untagged).
   const byManager = await maker.as(`/workspaces/${WS}/project-templates/${created[3]}/tags`, { method: 'PATCH', body: { tags: ['Q3'] } })
   const engD = await tagsInDb(created[3])
-  chk(byManager.status === 200 && JSON.stringify(engD) === JSON.stringify(['Q3']),
+  chk(byManager.status === 200 && JSON.stringify(engD) === JSON.stringify(['q3']),
     'a manager, who holds template.manage by default, may tag a template somebody else made',
     `HTTP ${byManager.status} ${JSON.stringify(byManager.error?.message ?? null)}; the row holds ${JSON.stringify(engD)}`)
   /*

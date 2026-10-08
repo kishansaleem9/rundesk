@@ -3,7 +3,7 @@
 # The chips change in the dialog, Save answers 200 with a toast, and the list
 # sent is the template's own, so nothing changes: an edit that reports success.
 #
-# Reddens: template-center: "the tag icon on its card changes a saved template's tags — Launch day off, retro on — and the database holds Q3 and retro"
+# Reddens: template-center: "the tag icon on its card changes a saved template's tags — launch day off, Retro typed on — and the database holds q3 and retro"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-templates-page.tsx'
 a = "        body: { tags },\n"

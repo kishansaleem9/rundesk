@@ -1,12 +1,16 @@
 # A TEMPLATE'S VALUES ARE WRITTEN UNCHECKED AGAIN, as `tvu-1`, for the unit test that reads
 # what `instantiate` writes (`found-30-sep/template-values-written-unchecked`).
+# Re-aimed 8 October: values left out are named in the answer (`found-30-sep/template-leaves-values-out-silently`).
 # Reddens: unit: task-templates.service.test.ts "writes no words into a Number field, no option a Dropdown does not define and no words into an Email field, and writes the values its fields can hold"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/task-templates/task-templates.service.ts'
 a = ("      const taken = await this.customFields.checkValue(workspaceId, taskId, def, value).then(\n"
      "        (checked) => ({ checked }),\n"
      "        (err: unknown) => {\n"
-     "          if (err instanceof BadRequestException) return null\n"
+     "          if (err instanceof BadRequestException) {\n"
+     "            leftOut.push({ field: def.name, reason: err.message })\n"
+     "            return null\n"
+     "          }\n"
      "          throw err\n"
      "        },\n"
      "      )\n")

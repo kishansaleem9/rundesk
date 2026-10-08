@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 531 items: 0 open · 0 partly fixed · 474 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 531 items: 0 open · 0 partly fixed · 480 closed, and 51 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1969,6 +1969,8 @@ Checks:
 - `template-center-34` (the collation's first spelling) and `-35` (a tie given to the first written) are new, each reddening its check. The break runner measured them at 8c1b727 (lane 1): 79 and 80 of 81 against 81/81.
 - `template-center-17`'s anchor went with `group by lower(t)`. It is re-aimed at the word column and still reddens its check.
 - `ptt-17` and `ptt-18` are unit claims, each reddening its test in `project-templates.service.test.ts` (7 tests new).
+
+*Superseded in part, 8 October:* a template's tags are kept in lower case now (`found-30-sep/template-tags-keep-their-case`), so a word has one spelling and nothing is left for the facet to choose; `template-center`'s spelling checks read lower case, and `template-center-34` and `-35`, which set one stored spelling against another, are retired.
 
 ### `found-30-sep/killed-suites-leave-members-behind` — **closed** (test tooling, small; found closing `ledger-rows/row-1874`)
 
@@ -10292,6 +10294,140 @@ Checks: `person-panel` 60 → 61: "the tasks the bucket checks look for are made
 
 Checks: `check-ledger-ids-cases.mjs` 11 → 13: "a day's find of another month, its day in one digit, is read and names its item" and "and an October id the ledger does not have is a failure too, not passed unread". Mutation `september-only` (the September pattern again) reddens both; 10 of 10 mutations bite.
 
+## Closed from the uncounted list, as ClickUp works them (8 October) — 6
+
+On the owner's word of 8 October ("close all of these properly … close them as they work on clickup"), the
+items the triage set aside as features and decisions are closed one by one: as ClickUp works each where its
+sources say how, and as Rundesk already works where they are silent. Each moves here from the last section with
+its evidence, is reproduced on a lane before it is changed, and is counted as closed.
+
+### `found-6-oct/task-writes-answer-a-refusal-as-not-found` — **closed** (decision, small; found closing `found-5-oct/super-admin-cannot-write-a-task-it-reads`; was not counted, a decision for the owner) · reproduced 8 October
+
+**A task its caller may not open answers 403 with its reason when read, and 404 "Task not found" when changed or moved**
+
+*Measured, 6 October, lane 6:* a plain member's `GET` of a private space's task answered 403 "This space or project is private", and their `PATCH` of it 404 "Task not found". `PATCH /tasks/:id` and `POST /tasks/:id/move` carry no `ResourceMemberGuard`, and the write rule answers a task its caller may not read as not found; this predates the owner's decision of 1 October, which named reads (403 with the reason, for tasks, lists, projects and spaces). Whether writes follow it is the owner's to say. If they do: the write rule answers 403 with the read rule's reason for a task the caller may not open, and 404 for an id naming nothing, paired in a suite. `super-admin-task-writes` takes 403 or 404 with nothing changed, so it pins neither.
+
+*Closed, 8 October* (lane 3), on the owner's word of 8 October to close the uncounted items as ClickUp works them. ClickUp's sources say nothing of what a refused change answers; Rundesk's own rule, the owner's of 1 October, answers a read its caller may not make 403 with the reason, and a change or a move of the same task is refused in the same words now. The write rule (`assertTaskWritable`, `common/permissions/task-write.ts`) asks the read rule's answer (`taskReadAnswer`, `read-access.ts`): a task its caller may not open is 403 in the guard's sentence ("This task is private", "This list is private", "This space or project is private", "This is not shared with you"); somebody of another workspace is 403 "You are not a member of this workspace", where they were told "Workspace not found"; and an id naming nothing is still 404 "Task not found".
+
+Measured on lane 3 with `refused-as-forbidden`'s new section 13: a member's change of a private task, of one in a private list and of one in a private space, and their move of the last; a guest's change of a task not shared with them; a stranger's.
+- Before (the API before the change): each 404 "Task not found", the stranger's "Workspace not found"; 12 of 15, with sections 14 and 15 (below).
+- After: each 403 in its refusal's words, nothing changed (SQL), and a change of an id naming nothing 404; 15 of 15.
+
+Checks:
+- `refused-as-forbidden` 12 → 15 (this and the two below): "a change or a move of a task its caller may not open is refused 403 in the read’s words — a private task, list or space, a guest’s, a stranger’s — and nothing changes (SQL); a change of an id naming nothing is 404".
+- Patches `raf-13` (a refused change is 404 again) and `raf-14` (a stranger's is "Workspace not found" again) redden it: 14 and 13 of 15 on lane 3.
+- The patches written on the write rule's old lines (`tel-2`, `gte-1`, `gte-2`, `saw-1`–`saw-3`, `tws-1`–`tws-4`) are re-aimed at the new ones; each still reddens its check on lane 3 (`tel-2` 4 of 5, `gte-1` 1 of 6, `gte-2` 5 of 6, `saw-1` 3 of 7, `saw-2` and `saw-3` 6 of 7; `tws-1`–`tws-4` are unit claims, read by the preflight). `guest-task-edits` reads a guest's change of a task not shared with them as 403 "This is not shared with you" now, as its read is refused, and the write rule's unit test a member's change in a private list as 403 "This list is private".
+
+### `found-6-oct/super-admin-outside-makes-what-it-cannot-change` — **closed** (security, small; found closing `found-5-oct/super-admin-cannot-write-a-task-it-reads`; was not counted, a decision for the owner) · reproduced 8 October
+
+**A platform super_admin who is no member of a workspace makes a task there and is refused changing it**
+
+*Measured, 6 October, lane 6:* `admin@rundesk.internal`, with no member row in a signed-up owner's workspace, made a task in its list (`POST /tasks` 201) and opened it (200); `PATCH` of it answered 404 "Workspace not found". The create gate lets a super_admin who is no member through (the read rule by the account's role; `resolveSpaceLevel` answers nothing for a non-member), and the write rule asks membership. An import by such an account passes the importers' guest rule, and its merge answers the same 404. ClickUp has no platform-wide role to compare with. Whether a platform admin outside a workspace may make there, change there, or neither, is the owner's, beside whether a platform admin reaches private locations at all (recorded on `found-5-oct/super-admin-cannot-write-a-task-it-reads`); either way the create gate and the write rule should agree.
+
+*Closed, 8 October* (lane 3). ClickUp has no platform-wide role: a Workspace's owner and admins act in their own Workspace, and its tasks are made by somebody of it. So a platform super_admin who is no member of a workspace neither makes nor changes anything there, and the gates agree:
+- the create gate (`assertCanCreateTaskIn`) asks them to be a member of the list's workspace, as the write rule already did;
+- the importers (`assertMayImport`) ask it too: they asked only whether the member row they found was a guest's, so a platform admin with no row there imported a project and its tasks;
+- each refuses 403 "You are not a member of this workspace", in the write rule's words.
+
+Reading there stays as it was (the read rule, by the account's role). Whether a platform admin reaches private locations at all stays where `found-5-oct/super-admin-cannot-write-a-task-it-reads` recorded it.
+
+Measured on lane 3 with `refused-as-forbidden`'s section 15: the platform's admin, with no member row in a workspace a signed-up user made.
+- Before: it made a task there (201, a row written) and was refused changing it, 404 "Workspace not found"; with the create gate closed, an import there was still taken (201, and its job wrote a project there).
+- After: made 403, imported 403 (no job row, no project), changed 403, each "You are not a member of this workspace", nothing written; read 200.
+
+Checks:
+- `refused-as-forbidden`: "the platform’s admin, no member of a workspace, makes no task there, imports nothing and changes none, each refused 403 “You are not a member of this workspace” with nothing written (SQL) — as before, it may read there".
+- Patches `raf-16` (the create gate asks no membership of the platform admin), `raf-17` (nor do the importers) and `raf-14` redden it: 14, 14 and 13 of 15 on lane 3.
+- Unit: `import-access.test.ts` "a platform admin who is no member is refused 403 …" (patch `raf-18-…-unit`), and `task-create.test.ts` "refuses a platform super_admin who is no member of the list’s workspace …" (patch `raf-19-…-unit`).
+
+### `found-6-oct/doc-refusals-answer-not-found` — **closed** (decision, small; found reviewing `found-6-oct/an-open-socket-outlives-its-access`; was not counted, a decision for the owner) · reproduced 8 October
+
+**A doc the caller may not open answers 404 "Doc not found", where the owner's rule of 1 October answers 403 with the reason for tasks, lists, projects and spaces**
+
+*Measured, 6 October, lane 2:* a member removed from the workspace, reading the doc they wrote, got 404 "Doc not found". `DocsService.assertDocAccess` answers not-found both to a non-member and to a member a private space refuses ("Not found either way"), since `db1416d` (24 September). The owner's decision named tasks, lists, projects and spaces; whether docs follow it is the owner's to say (as for a colleague's private view, recorded on `found-5-oct/readers-change-shared-views`). If they do: 403 with the reason for a doc the caller may not open, 404 for an id naming nothing, paired in a suite.
+
+*Closed, 8 October* (lane 3). As tasks, lists, projects and spaces are by the owner's rule of 1 October, a doc its caller may not open is refused 403 in the guard's own sentence (`READ_REFUSALS`): somebody of another workspace "You are not a member of this workspace", a guest it is not shared with "This is not shared with you", a member refused the private space it lives in "This space or project is private". An id naming nothing is still 404 "Doc not found". `DocsService.assertDocAccess` is every doc route's one door, so reads, edits, comments, exports, shares and revisions answer alike; and a task's link to a doc its caller may not open (`TasksService.linkDoc`), refused 404 for the same reason, is refused in the door's words too.
+
+Measured on lane 3 with `refused-as-forbidden`'s new section 14: a member's read and change of a doc in a private space; a guest's read of an open space's doc; a stranger's.
+- Before: each 404 "Doc not found".
+- After: each 403 in its words, the doc unchanged (SQL), an id naming nothing 404, and the member's open doc and the admin's read 200.
+
+Checks:
+- `refused-as-forbidden`: "a doc its caller may not open is refused 403 in the read’s words — read or changed by a member refused its space, a guest’s, a stranger’s — and is not changed (SQL); an id naming nothing is 404, and the open doc and the admin’s are read".
+- Patch `raf-15` (the door answers "Doc not found" again) reddens it, 14 of 15.
+- `workspace-read-access`'s doc checks read the refusal in its words now: "a member cannot open a doc of a space they are refused, nor the page under it (403 “This space or project is private”) — …", "a member cannot edit, comment on, export or template a doc they may not open (403 … each, …)" and "… and linking one is refused (403 “This space or project is private”, no link) — the admin’s name it". Their patches still redden them (`wra-41` 28 of 30, `wra-44` 27, `wra-45` and `wra-51` 29, `wra-48` 29 and `wra-49` 29 of 30, the last re-aimed at the link's new lines).
+
+### `found-30-sep/template-leaves-values-out-silently` — **closed** (visible bug, small; found closing `found-30-sep/template-values-written-unchecked`; was not counted, a decision for the owner) · reproduced 8 October
+
+**A template applied where a field refuses its value leaves that field unset, and nothing says so**
+
+*Evidence, 30 September:* `instantiate` now writes only what each field's route would take and leaves out the rest (words into a Number field, an option a Dropdown lacks). Its answer does not say which were left out, and the create modal's toast says only that the task was made. ClickUp's help centre has nothing on a template's value that its target field refuses.
+
+*To close:* the owner decides whether the person is told. If so, the answer names the fields left out and the modal says so, in four locales; check it with a template applied where a field refuses its value.
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Still true on lane 6: a template value its target field refuses is left out, and neither the API answer nor the create modal says so. The owner has yet to decide whether the person should be told. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October* (lane 3). ClickUp's help centre says nothing of a template's value its target field refuses. Rundesk's create modal already names whatever a create could not do (a tag it could not add, a watcher, a file), so that is the rule kept here: the person is told.
+- `instantiate` answers `valuesLeftOut`: each field left out, with why. Where the field's route refused the value, the reason is the route's own words ("Field expects a number value", "Value must match a defined option", "Invalid email address"); where no part of a list fits, it says so ("none of the template’s choices are among this field’s options", and the like for people and tasks). A field's empty value, and a vote or a file (never carried by a template), are not counted.
+- The create modal (Use Template and Create instantly) and the Template Center's Apply warn: "Task created from template. Not applied: Estimate (Field expects a number value); …", in the four locales (`taskTemplates.valuesLeftOut`).
+- The Template Center's Apply dialog took test ids (`task-template-apply-*`) so its toast can be read.
+
+Measured on lane 3 with `create-modal-templates`' new section, the template applied in a second project whose Estimate is a Number, Severity a Dropdown without the template's option, and Contact an Email field:
+- Before: the answer held no `valuesLeftOut`, and the toast said only that the task was made; 45 of 47.
+- After: the answer names the three, each in its field route's words, and not the Note it wrote; Create instantly's toast and the Template Center's Apply's each name the three; 48 of 48.
+
+Checks:
+- `create-modal-templates` 45 → 48: "and the answer names each value it left out, with why: …", "and the modal says so: …", "and so does the Template Center’s Apply: …".
+- Patches: `create-modal-templates-32` (the answer names nothing) reddens all three, 45 of 48; `-33` (the modal keeps quiet) and `-34` (the Center says only that the task was made) each redden their own, 47 of 48 each.
+- `tvu-1`–`tvu-3`, `dcv-2` and `dcv-3` are re-aimed at the loop's new lines; each still reddens its check (`tvu-1` and `tvu-2` 42 of 48, `dcv-2` and `dcv-3` 59 of 60; `tvu-3` is a unit claim).
+
+### `found-30-sep/template-tags-keep-their-case` — **closed** (visible bug, small; found closing `found-30-sep/template-tags-spelled-by-collation`; was not counted, a decision for the owner) · reproduced 8 October
+
+**ClickUp forces a tag to lower case; Rundesk keeps each template's own spelling, so the Tags facet has to choose one**
+
+*Evidence, 30 September:*
+- ClickUp's feedback board ("Allow Tags to use capital letters", read through search excerpts): tags "are currently forced to be lowercase, no matter what you write or rename it to". Template Center tags are the Space's tags.
+- Rundesk keeps the case typed on each template (`ledger-rows/row-1874`), and the facet now shows the most-used spelling.
+- A card and the facet can show the same word in two cases.
+
+*To close:* the owner decides whether template tags keep their case, as now, or are stored lower-cased as ClickUp's are. If they are lower-cased, migrate the stored tags, and check that the facet and the cards agree.
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Template tags still keep each template's own case, and the Tags facet shows the most-used spelling, so cards and facet can differ (seen on lane 6). The owner has yet to decide whether to lower-case tags as ClickUp does. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October* (lane 3). As ClickUp keeps a tag, in lower case whatever case it is typed in (its feedback board's "Allow Tags to use capital letters", open since 2020, read through search excerpts), a template's tags are stored in lower case: the server's normaliser keeps each word once, lower-cased, and the save and tags dialogs show the chips as they will be kept. Migration `0175_template_tags_lower_case` lower-cases the tags already stored, each word once, in the order its first spelling held. A word now has one spelling on every card and in the facet, so the facet no longer has to choose one (`found-30-sep/template-tags-spelled-by-collation`).
+
+Measured on lane 3 with `template-center`:
+- Before: a template made with " Q3 ", "client" and "q3" held ["Q3","client"]; saved from the page, ["Q3","Launch day"]; the facet read client, Q3 and Retro; a manager's "Q3" stayed "Q3"; 75 of 81.
+- After: q3 and client, q3 and launch day, the facet's client, q3 and retro, the manager's q3; the save dialog's chips read q3 and launch day before Save; 82 of 82.
+
+Checks:
+- `template-center` 81 → 82: its tag checks read lower case, and "typed into the save dialog, Q3, "  Launch   day " and q3 show as q3 and launch day before Save — as they will be kept" is new.
+- Patches `template-center-36` (the server keeps the case typed) and `-37` (the chips keep it) redden their checks: 78 and 81 of 82. `template-center-34` and `-35`, which set one stored spelling against another, are retired with the facet's choice; `-21`, `-24` and `-27` are re-claimed in lower case (81, 77 and 79 of 82).
+- Unit: `project-templates.service.test.ts` reads the tags in lower case.
+
+### `found-30-sep/guests-may-ask-for-clip-links` — **closed** (security, small; found closing `resume-defects/resume-7`; was not counted, a decision for the owner) · reproduced 8 October
+
+**A guest may ask for a clip's link, as a guest could sign one before**
+
+*Evidence, 30 September:* the library's routes admit any workspace member, guests included. ClickUp's sources say nothing about guests and Clip links. Rundesk's public doc links are not a guest's to make ("guests never share publicly").
+
+*To close:* the owner decides. If guests may not make public links of any kind, refuse them the link route, as doc links refuse them, and check it.
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Still true on lane 6: a guest can mint a clip's public link through clips/link (and through clips/share with mode=public), and anyone can open it, while doc public links refuse guests. The owner has yet to decide whether that should change. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/guests-read-and-delete-every-clip`. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October* (lane 3). ClickUp's help centre ("Share locations and items with a public link", read through search excerpts) does not let guests share items publicly, and a Clip's link opens for anybody who holds it, without signing in ("Clip screen recordings", and ClickUp's own replies on its feedback board). So a guest makes no clip link that opens for anybody, as a guest makes no doc link ("Guests cannot share docs"):
+- `clips/link`, and `clips/share` (which makes the link), refuse a guest 403 "Guests cannot share clips publicly" where the workspace's clip links open for anybody (`mayShareClip`, `clip-access.ts`).
+- Where the workspace blocks public sharing, a link opens only for its signed-in members, and a guest's is made.
+- The library says, clip by clip, whether its reader may share it (`mayShare`), and the page draws Share only there.
+
+Measured on lane 3 with `clip-library-access`:
+- Before: a guest's own clip got a link by both routes (201, audience "anyone"), the library said nothing of sharing, and the page drew Share for the guest; 8 of 11, with the two checks that took a guest's own public link.
+- After: refused 403 both ways where links open for anybody, made where they open for members; Share drawn for a member and not for the guest; 11 of 11.
+
+Checks:
+- `clip-library-access` 10 → 11: "a guest makes no link that opens for anybody, even of their own clip — …"; the checks of sections 9 and 10 now read a guest's own public link as refused.
+- Patches `clacc-32` (a guest's public link is made) reddens the three, 8 of 11; `clacc-33` (Share drawn on every card) reddens the new one, 10 of 11. `clacc-21`–`clacc-25` are re-claimed, each still reddening its check, 10 of 11.
+
 ## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
 
 Moved here by the triage of 5 October, at the owner's request: these are not open defects and are not in the
@@ -11145,60 +11281,7 @@ reason (`found-30-sep/private-task-reads-say-403`, reverted). This item asked to
 so it no longer describes a defect, and it is not counted. The 400 "Doc belongs to a
 different workspace" could still be reviewed as a tenant-boundary matter of its own.
 
-#### Decisions for the owner — 13
-
-### `found-6-oct/task-writes-answer-a-refusal-as-not-found` — decision, not counted (6 October; found closing `found-5-oct/super-admin-cannot-write-a-task-it-reads`)
-
-**A task its caller may not open answers 403 with its reason when read, and 404 "Task not found" when changed or moved**
-
-*Measured, 6 October, lane 6:* a plain member's `GET` of a private space's task answered 403 "This space or project is private", and their `PATCH` of it 404 "Task not found". `PATCH /tasks/:id` and `POST /tasks/:id/move` carry no `ResourceMemberGuard`, and the write rule answers a task its caller may not read as not found; this predates the owner's decision of 1 October, which named reads (403 with the reason, for tasks, lists, projects and spaces). Whether writes follow it is the owner's to say. If they do: the write rule answers 403 with the read rule's reason for a task the caller may not open, and 404 for an id naming nothing, paired in a suite. `super-admin-task-writes` takes 403 or 404 with nothing changed, so it pins neither.
-
-### `found-6-oct/super-admin-outside-makes-what-it-cannot-change` — decision, not counted (6 October; found closing `found-5-oct/super-admin-cannot-write-a-task-it-reads`)
-
-**A platform super_admin who is no member of a workspace makes a task there and is refused changing it**
-
-*Measured, 6 October, lane 6:* `admin@rundesk.internal`, with no member row in a signed-up owner's workspace, made a task in its list (`POST /tasks` 201) and opened it (200); `PATCH` of it answered 404 "Workspace not found". The create gate lets a super_admin who is no member through (the read rule by the account's role; `resolveSpaceLevel` answers nothing for a non-member), and the write rule asks membership. An import by such an account passes the importers' guest rule, and its merge answers the same 404. ClickUp has no platform-wide role to compare with. Whether a platform admin outside a workspace may make there, change there, or neither, is the owner's, beside whether a platform admin reaches private locations at all (recorded on `found-5-oct/super-admin-cannot-write-a-task-it-reads`); either way the create gate and the write rule should agree.
-
-
-### `found-6-oct/doc-refusals-answer-not-found` — decision, not counted (6 October; found reviewing `found-6-oct/an-open-socket-outlives-its-access`)
-
-**A doc the caller may not open answers 404 "Doc not found", where the owner's rule of 1 October answers 403 with the reason for tasks, lists, projects and spaces**
-
-*Measured, 6 October, lane 2:* a member removed from the workspace, reading the doc they wrote, got 404 "Doc not found". `DocsService.assertDocAccess` answers not-found both to a non-member and to a member a private space refuses ("Not found either way"), since `db1416d` (24 September). The owner's decision named tasks, lists, projects and spaces; whether docs follow it is the owner's to say (as for a colleague's private view, recorded on `found-5-oct/readers-change-shared-views`). If they do: 403 with the reason for a doc the caller may not open, 404 for an id naming nothing, paired in a suite.
-
-
-### `found-30-sep/template-leaves-values-out-silently` — decision, not counted (triage, 5 October; was: open (decision, small; found closing `found-30-sep/template-values-written-unchecked`))
-
-**A template applied where a field refuses its value leaves that field unset, and nothing says so**
-
-*Evidence, 30 September:* `instantiate` now writes only what each field's route would take and leaves out the rest (words into a Number field, an option a Dropdown lacks). Its answer does not say which were left out, and the create modal's toast says only that the task was made. ClickUp's help centre has nothing on a template's value that its target field refuses.
-
-*To close:* the owner decides whether the person is told. If so, the answer names the fields left out and the modal says so, in four locales; check it with a template applied where a field refuses its value.
-
-*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Still true on lane 6: a template value its target field refuses is left out, and neither the API answer nor the create modal says so. The owner has yet to decide whether the person should be told. Evidence: `docs/triage-2026-10-05.md`.
-
-### `found-30-sep/template-tags-keep-their-case` — decision, not counted (triage, 5 October; was: open (decision, small; found closing `found-30-sep/template-tags-spelled-by-collation`))
-
-**ClickUp forces a tag to lower case; Rundesk keeps each template's own spelling, so the Tags facet has to choose one**
-
-*Evidence, 30 September:*
-- ClickUp's feedback board ("Allow Tags to use capital letters", read through search excerpts): tags "are currently forced to be lowercase, no matter what you write or rename it to". Template Center tags are the Space's tags.
-- Rundesk keeps the case typed on each template (`ledger-rows/row-1874`), and the facet now shows the most-used spelling.
-- A card and the facet can show the same word in two cases.
-
-*To close:* the owner decides whether template tags keep their case, as now, or are stored lower-cased as ClickUp's are. If they are lower-cased, migrate the stored tags, and check that the facet and the cards agree.
-
-*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Template tags still keep each template's own case, and the Tags facet shows the most-used spelling, so cards and facet can differ (seen on lane 6). The owner has yet to decide whether to lower-case tags as ClickUp does. Evidence: `docs/triage-2026-10-05.md`.
-
-### `found-30-sep/guests-may-ask-for-clip-links` — decision, not counted (triage, 5 October; was: open (decision, small; found closing `resume-defects/resume-7`))
-
-**A guest may ask for a clip's link, as a guest could sign one before**
-
-*Evidence, 30 September:* the library's routes admit any workspace member, guests included. ClickUp's sources say nothing about guests and Clip links. Rundesk's public doc links are not a guest's to make ("guests never share publicly").
-
-*To close:* the owner decides. If guests may not make public links of any kind, refuse them the link route, as doc links refuse them, and check it.
-
-*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Still true on lane 6: a guest can mint a clip's public link through clips/link (and through clips/share with mode=public), and anyone can open it, while doc public links refuse guests. The owner has yet to decide whether that should change. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/guests-read-and-delete-every-clip`. Evidence: `docs/triage-2026-10-05.md`.
+#### Decisions for the owner — 7
 
 ### `ledger-rows/row-869` — decision, not counted (triage, 5 October; was: open, large)
 

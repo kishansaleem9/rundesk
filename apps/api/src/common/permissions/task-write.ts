@@ -1,9 +1,9 @@
 import { isManagerRole } from './workspace-roles'
-import { ConflictException, NotFoundException } from '@nestjs/common'
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common'
 import { and, eq } from 'drizzle-orm'
 import { lists, projects, spaces, taskAssignees, tasks, users, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
-import { readableTask } from './read-access'
+import { READ_REFUSALS, readableTask, taskReadAnswer } from './read-access'
 import { assertSpaceLevel, resolveSpaceLevel, spaceLevelReaches, type WithinStep } from './space-default-permission'
 
 /*
@@ -90,7 +90,18 @@ export async function assertTaskWritable(
     .from(workspaceMembers)
     .where(and(eq(workspaceMembers.workspaceId, ctx.workspaceId), eq(workspaceMembers.userId, actorId)))
     .limit(1)
-  if (!membership) throw new NotFoundException('Workspace not found')
+  /*
+   * REFUSED IN THE READ'S WORDS (`found-6-oct/task-writes-answer-a-refusal-as-not-found`).
+   * A task its caller may not open answered its read 403 with the reason and its
+   * change or move 404 — "Workspace not found" to somebody of another
+   * workspace, "Task not found" to a member refused it — as an id naming
+   * nothing does. The owner's rule of 1 October answers a refusal 403 with its
+   * reason and an id naming nothing 404, and a write is refused as its read is:
+   * the same sentence (`READ_REFUSALS`), and the same 404 for no task at all.
+   * A platform super_admin who is no member is refused here too, as they are
+   * refused making a task where they are no member (`assertCanCreateTaskIn`).
+   */
+  if (!membership) throw new ForbiddenException(READ_REFUSALS.notMember)
 
   if (isManagerRole(membership.role)) return ctx
   /*
@@ -128,9 +139,9 @@ export async function assertTaskWritable(
    * below is asked of them as of any member, as the create gate asks it.
    */
   const [account] = await db.select({ role: users.role }).from(users).where(eq(users.id, actorId)).limit(1)
-  if (!(await readableTask(db, ctx.workspaceId, taskId, { id: actorId, role: account?.role }))) {
-    throw new NotFoundException('Task not found')
-  }
+  const read = await taskReadAnswer(db, ctx.workspaceId, taskId, { id: actorId, role: account?.role })
+  if (!read) throw new NotFoundException('Task not found')
+  if ('refused' in read) throw new ForbiddenException(read.refused)
   const [assignee] = await db
     .select({ userId: taskAssignees.userId })
     .from(taskAssignees)

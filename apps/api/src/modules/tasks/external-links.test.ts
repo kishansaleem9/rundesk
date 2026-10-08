@@ -1,3 +1,4 @@
+import { ForbiddenException } from '@nestjs/common'
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 import { parseExternalLinkUrl, isHttpUrl } from './external-links.util'
@@ -373,9 +374,10 @@ describe('TasksService external links — CRUD + access', () => {
   it('denies a non-member (access check)', async () => {
     const { db } = makeCaptureDb([CTX, []]) // no membership row
     const svc = makeService(db)
+    // In the read's words, 403 (`found-6-oct/task-writes-answer-a-refusal-as-not-found`).
     await assert.rejects(
       () => svc.addExternalLink('t1', 'outsider', { url: 'https://github.com/a/b/pull/1' }),
-      /workspace not found/i,
+      (e: unknown) => e instanceof ForbiddenException && e.message === 'You are not a member of this workspace',
     )
   })
 

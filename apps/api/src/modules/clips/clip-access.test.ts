@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { mayDeleteClip, mayReadClip, readsOnlyOwnClips, recordedByReader } from './clip-access'
+import { mayDeleteClip, mayReadClip, mayShareClip, readsOnlyOwnClips, recordedByReader } from './clip-access'
 
 /*
  * `found-5-oct/guests-read-and-delete-every-clip` — whose a clip is, and who
@@ -52,5 +52,19 @@ describe('clip-access — who reads and deletes it', () => {
       assert.equal(mayDeleteClip(undefined, { id: 'me', role }), true, `${role}, unread`)
     }
     assert.equal(mayDeleteClip(another, { id: 'me', role: null }), false, 'no role')
+  })
+})
+
+describe('clip-access — who makes a clip’s link (`found-30-sep/guests-may-ask-for-clip-links`)', () => {
+  it('a guest makes no link that opens for anybody, and one that opens for members only is theirs to make', () => {
+    assert.equal(mayShareClip({ id: 'g', role: 'guest' }, 'anyone'), false)
+    assert.equal(mayShareClip({ id: 'g', role: 'guest' }, 'members'), true)
+  })
+
+  it('anybody else in the workspace makes either', () => {
+    for (const role of ['member', 'admin', 'owner', 'super_admin']) {
+      assert.equal(mayShareClip({ id: 'm', role }, 'anyone'), true, role)
+      assert.equal(mayShareClip({ id: 'm', role }, 'members'), true, role)
+    }
   })
 })

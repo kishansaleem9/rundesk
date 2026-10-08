@@ -154,7 +154,7 @@ export function TaskTemplatesSection({ workspaceId }: { workspaceId: string }) {
                 )}
               </div>
               <div className="flex items-center gap-1.5 mt-auto pt-2 border-t border-border/40">
-                <Button size="sm" onClick={() => setApplyTarget(tpl)} className="flex-1">
+                <Button size="sm" onClick={() => setApplyTarget(tpl)} className="flex-1" data-testid="task-template-apply" data-template-id={tpl.id}>
                   <Play className="h-3.5 w-3.5 mr-1.5" />
                   {t('taskTemplates.apply')}
                 </Button>
@@ -325,15 +325,22 @@ function ApplyTemplateDialog({
 
   const apply = useMutation({
     mutationFn: () =>
-      api<{ taskId: string }>(
+      api<{ taskId: string; valuesLeftOut?: Array<{ field: string; reason: string }> }>(
         `/workspaces/${workspaceId}/task-templates/${template!.id}/instantiate`,
         {
           method: 'POST',
           body: { listId, titleOverride: titleOverride.trim() || undefined },
         },
       ),
-    onSuccess: () => {
-      toast.success(t('taskTemplates.taskCreated'))
+    onSuccess: (made) => {
+      // The template's values a field there would not take are named, with why
+      // (`found-30-sep/template-leaves-values-out-silently`).
+      const leftOut = made.valuesLeftOut ?? []
+      if (leftOut.length) {
+        toast.warning(t('taskTemplates.valuesLeftOut', { fields: leftOut.map((v) => `${v.field} (${v.reason})`).join('; ') }))
+      } else {
+        toast.success(t('taskTemplates.taskCreated'))
+      }
       qc.invalidateQueries({ queryKey: ['task-templates', workspaceId] })
       // Conservative invalidation — re-fetch any list view that might
       // hold the new task. The list/board/calendar views all use
@@ -361,6 +368,7 @@ function ApplyTemplateDialog({
             <div>
               <Label className="text-xs">{t('taskTemplates.spaceLabel')}</Label>
               <select
+                data-testid="task-template-apply-space"
                 value={spaceId}
                 onChange={(e) => {
                   setSpaceId(e.target.value)
@@ -382,6 +390,7 @@ function ApplyTemplateDialog({
             <div>
               <Label className="text-xs">{t('taskTemplates.projectLabel')}</Label>
               <select
+                data-testid="task-template-apply-project"
                 value={projectId}
                 onChange={(e) => {
                   setProjectId(e.target.value)
@@ -403,6 +412,7 @@ function ApplyTemplateDialog({
             <div>
               <Label className="text-xs">{t('taskTemplates.listLabel')}</Label>
               <select
+                data-testid="task-template-apply-list"
                 value={listId}
                 onChange={(e) => setListId(e.target.value)}
                 disabled={!projectId}
@@ -423,6 +433,7 @@ function ApplyTemplateDialog({
           <div>
             <Label className="text-xs">{t('taskTemplates.titleOverrideLabel')}</Label>
             <Input
+              data-testid="task-template-apply-title"
               placeholder={template?.payload.title || t('taskTemplates.useTemplateTitle')}
               value={titleOverride}
               onChange={(e) => setTitleOverride(e.target.value)}
@@ -433,7 +444,7 @@ function ApplyTemplateDialog({
             <Button variant="ghost" onClick={onClose}>
               {t('common.cancel')}
             </Button>
-            <Button onClick={() => apply.mutate()} disabled={!listId || apply.isPending}>
+            <Button onClick={() => apply.mutate()} disabled={!listId || apply.isPending} data-testid="task-template-apply-confirm">
               {apply.isPending ? t('taskTemplates.applying') : t('taskTemplates.apply')}
             </Button>
           </div>

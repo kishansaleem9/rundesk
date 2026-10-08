@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, NotFoundException, Unauthorize
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 import { ClipsService } from './clips.service'
-import { CLIP_DELETE_REFUSAL, CLIP_READ_REFUSAL } from './clip-access'
+import { CLIP_DELETE_REFUSAL, CLIP_GUEST_PUBLIC_REFUSAL, CLIP_READ_REFUSAL } from './clip-access'
 
 /*
  * THE VALUES A QUERY WAS ASKED FOR, read off drizzle's condition: `eq(col, v)`
@@ -441,8 +441,16 @@ describe('ClipsService — who reads and deletes a clip', () => {
       }
     }
     assert.equal(db.state.links.length, 0)
-    // Their own is theirs to link, and a member links anybody's.
-    assert.match((await service(r2, db).link('ws-1', GUEST, 'workspaces/ws-1/clips/300-guest.webm')).token, /^[A-Za-z0-9_-]{32}$/)
+    // Their own is theirs to link where links open for members only; where they open for
+    // anybody, a guest makes none (`found-30-sep/guests-may-ask-for-clip-links`).
+    await assert.rejects(
+      () => service(r2, db).link('ws-1', GUEST, 'workspaces/ws-1/clips/300-guest.webm'),
+      (e: unknown) => e instanceof ForbiddenException && e.message === CLIP_GUEST_PUBLIC_REFUSAL,
+    )
+    assert.equal(db.state.links.length, 0)
+    const membersOnly = createDbMock({ blocked: ['ws-1'] })
+    assert.match((await service(r2, membersOnly).link('ws-1', GUEST, 'workspaces/ws-1/clips/300-guest.webm')).token, /^[A-Za-z0-9_-]{32}$/)
+    // And a member links anybody's.
     assert.match((await service(r2, db).link('ws-1', MEMBER, OWNERS)).token, /^[A-Za-z0-9_-]{32}$/)
     // A key naming no clip is not found, rather than refused.
     await assert.rejects(

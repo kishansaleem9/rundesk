@@ -1,5 +1,5 @@
 # A TEMPLATE FROM ANY DOC OF THE WORKSPACE, as it was: the whole body copied where every member reads it.
-# Reddens: workspace-read-access: "a member cannot edit, comment on, export or template a doc they may not open (404 each, the doc unchanged, nothing made) — while they edit an open one"
+# Reddens: workspace-read-access: "a member cannot edit, comment on, export or template a doc they may not open (403 “This space or project is private” each, the doc unchanged, nothing made) — while they edit an open one"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/docs/docs.service.ts'
 a = "    const doc = await this.assertDocAccess(docId, userId)\n    if (doc.workspaceId !== workspaceId) throw new NotFoundException('Doc not found in this workspace')\n"

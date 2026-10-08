@@ -569,14 +569,21 @@ try {
   const ALL_DOCS = [...OPENED_DOCS, ...REFUSED_DOCS]
   const docName = (id) => ['open', 'shared', 'shared page', 'private', 'private page'][ALL_DOCS.indexOf(id)] ?? id
 
+  /*
+   * Refused in the words of what refuses it, as a task, list, project or space
+   * is (the owner's rule of 1 October; `found-6-oct/doc-refusals-answer-not-found`):
+   * it was 404 "Doc not found", as an id naming nothing.
+   */
+  const PRIVATE_SPACE = 'This space or project is private'
+  const refusedBySpace = (res) => res.status === 403 && res.error?.message === PRIVATE_SPACE
   const statusOf = async (C, id) => (await C(`/docs/${id}`)).status
-  const memberOpens = Object.fromEntries(await Promise.all(ALL_DOCS.map(async (id) => [id, await statusOf(M, id)])))
+  const memberOpens = Object.fromEntries(await Promise.all(ALL_DOCS.map(async (id) => [id, await M(`/docs/${id}`)])))
   const adminOpens = Object.fromEntries(await Promise.all(ALL_DOCS.map(async (id) => [id, await statusOf(A, id)])))
   chk(
-    REFUSED_DOCS.every((id) => memberOpens[id] === 404) && OPENED_DOCS.every((id) => memberOpens[id] === 200) &&
+    REFUSED_DOCS.every((id) => refusedBySpace(memberOpens[id])) && OPENED_DOCS.every((id) => memberOpens[id].status === 200) &&
       ALL_DOCS.every((id) => adminOpens[id] === 200),
-    'a member cannot open a doc of a space they are refused, nor the page under it (404) — while they open an open doc, and a doc and page shared with them; the admin opens all five',
-    `the member: ${ALL_DOCS.map((id) => `${docName(id)} ${memberOpens[id]}`).join(', ')}; the admin: ${ALL_DOCS.map((id) => `${docName(id)} ${adminOpens[id]}`).join(', ')}`,
+    'a member cannot open a doc of a space they are refused, nor the page under it (403 “This space or project is private”) — while they open an open doc, and a doc and page shared with them; the admin opens all five',
+    `the member: ${ALL_DOCS.map((id) => `${docName(id)} ${said(memberOpens[id])}`).join(', ')}; the admin: ${ALL_DOCS.map((id) => `${docName(id)} ${adminOpens[id]}`).join(', ')}`,
   )
 
   const hubIds = (res) => (res.data ?? []).map((d) => d.id)
@@ -604,10 +611,10 @@ try {
          + (select count(*) from doc_templates where workspace_id = ${WS} and name = ${`${TAG} lifted`}) as n`
   const renamedOpen = await M(`/docs/${OPEN_DOC}`, { method: 'PATCH', body: { title: `${TAG} open doc` } })
   chk(
-    [renamed, commented, exported, templated].every((r) => r.status === 404) && privTitle === `${TAG} private doc` && Number(strayRows) === 0 &&
+    [renamed, commented, exported, templated].every(refusedBySpace) && privTitle === `${TAG} private doc` && Number(strayRows) === 0 &&
       renamedOpen.status === 200,
-    'a member cannot edit, comment on, export or template a doc they may not open (404 each, the doc unchanged, nothing made) — while they edit an open one',
-    `rename ${renamed.status}, comment ${commented.status}, export ${exported.status}, template ${templated.status}; the title is now "${privTitle}", rows made ${strayRows}; renaming the open doc ${said(renamedOpen)}`,
+    'a member cannot edit, comment on, export or template a doc they may not open (403 “This space or project is private” each, the doc unchanged, nothing made) — while they edit an open one',
+    `rename ${said(renamed)}, comment ${said(commented)}, export ${said(exported)}, template ${said(templated)}; the title is now "${privTitle}", rows made ${strayRows}; renaming the open doc ${said(renamedOpen)}`,
   )
 
   // Nor file something of their own under it, which would hide it from themselves and name its parent.
@@ -676,8 +683,8 @@ try {
   const [{ n: subLinks }] = await sql`select count(*)::int as n from task_doc_links where doc_id = ${SUB_DOC}`
   chk(
     memberLinked.status === 200 && !linkedIds(memberLinked).includes(PRIV_DOC) && linkedIds(memberLinked).includes(OPEN_DOC) &&
-      linkedIds(adminLinked).includes(PRIV_DOC) && memberLinks.status === 404 && subLinks === 0,
-    'a task’s linked docs name none the member may not open, and linking one is refused (404, no link) — the admin’s name it',
+      linkedIds(adminLinked).includes(PRIV_DOC) && refusedBySpace(memberLinks) && subLinks === 0,
+    'a task’s linked docs name none the member may not open, and linking one is refused (403 “This space or project is private”, no link) — the admin’s name it',
     `the member's list has ${JSON.stringify(linkedIds(memberLinked).map(docName))} (${memberLinked.status}); the admin's ${JSON.stringify(linkedIds(adminLinked).map(docName))}; ` +
       `linking the private page answered ${said(memberLinks)}, links made ${subLinks}`,
   )

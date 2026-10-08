@@ -4,7 +4,7 @@ import { lists, projects, spaces, tasks, users, workspaceMembers } from '@rundes
 import type { Db } from '@rundesk/db'
 import { taskInReachFilter } from '../../../common/permissions/container-access.guard-helper'
 import { resolveIsManager, taskVisibilityFilter } from '../../../common/permissions/item-visibility'
-import { readableTask } from '../../../common/permissions/read-access'
+import { READ_REFUSALS, readableTask } from '../../../common/permissions/read-access'
 import { assertTaskCommentable, assertTaskWritable } from '../../../common/permissions/task-write'
 import { dupKey } from './clickup-csv.util'
 
@@ -32,6 +32,15 @@ export type Importer = { id: string; role?: string | null }
  * permissions are given to members, owners and admins there.
  *
  * Refused with the reason, before anything is read or written.
+ *
+ * AND NOBODY IMPORTS WHERE THEY ARE NO MEMBER
+ * (`found-6-oct/super-admin-outside-makes-what-it-cannot-change`). The route's
+ * guard lets a platform super_admin through every workspace, and this asked
+ * only whether the member row it found was a guest's: one with no row there
+ * imported a project and its tasks into a workspace whose tasks the write rule
+ * then refused them changing. A workspace's tasks are made by somebody of it,
+ * as the create gate now asks (`assertCanCreateTaskIn`), so they are refused as
+ * the write rule refuses them, 403 "You are not a member of this workspace".
  */
 export const GUESTS_CANNOT_IMPORT = 'Guests cannot import data into a workspace'
 
@@ -64,7 +73,8 @@ export async function assertMayImport(db: Db, params: { workspaceId: string; act
     .from(workspaceMembers)
     .where(and(eq(workspaceMembers.workspaceId, params.workspaceId), eq(workspaceMembers.userId, params.actorId)))
     .limit(1)
-  if (member?.role === 'guest') throw new ForbiddenException(GUESTS_CANNOT_IMPORT)
+  if (!member) throw new ForbiddenException(READ_REFUSALS.notMember)
+  if (member.role === 'guest') throw new ForbiddenException(GUESTS_CANNOT_IMPORT)
 }
 
 /**

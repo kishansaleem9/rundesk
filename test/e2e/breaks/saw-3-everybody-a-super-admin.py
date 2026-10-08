@@ -1,10 +1,11 @@
 # EVERY ACCOUNT IS READ AS A SUPER_ADMIN BY THE WRITE RULE: a plain member changes a private space's task they may
 # not open (`PATCH` has no route guard in front of the rule).
+# Re-aimed 8 October: the write rule asks `taskReadAnswer`, refusing in the read's words (`found-6-oct/task-writes-answer-a-refusal-as-not-found`).
 # Reddens: super-admin-task-writes: "and a plain member is still refused the private space’s task — its read 403, its change refused and not made (SQL) — while its owner changes it"
 import io
 p = '/home/user/rundesk/apps/api/src/common/permissions/task-write.ts'
-a = '  if (!(await readableTask(db, ctx.workspaceId, taskId, { id: actorId, role: account?.role }))) {\n'
-b = "  if (!(await readableTask(db, ctx.workspaceId, taskId, { id: actorId, role: account ? 'super_admin' : null }))) {\n"
+a = '  const read = await taskReadAnswer(db, ctx.workspaceId, taskId, { id: actorId, role: account?.role })\n'
+b = "  const read = await taskReadAnswer(db, ctx.workspaceId, taskId, { id: actorId, role: account ? 'super_admin' : null })\n"
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

@@ -49,7 +49,8 @@ export type TemplateFacets = {
   createdBy: Array<FacetBucket & { name: string }>
   /**
    * And **Tags**: one bucket per word whatever its case, alphabetical. The
-   * value is the spelling most of its templates carry (`spellTagFacet`), and
+   * value is the word as tags are stored, in lower case (`normalizeTemplateTags`);
+   * `spellTagFacet` still picks one should a row hold another spelling, and
    * `tag=` matches any.
    */
   tag: FacetBucket[]
@@ -92,10 +93,17 @@ export function normalizeTemplateTags(value: unknown): string[] {
         `A tag can be at most ${TEMPLATE_TAG_MAX_LENGTH} characters, and "${chars.slice(0, 24).join('')}…" has ${chars.length}`,
       )
     }
+    /*
+     * IN LOWER CASE, AS CLICKUP KEEPS A TAG (`found-30-sep/template-tags-keep-their-case`):
+     * its tags are lower case whatever case they are typed in (people ask its
+     * feedback board for capitals). Each template kept its own spelling, so the
+     * Tags facet had to choose one for a word the cards spelled two ways; a
+     * word is one tag now, in one spelling, on every card and in the facet.
+     */
     const key = tag.toLowerCase()
     if (seen.has(key)) continue
     seen.add(key)
-    out.push(tag)
+    out.push(key)
   }
   if (out.length > TEMPLATE_TAGS_MAX) {
     throw new BadRequestException(`A template can carry at most ${TEMPLATE_TAGS_MAX} tags, and these are ${out.length}`)

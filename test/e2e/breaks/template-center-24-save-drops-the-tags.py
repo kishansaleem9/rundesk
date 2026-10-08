@@ -3,7 +3,7 @@
 # The dialog sends them, the server cleans them, and the insert leaves them
 # out: the template is saved, the toast says so, and it carries none.
 #
-# Reddens: template-center: "a template saved from the page with Q3, \"  Launch   day \" and q3 carries Q3 and Launch day (read from the database)"
+# Reddens: template-center: "a template saved from the page with Q3, \"  Launch   day \" and q3 carries q3 and launch day (read from the database)"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/project-templates/project-templates.service.ts'
 a = ("        complexity: complexityOf(payload),\n"

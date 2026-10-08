@@ -62,6 +62,11 @@
  * where a field of the same name is of another kind, so the route's rule is
  * the one kept: nothing is written that the field itself would refuse.
  *
+ * AND WHAT IS LEFT OUT IS SAID, `found-30-sep/template-leaves-values-out-silently`:
+ * the answer names each value left out, with why (the field route's own words
+ * where it refused), and the toast names the fields — the modal's, and the
+ * Template Center's Apply's.
+ *
  * AND ONLY INTO A FIELD THE NEW TASK HAS, BY FIELD BEFORE NAME,
  * `found-30-sep/template-values-find-fields-by-name-alone`. Values were mapped
  * by name over every field of the project: one went into a field scoped to
@@ -131,7 +136,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 45
+const EXPECTED_CHECKS = 48
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -750,8 +755,12 @@ try {
   const PROBE = must('make the task the route is asked on', await A('/tasks', { method: 'POST', body: { listId: OTHER_LIST, title: `Probe ${TAG}` } }))?.id
   if (!T3_ID || !PROBE) throw new Error('the template or the probe task came back without an id')
   const routeSaid = {}
+  /** And in what words: the answer to a template applied there gives the same. */
+  const routeWords = {}
   for (const [name] of OTHER_FIELDS) {
-    routeSaid[name] = (await A(`/workspaces/${WS}/tasks/${PROBE}/custom-fields/${otherField[name]}`, { method: 'PUT', body: { value: HELD[name] } })).status
+    const res = await A(`/workspaces/${WS}/tasks/${PROBE}/custom-fields/${otherField[name]}`, { method: 'PUT', body: { value: HELD[name] } })
+    routeSaid[name] = res.status
+    routeWords[name] = res.error?.message ?? null
   }
   const APPLIED = `Applied elsewhere ${TAG}`
   const applied = await A(`/workspaces/${WS}/task-templates/${T3_ID}/instantiate`, { method: 'POST', body: { listId: OTHER_LIST, titleOverride: APPLIED } })
@@ -779,6 +788,82 @@ try {
     leftUnset(CONTACT),
     'and words that are no address, where that field is an Email field, leave it unset — as its route refuses them (400) — while the Note, a Text field there too, is written',
     `the route answered ${routeSaid[CONTACT]} for ${JSON.stringify(HELD[CONTACT])} and ${routeSaid[NOTE]} for the Note; ${appliedSaid}`,
+  )
+
+  // ══ 23–25. AND WHAT WAS LEFT OUT IS SAID ═════════════════════════════════
+  console.log('\n▶ what a template applied there left out, said in the answer and in the modal')
+  /*
+   * `found-30-sep/template-leaves-values-out-silently`. The three values above
+   * were left out and nothing said so: the answer held the task alone, and the
+   * modal's toast said only that it was made. ClickUp's help centre says
+   * nothing of a template's value its target field refuses, so the rule this
+   * modal keeps wherever a create half-succeeds is the one kept here: a tag it
+   * could not add, a watcher, a file, each is named. The answer names each
+   * value left out, with why — the field route's own words where it refused —
+   * and the modal says it, for Create instantly as for the submit.
+   */
+  const LEFT_OUT = [ESTIMATE, SEVERITY, CONTACT]
+  const leftOutSaid = Array.isArray(applied.data?.valuesLeftOut) ? applied.data.valuesLeftOut : null
+  const namedOut = (leftOutSaid ?? []).map((v) => v?.field).sort()
+  chk(
+    !!leftOutSaid && JSON.stringify(namedOut) === JSON.stringify([...LEFT_OUT].sort())
+      && LEFT_OUT.every((name) => !!routeWords[name] && leftOutSaid.find((v) => v?.field === name)?.reason === routeWords[name]),
+    'and the answer names each value it left out, with why: the Estimate, the Severity and the Contact, each in its field route’s own words, and not the Note it wrote',
+    `the answer's valuesLeftOut was ${JSON.stringify(leftOutSaid)}; the field route said ${JSON.stringify(routeWords)}`,
+  )
+
+  await openModal(page)
+  await page.getByTestId('quick-create-space').selectOption(SPACE, { timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('quick-create-project').selectOption(OTHER_PROJECT, { timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('quick-create-list').selectOption(OTHER_LIST, { timeout: 10_000 }).catch(() => {})
+  const TOLD = `Told ${TAG}`
+  await titleBox(page).fill(TOLD, { timeout: 5000 }).catch(() => {})
+  const toldMenu = await openMenu(page)
+  const toldSub = toldMenu && await openSub(page, 'instant')
+  const toldAnswer = answered(page, `/task-templates/${T3_ID}/instantiate`)
+  await page.getByTestId(`quick-create-tpl-instant-${T3_ID}`).click({ timeout: 5000 }).catch(() => {})
+  // The toast first: it lives seconds (as Create instantly's own, above).
+  let toldToast = ''
+  const toldSeen = await waitUntil(async () => {
+    toldToast = (await toasts(page)).find((s) => s.includes('Not applied')) ?? ''
+    return toldToast.length > 0
+  }, { timeoutMs: 15_000 })
+  const toldStatus = (await toldAnswer)?.status() ?? null
+  let toldRows = []
+  await waitUntil(async () => (toldRows = await madeTasks(TOLD)).length > 0, { timeoutMs: 15_000 })
+  chk(
+    toldSub && toldRows.length === 1 && toldRows[0].list_id === OTHER_LIST && toldSeen
+      && LEFT_OUT.every((name) => toldToast.includes(name)) && !toldToast.includes(NOTE),
+    'and the modal says so: Create instantly from that template, in that list, makes the task and names the Estimate, the Severity and the Contact as not applied, and not the Note',
+    `the submenu opened ${toldSub}; the route answered ${toldStatus ?? 'nothing'}; ${toldRows.length} task(s) so titled${toldRows[0] ? `, in ${toldRows[0].list_id === OTHER_LIST ? 'that list' : `list ${toldRows[0].list_id}`}` : ''}; ` +
+      `the toast ${toldSeen ? `read ${JSON.stringify(toldToast)}` : 'never said what was not applied'}`,
+  )
+
+  // The Template Center's Apply makes a task from a template too, and says the same.
+  await page.goto(`${B}/app/${WS}/templates`, { waitUntil: 'domcontentloaded' })
+  const applyButton = page.locator(`[data-testid="task-template-apply"][data-template-id="${T3_ID}"]`)
+  await applyButton.click({ timeout: 25_000 }).catch(() => {})
+  await page.getByTestId('task-template-apply-space').selectOption(SPACE, { timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('task-template-apply-project').selectOption(OTHER_PROJECT, { timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('task-template-apply-list').selectOption(OTHER_LIST, { timeout: 10_000 }).catch(() => {})
+  const CENTRE = `From the centre ${TAG}`
+  await page.getByTestId('task-template-apply-title').fill(CENTRE, { timeout: 5000 }).catch(() => {})
+  const centreAnswer = answered(page, `/task-templates/${T3_ID}/instantiate`)
+  await page.getByTestId('task-template-apply-confirm').click({ timeout: 8000 }).catch(() => {})
+  let centreToast = ''
+  const centreSeen = await waitUntil(async () => {
+    centreToast = (await toasts(page)).find((s) => s.includes('Not applied')) ?? ''
+    return centreToast.length > 0
+  }, { timeoutMs: 15_000 })
+  const centreStatus = (await centreAnswer)?.status() ?? null
+  let centreRows = []
+  await waitUntil(async () => (centreRows = await madeTasks(CENTRE)).length > 0, { timeoutMs: 15_000 })
+  chk(
+    centreRows.length === 1 && centreRows[0].list_id === OTHER_LIST && centreSeen
+      && LEFT_OUT.every((name) => centreToast.includes(name)) && !centreToast.includes(NOTE),
+    'and so does the Template Center’s Apply: applied into that list, it makes the task and its toast names the Estimate, the Severity and the Contact as not applied, and not the Note',
+    `the route answered ${centreStatus ?? 'nothing'}; ${centreRows.length} task(s) so titled${centreRows[0] ? `, in ${centreRows[0].list_id === OTHER_LIST ? 'that list' : `list ${centreRows[0].list_id}`}` : ''}; ` +
+      `the toast ${centreSeen ? `read ${JSON.stringify(centreToast)}` : 'never said what was not applied'}`,
   )
 
   // ══ ONLY THE FIELDS THE TASK HAS, AND WHICH OF TWO OF ONE NAME ═══════════

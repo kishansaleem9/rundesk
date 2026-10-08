@@ -4,7 +4,7 @@
 # admin's key copies the admin's clip onto a task shared with them to edit, and
 # downloads it there, signed for whoever reads the task.
 #
-# Reddens: clip-library-access: "a guest may not link, share or copy onto a task somebody else’s clip — refused, saying which clips are theirs, and nothing is made; their own they link and attach"
+# Reddens: clip-library-access: "a guest may not link, share or copy onto a task somebody else’s clip — refused, saying which clips are theirs, and nothing is made; their own they attach, and its public link is refused as a guest’s (section 11)"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 a = '    if (!mayReadClip(head.Metadata, await clipReaderOf(this.db, ctx.workspaceId, actorId))) {\n'

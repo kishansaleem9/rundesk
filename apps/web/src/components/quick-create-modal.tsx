@@ -528,9 +528,14 @@ const CREATABLE_FIELD_TYPES: Array<{ value: string; labelKey: TranslationKey }> 
 type TaskTemplate = { id: string; name: string }
 /**
  * What `POST …/task-templates/:id/instantiate` answers: the new task's id as
- * `taskId`, beside the task. Not a task, so it has no `id` of its own.
+ * `taskId`, beside the task. Not a task, so it has no `id` of its own. With it,
+ * each of the template's values a field here would not take, and why.
  */
-type InstantiatedTask = { taskId: string; task?: { title?: string; labels?: Array<{ name: string }> } }
+type InstantiatedTask = {
+  taskId: string
+  task?: { title?: string; labels?: Array<{ name: string }> }
+  valuesLeftOut?: Array<{ field: string; reason: string }>
+}
 /** Which of the Templates menu's two writes has its panel open, and on what. */
 type TemplatePanel = { kind: 'save' } | { kind: 'update'; template: TaskTemplate }
 type WorkspaceMember = { userId: string; displayName?: string | null; email?: string | null }
@@ -1235,6 +1240,17 @@ function TaskForm({
       method: 'POST',
       body: { listId, ...(titleOverride.trim() ? { titleOverride: titleOverride.trim() } : {}), ...fields },
     })
+    /*
+     * A value of the template that a field here would not take — words for a
+     * Number field, an option this Dropdown lacks — is left out of the task.
+     * Nothing said so (`found-30-sep/template-leaves-values-out-silently`): the
+     * answer names each now, with why, and so does this, for both ways a
+     * template makes a task.
+     */
+    const leftOut = made.valuesLeftOut ?? []
+    if (leftOut.length) {
+      toast.warning(t('taskTemplates.valuesLeftOut', { fields: leftOut.map((v) => `${v.field} (${v.reason})`).join('; ') }))
+    }
     return { id: made.taskId, title: made.task?.title, labels: made.task?.labels }
   }
 

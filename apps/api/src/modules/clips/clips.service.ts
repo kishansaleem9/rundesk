@@ -17,7 +17,7 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { EmailService } from '../email/email.service'
 import { isManagerRole } from '../../common/permissions/workspace-roles'
 import { clipPrefix, isWorkspaceClipKey } from './clip-keys'
-import { CLIP_DELETE_REFUSAL, CLIP_READ_REFUSAL, mayDeleteClip, mayReadClip, type ClipReader } from './clip-access'
+import { CLIP_DELETE_REFUSAL, CLIP_GUEST_PUBLIC_REFUSAL, CLIP_READ_REFUSAL, mayDeleteClip, mayReadClip, mayShareClip, type ClipReader } from './clip-access'
 import { clipReaderOf } from './clip-reader'
 
 /** How many clips the library lists: the newest, whatever the workspace holds. */
@@ -122,6 +122,8 @@ export class ClipsService {
     const objects = (await this.r2.listAllObjects(prefix))
       .filter((o) => !!o.Key)
       .sort((a, b) => (b.LastModified?.getTime() ?? 0) - (a.LastModified?.getTime() ?? 0) || (a.Key! < b.Key! ? 1 : a.Key! > b.Key! ? -1 : 0))
+    // Whether this reader may make a clip's link here, asked once (`mayShareClip`).
+    const mayShare = mayShareClip(reader, await this.audienceOf(workspaceId))
     /*
      * A GUEST'S LIBRARY IS THE CLIPS THEY RECORDED
      * (`found-5-oct/guests-read-and-delete-every-clip`, `clip-access.ts`). It
@@ -152,6 +154,8 @@ export class ClipsService {
         url,
         // So the page offers Delete only where the server would do it.
         mayDelete: mayDeleteClip(head.Metadata, reader),
+        // And Share, which hands out the clip's link (`found-30-sep/guests-may-ask-for-clip-links`).
+        mayShare,
       }
     }
     const results: Array<NonNullable<Awaited<ReturnType<typeof read>>>> = []
@@ -211,8 +215,8 @@ export class ClipsService {
    * who was handed somebody else's key got a link to a clip their library
    * does not show them (201), and it played signed out (200). They are
    * refused, told which clips are theirs; a key naming no clip is still not
-   * found. Whether a guest may make a public link at all, even of their own,
-   * is the owner's open question (`found-30-sep/guests-may-ask-for-clip-links`).
+   * found. And a guest makes no public link at all, even of their own
+   * (`found-30-sep/guests-may-ask-for-clip-links`, `mayShareClip`).
    */
   async link(workspaceId: string, reader: ClipReader, clipKey: unknown) {
     if (!isWorkspaceClipKey(clipKey, workspaceId)) {
@@ -223,6 +227,8 @@ export class ClipsService {
     const head = await this.headOrMissing(key)
     if (!mayReadClip(head.Metadata, reader)) throw new ForbiddenException(CLIP_READ_REFUSAL)
     const audience = await this.audienceOf(workspaceId)
+    // A guest makes no link that opens for anybody (`mayShareClip`).
+    if (!mayShareClip(reader, audience)) throw new ForbiddenException(CLIP_GUEST_PUBLIC_REFUSAL)
     const [existing] = await this.db
       .select({ token: clipLinks.token })
       .from(clipLinks)

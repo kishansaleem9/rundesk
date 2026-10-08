@@ -67,6 +67,28 @@ export function mayReadClip(meta: ClipMetadata, reader: ClipReader): boolean {
   return !readsOnlyOwnClips(reader.role) || recordedByReader(meta, reader)
 }
 
+/**
+ * What a link or a share of a clip answers a guest where the link would open
+ * for anybody who holds it (`found-30-sep/guests-may-ask-for-clip-links`).
+ */
+export const CLIP_GUEST_PUBLIC_REFUSAL = 'Guests cannot share clips publicly'
+
+/**
+ * WHETHER `reader` MAY MAKE THE CLIP'S LINK, given who the workspace's clip
+ * links open for (`found-30-sep/guests-may-ask-for-clip-links`).
+ *
+ * A clip's link plays it to whoever holds it, unless the workspace blocks
+ * public sharing (then to its members, signed in). ClickUp lets a guest record
+ * clips and keeps a guest from sharing anything publicly; Rundesk refuses a
+ * guest a doc's public link for that reason ("Guests cannot share docs"). A
+ * guest asked for their clip's link, and for its share by mail or in public,
+ * and was given a link anybody could open (201). So a guest makes no link that
+ * opens for anybody; where the links open for members only, theirs is made.
+ */
+export function mayShareClip(reader: ClipReader, audience: 'anyone' | 'members'): boolean {
+  return !(reader.role === 'guest' && audience === 'anyone')
+}
+
 /** Whether `reader` may delete the clip: its recorder, or somebody who manages the workspace. */
 export function mayDeleteClip(meta: ClipMetadata, reader: ClipReader): boolean {
   return isManagerRole(reader.role) || recordedByReader(meta, reader)

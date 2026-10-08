@@ -72,11 +72,12 @@ function refusal(fn: () => unknown): { status: number; message: string } | null 
 
 describe('normalizeTemplateTags — a template\'s tags, cleaned once where they are written', () => {
   it('trims each tag, makes a run of spaces one, and drops the blanks', () => {
-    assert.deepEqual(normalizeTemplateTags(['  Q3 ', 'Launch   day', '   ', '']), ['Q3', 'Launch day'])
+    assert.deepEqual(normalizeTemplateTags(['  q3 ', 'launch   day', '   ', '']), ['q3', 'launch day'])
   })
 
-  it('keeps one tag per word whatever its case, in the spelling first given', () => {
-    assert.deepEqual(normalizeTemplateTags(['Q3', 'client', 'q3', 'CLIENT ', 'Retro']), ['Q3', 'client', 'Retro'])
+  it('keeps one tag per word whatever its case, in lower case as ClickUp keeps a tag (`found-30-sep/template-tags-keep-their-case`)', () => {
+    assert.deepEqual(normalizeTemplateTags(['Q3', 'client', 'q3', 'CLIENT ', 'Retro']), ['q3', 'client', 'retro'])
+    assert.deepEqual(normalizeTemplateTags(['  Launch   Day ']), ['launch day'])
   })
 
   it('reads an absent list as no tags', () => {
@@ -117,12 +118,12 @@ describe('normalizeTemplateTags — a template\'s tags, cleaned once where they 
 })
 
 describe('setTags — a template\'s tags, changed after it was saved', () => {
-  it('writes the cleaned list over the one held, and answers with the row', async () => {
+  it('writes the cleaned list over the one held, in lower case, and answers with the row', async () => {
     const { db, written } = fakeDb([[ownTemplate]])
     const row = await service(db).setTags(WS, TPL, [' Retro ', 'retro', 'Q3'])
-    assert.deepEqual(written.set?.tags, ['Retro', 'Q3'])
+    assert.deepEqual(written.set?.tags, ['retro', 'q3'])
     assert.ok(written.set?.updatedAt instanceof Date)
-    assert.deepEqual(row.tags, ['Retro', 'Q3'])
+    assert.deepEqual(row.tags, ['retro', 'q3'])
   })
 
   it('clears them when sent an empty list', async () => {

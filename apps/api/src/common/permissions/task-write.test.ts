@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { NotFoundException } from '@nestjs/common'
+import { ForbiddenException } from '@nestjs/common'
 import { assertTaskWritable, taskCommentAllowed } from './task-write'
 
 /*
@@ -58,9 +58,10 @@ describe('assertTaskWritable — the account role', () => {
   })
 
   it('still refuses a plain member, whose account is no super_admin, the task in somebody else’s private list', async () => {
-    // The read rule reads their workspace role and the project's folder, and the private list refuses them.
+    // The read rule reads their workspace role and the project's folder, and the private list refuses them,
+    // in its own words, as the read is refused (`found-6-oct/task-writes-answer-a-refusal-as-not-found`).
     const db = makeDb([[CTX], [{ role: 'member' }], [{ role: 'member' }], [IN_PRIVATE_LIST], [{ role: 'member' }], []])
-    await assert.rejects(() => assertTaskWritable(db, 't1', 'm'), (e: unknown) => e instanceof NotFoundException && e.message === 'Task not found')
+    await assert.rejects(() => assertTaskWritable(db, 't1', 'm'), (e: unknown) => e instanceof ForbiddenException && e.message === 'This list is private')
   })
 
   it('still asks a super_admin who is a plain member the space’s level', async () => {

@@ -4,7 +4,7 @@
 # holding the admin's key gets its link again, and a share of it, and the link
 # plays the admin's clip to whoever holds it.
 #
-# Reddens: clip-library-access: "a guest may not link, share or copy onto a task somebody else’s clip — refused, saying which clips are theirs, and nothing is made; their own they link and attach"
+# Reddens: clip-library-access: "a guest may not link, share or copy onto a task somebody else’s clip — refused, saying which clips are theirs, and nothing is made; their own they attach, and its public link is refused as a guest’s (section 11)"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/clips/clips.service.ts'
 a = '    if (!mayReadClip(head.Metadata, reader)) throw new ForbiddenException(CLIP_READ_REFUSAL)\n'

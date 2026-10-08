@@ -10,6 +10,7 @@ import { checkContainerAccess } from '../../common/permissions/container-access.
 import { canReadDoc, docLevel, docLevelReaches, type DocLevel, hiddenDocIds } from '../../common/permissions/doc-access'
 import { allowedBy } from '../../common/permissions/capability'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
+import { READ_REFUSALS } from '../../common/permissions/read-access'
 import { isUuid } from '../../common/validation/uuid'
 import { pickDocUpdatable } from './doc-update-fields'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
@@ -205,8 +206,16 @@ export class DocsService {
    * THE ONE DOOR to a doc for a person: every read, edit, comment, export,
    * share and revision passes it. Workspace membership, then where the doc
    * lives (`doc-access.ts`) — membership alone let a member refused a private
-   * space open, edit and export its docs. Not found either way, so a probe
-   * cannot tell "not yours to read" from "does not exist".
+   * space open, edit and export its docs.
+   *
+   * REFUSED IN THE READ'S WORDS (`found-6-oct/doc-refusals-answer-not-found`).
+   * It answered "Doc not found" either way, so a probe could not tell "not
+   * yours to read" from "does not exist" — the rule tasks, lists, projects and
+   * spaces kept until the owner's of 1 October: 403 with the reason, and 404
+   * for an id naming nothing. A doc follows it, in the guard's sentences
+   * (`READ_REFUSALS`): somebody of another workspace is not a member of it, a
+   * guest is not shared it, and a member is refused the private space it lives
+   * in.
    */
   private async assertDocAccess(docId: string, userId: string) {
     const [row] = await this.db.select().from(docs).where(eq(docs.id, docId))
@@ -215,9 +224,9 @@ export class DocsService {
       .select({ role: workspaceMembers.role })
       .from(workspaceMembers)
       .where(and(eq(workspaceMembers.workspaceId, row.workspaceId), eq(workspaceMembers.userId, userId)))
-    if (!membership) throw new NotFoundException('Doc not found')
+    if (!membership) throw new ForbiddenException(READ_REFUSALS.notMember)
     if (!(await canReadDoc(this.db, row, userId, isManagerRole(membership.role as string)))) {
-      throw new NotFoundException('Doc not found')
+      throw new ForbiddenException(membership.role === 'guest' ? READ_REFUSALS.notShared : READ_REFUSALS.privateContainer)
     }
     return row
   }

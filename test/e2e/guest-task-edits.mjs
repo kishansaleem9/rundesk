@@ -184,10 +184,10 @@ try {
   }
   const is = (x, edit, progress, comment) => x && x.edit === edit && x.progress === progress && x.comment === comment
   chk(
-    b1.status === 404 && rb?.title === tBeside.title
+    b1.status === 403 && b1.error?.message === 'This is not shared with you' && rb?.title === tBeside.title
       && is(caps.view, false, false, false) && is(caps.comment, false, false, true) && is(caps.assigned, false, true, true)
       && is(caps.edit, true, true, true) && is(caps.inList, true, true, true) && caps.edit.full === false && (caps.beside === 403 || caps.beside === 404),
-    'the task beside them, shared with nobody, is not theirs (not found, unchanged; its capabilities refused); and the API answers each shared task by its share: nothing, comments, the status on theirs, every change — and at Edit no delete, which takes Full edit',
+    'the task beside them, shared with nobody, is not theirs (403 “This is not shared with you”, as its read is refused; unchanged; its capabilities refused); and the API answers each shared task by its share: nothing, comments, the status on theirs, every change — and at Edit no delete, which takes Full edit',
     `the unshared task ${said(b1)}, now "${rb?.title}"; ${JSON.stringify(caps)}`,
   )
 

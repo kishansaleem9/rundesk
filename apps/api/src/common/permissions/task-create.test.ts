@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { ConflictException, NotFoundException } from '@nestjs/common'
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common'
 import { assertCanCreateTaskIn, canCreateTaskIn, heldInTrashWords, LIST_IN_TRASH_ASK, LIST_IN_TRASH_RESTORE, ListInTrashException } from './task-create'
 
 /*
@@ -116,5 +116,24 @@ describe('assertCanCreateTaskIn — what holds the list, in the trash', () => {
       () => assertCanCreateTaskIn(db, LIST, 'm'),
       (e: unknown) => e instanceof ListInTrashException && (e as Error).message === heldInTrashWords('project', false),
     )
+  })
+})
+
+/*
+ * A PLATFORM ADMIN MAKES A TASK ONLY WHERE THEY ARE A MEMBER
+ * (`found-6-oct/super-admin-outside-makes-what-it-cannot-change`). The read
+ * rule lets a platform super_admin open every workspace's lists, so one with
+ * no member row made a task there that the write rule then refused them
+ * changing. The gate asks the membership after the read rule, in the write
+ * rule's words.
+ */
+describe('assertCanCreateTaskIn — a platform admin outside the workspace', () => {
+  it('refuses a platform super_admin who is no member of the list’s workspace, 403 “You are not a member of this workspace”', async () => {
+    const db = makeDb([home(false), [{ role: 'super_admin' }], [OPEN_LIST], []])
+    await assert.rejects(
+      () => assertCanCreateTaskIn(db, LIST, 'sa'),
+      (e: unknown) => e instanceof ForbiddenException && e.message === 'You are not a member of this workspace',
+    )
+    assert.equal(db.left(), 0, 'and asks nothing after the membership')
   })
 })

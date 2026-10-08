@@ -95,7 +95,7 @@ import {
 } from '../../common/permissions/item-visibility'
 import { PUBLIC_USER_COLUMNS, PUBLIC_USER_WITH } from '../../common/permissions/public-user'
 import { canReadDoc, hiddenDocIds } from '../../common/permissions/doc-access'
-import { readableTask, readableTaskIds } from '../../common/permissions/read-access'
+import { READ_REFUSALS, readableTask, readableTaskIds } from '../../common/permissions/read-access'
 import { listVisibilityFilter } from '../../common/permissions/item-visibility'
 import { safeFetch } from '../../common/http/safe-fetch'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
@@ -1155,10 +1155,17 @@ export class TasksService {
       .limit(1)
     if (!doc) throw new NotFoundException('Doc not found')
     if (doc.workspaceId !== ctx.workspaceId) throw new BadRequestException('Doc belongs to a different workspace')
-    // Not found, as for a doc that does not exist: linking one you may not open
-    // was a way to read its title back off the task.
+    // Linking one you may not open was a way to read its title back off the
+    // task. Refused in the doc door's words (`DocsService.assertDocAccess`), as
+    // every refusal of a doc is (`found-6-oct/doc-refusals-answer-not-found`):
+    // it was 404 "Doc not found", as a doc that does not exist.
     if (!(await canReadDoc(this.db, doc, userId, await resolveIsManager(this.db, ctx.workspaceId, userId)))) {
-      throw new NotFoundException('Doc not found')
+      const [member] = await this.db
+        .select({ role: workspaceMembers.role })
+        .from(workspaceMembers)
+        .where(and(eq(workspaceMembers.workspaceId, ctx.workspaceId), eq(workspaceMembers.userId, userId)))
+        .limit(1)
+      throw new ForbiddenException(member?.role === 'guest' ? READ_REFUSALS.notShared : READ_REFUSALS.privateContainer)
     }
     const [row] = await this.db
       .insert(taskDocLinks)

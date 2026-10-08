@@ -21,9 +21,10 @@
  * clip is deleted by whoever recorded it or by somebody who manages the
  * workspace (`apps/api/src/modules/clips/clip-access.ts`).
  *
- * Whether a guest may make a public link at all, even of a clip they recorded,
- * is the owner's open decision (`found-30-sep/guests-may-ask-for-clip-links`);
- * a guest's own clip is linked here as it was.
+ * And a guest makes no link that opens for anybody, even of a clip they
+ * recorded: refused 403 "Guests cannot share clips publicly", the library and
+ * the page offering them no Share; where the workspace's links open for members
+ * only, theirs is made (`found-30-sep/guests-may-ask-for-clip-links`, section 11).
  *
  * Against the lane's real API and store: every clip is uploaded the way the
  * app uploads one (presign, then a PUT), by the person who records it.
@@ -43,7 +44,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 10
+const EXPECTED_CHECKS = 11
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -55,6 +56,8 @@ const ADMIN = {
 const REFUSAL = 'Only the person who recorded this clip, or a manager or admin of the workspace, can delete it'
 /** And for a link, a share or a task's copy a guest may not have: which clips are theirs. */
 const READ_REFUSAL = 'Guests can share or attach only the clips they recorded'
+/** And for a link that would open for anybody, asked by a guest: none of theirs, whoever recorded the clip. */
+const GUEST_PUBLIC = 'Guests cannot share clips publicly'
 
 let passed = 0
 let failed = 0
@@ -349,9 +352,9 @@ try {
   const refusedRead = (res) => res.status === 403 && res.error?.message === READ_REFUSAL && !res.data?.token
   chk(
     refusedRead(gLinkAdmins) && refusedRead(gShareAdmins) && refusedRead(gAttachAdmins) &&
-      gLinkOwn.ok && typeof gLinkOwn.data?.token === 'string' && gAttachOwn.ok &&
+      gLinkOwn.status === 403 && gLinkOwn.error?.message === GUEST_PUBLIC && gAttachOwn.ok &&
       JSON.stringify(onTaskNames) === JSON.stringify([G_ONE.title]),
-    'a guest may not link, share or copy onto a task somebody else’s clip — refused, saying which clips are theirs, and nothing is made; their own they link and attach',
+    'a guest may not link, share or copy onto a task somebody else’s clip — refused, saying which clips are theirs, and nothing is made; their own they attach, and its public link is refused as a guest’s (section 11)',
     `the admin's clip: link ${said(gLinkAdmins)}, share ${said(gShareAdmins)}, task copy ${said(gAttachAdmins)}; ` +
       `their own: link ${said(gLinkOwn)}, task copy ${said(gAttachOwn)}; the task holds ${JSON.stringify(onTaskNames)}`,
   )
@@ -384,15 +387,52 @@ try {
   chk(
     storedAs?.by === memberA.email && storedAs?.byId === null &&
       aOld?.mayDelete === true && bSeesAOld?.mayDelete === false && gOld?.mayDelete === true && !gSeesAOld &&
-      gFindsOld.ids.includes(`file-${G_OLD.key}`) && gLinkOld.ok &&
+      gFindsOld.ids.includes(`file-${G_OLD.key}`) && gLinkOld.status === 403 && gLinkOld.error?.message === GUEST_PUBLIC &&
       bDelAOld.status === 403 && bDelAOld.error?.message === REFUSAL && aOldKept &&
       aDelAOld.ok && aOldGone && gDelGOld.ok && gOldGone,
-    'a clip stored before clips carried their recorder’s id is its recorder’s by their address — listed with Delete, found, linked and deleted by them — and nobody else’s',
+    'a clip stored before clips carried their recorder’s id is its recorder’s by their address — listed with Delete, found and deleted by them, its link refused them only as a guest’s public one — and nobody else’s',
     `stored as ${JSON.stringify(storedAs)}; member A's: listed to them ${aOld ? `with Delete ${aOld.mayDelete}` : 'NOT'}, ` +
       `to member B ${bSeesAOld ? `with Delete ${bSeesAOld.mayDelete}` : 'NOT'}, to the guest ${gSeesAOld ? 'TOO' : 'not'}; ` +
       `member B's delete ${said(bDelAOld)}, ${aOldKept ? 'kept' : 'GONE'}; member A's ${said(aDelAOld)}, ${aOldGone ? 'gone' : 'kept'}; ` +
       `the guest's: listed ${gOld ? `with Delete ${gOld.mayDelete}` : 'NOT'}, found ${gFindsOld.ids.includes(`file-${G_OLD.key}`)}, ` +
       `link ${said(gLinkOld)}, delete ${said(gDelGOld)}, ${gOldGone ? 'gone' : 'kept'}`,
+  )
+
+  // ══ 11. A GUEST'S PUBLIC LINK ════════════════════════════════════════════
+  /*
+   * A clip's link plays it to whoever holds it, unless the workspace blocks
+   * public sharing. A guest was given one of their own clip, by a link and by a
+   * public share (201), and the page offered them Share. Guests share nothing
+   * publicly, as a doc's public link refuses them: no link that opens for
+   * anybody, and where the links open for members only, theirs is made.
+   */
+  console.log('\n▶ the guest asks for their clip’s link and a public share of it, where links open for anybody and for members only')
+  const G_LINK = await record(guest.as, 'guestslink')
+  const gLinkPublic = await guest.as(`/workspaces/${WS}/clips/link`, { method: 'POST', body: { storageKey: G_LINK.key } })
+  const gSharePublic = await guest.as(`/workspaces/${WS}/clips/share`, { method: 'POST', body: { storageKey: G_LINK.key, mode: 'public' } })
+  const gOffered = (await listed(guest.as)).clips.find((c) => c.storageKey === G_LINK.key)
+  const mOffered = (await listed(memberA.as)).clips.find((c) => c.storageKey === G_LINK.key)
+  /** Whether the page drawn for `page`'s reader offers Share on the clip titled `title`. */
+  const shareDrawn = async (page, title) => {
+    await page.goto(`${stack.base}/app/${WS}/clips`, { waitUntil: 'domcontentloaded' })
+    const card = page.getByTestId('clip-card').filter({ hasText: title }).first()
+    await waitUntil(() => card.isVisible().catch(() => false), { timeoutMs: 20_000 })
+    return (await card.getByTestId('clip-card-share').filter({ visible: true }).count()) > 0
+  }
+  const gPageShare = await shareDrawn(guestPage, G_LINK.title)
+  const mPageShare = await shareDrawn(memberPage, G_LINK.title)
+  const blocked = await A(`/workspaces/${WS}`, { method: 'PATCH', body: { blockPublicSharing: true } })
+  const gLinkMembers = await guest.as(`/workspaces/${WS}/clips/link`, { method: 'POST', body: { storageKey: G_LINK.key } })
+  const gOfferedMembers = (await listed(guest.as)).clips.find((c) => c.storageKey === G_LINK.key)
+  const publicAgain = await A(`/workspaces/${WS}`, { method: 'PATCH', body: { blockPublicSharing: false } })
+  const refusedPublic = (res) => res.status === 403 && res.error?.message === GUEST_PUBLIC && !res.data?.token
+  chk(
+    refusedPublic(gLinkPublic) && refusedPublic(gSharePublic) && gOffered?.mayShare === false && mOffered?.mayShare === true &&
+      !gPageShare && mPageShare && blocked.ok && publicAgain.ok &&
+      gLinkMembers.ok && gLinkMembers.data?.audience === 'members' && gOfferedMembers?.mayShare === true,
+    'a guest makes no link that opens for anybody, even of their own clip — refused 403 “Guests cannot share clips publicly”, the library and the page offering them no Share where a member is offered it — and where the workspace’s links open for members only, theirs is made',
+    `where links open for anybody: link ${said(gLinkPublic)}, public share ${said(gSharePublic)}; mayShare to the guest ${gOffered?.mayShare}, to a member ${mOffered?.mayShare}; ` +
+      `Share drawn for the guest ${gPageShare}, for a member ${mPageShare}; for members only (${blocked.status}, back ${publicAgain.status}): link ${said(gLinkMembers)}, audience ${gLinkMembers.data?.audience}, mayShare ${gOfferedMembers?.mayShare}`,
   )
 } catch (e) {
   failed += 1

@@ -1,5 +1,5 @@
 # A TASK'S LINKED DOCS WITH NO READER RULE, as they were: each doc's title, whoever reads the task.
-# Reddens: workspace-read-access: "a task’s linked docs name none the member may not open, and linking one is refused (404, no link) — the admin’s name it"
+# Reddens: workspace-read-access: "a task’s linked docs name none the member may not open, and linking one is refused (403 “This space or project is private”, no link) — the admin’s name it"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 a = '      .where(and(eq(taskDocLinks.taskId, taskId), hidden.length ? notInArray(docs.id, hidden) : undefined))\n'

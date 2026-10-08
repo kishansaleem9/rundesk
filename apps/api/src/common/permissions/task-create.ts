@@ -1,8 +1,8 @@
-import { ConflictException, HttpException, NotFoundException } from '@nestjs/common'
+import { ConflictException, ForbiddenException, HttpException, NotFoundException } from '@nestjs/common'
 import { and, eq, sql, type SQL } from 'drizzle-orm'
-import { folders, lists, projects, spaces, users } from '@rundesk/db'
+import { folders, lists, projects, spaces, users, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
-import { readableList } from './read-access'
+import { READ_REFUSALS, readableList } from './read-access'
 import { assertCanCreateInSpace } from './container-access'
 import { isAdminRole } from './workspace-roles'
 import { isUuid } from '../validation/uuid'
@@ -188,7 +188,14 @@ export async function listTrashState(db: Db, listId: string): Promise<{ inTrash:
  *     is Full edit: every guest was refused first
  *     (`found-25-sep/guests-with-full-edit-make-no-tasks`), where ClickUp's
  *     Full edit "creates tasks and subtasks", a guest's included.
- * A super-admin passes where they are not a member, as every guard lets them.
+ * A platform super_admin is asked to be a MEMBER of the list's workspace
+ * (`found-6-oct/super-admin-outside-makes-what-it-cannot-change`): the read
+ * rule lets them open every workspace's lists, so one with no member row made a
+ * task there (201) that the write rule then refused them changing. ClickUp has
+ * no platform-wide role; its own owners and admins work where they belong, and
+ * a task is made by somebody of its workspace. So they are refused as the write
+ * rule refuses them, 403 "You are not a member of this workspace", and read on
+ * as before.
  */
 export async function assertCanCreateTaskIn(
   db: Db,
@@ -201,6 +208,9 @@ export async function assertCanCreateTaskIn(
   const [account] = await db.select({ role: users.role }).from(users).where(eq(users.id, actorId)).limit(1)
   const list = await readableList(db, home.workspaceId, listId, { id: actorId, role: account?.role })
   if (!list) throw new NotFoundException('List not found')
+  if (list.role === 'super_admin' && !(await isWorkspaceMember(db, home.workspaceId, actorId))) {
+    throw new ForbiddenException(READ_REFUSALS.notMember)
+  }
   // Asked of somebody who may open the list, so it tells nobody else it is there.
   // What holds it in the trash refuses as the list itself does; the list's own trash is said first (below).
   const held = home.inTrash ? null : nearestHolderInTrash(home)
@@ -229,4 +239,14 @@ export async function canCreateTaskIn(db: Db, listId: string, actorId: string, o
     if (err instanceof HttpException) return false
     throw err
   }
+}
+
+/** Whether `userId` has a member row in the workspace — a guest's included. */
+async function isWorkspaceMember(db: Db, workspaceId: string, userId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ userId: workspaceMembers.userId })
+    .from(workspaceMembers)
+    .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+    .limit(1)
+  return !!row
 }

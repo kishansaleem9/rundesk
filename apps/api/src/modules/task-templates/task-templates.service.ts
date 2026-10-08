@@ -113,6 +113,23 @@ export function fitTemplateValue(
 }
 
 /**
+ * A template's value its field did not take, and why, in words for the person
+ * who applied it (`found-30-sep/template-leaves-values-out-silently`).
+ */
+export type TemplateValueLeftOut = { field: string; reason: string }
+
+/** Why `fitTemplateValue` kept nothing of a value — asked only where there was a value to keep. */
+export function whyValueDoesNotFit(field: { type: string }, value: TemplateFieldValue): string {
+  const listField = LIST_FIELDS.has(field.type)
+  if (Array.isArray(value) !== listField) return 'the template holds another kind of value than this field takes'
+  return field.type === 'people'
+    ? 'none of the template’s people are members of this workspace'
+    : field.type === 'tasks'
+      ? 'none of the template’s tasks are in this workspace'
+      : 'none of the template’s choices are among this field’s options'
+}
+
+/**
  * `found-30-sep/template-values-find-fields-by-name-alone` — WHICH FIELD EACH
  * VALUE GOES INTO, among the fields the new task has (`fieldIsOnList`: its
  * project's, less those scoped to another list). Values were mapped by name
@@ -492,7 +509,7 @@ export class TaskTemplatesService {
     if (!task) throw new Error('Task creation returned no row')
 
     await this.materialiseChecklists(task.id, payload.checklists)
-    await this.materialiseTemplateValues(task.id, { projectId: listCtx.projectId, listId: dto.listId }, workspaceId, payload.customFieldValues)
+    const valuesLeftOut = await this.materialiseTemplateValues(task.id, { projectId: listCtx.projectId, listId: dto.listId }, workspaceId, payload.customFieldValues)
     await this.materialiseSubtasks(dto.listId, task.id, payload.subtasks, actor.id, now)
 
     // Bump usage count for ordering/discovery.
@@ -512,7 +529,7 @@ export class TaskTemplatesService {
       metadata: { templateId },
     })
 
-    return { taskId: task.id, templateId, task }
+    return { taskId: task.id, templateId, task, valuesLeftOut }
   }
 
   /**
@@ -801,8 +818,8 @@ export class TaskTemplatesService {
     target: { projectId: string; listId: string },
     workspaceId: string,
     values: TaskTemplatePayload['customFieldValues'],
-  ) {
-    if (!values?.length) return
+  ): Promise<TemplateValueLeftOut[]> {
+    if (!values?.length) return []
     const defs = await this.db
       .select({
         id: customFieldDefinitions.id,
@@ -844,22 +861,39 @@ export class TaskTemplatesService {
       : []
     const known = { members: new Set(members.map((m) => m.id)), tasks: new Set(tasksHere.map((t) => t.id)) }
 
+    /*
+     * WHAT IS LEFT OUT IS SAID (`found-30-sep/template-leaves-values-out-silently`).
+     * A value no part of which fits its field, or one the field's own route
+     * refuses, was left out and nothing said so: the answer and the create
+     * modal's toast said only that the task was made. Each is named now, with
+     * why — the field route's own words where it refused — in the answer, and
+     * the modal says it. A field's empty value, and a vote or a file (never
+     * carried by a template), were not the template's to apply, and are not.
+     */
+    const leftOut: TemplateValueLeftOut[] = []
     const rows: Array<typeof customFieldValues.$inferInsert> = []
     for (const { field: def, value: held } of planned) {
+      if (held === null || held === undefined || NOT_FROM_TEMPLATES.has(def.type)) continue
       const value = fitTemplateValue(def, held, known)
-      if (value === undefined) continue
+      if (value === undefined) {
+        leftOut.push({ field: def.name, reason: whyValueDoesNotFit(def, held) })
+        continue
+      }
       const taken = await this.customFields.checkValue(workspaceId, taskId, def, value).then(
         (checked) => ({ checked }),
         (err: unknown) => {
-          if (err instanceof BadRequestException) return null
+          if (err instanceof BadRequestException) {
+            leftOut.push({ field: def.name, reason: err.message })
+            return null
+          }
           throw err
         },
       )
       if (!taken) continue
       rows.push({ taskId, fieldId: def.id, value: { v: taken.checked } })
     }
-    if (rows.length === 0) return
-    await this.db.insert(customFieldValues).values(rows)
+    if (rows.length) await this.db.insert(customFieldValues).values(rows)
+    return leftOut
   }
 
   private async materialiseSubtasks(

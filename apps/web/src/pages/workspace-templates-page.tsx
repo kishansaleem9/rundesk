@@ -1129,7 +1129,7 @@ function SaveTemplateDialog({
  * the last. The words already in use are offered as you type.
  *
  * Cleaned here as the server cleans them — trimmed, a run of spaces made one,
- * one per word whatever its case — so the chips show what will be kept. The
+ * in lower case, one per word — so the chips show what will be kept. The
  * BOUNDS are not copied here: forty characters and twenty tags are the
  * server's to refuse, in its own words, and a second copy of them in the
  * browser is one that drifts.
@@ -1152,8 +1152,9 @@ function TagsInput({
   const add = (raw: string) => {
     let next = value
     for (const part of raw.split(',')) {
-      const tag = part.trim().replace(/\s+/g, ' ')
-      if (tag && !next.some((v) => v.toLowerCase() === tag.toLowerCase())) next = [...next, tag]
+      // In lower case, as the server keeps a tag and ClickUp does (`found-30-sep/template-tags-keep-their-case`).
+      const tag = part.trim().replace(/\s+/g, ' ').toLowerCase()
+      if (tag && !next.some((v) => v.toLowerCase() === tag)) next = [...next, tag]
     }
     if (next !== value) onChange(next)
     setDraft('')

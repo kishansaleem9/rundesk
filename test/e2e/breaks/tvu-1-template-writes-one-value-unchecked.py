@@ -1,13 +1,17 @@
 # A TEMPLATE'S VALUES ARE WRITTEN UNCHECKED AGAIN (`found-30-sep/template-values-written-unchecked`).
 # The field route's rules are not asked: a template's words go into a Number field of the same
 # name, an option into a Dropdown that does not define it, and words into an Email field.
+# Re-aimed 8 October: values left out are named in the answer (`found-30-sep/template-leaves-values-out-silently`).
 # Reddens: create-modal-templates: "a template’s words, applied where the field of that name is a Number, leave that field unset — as the field’s own route refuses them (400), read by SQL"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/task-templates/task-templates.service.ts'
 a = ("      const taken = await this.customFields.checkValue(workspaceId, taskId, def, value).then(\n"
      "        (checked) => ({ checked }),\n"
      "        (err: unknown) => {\n"
-     "          if (err instanceof BadRequestException) return null\n"
+     "          if (err instanceof BadRequestException) {\n"
+     "            leftOut.push({ field: def.name, reason: err.message })\n"
+     "            return null\n"
+     "          }\n"
      "          throw err\n"
      "        },\n"
      "      )\n")

@@ -28,11 +28,22 @@
  * stay 404 and in other words; and every refusal has somebody for whom the
  * thing is there (section 11).
  *
+ * WRITES AND DOCS TOO, 8 October: the rule named reads, and a change or move of
+ * a task its caller may not open was 404 "Task not found", a doc they may not
+ * open 404 "Doc not found", each as an id naming nothing
+ * (`found-6-oct/task-writes-answer-a-refusal-as-not-found`,
+ * `found-6-oct/doc-refusals-answer-not-found`). They are refused in the read's
+ * words now (sections 13 and 14). And a platform super_admin, whom the guard
+ * lets read every workspace, makes no task where they are no member, imports
+ * none, and changes none there (`found-6-oct/super-admin-outside-makes-what-it-cannot-change`,
+ * section 15).
+ *
  *   node test/e2e/refused-as-forbidden.mjs --api 3021
  */
 import { signInApi, signUpApi } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { apiAs as apiAsAt, must } from './lib/fixture.mjs'
+import { waitUntil } from './lib/wait.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -40,7 +51,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 12
+const EXPECTED_CHECKS = 15
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -264,6 +275,81 @@ try {
     w1.status === 403 && w0.status === 403 && w1.message === w0.message && !JSON.stringify(w1.data ?? null).includes(TAG),
     'a route naming the workspace itself refuses a stranger 403 — alike for this workspace and for an id naming none, since it is not looked up — and names nothing in it',
     `this workspace ${said(w1)}; an id naming none ${said(w0)}`,
+  )
+
+  // ══ 13. A CHANGE OF A TASK ITS CALLER MAY NOT OPEN ═══════════════════════
+  console.log('\n▶ changes and a move of tasks the member, a guest and a stranger may not open')
+  const titleOf = async (id) => (await sql`select title from tasks where id = ${id}`)[0]?.title
+  const changes = {
+    privateTask: [await M(`/tasks/${PT}`, { method: 'PATCH', body: { title: `${TAG} changed 1` } }), 'This task is private'],
+    privateList: [await M(`/tasks/${PLT}`, { method: 'PATCH', body: { title: `${TAG} changed 2` } }), 'This list is private'],
+    privateSpace: [await M(`/tasks/${PST}`, { method: 'PATCH', body: { title: `${TAG} changed 3` } }), SAYS],
+    moved: [await M(`/tasks/${PST}/move`, { method: 'POST', body: { listId: OL, position: 0 } }), SAYS],
+    guest: [await G(`/tasks/${OT}`, { method: 'PATCH', body: { title: `${TAG} changed 4` } }), 'This is not shared with you'],
+    stranger: [await S(`/tasks/${OT}`, { method: 'PATCH', body: { title: `${TAG} changed 5` } }), 'You are not a member of this workspace'],
+  }
+  const change0 = await M(`/tasks/${NONE}`, { method: 'PATCH', body: { title: `${TAG} changed 0` } })
+  const titles = [await titleOf(PT), await titleOf(PLT), await titleOf(PST), await titleOf(OT)]
+  const [movedTo] = await sql`select list_id from tasks where id = ${PST}`
+  const kept = titles.join('|') === [`${TAG} private task`, `${TAG} in the private list`, `${TAG} in the private space`, `${TAG} open task`].join('|')
+  chk(
+    Object.values(changes).every(([res, words]) => refusedSaying(res, words, change0)) && kept && movedTo?.list_id === PSL,
+    'a change or a move of a task its caller may not open is refused 403 in the read’s words — a private task, list or space, a guest’s, a stranger’s — and nothing changes (SQL); a change of an id naming nothing is 404',
+    `${Object.entries(changes).map(([k, [res]]) => `${k} ${said(res)}`).join('; ')}; nothing ${said(change0)}; titles ${kept ? 'kept' : JSON.stringify(titles)}; the private space's task ${movedTo?.list_id === PSL ? 'in its list' : `moved to ${movedTo?.list_id}`}`,
+  )
+
+  // ══ 14. A DOC ITS CALLER MAY NOT OPEN ════════════════════════════════════
+  console.log('\n▶ docs the member, a guest and a stranger may not open')
+  const spaceDoc = must(await A(`/workspaces/${WS}/docs`, { method: 'POST', body: { spaceId: PS, title: `${TAG} the private space's doc` } }), 'make the private space’s doc').id
+  const openDoc = must(await A(`/workspaces/${WS}/docs`, { method: 'POST', body: { spaceId: OS, title: `${TAG} the open space's doc` } }), 'make the open space’s doc').id
+  const docs = {
+    privateSpace: [await M(`/docs/${spaceDoc}`), SAYS],
+    privateSpaceChange: [await M(`/docs/${spaceDoc}`, { method: 'PATCH', body: { title: `${TAG} doc changed` } }), SAYS],
+    guest: [await G(`/docs/${openDoc}`), 'This is not shared with you'],
+    stranger: [await S(`/docs/${openDoc}`), 'You are not a member of this workspace'],
+  }
+  const doc0 = await M(`/docs/${NONE}`)
+  const [docTitle] = await sql`select title from docs where id = ${spaceDoc}`
+  const docsOpen = { member: await M(`/docs/${openDoc}`), admin: await A(`/docs/${spaceDoc}`) }
+  chk(
+    Object.values(docs).every(([res, words]) => refusedSaying(res, words, doc0)) && docTitle?.title === `${TAG} the private space's doc`
+      && docsOpen.member.status === 200 && docsOpen.admin.status === 200,
+    'a doc its caller may not open is refused 403 in the read’s words — read or changed by a member refused its space, a guest’s, a stranger’s — and is not changed (SQL); an id naming nothing is 404, and the open doc and the admin’s are read',
+    `${Object.entries(docs).map(([k, [res]]) => `${k} ${said(res)}`).join('; ')}; nothing ${said(doc0)}; title ${JSON.stringify(docTitle?.title)}; the member's open doc ${docsOpen.member.status}, the admin's ${docsOpen.admin.status}`,
+  )
+
+  // ══ 15. A PLATFORM ADMIN OUTSIDE A WORKSPACE ═════════════════════════════
+  console.log('\n▶ the platform’s admin, in a workspace it is no member of')
+  const theirs = must(await S('/workspaces', { method: 'POST', body: { name: `${TAG} the stranger's` } }), 'make the stranger’s workspace').id
+  const theirSpace = must(await S('/spaces', { method: 'POST', body: { workspaceId: theirs, name: `${TAG} theirs` } }), 'make the stranger’s space').id
+  const theirProject = must(await S('/projects', { method: 'POST', body: { spaceId: theirSpace, name: `${TAG} theirs` } }), 'make the stranger’s project').id
+  const theirList = must(await S('/lists', { method: 'POST', body: { projectId: theirProject, name: `${TAG} theirs` } }), 'make the stranger’s list').id
+  const theirTask = must(await S('/tasks', { method: 'POST', body: { listId: theirList, title: `${TAG} the stranger's task` } }), 'make the stranger’s task').id
+  const [notIn] = await sql`select count(*)::int as n from workspace_members m join users u on u.id = m.user_id where m.workspace_id = ${theirs} and u.email = ${ADMIN.email}`
+  const madeThere = await A('/tasks', { method: 'POST', body: { listId: theirList, title: `${TAG} made by the platform admin` } })
+  const changedThere = await A(`/tasks/${theirTask}`, { method: 'PATCH', body: { title: `${TAG} changed by the platform admin` } })
+  const readThere = await A(`/tasks/${theirTask}`)
+  const [madeRows] = await sql`select count(*)::int as n from tasks where list_id = ${theirList} and title = ${`${TAG} made by the platform admin`}`
+  // And an import there, which makes a project and its tasks: the importers' own rule (`assertMayImport`).
+  const IMPORTED = `${TAG} imported by the platform admin`
+  const importedThere = await A(`/workspaces/${theirs}/import/clickup`, {
+    method: 'POST',
+    body: { csv: `Task Name\n${IMPORTED}\n`, targetSpaceId: theirSpace, targetProjectName: IMPORTED },
+  })
+  // A job it started is waited out, so "nothing written" is not read before the job writes.
+  const jobId = importedThere.data?.jobId
+  if (jobId) {
+    await waitUntil(async () => ['completed', 'failed'].includes((await A(`/workspaces/${theirs}/import/clickup/jobs/${jobId}`)).data?.status), { timeoutMs: 30_000 })
+  }
+  const [importLeft] = await sql`select (select count(*)::int from clickup_import_jobs where workspace_id = ${theirs}) as jobs, (select count(*)::int from projects where space_id = ${theirSpace} and name = ${IMPORTED}) as projects`
+  const OUTSIDE = 'You are not a member of this workspace'
+  chk(
+    notIn.n === 0 && madeThere.status === 403 && madeThere.message === OUTSIDE && madeRows.n === 0
+      && importedThere.status === 403 && importedThere.message === OUTSIDE && importLeft.jobs === 0 && importLeft.projects === 0
+      && changedThere.status === 403 && changedThere.message === OUTSIDE && (await titleOf(theirTask)) === `${TAG} the stranger's task`
+      && readThere.status === 200,
+    'the platform’s admin, no member of a workspace, makes no task there, imports nothing and changes none, each refused 403 “You are not a member of this workspace” with nothing written (SQL) — as before, it may read there',
+    `a member there: ${notIn.n}; made ${said(madeThere)} (${madeRows.n} written); imported ${said(importedThere)} (${importLeft.jobs} job row(s), ${importLeft.projects} project(s)); changed ${said(changedThere)}; read ${said(readThere)}`,
   )
 } catch (e) {
   failed += 1

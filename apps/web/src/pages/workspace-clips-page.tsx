@@ -54,6 +54,8 @@ type Clip = {
    * Every card offered Delete, a guest's included, and the server asked nobody.
    */
   mayDelete?: boolean
+  /** Whether the server would make this reader the clip's link: not a guest's where links open for anybody. */
+  mayShare?: boolean
 }
 
 type WorkspaceMember = {
@@ -692,14 +694,17 @@ function ClipCard({
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             )}
-            <button
-              className="text-muted-foreground hover:text-foreground"
-              data-testid="clip-card-share"
-              aria-label={t('clips.shareTitle')}
-              onClick={onShare}
-            >
-              <Share2 className="h-3.5 w-3.5" />
-            </button>
+            {/* Only where the server would make its link for this reader (`mayShare`). */}
+            {clip.mayShare === true && (
+              <button
+                className="text-muted-foreground hover:text-foreground"
+                data-testid="clip-card-share"
+                aria-label={t('clips.shareTitle')}
+                onClick={onShare}
+              >
+                <Share2 className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         </div>
       </div>

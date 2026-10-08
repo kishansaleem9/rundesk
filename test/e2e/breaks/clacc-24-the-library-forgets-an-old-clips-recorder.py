@@ -4,7 +4,7 @@
 # from before clips carried their recorder's id is listed to them without
 # Delete and their delete is refused, and a guest's leaves their library.
 #
-# Reddens: clip-library-access: "a clip stored before clips carried their recorder’s id is its recorder’s by their address — listed with Delete, found, linked and deleted by them — and nobody else’s"
+# Reddens: clip-library-access: "a clip stored before clips carried their recorder’s id is its recorder’s by their address — listed with Delete, found and deleted by them, its link refused them only as a guest’s public one — and nobody else’s"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/clips/clips.service.ts'
 a = '    return clipReaderOf(this.db, workspaceId, userId)\n'
