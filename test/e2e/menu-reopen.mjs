@@ -93,7 +93,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 28
+const EXPECTED_CHECKS = 29
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -863,6 +863,32 @@ try {
     `the menu ${oneMenuOpened ? 'opened' : 'never opened'}; the dialog ${oneUp ? (oneShut ? 'closed' : 'stayed open after a press on its overlay 0.7 s after opening') : 'never opened'}`,
   )
   if (!oneShut) await page.keyboard.press('Escape').catch(() => {})
+
+  /*
+   * AND A DIALOG THAT HAS CHANGED SINCE IT OPENED (`found-8-oct/a-dialog-takes-each-render-for-its-opening`).
+   * The interval ran from each time the dialog's content was handed its ref,
+   * and a layer inside Radix hands it again at every render, so a dialog whose
+   * list loaded after it opened took no press outside for half a second more:
+   * a press on the overlay 0.7 s after opening shut it in 8 rounds of 12 and
+   * left it open in 4, each time inserted once (lane 3, a CI rehearsal on the
+   * other cores). Typed into, a render, 0.6 s after it opened, and pressed
+   * outside at once: it closes.
+   */
+  const { opened: typedMenuOpened } = await openFresh(page, more)
+  await mergeRow.click({ timeout: 8000 }).catch(() => {})
+  const typedUp = await waitUntil(mergeShown, { timeoutMs: 8000 })
+  await page.waitForTimeout(600)
+  if (typedUp) {
+    await page.getByTestId('task-merge-search').fill('x', { timeout: 5000 }).catch(() => {})
+    await page.mouse.click(4, 4).catch(() => {})
+  }
+  const typedShut = typedUp ? await waitUntil(async () => !(await mergeShown()), { timeoutMs: 5000 }) : false
+  chk(
+    typedMenuOpened && typedUp && typedShut,
+    'and a dialog that has changed since it opened — typed into 0.6 s after — still closes at a press outside: the interval runs from its opening, not from its last render',
+    `the menu ${typedMenuOpened ? 'opened' : 'never opened'}; the dialog ${typedUp ? (typedShut ? 'closed' : 'stayed open after a press outside, typed into 0.6 s after it opened') : 'never opened'}`,
+  )
+  if (!typedShut) await page.keyboard.press('Escape').catch(() => {})
 
   /*
    * THE CREATE MODAL, where an Escape that is not the menu's shows: the modal

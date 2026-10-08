@@ -61,7 +61,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 12
+const EXPECTED_CHECKS = 17
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -128,6 +128,10 @@ try {
     return r ? { start: iso(r.start_date), due: iso(r.due_date), binned: r.is_archived } : null
   }
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+  // Section 9's and 10's reads, one browser each.
+  const timelineFar = []
+  const ganttFar = []
+  const dstLabel = []
 
   // The member, and what each zone's browser works on.
   const memberEmail = `${TAG}-member@rundesk.invalid`
@@ -552,6 +556,203 @@ try {
       JSON.stringify(results),
     )
   }
+
+  // ══ 9. A TASK IN YEAR 202: BOTH VIEWS DRAWN IN A SECOND, THEIR FAR END REACHED ══
+  console.log('\n▶ found-6-oct/timeline-and-gantt-draw-a-column-per-day — a task starting in year 202 leaves the workspace timeline and the list’s Gantt drawn in a second, and this October reached by scrolling')
+  /*
+   * ClickUp's Timeline has "no limit to how far you can scroll into the future
+   * or past". Each view laid its span out from the earliest date and drew an
+   * element for every day of it: with a task starting in year 202 the timeline
+   * drew after 17.8 s with 95,834 nodes, and the Gantt after a minute with 1.5
+   * million (lane 5, 6 October). Each now draws the days in view and a margin,
+   * and lays the span out no wider than a browser lays anything out, so its far
+   * end is where its days say. Every wait is bounded: a build that cannot draw
+   * the span fails these checks in words instead of hanging the run.
+   *
+   * Made last, as the timeline's span is the whole workspace's and every
+   * section above opens it.
+   */
+  const farPlace = await place(FULL, 'year 202')
+  const nearTitle = `${TAG} this October`
+  const nearTask = await task(farPlace.list, nearTitle, '2026-10-07T09:00:00.000Z', '2026-10-09T17:30:00.000Z')
+  await task(farPlace.list, `${TAG} since year 202`, '0202-10-06T09:00:00.000Z', '2026-10-08T17:30:00.000Z')
+  /** What `fn` gives within `ms`, or 'timed out'. */
+  const within = (ms, fn) => Promise.race([fn(), new Promise((r) => setTimeout(() => r('timed out'), ms))])
+  /** The header cell drawn under a point of the chart, its day; and whether a box is in the scroller's view. */
+  const cellUnder = (page, cellSel, x, y) =>
+    page.evaluate(({ cellSel, x, y }) => {
+      // A drawn cell only: a hidden one keeps a box and answers innerText with its whole text.
+      const cell = [...document.querySelectorAll(cellSel)].find((c) => {
+        const r = c.getBoundingClientRect()
+        return c.checkVisibility() && r.left <= x && x < r.right && (y == null || (r.top <= y && y < r.bottom))
+      })
+      return cell ? cell.dataset.day ?? cell.innerText.trim() : null
+    }, { cellSel, x, y })
+  const inView = (page, scrollerSel, boxSel) =>
+    page.evaluate(({ scrollerSel, boxSel }) => {
+      const scroller = document.querySelector(scrollerSel)
+      const box = document.querySelector(boxSel)
+      if (!scroller || !box) return null
+      const s = scroller.getBoundingClientRect()
+      const b = box.getBoundingClientRect()
+      return { inView: b.right > s.left && b.left < s.right, barLeft: b.left, barTop: b.top + b.height / 2, scrollWidth: scroller.scrollWidth }
+    }, { scrollerSel, boxSel })
+  const nodesUnder = (page, sel) => page.evaluate((sel) => document.querySelector(sel)?.querySelectorAll('*').length ?? null, sel)
+  {
+    const { ctx, page } = await open('UTC', ADMIN)
+    const nearBar = `[data-testid="timeline-bar"][data-task-id="${nearTask}"]`
+    // The timeline, narrowed to a project of an ordinary span first: then the year-202 project is the change timed.
+    await page.goto(`${B}/app/${WS}/timeline`, { waitUntil: 'domcontentloaded' })
+    const opened = await within(90_000, () => page.locator(`[data-testid="timeline-bar"][data-task-id="${work.UTC.pressTimed}"]`).waitFor({ timeout: 90_000 }).then(() => true, () => false))
+    await within(90_000, () => page.getByTestId('timeline-project-filter').selectOption(work.UTC.tl.project, { timeout: 90_000 }).catch(() => {}))
+    let t0 = Date.now()
+    await within(90_000, () => page.getByTestId('timeline-project-filter').selectOption(farPlace.project, { timeout: 90_000 }).catch(() => {}))
+    const drawn = await within(90_000, () => page.locator(nearBar).waitFor({ timeout: 90_000 }).then(() => true, () => false))
+    const timelineMs = Date.now() - t0
+    const axis = await within(10_000, () => page.getByTestId('timeline-axis').evaluate((e) => ({ start: e.dataset.rangeStart, dayPx: e.dataset.dayPx })).catch(() => null))
+    const timelineNodes = await within(10_000, () => nodesUnder(page, '[data-testid="timeline-chart-viewport"]'))
+    /*
+     * The Day zoom, and the span's far end: this October, the bar under its own
+     * day. Read by the axis's zoom and not its px a day: a span this long is
+     * narrowed to the widest a browser lays out at the Week zoom already, so the
+     * two zooms draw the same px a day here, in cells of a day or of a week.
+     */
+    t0 = Date.now()
+    await within(90_000, () => page.getByTestId('timeline-zoom-day').click({ timeout: 90_000 }).catch(() => {}))
+    const zoomed = await within(90_000, () => waitUntil(async () => {
+      const zoom = await page.getByTestId('timeline-axis').getAttribute('data-zoom', { timeout: 1000 }).catch(() => null)
+      return zoom === 'day' && (await page.locator('[data-testid="timeline-date-cell"]').count()) > 0
+    }, { timeoutMs: 90_000 }))
+    const dayZoomMs = Date.now() - t0
+    await within(30_000, () => page.getByTestId('timeline-chart-viewport').evaluate((e) => { e.scrollLeft = e.scrollWidth }).catch(() => {}))
+    let end = null
+    let under = null
+    await within(30_000, () => waitUntil(async () => {
+      end = await inView(page, '[data-testid="timeline-chart-viewport"]', nearBar)
+      under = end?.inView ? await cellUnder(page, '[data-testid="timeline-date-cell"]', end.barLeft + 2, null) : null
+      return under === '2026-10-07'
+    }, { timeoutMs: 20_000 }))
+    timelineFar.push({ opened, drawn, timelineMs, axis, timelineNodes, zoomed, dayZoomMs, end, under })
+    await ctx.close()
+  }
+  chk(
+    timelineFar[0]?.drawn === true && timelineFar[0].timelineMs < 1000 && String(timelineFar[0].axis?.start ?? '').startsWith('202-') && timelineFar[0].timelineNodes < 5000,
+    'the workspace timeline draws a project holding a task that starts in year 202 within a second of its being chosen, its span starting in year 202, with a few thousand elements at most — not one a day',
+    JSON.stringify(timelineFar),
+  )
+  chk(
+    timelineFar[0]?.zoomed === true && timelineFar[0].dayZoomMs < 1000 && timelineFar[0].end?.inView === true && timelineFar[0].under === '2026-10-07',
+    'and its Day zoom is drawn within a second, and scrolled to the span’s far end shows this October: the bar of a task starting 7 October in view, under the day “2026-10-07”',
+    JSON.stringify(timelineFar),
+  )
+  console.log(`    measured: ${JSON.stringify(timelineFar[0] ?? null)}`)
+  {
+    const { ctx, page } = await open('UTC', ADMIN)
+    await page.goto(`${B}/app/${WS}/${FULL}/${farPlace.project}/${farPlace.list}`, { waitUntil: 'domcontentloaded' })
+    await page.getByTestId('work-view-tab-type-list').waitFor({ timeout: 30_000 }).catch(() => {})
+    const gbarSel = `div[role="button"][aria-label="${nearTitle}"]`
+    let t0 = Date.now()
+    await within(90_000, () => page.getByTestId('work-view-tab-type-gantt').click({ timeout: 90_000 }).catch(() => {}))
+    const drawn = await within(90_000, () => page.locator(gbarSel).first().waitFor({ timeout: 90_000 }).then(() => true, () => false))
+    const firstMs = Date.now() - t0
+    /*
+     * TIMED AS THE TAB IS CHOSEN AGAIN, IN THE PAGE. The first choosing mounts
+     * the view and, timed from here, carries Playwright's own waits before its
+     * click: 1.15 s on lane 3 with a CI rehearsal on the other cores, where the
+     * draw itself was a tenth of that. So the List tab, then the Gantt's again,
+     * clicked and timed in the page until the bar is there: the Gantt is drawn
+     * anew each time its tab is chosen, and a build that draws every day of the
+     * span pays for all of them again. Timed only once the Gantt has left the
+     * page: a build that drew every day took no press on the List tab within its
+     * 30 s, the Gantt stayed, and the timing read a press on the tab already
+     * open, 207 ms.
+     */
+    await within(30_000, () => page.getByTestId('work-view-tab-type-list').click({ timeout: 30_000 }).catch(() => {}))
+    const left = await within(30_000, () => page.locator(gbarSel).first().waitFor({ state: 'detached', timeout: 30_000 }).then(() => true, () => false))
+    const ganttMs = await within(90_000, () => page.evaluate((sel) => new Promise((resolve) => {
+      const tab = document.querySelector('[data-testid="work-view-tab-type-gantt"]')
+      if (!tab) { resolve(null); return }
+      const t = performance.now()
+      const done = () => { observer.disconnect(); resolve(Math.round(performance.now() - t)) }
+      const observer = new MutationObserver(() => { if (document.querySelector(sel)) done() })
+      observer.observe(document.body, { childList: true, subtree: true })
+      tab.click()
+      if (document.querySelector(sel)) done()
+    }), gbarSel).catch(() => null))
+    const scrollerOf = async () => within(10_000, () => page.locator(gbarSel).first().evaluate((e) => {
+      const s = e.closest('.overflow-x-auto')
+      return s ? { nodes: s.querySelectorAll('*').length, width: s.scrollWidth } : null
+    }).catch(() => null))
+    const week = await scrollerOf()
+    const widthOf = () => page.locator(gbarSel).first().evaluate((e) => e.getBoundingClientRect().width).catch(() => null)
+    const weekBar = await within(10_000, widthOf)
+    t0 = Date.now()
+    await within(90_000, () => page.getByRole('group', { name: 'Timeline zoom' }).getByRole('button', { name: 'Day' }).click({ timeout: 90_000 }).catch(() => {}))
+    const zoomed = await within(90_000, () => waitUntil(async () => {
+      const w = await widthOf()
+      return w != null && w !== weekBar
+    }, { timeoutMs: 90_000 }))
+    const dayZoomMs = Date.now() - t0
+    await within(30_000, () => page.locator(gbarSel).first().evaluate((e) => { const s = e.closest('.overflow-x-auto'); if (s) s.scrollLeft = s.scrollWidth }).catch(() => {}))
+    let end = null
+    let under = null
+    await within(30_000, () => waitUntil(async () => {
+      end = await page.locator(gbarSel).first().evaluate((e) => {
+        const s = e.closest('.overflow-x-auto')?.getBoundingClientRect()
+        const b = e.getBoundingClientRect()
+        return s ? { inView: b.right > s.left && b.left < s.right, barLeft: b.left } : null
+      }).catch(() => null)
+      under = end?.inView ? await cellUnder(page, '[data-testid="gantt-day"]', end.barLeft + 2, null) : null
+      return under === '2026-10-07'
+    }, { timeoutMs: 20_000 }))
+    ganttFar.push({ drawn, firstMs, left, ganttMs, week, zoomed, dayZoomMs, end, under })
+    await ctx.close()
+  }
+  chk(
+    ganttFar[0]?.drawn === true && ganttFar[0].left === true && typeof ganttFar[0].ganttMs === 'number' && ganttFar[0].ganttMs < 1000 && (ganttFar[0].week?.nodes ?? Infinity) < 5000,
+    'the list’s Gantt of a list holding a task that starts in year 202 is drawn within a second of its tab being chosen, with a few thousand elements at most — not one a day',
+    JSON.stringify(ganttFar),
+  )
+  chk(
+    ganttFar[0]?.zoomed === true && ganttFar[0].dayZoomMs < 1000 && ganttFar[0].end?.inView === true && ganttFar[0].under === '2026-10-07',
+    'and its Day zoom is drawn within a second, and scrolled to the span’s far end shows this October: the bar of a task starting 7 October in view, over the day “2026-10-07”',
+    JSON.stringify(ganttFar),
+  )
+  console.log(`    measured: ${JSON.stringify(ganttFar[0] ?? null)}`)
+
+  // ══ 10. A DAY'S LABEL AFTER THE CLOCK GOES BACK ══════════════════════════════
+  console.log('\n▶ found-8-oct/timeline-day-labels-slip-after-the-clock-goes-back — in Los Angeles a task of 10 November sits under “Nov 10” at Day zoom')
+  /*
+   * The timeline labelled a day cell with the date of `start + i × 24 h`. After
+   * the clock goes back on 1 November that is 23:00 of the day before, so from
+   * then on each cell read the day before the one it stood for — while the
+   * bars, placed by their own days, stood under the right cells.
+   */
+  const dstPlace = await place(FULL, 'clock goes back')
+  await task(dstPlace.list, `${TAG} before the change`, '2026-10-20T17:30:00.000Z', '2026-10-21T17:30:00.000Z')
+  const afterChange = await task(dstPlace.list, `${TAG} after the change`, '2026-11-10T18:30:00.000Z', '2026-11-10T18:30:00.000Z')
+  {
+    const { ctx, page } = await open('America/Los_Angeles', ADMIN)
+    await openTimeline(page, dstPlace.project, afterChange)
+    const barSel = `[data-testid="timeline-bar"][data-task-id="${afterChange}"]`
+    await page.locator(barSel).scrollIntoViewIfNeeded({ timeout: 10_000 }).catch(() => {})
+    const at = await page.locator(barSel).evaluate((e) => { const r = e.getBoundingClientRect(); return { x: r.left + 2 } }).catch(() => null)
+    // The date row's cells are the header's lowest row; the one under the bar's left edge, by its words.
+    const label = at
+      ? await page.evaluate((x) => {
+          const cells = [...document.querySelectorAll('[data-testid="timeline-chart-header"] div')].filter((c) => c.checkVisibility() && c.children.length === 0 && /^[A-Z][a-z]{2} \d{1,2}$/.test(c.innerText.trim()))
+          const cell = cells.find((c) => { const r = c.getBoundingClientRect(); return r.left <= x && x < r.right })
+          return cell ? cell.innerText.trim() : null
+        }, at.x).catch(() => null)
+      : null
+    dstLabel.push({ at, label })
+    await ctx.close()
+  }
+  chk(
+    dstLabel[0]?.label === 'Nov 10',
+    'in Los Angeles, at Day zoom, a task of 10 November sits under the cell “Nov 10”, after the clock goes back on 1 November as before it',
+    JSON.stringify(dstLabel),
+  )
 } catch (err) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${String(err?.message ?? err).split('\n')[0]}`)

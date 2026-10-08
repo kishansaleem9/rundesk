@@ -12,6 +12,7 @@ import { readableList } from '../../common/permissions/read-access'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
 import { heldInTrash, ListInTrashException, listTrashState, mayRestoreList } from '../../common/permissions/task-create'
 import { isUuid } from '../../common/validation/uuid'
+import { taskDateTimeFlags } from '../tasks/task-date-input'
 
 /** Hard cap on a single form-upload file (public intake). */
 export const MAX_FORM_UPLOAD_BYTES = 25 * 1024 * 1024 // 25 MB
@@ -222,6 +223,8 @@ export class FormsService {
         description: taskDescription || null,
         priority: mappedPriority ?? 'normal',
         dueDate: mappedDueDate ?? null,
+        // With its time flag, as every date write (`taskDateTimeFlags`).
+        ...taskDateTimeFlags({ dueDate: mappedDueDate ?? null }),
         /*
          * §V2-04 — say on the task that a form made it.
          *

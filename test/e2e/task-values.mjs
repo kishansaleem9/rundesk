@@ -61,7 +61,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 24
+const EXPECTED_CHECKS = 27
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -545,6 +545,87 @@ try {
       && t.start === new Date(Date.UTC(2027, 9, 6, 9 + (t.zone === 'UTC' ? 0 : 7))).toISOString()),
     'a year typed digit by digit is written once, as typed, when the box is left: 2, 0, 2, 7 into the start’s year sends nothing — never year 2 or 20 — until the box is left, and then 6 October 2027 09:00, in UTC and in Los Angeles (read by SQL)',
     JSON.stringify(typedYear),
+  )
+
+  // ══ 5b. A TIME ON UTC MIDNIGHT IS READ BACK AS A TIME ═════════════════════
+  console.log('\n▶ found-6-oct/a-time-on-utc-midnight-reads-as-no-time — a time typed in the sheet is read back as typed in UTC, Los Angeles and Karachi, though two of them land on UTC midnight')
+  /*
+   * 17:00 on 8 October in Los Angeles is 00:00 UTC on the 9th, and 05:00 in
+   * Karachi is 00:00 UTC on the 8th: the instant a date picked with no time is
+   * stored at. Read by the instant alone, each came back a date with no time —
+   * the sheet showing 00:00 on the 9th in Los Angeles. The task keeps a flag
+   * beside each date (`due_date_has_time`), as ClickUp keeps `due_date_time`.
+   * Read through `to_jsonb`, so a database without the column answers null
+   * rather than stopping the run.
+   */
+  const flagOf = async (id) =>
+    (await sql`select due_date, to_jsonb(t) ->> 'due_date_has_time' as has_time from tasks t where id = ${id}`)[0] ?? null
+  const midnightTyped = []
+  for (const [zone, typed, stored] of [
+    ['America/Los_Angeles', '2026-10-08T17:00', '2026-10-09T00:00:00.000Z'],
+    ['Asia/Karachi', '2026-10-08T05:00', '2026-10-08T00:00:00.000Z'],
+    ['UTC', '2026-10-08T17:00', '2026-10-08T17:00:00.000Z'],
+  ]) {
+    const zctx = await browser.newContext({ viewport: { width: 1500, height: 1100 }, timezoneId: zone, locale: 'en-US', serviceWorkers: 'block' })
+    const zpage = await zctx.newPage()
+    await zpage.goto(`${B}/login`, { waitUntil: 'domcontentloaded' })
+    await zpage.fill('input[type=email]', ADMIN.email, { timeout: 15_000 }).catch(() => {})
+    await zpage.fill('input[type=password]', ADMIN.password, { timeout: 15_000 }).catch(() => {})
+    await zpage.click('button[type=submit]', { timeout: 15_000 }).catch(() => {})
+    await zpage.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS }).catch(() => {})
+    await zpage.getByRole('button', { name: /^Accept$/ }).click({ timeout: 3000 }).catch(() => {})
+    // Due at noon UTC on the 8th, a time; then the time typed over it.
+    const T = await makeTask(`Midnight ${zone} ${TAG}`, { dueDate: '2026-10-08T12:00:00.000Z' })
+    await zpage.goto(`${B}/app/${WS}/${SPACE}/${PROJECT}/${LIST}?task=${T}`, { waitUntil: 'domcontentloaded' })
+    const zdue = zpage.getByTestId('task-due-date')
+    const ready = await waitUntil(async () => (await zdue.inputValue({ timeout: 1000 }).catch(() => '')) !== '', { timeoutMs: 20_000 })
+    await zdue.fill(typed, { timeout: 5000 }).catch(() => {})
+    await zdue.press('Enter', { timeout: 5000 }).catch(() => {})
+    let held = null
+    const written = await waitUntil(async () => ms((held = await flagOf(T))?.due_date) === ms(stored), { timeoutMs: 10_000 })
+    // Read back as a person would find it: the page loaded afresh.
+    await zpage.reload({ waitUntil: 'domcontentloaded' })
+    let shown = ''
+    await waitUntil(async () => (shown = await zdue.inputValue({ timeout: 1000 }).catch(() => '')) !== '', { timeoutMs: 20_000 })
+    // And the list row's day box behind the sheet: the day it is due there.
+    const rowDay = await zpage
+      .locator(`[data-testid="list-task-row"][data-task-id="${T}"] [data-testid="list-row-due-date"]`)
+      .inputValue({ timeout: 5000 })
+      .catch(() => null)
+    midnightTyped.push({ zone, typed, ready, written, stored: held?.due_date ? new Date(held.due_date).toISOString() : null, hasTime: held?.has_time ?? null, shown, rowDay })
+    await zctx.close()
+  }
+  chk(
+    midnightTyped.length === 3 && midnightTyped.every((m) => m.ready && m.written && m.hasTime === 'true' && m.shown === m.typed),
+    'a time typed in the task sheet is read back as typed though it lands on UTC midnight: 17:00 on 8 October in Los Angeles (stored at 00:00 UTC on the 9th) and 05:00 in Karachi (00:00 UTC on the 8th), as 17:00 in UTC — each stored with its time flag (read by SQL)',
+    JSON.stringify(midnightTyped),
+  )
+  chk(
+    midnightTyped.find((m) => m.zone === 'America/Los_Angeles')?.rowDay === '2026-10-08',
+    'and the list row shows it on its own day in Los Angeles, the 8th, not the 9th its UTC midnight falls on',
+    JSON.stringify(midnightTyped.map(({ zone, rowDay }) => ({ zone, rowDay }))),
+  )
+  // Through the API: a flag sent, one not sent, a date-only write after a time, a flag that is no flag.
+  const inferred = await makeTask(`Flag inferred ${TAG}`, { dueDate: '2026-10-19T00:00:00.000Z' })
+  const sentFlag = await makeTask(`Flag sent ${TAG}`, { dueDate: '2026-10-19T00:00:00.000Z', dueDateHasTime: true })
+  const timed = await makeTask(`Flag timed ${TAG}`, { dueDate: '2026-10-19T09:30:00.000Z' })
+  const answered = (await A(`/tasks/${sentFlag}`)).data?.dueDateHasTime
+  const sentHeld = (await flagOf(sentFlag))?.has_time ?? null
+  const dateOnlyAfter = await A(`/tasks/${sentFlag}`, { method: 'PATCH', body: { dueDate: '2026-10-20T00:00:00.000Z' } })
+  const notAFlag = await A(`/tasks/${inferred}`, { method: 'PATCH', body: { dueDateHasTime: 'yes' } })
+  const flags = {
+    inferred: (await flagOf(inferred))?.has_time ?? null,
+    sent: sentHeld,
+    answered,
+    afterDateOnly: dateOnlyAfter.status === 200 ? (await flagOf(sentFlag))?.has_time ?? null : `answered ${dateOnlyAfter.status}`,
+    timed: (await flagOf(timed))?.has_time ?? null,
+    notAFlag: { status: notAFlag.status, message: notAFlag.message },
+  }
+  chk(
+    flags.inferred === 'false' && flags.sent === 'true' && flags.answered === true && flags.afterDateOnly === 'false' && flags.timed === 'true'
+      && flags.notAFlag.status === 400 && String(flags.notAFlag.message).includes('dueDateHasTime must be true or false'),
+    'the API keeps the flag a write sends, and reads one not sent from the instant: 00:00 UTC sent alone is a date with no time, sent with `dueDateHasTime: true` a time — answered on the task — and 09:30 a time; a later date-only write leaves no time behind; and a flag that is not true or false is refused in words, 400 (read by SQL)',
+    JSON.stringify(flags),
   )
 
   // ══ 6. A YEAR BELOW 100 IS READ BACK AS IT WAS WRITTEN ═══════════════════

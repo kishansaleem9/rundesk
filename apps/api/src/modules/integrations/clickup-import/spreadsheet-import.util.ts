@@ -22,7 +22,7 @@
  * beats fake.
  */
 
-import { splitCsvLines, mapStatus, mapPriority, type TaskPriority, type TaskStatus } from './clickup-csv.util'
+import { cellHasTime, splitCsvLines, mapStatus, mapPriority, type TaskPriority, type TaskStatus } from './clickup-csv.util'
 
 /** Which Rundesk task field a spreadsheet column feeds. `ignore` = not imported. */
 export type SheetField =
@@ -562,6 +562,9 @@ export type MappedRow = {
   priority: TaskPriority
   dueDate?: Date
   startDate?: Date
+  /** Whether each date's cell held a time of day, not only a day (`cellHasTime`). */
+  dueDateHasTime: boolean
+  startDateHasTime: boolean
   assignees: string[]
   listName: string
   tags: string[]
@@ -641,9 +644,9 @@ export function mapRow(
 
   const readDate = (
     field: 'dueDate' | 'startDate',
-  ): { ok: true; date?: Date } | { ok: false; rejection: RowRejection } => {
+  ): { ok: true; date?: Date; hasTime: boolean } | { ok: false; rejection: RowRejection } => {
     const cell = pick(field)
-    if (!cell || !cell.value) return { ok: true }
+    if (!cell || !cell.value) return { ok: true, hasTime: false }
     const ms = Date.parse(cell.value)
     if (Number.isNaN(ms)) {
       return {
@@ -657,7 +660,7 @@ export function mapRow(
         },
       }
     }
-    return { ok: true, date: new Date(ms) }
+    return { ok: true, date: new Date(ms), hasTime: cellHasTime(cell.value) }
   }
 
   const due = readDate('dueDate')
@@ -678,6 +681,8 @@ export function mapRow(
       priority: normalizePriority(pick('priority')?.value, opts.priorityScale),
       dueDate: due.date,
       startDate: start.date,
+      dueDateHasTime: due.hasTime,
+      startDateHasTime: start.hasTime,
       assignees: splitCell(pick('assignees')?.value),
       listName: pick('list')?.value || opts.defaultListName || DEFAULT_LIST_NAME,
       tags: splitCell(pick('tags')?.value),
@@ -711,6 +716,8 @@ export type MergeSet = {
   priority?: TaskPriority
   dueDate?: Date
   startDate?: Date
+  dueDateHasTime?: boolean
+  startDateHasTime?: boolean
 }
 
 /**
@@ -734,8 +741,9 @@ export function mergeSet(row: MappedRow, mapping: ColumnMapping): MergeSet {
     set.statusCategory = row.statusCategory
   }
   if (mapped.has('priority')) set.priority = row.priority
-  if (mapped.has('dueDate') && row.dueDate) set.dueDate = row.dueDate
-  if (mapped.has('startDate') && row.startDate) set.startDate = row.startDate
+  // Each date with whether its cell held a time (`cellHasTime`).
+  if (mapped.has('dueDate') && row.dueDate) Object.assign(set, { dueDate: row.dueDate, dueDateHasTime: row.dueDateHasTime })
+  if (mapped.has('startDate') && row.startDate) Object.assign(set, { startDate: row.startDate, startDateHasTime: row.startDateHasTime })
   return set
 }
 

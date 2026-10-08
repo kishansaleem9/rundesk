@@ -46,11 +46,21 @@ export const DialogContent = React.forwardRef<
     hideClose?: boolean
   }
 >(({ className, hideClose, children, onPointerDownOutside, ...props }, ref) => {
-  // When the content was drawn: the wrapper renders while the dialog is shut too, so not its first render.
+  /*
+   * When the content was drawn: the wrapper renders while the dialog is shut
+   * too, so not its first render. Nor each time the ref is set: a layer inside
+   * Radix composes it with an arrow made afresh at every render, so React sets
+   * it again — null, then the same element — whenever the dialog renders, and
+   * a dialog whose list loaded after it opened took no press outside for half a
+   * second more (`found-8-oct/a-dialog-takes-each-render-for-its-opening`).
+   * Only an element it did not hold before is the dialog drawn.
+   */
   const openedAt = React.useRef(0)
+  const drawn = React.useRef<Element | null>(null)
   const setRefs = React.useCallback(
     (el: React.ElementRef<typeof DialogPrimitive.Content> | null) => {
-      if (el) openedAt.current = performance.now()
+      if (el && el !== drawn.current) openedAt.current = performance.now()
+      if (el) drawn.current = el
       if (typeof ref === 'function') ref(el)
       else if (ref) ref.current = el
     },

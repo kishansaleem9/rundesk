@@ -1,6 +1,7 @@
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsIn,
   IsInt,
@@ -60,6 +61,15 @@ export class InstantiateTemplateDto {
   @IsOptional()
   @IsDateString()
   dueDate?: string
+
+  /** Whether each date set carries a time of day, as `POST /tasks` takes it (`taskDateTimeFlags`). */
+  @IsOptional()
+  @IsBoolean()
+  startDateHasTime?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  dueDateHasTime?: boolean
 
   @IsOptional()
   @IsInt()

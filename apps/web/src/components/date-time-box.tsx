@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { fromDateTimeInput, toDateInput, toDateTimeInput, withDatePart } from '../lib/task-dates'
+import { carriesTime, fromDateTimeBox, toDateInput, toDateTimeInput, withDatePart, type DateWrite } from '../lib/task-dates'
 import { dateBoxCommit } from '../lib/date-box'
 
 type BoxProps = {
@@ -27,7 +27,7 @@ type BoxProps = {
  * corrected while one is out is written after it, and only the last of those
  * waiting is.
  */
-export function DateBox({
+export function DateBox<V = string>({
   type,
   shown,
   toValue,
@@ -44,8 +44,8 @@ export function DateBox({
   /** The stored date as this box shows it. */
   shown: string
   /** What a whole typed value is written as (`lib/date-box.ts`). */
-  toValue: (typed: string) => string | null
-  onCommit: (value: string | null) => Promise<unknown>
+  toValue: (typed: string) => V | null
+  onCommit: (value: V | null) => Promise<unknown>
 }) {
   const [draft, setDraft] = useState<string | null>(null)
   // The draft last accepted, until its write settles.
@@ -94,16 +94,31 @@ export function DateBox({
   )
 }
 
-/** A stored instant in a `datetime-local` box: the task sheet's start and due dates. */
+/**
+ * A stored instant in a `datetime-local` box: the task sheet's start and due
+ * dates. `hasTime` is the task's flag for it, and what is written goes with its
+ * own (`fromDateTimeBox`, `found-6-oct/a-time-on-utc-midnight-reads-as-no-time`);
+ * an emptied box writes no date, which carries no time.
+ */
 export function DateTimeBox({
   stored,
+  hasTime,
   onCommit,
   ...box
 }: BoxProps & {
   stored: string | null | undefined
-  onCommit: (iso: string | null) => Promise<unknown>
+  hasTime?: boolean
+  onCommit: (iso: string | null, hasTime: boolean) => Promise<unknown>
 }) {
-  return <DateBox type="datetime-local" shown={toDateTimeInput(stored)} toValue={fromDateTimeInput} onCommit={onCommit} {...box} />
+  return (
+    <DateBox<DateWrite>
+      type="datetime-local"
+      shown={toDateTimeInput(stored, hasTime)}
+      toValue={(typed) => fromDateTimeBox(typed, stored, hasTime)}
+      onCommit={(write) => onCommit(write?.iso ?? null, write?.hasTime ?? false)}
+      {...box}
+    />
+  )
 }
 
 /**
@@ -113,11 +128,25 @@ export function DateTimeBox({
  */
 export function DayBox({
   stored,
+  hasTime,
   onCommit,
   ...box
 }: BoxProps & {
   stored: string | null | undefined
-  onCommit: (iso: string | null) => Promise<unknown>
+  /** The task's flag for `stored`: a day picked keeps the time it carries, and says so. */
+  hasTime?: boolean
+  onCommit: (iso: string | null, hasTime: boolean) => Promise<unknown>
 }) {
-  return <DateBox type="date" shown={toDateInput(stored)} toValue={(ymd) => withDatePart(stored, ymd)} onCommit={onCommit} {...box} />
+  return (
+    <DateBox<DateWrite>
+      type="date"
+      shown={toDateInput(stored, hasTime)}
+      toValue={(ymd) => {
+        const iso = withDatePart(stored, ymd, hasTime)
+        return iso ? { iso, hasTime: carriesTime(stored, hasTime) } : null
+      }}
+      onCommit={(write) => onCommit(write?.iso ?? null, write?.hasTime ?? false)}
+      {...box}
+    />
+  )
 }

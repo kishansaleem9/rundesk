@@ -24,7 +24,7 @@ import type { PlanFeature } from '../plans/plans.constants'
 import { EmailToTaskService } from '../email-to-task/email-to-task.service'
 import { CreateTaskDto, AddAttachmentDto, AttachClipDto } from './dto/task.dto'
 import { unknownUpdateFields } from './task-update-fields'
-import { taskDateFrom } from './task-date-input'
+import { taskDateFrom, taskTimeFlagFrom } from './task-date-input'
 import type { CurrentUserPayload } from './types'
 import { downloadName } from '../../common/export/download-name'
 
@@ -321,6 +321,9 @@ export class TasksController {
       // A date Postgres cannot take as sent is refused in words, not a 500 (`taskDateFrom`).
       startDate: taskDateFrom('startDate', body.startDate) ?? undefined,
       dueDate: taskDateFrom('dueDate', body.dueDate) ?? undefined,
+      // Whether each carries a time of day; not sent, its instant says (`taskDateTimeFlags`).
+      startDateHasTime: taskTimeFlagFrom('startDateHasTime', body.startDateHasTime),
+      dueDateHasTime: taskTimeFlagFrom('dueDateHasTime', body.dueDateHasTime),
       timeEstimate: body.timeEstimate,
       parentTaskId: body.parentTaskId,
       assigneeIds: body.assigneeIds,
@@ -349,6 +352,8 @@ export class TasksController {
       status: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done' | 'cancelled'
       startDate: string | null
       dueDate: string | null
+      startDateHasTime: boolean
+      dueDateHasTime: boolean
       position: number
       timeEstimate: number | null
       // §V2-09 — the cover is a colour OR an image, and an image is either one
@@ -400,6 +405,9 @@ export class TasksController {
     // Not a date, or one Postgres cannot take as sent (year 0, before it, past 9999): 400 with the reason (`taskDateFrom`).
     if ('startDate' in body) patch.startDate = taskDateFrom('startDate', body.startDate)
     if ('dueDate'   in body) patch.dueDate   = taskDateFrom('dueDate', body.dueDate)
+    // Whether each carries a time of day: true or false, or a 400 that says so (`taskTimeFlagFrom`).
+    if ('startDateHasTime' in body) patch.startDateHasTime = taskTimeFlagFrom('startDateHasTime', body.startDateHasTime)
+    if ('dueDateHasTime' in body) patch.dueDateHasTime = taskTimeFlagFrom('dueDateHasTime', body.dueDateHasTime)
     return this.tasks.updateTask(taskId, user.id, patch)
   }
 
@@ -414,6 +422,8 @@ export class TasksController {
         status: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done' | 'cancelled'
         startDate: string | null
         dueDate: string | null
+        startDateHasTime: boolean
+        dueDateHasTime: boolean
         timeEstimate: number | null
         isArchived: boolean
         // Cross-list move target (Plan §5.1 bulk "Move to list").
@@ -443,6 +453,8 @@ export class TasksController {
     // The one date for every task: refused whole, in words, when it cannot be written (`taskDateFrom`).
     if ('startDate' in body.patch) patch.startDate = taskDateFrom('startDate', body.patch.startDate)
     if ('dueDate' in body.patch) patch.dueDate = taskDateFrom('dueDate', body.patch.dueDate)
+    if ('startDateHasTime' in body.patch) patch.startDateHasTime = taskTimeFlagFrom('startDateHasTime', body.patch.startDateHasTime)
+    if ('dueDateHasTime' in body.patch) patch.dueDateHasTime = taskTimeFlagFrom('dueDateHasTime', body.patch.dueDateHasTime)
     return this.tasks.bulkUpdateTasks(body.taskIds, user.id, patch)
   }
 

@@ -26,6 +26,7 @@ import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { useCreatable } from '../hooks/use-creatable'
 import { usePermissions } from '../hooks/use-permissions'
 import { daysFromToday, localDateTimeValue } from '../lib/local-date'
+import { dateWriteOf } from '../lib/task-dates'
 import { parseEstimate } from '../lib/estimate'
 import { CREATE_TYPES, createTypeOf, type CreateKind } from '../lib/create-types'
 
@@ -1199,8 +1200,11 @@ function TaskForm({
       // datetime-local has no zone; the browser's own offset is the one she
       // picked it in, so let Date apply it rather than pinning a Z and shifting
       // everybody's 7pm.
-      ...(startDate ? { startDate: new Date(startDate).toISOString() } : {}),
-      ...(dueDate ? { dueDate: new Date(dueDate).toISOString() } : {}),
+      // Each with whether it carries a time (`fromDateTimeBox`): 17:00 typed in
+      // Los Angeles is UTC midnight, and is still 17:00
+      // (`found-6-oct/a-time-on-utc-midnight-reads-as-no-time`).
+      ...dateWriteOf('startDate', startDate),
+      ...dateWriteOf('dueDate', dueDate),
       /*
        * §V2-S02 — through the SAME parser the task-detail field uses. This used
        * to be its own `Number(hours) * 3600`, so the two boxes would have

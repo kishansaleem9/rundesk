@@ -237,6 +237,14 @@ describe('what a merge writes', () => {
 
   it('leaves a mapped description or date alone where the row holds none', () => {
     const { row, mapping } = rowOf('Title,Description,Due Date,Start Date\ntwo,,,2026-10-01\n')
-    assert.deepEqual(Object.keys(mergeSet(row, mapping)), ['startDate'])
+    // The start date goes with its time flag (`found-6-oct/a-time-on-utc-midnight-reads-as-no-time`).
+    assert.deepEqual(Object.keys(mergeSet(row, mapping)), ['startDate', 'startDateHasTime'])
+  })
+
+  it('writes each date with whether its cell held a time of day, midnight included', () => {
+    const { row, mapping } = rowOf('Title,Due Date,Start Date\nthree,10/1/2026 12:00 AM,2026-10-01\n')
+    const set = mergeSet(row, mapping)
+    assert.equal(set.dueDateHasTime, true, 'a cell reading 12:00 AM holds a time, at midnight')
+    assert.equal(set.startDateHasTime, false, 'a cell with a day and no clock holds no time')
   })
 })

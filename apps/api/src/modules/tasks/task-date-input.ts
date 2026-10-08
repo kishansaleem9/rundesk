@@ -29,3 +29,53 @@ export function taskDateFrom(label: string, value: unknown): Date | null {
   }
   return at
 }
+
+/**
+ * WHETHER A TASK'S DATES CARRY A TIME OF DAY, AS A WRITE LEAVES THEM
+ * (`found-6-oct/a-time-on-utc-midnight-reads-as-no-time`).
+ *
+ * A date picked without a time is stored at UTC midnight, and the app read every
+ * UTC midnight as such a date. A real time can be UTC midnight as well — 17:00
+ * in Los Angeles in October, 05:00 in Karachi — and, typed in the task sheet and
+ * saved, it came back as a date with no time (lane 5, 6 October). ClickUp's API
+ * keeps a flag beside each date, `start_date_time` and `due_date_time`, "true if
+ * the date includes a time of day"; so does `tasks` (migration 0174).
+ *
+ * Each date a write sets takes the flag sent with it, or — none sent — the one
+ * its instant says, as the app read it until now: no date, no time; a UTC
+ * midnight, a date with no time; anything else, a time. A flag sent without its
+ * date says whether the date the task holds carries a time. Dates the write does
+ * not set keep their flags: their keys are left out.
+ */
+export type TaskDateTimeFlags = { startDateHasTime?: boolean; dueDateHasTime?: boolean }
+
+/** Is this instant exactly UTC midnight — the form a date picked without a time is stored in? */
+export function isUtcMidnight(at: Date): boolean {
+  return at.getUTCHours() === 0 && at.getUTCMinutes() === 0 && at.getUTCSeconds() === 0
+}
+
+export function taskDateTimeFlags(write: {
+  startDate?: Date | null
+  dueDate?: Date | null
+  startDateHasTime?: boolean
+  dueDateHasTime?: boolean
+}): TaskDateTimeFlags {
+  const flag = (date: Date | null | undefined, sent: boolean | undefined): boolean | undefined => {
+    if (date === undefined) return sent
+    if (date === null) return false
+    return sent ?? !isUtcMidnight(date)
+  }
+  const out: TaskDateTimeFlags = {}
+  const start = flag(write.startDate, write.startDateHasTime)
+  const due = flag(write.dueDate, write.dueDateHasTime)
+  if (start !== undefined) out.startDateHasTime = start
+  if (due !== undefined) out.dueDateHasTime = due
+  return out
+}
+
+/** A time flag as a body sends it: true, false, or not sent; anything else is refused in words. */
+export function taskTimeFlagFrom(label: string, value: unknown): boolean | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'boolean') throw new BadRequestException(`${label} must be true or false`)
+  return value
+}

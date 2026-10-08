@@ -27,6 +27,7 @@ import {
   mapPriority,
   mergeSetOf,
   safeDate,
+  cellHasTime,
   coerceCustomValue,
   type CsvCarries,
   type ParsedTask,
@@ -405,6 +406,8 @@ export class ClickUpImportService {
                   statusCategory: categoryForDefaultKey(mapStatus(t.status)),
                   priority: mapPriority(t.priority),
                   dueDate: t.dueDate ? safeDate(t.dueDate) : undefined,
+                  // Whether the cell held a time of day, not only a day (`cellHasTime`).
+                  dueDateHasTime: !!(t.dueDate && safeDate(t.dueDate)) && cellHasTime(t.dueDate),
                 })
                 .returning()
               summary.tasksCreated++

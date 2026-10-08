@@ -66,6 +66,12 @@ type CalendarEvent = {
   description?: string
   start: Date
   end: Date
+  /**
+   * A day's event, with no time of day — the task's dates carry none. A timed
+   * event at 17:00 in Los Angeles is UTC midnight, so its instant alone would
+   * read as a day (`found-6-oct/a-time-on-utc-midnight-reads-as-no-time`).
+   */
+  allDay: boolean
   etag?: string
   htmlLink?: string
 }
@@ -243,6 +249,8 @@ export class CalendarSyncService {
             description: event.description ?? null,
             dueDate: event.end,
             startDate: event.start,
+            dueDateHasTime: !event.allDay,
+            startDateHasTime: !event.allDay,
             updatedAt: new Date(),
           })
           .where(eq(tasks.id, existing.taskId))
@@ -260,6 +268,8 @@ export class CalendarSyncService {
             description: event.description ?? null,
             startDate: event.start,
             dueDate: event.end,
+            startDateHasTime: !event.allDay,
+            dueDateHasTime: !event.allDay,
             createdById: conn.connectedById ?? null,
           })
           .returning()
@@ -564,6 +574,8 @@ export class CalendarSyncService {
         description: e.description,
         start: new Date(e.start!.dateTime ?? e.start!.date!),
         end: new Date(e.end?.dateTime ?? e.end?.date ?? e.start!.dateTime ?? e.start!.date!),
+        // Google gives a day's event a `date` and a timed one a `dateTime`.
+        allDay: !e.start!.dateTime,
         etag: e.etag,
         htmlLink: e.htmlLink,
       }))
@@ -659,6 +671,7 @@ export class CalendarSyncService {
         bodyPreview?: string
         start?: { dateTime?: string }
         end?: { dateTime?: string }
+        isAllDay?: boolean
         isCancelled?: boolean
       }>
     }
@@ -670,6 +683,7 @@ export class CalendarSyncService {
         description: e.bodyPreview,
         start: new Date(e.start!.dateTime!),
         end: new Date(e.end!.dateTime!),
+        allDay: e.isAllDay === true,
         etag: e['@odata.etag'],
       }))
   }

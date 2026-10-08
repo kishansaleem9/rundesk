@@ -30,6 +30,16 @@ export const tasks = pgTable('tasks', {
   position:      integer('position').notNull().default(0),
   startDate:     timestamp('start_date', { withTimezone: true }),
   dueDate:       timestamp('due_date', { withTimezone: true }),
+  /*
+   * Whether each date carries a time of day (migration 0174,
+   * `found-6-oct/a-time-on-utc-midnight-reads-as-no-time`), as ClickUp's API
+   * keeps `start_date_time` / `due_date_time`. A date picked without a time is
+   * stored at UTC midnight, and a real time can be UTC midnight as well, so the
+   * instant alone cannot say which it is. Written with the date by every write
+   * (`taskDateTimeFlags`); false with no date.
+   */
+  startDateHasTime: boolean('start_date_has_time').notNull().default(false),
+  dueDateHasTime:   boolean('due_date_has_time').notNull().default(false),
   completedAt:   timestamp('completed_at', { withTimezone: true }),
   timeEstimate:  integer('time_estimate'), // seconds
   /*

@@ -51,39 +51,55 @@ function utcMidnight(y: number, m: number, d: number): Date {
 }
 
 /**
- * Is this instant exactly UTC midnight?
+ * Is this a date with no time of day?
  *
- * Rows written before this file exists are all UTC midnight, because that is
- * what `new Date('2026-09-16')` parses to. Read literally in local time, every
- * one of them would suddenly sprout a clock — a task due "the 16th" would show
- * as 05:00 on the 16th in Karachi and 17:00 on the 15th in Los Angeles. So a
- * value with no time in it is shown as the date it was picked as, and only a
- * value that carries a real time is translated into local terms.
+ * A date picked without a time is stored at UTC midnight, because that is what
+ * `new Date('2026-09-16')` parses to. Read literally in local time, every one
+ * of them would sprout a clock — a task due "the 16th" would show as 05:00 on
+ * the 16th in Karachi and 17:00 on the 15th in Los Angeles. So a value with no
+ * time in it is shown as the date it was picked as, and only a value that
+ * carries a real time is translated into local terms.
  *
- * The rule is stable in both directions: pick 00:00 locally and the instant
- * that gets stored is *not* UTC midnight (unless you are on UTC), so it comes
- * back through the local branch and still reads 00:00. Nothing drifts.
+ * WHICH IT IS, THE TASK SAYS (`found-6-oct/a-time-on-utc-midnight-reads-as-no-time`):
+ * `startDateHasTime` and `dueDateHasTime`, kept beside each date as ClickUp
+ * keeps `due_date_time`. This read the instant alone — every UTC midnight a date
+ * with no time — and a real time can be UTC midnight as well: 17:00 typed in
+ * Los Angeles in October, 05:00 in Karachi, saved and read back as a date with
+ * no time. The instant is still the answer for a value the caller has no flag
+ * for (`hasTime` undefined), as it was for every value until the flag was kept.
  */
-function isDateOnly(d: Date): boolean {
+function isDateOnly(d: Date, hasTime?: boolean): boolean {
+  if (hasTime !== undefined) return !hasTime
   return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0
 }
 
-/** `YYYY-MM-DD`, for an `<input type="date">`. */
-export function toDateInput(iso: string | null | undefined): string {
+/**
+ * Does a stored date carry a time of day — the flag a write of it, or of a day
+ * moved from it, sends with it (`taskDateTimeFlags` on the API)? No date has
+ * none.
+ */
+export function carriesTime(iso: string | null | undefined, hasTime?: boolean): boolean {
+  if (!iso) return false
+  const d = new Date(iso)
+  return !Number.isNaN(d.getTime()) && !isDateOnly(d, hasTime)
+}
+
+/** `YYYY-MM-DD`, for an `<input type="date">`. `hasTime`: the task's flag for this date, where the caller has it. */
+export function toDateInput(iso: string | null | undefined, hasTime?: boolean): string {
   if (!iso) return ''
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
-  return isDateOnly(d)
+  return isDateOnly(d, hasTime)
     ? `${padYear(d.getUTCFullYear())}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`
     : `${padYear(d.getFullYear())}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
-/** `YYYY-MM-DDTHH:mm`, for an `<input type="datetime-local">`. */
-export function toDateTimeInput(iso: string | null | undefined): string {
+/** `YYYY-MM-DDTHH:mm`, for an `<input type="datetime-local">`. `hasTime`: the task's flag for this date. */
+export function toDateTimeInput(iso: string | null | undefined, hasTime?: boolean): string {
   if (!iso) return ''
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
-  return isDateOnly(d)
+  return isDateOnly(d, hasTime)
     ? `${padYear(d.getUTCFullYear())}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T00:00`
     : `${padYear(d.getFullYear())}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
@@ -102,6 +118,37 @@ export function fromDateTimeInput(value: string): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString()
 }
 
+/** A date as a write sends it: the instant, and whether it carries a time of day. */
+export type DateWrite = { iso: string; hasTime: boolean }
+
+/**
+ * What the task sheet's `<input type="datetime-local">` writes, with its time
+ * flag (`found-6-oct/a-time-on-utc-midnight-reads-as-no-time`): the typed clock
+ * in local terms, a time — 17:00 in Los Angeles is UTC midnight, and is still
+ * 17:00. Save where the date it changes carried no time and the clock reads
+ * 00:00, which is how the box shows a date with no time (`toDateTimeInput`):
+ * then a new day is still a date with no time, as a day picked in a day box is.
+ */
+export function fromDateTimeBox(value: string, stored?: string | null, storedHasTime?: boolean): DateWrite | null {
+  const iso = fromDateTimeInput(value)
+  if (!iso) return null
+  const [day, clock] = value.split('T')
+  if (clock?.startsWith('00:00') && !carriesTime(stored, storedHasTime)) {
+    const [y, m, d] = day.split('-').map(Number)
+    return { iso: utcMidnight(y, m - 1, d).toISOString(), hasTime: false }
+  }
+  return { iso, hasTime: true }
+}
+
+/**
+ * A typed `datetime-local` value as the fields a new task's write sends — the
+ * date and whether it carries a time (`fromDateTimeBox`) — or none for no date.
+ */
+export function dateWriteOf(key: 'startDate' | 'dueDate', typed: string): Record<string, string | boolean> {
+  const write = typed ? fromDateTimeBox(typed) : null
+  return write ? { [key]: write.iso, [`${key}HasTime`]: write.hasTime } : {}
+}
+
 /**
  * Move a date to a new day and leave its time of day where it was.
  *
@@ -110,13 +157,13 @@ export function fromDateTimeInput(value: string): string | null {
  * times the size of the row it lives in. Those are allowed to be coarse; they
  * are not allowed to destroy something they cannot show.
  */
-export function withDatePart(existing: string | null | undefined, ymd: string): string | null {
+export function withDatePart(existing: string | null | undefined, ymd: string, hasTime?: boolean): string | null {
   if (!ymd) return null
   const [y, m, d] = ymd.split('-').map(Number)
   if (!y || !m || !d) return null
 
   const prev = existing ? new Date(existing) : null
-  const carry = prev && !Number.isNaN(prev.getTime()) && !isDateOnly(prev)
+  const carry = prev && carriesTime(existing, hasTime)
   // A day that never carried a time keeps being stored the way it always was,
   // so a date-only row stays byte-identical rather than acquiring an offset.
   if (!carry) return utcMidnight(y, m - 1, d).toISOString()
@@ -133,11 +180,11 @@ export function withDatePart(existing: string | null | undefined, ymd: string): 
  * in Los Angeles every date-only bar sat a day early ("Oct 18 – Oct 20" for a
  * task of the 19th to the 21st) and a drag moved it from the wrong day.
  */
-export function shownDay(iso: string | null | undefined): Date | null {
+export function shownDay(iso: string | null | undefined, hasTime?: boolean): Date | null {
   if (!iso) return null
   const at = new Date(iso)
   if (Number.isNaN(at.getTime())) return null
-  return isDateOnly(at)
+  return isDateOnly(at, hasTime)
     ? localAt(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate())
     : localAt(at.getFullYear(), at.getMonth(), at.getDate())
 }
@@ -152,11 +199,11 @@ export function shownDay(iso: string | null | undefined): Date | null {
  * The timeline saved `startOfDay` of each moved date and the list's Gantt sent
  * `yyyy-MM-dd`, so a drag of a task due at 17:30 left it due at midnight.
  */
-export function shiftByDays(iso: string | null | undefined, days: number): string | null {
+export function shiftByDays(iso: string | null | undefined, days: number, hasTime?: boolean): string | null {
   if (!iso) return null
   const at = new Date(iso)
   if (Number.isNaN(at.getTime())) return null
-  if (isDateOnly(at)) at.setUTCDate(at.getUTCDate() + days)
+  if (isDateOnly(at, hasTime)) at.setUTCDate(at.getUTCDate() + days)
   else at.setDate(at.getDate() + days)
   return at.toISOString()
 }
@@ -200,6 +247,8 @@ export function presetToIso(
   id: DatePresetId,
   existing: string | null | undefined,
   now: Date = new Date(),
+  /** The task's flag for `existing`, where the caller has it. */
+  hasTime?: boolean,
 ): string {
   const base = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   switch (id) {
@@ -227,7 +276,7 @@ export function presetToIso(
       break
   }
   const prev = existing ? new Date(existing) : null
-  const carry = prev && !Number.isNaN(prev.getTime()) && !isDateOnly(prev)
+  const carry = prev && carriesTime(existing, hasTime)
   if (carry) {
     base.setHours(prev!.getHours(), prev!.getMinutes(), 0, 0)
     return base.toISOString()

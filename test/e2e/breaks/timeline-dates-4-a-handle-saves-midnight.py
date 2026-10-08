@@ -1,9 +1,10 @@
 # A TIMELINE HANDLE SAVES THE DAY WITHOUT ITS TIME (`found-5-oct/timeline-press-moves-dates`): the left handle
 # writes the start as the day it lands on with no time, as the handles' `startOfDay` lost 09:00.
+# Re-aimed 8 October: the dates carry their time flag (`found-6-oct/a-time-on-utc-midnight-reads-as-no-time`).
 # Reddens: timeline-dates: "each handle moves its own date by whole days and keeps its time: a day’s drag of the left handle starts the task at 09:00 a day later, of the right one makes it due at 17:30 a day later, the other date untouched, in UTC, Los Angeles and Karachi (read by SQL)"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx'
-a = '    return { startDate: task.startDate ? shiftByDays(task.startDate, d) : dayAsDateOnly(daysAfter(from, d)) }\n'
+a = '    return task.startDate ? startMoved(d) : { startDate: dayAsDateOnly(daysAfter(from, d)), startDateHasTime: false }\n'
 b = '    return { startDate: dayAsDateOnly(daysAfter(from, d)) }\n'
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

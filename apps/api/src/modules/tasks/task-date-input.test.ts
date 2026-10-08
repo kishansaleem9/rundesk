@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { BadRequestException } from '@nestjs/common'
-import { taskDateFrom } from './task-date-input'
+import { taskDateFrom, taskDateTimeFlags, taskTimeFlagFrom } from './task-date-input'
 
 /**
  * `found-5-oct/years-below-100-read-back-wrong` — a task's date as `POST /tasks`,
@@ -34,5 +34,35 @@ describe('a task date as a write sends it', () => {
       assert.equal(refusal(() => taskDateFrom('startDate', sent)), 'startDate must fall between the years 1 and 9999', sent)
     }
     assert.equal(refusal(() => taskDateFrom('dueDate', 'not a date')), 'dueDate is not a valid date')
+  })
+})
+
+/**
+ * `found-6-oct/a-time-on-utc-midnight-reads-as-no-time`: each date a write sets
+ * takes the time flag sent with it, or the one its instant says.
+ */
+describe('whether a task date carries a time, as a write leaves it', () => {
+  it('takes the flag sent: 17:00 in Los Angeles is UTC midnight and still a time', () => {
+    assert.deepEqual(taskDateTimeFlags({ dueDate: new Date('2026-10-09T00:00:00.000Z'), dueDateHasTime: true }), { dueDateHasTime: true })
+  })
+
+  it('reads one not sent from the instant: a UTC midnight is a date with no time, any other a time', () => {
+    assert.deepEqual(
+      taskDateTimeFlags({ startDate: new Date('2026-10-09T00:00:00.000Z'), dueDate: new Date('2026-10-09T17:30:00.000Z') }),
+      { startDateHasTime: false, dueDateHasTime: true },
+    )
+  })
+
+  it('has no time for no date, whatever is sent; leaves a date the write does not set alone', () => {
+    assert.deepEqual(taskDateTimeFlags({ dueDate: null, dueDateHasTime: true }), { dueDateHasTime: false })
+    assert.deepEqual(taskDateTimeFlags({ startDate: new Date('2026-10-09T10:00:00.000Z') }), { startDateHasTime: true })
+    // A flag sent alone says whether the date the task holds carries a time.
+    assert.deepEqual(taskDateTimeFlags({ startDateHasTime: true }), { startDateHasTime: true })
+  })
+
+  it('takes a flag as true or false, and refuses anything else in words', () => {
+    assert.equal(taskTimeFlagFrom('dueDateHasTime', undefined), undefined)
+    assert.equal(taskTimeFlagFrom('dueDateHasTime', false), false)
+    assert.equal(refusal(() => taskTimeFlagFrom('dueDateHasTime', 'yes')), 'dueDateHasTime must be true or false')
   })
 })

@@ -851,6 +851,16 @@ describe('templateWithForm — a date set wins over the template’s, and the ot
     assert.equal(typed.startDate?.toISOString(), '2026-10-10T12:00:00.000Z')
     assert.equal(typed.dueDate?.toISOString(), '2026-10-03T12:00:00.000Z')
   })
+
+  it('sends a date set in the form with its time flag, and the template’s own date with none, to be read from its instant', () => {
+    // 17:00 on 8 October in Los Angeles: UTC midnight, and a time (`found-6-oct/a-time-on-utc-midnight-reads-as-no-time`).
+    const set = templateWithForm({ ...base, startDateOffsetDays: 2, dueDateOffsetDays: null }, { dueDate: '2026-10-09T00:00:00.000Z', dueDateHasTime: true }, NOW)
+    assert.equal(set.dueDateHasTime, true)
+    assert.equal(set.startDateHasTime, undefined, 'the template’s start is not the form’s, and carries no flag sent')
+    // A flag sent for a date the form did not set goes nowhere.
+    const stray = templateWithForm({ ...base, startDateOffsetDays: null, dueDateOffsetDays: 3 }, { dueDateHasTime: true }, NOW)
+    assert.equal(stray.dueDateHasTime, undefined)
+  })
 })
 
 /*

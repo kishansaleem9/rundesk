@@ -1062,7 +1062,8 @@ try {
    * template's; the request is read off the wire, and the task by SQL.
    */
   // The typed tag goes by name (`labelsByName`), made by the server once the task is (`found-30-sep/refused-create-leaves-tags`).
-  const SENT = ['assigneeIds', 'description', 'dueDate', 'labelsByName', 'listId', 'priority', 'titleOverride']
+  // The due date set goes with its time flag (`found-6-oct/a-time-on-utc-midnight-reads-as-no-time`).
+  const SENT = ['assigneeIds', 'description', 'dueDate', 'dueDateHasTime', 'labelsByName', 'listId', 'priority', 'titleOverride']
   const sentKeys = mergedSent ? Object.keys(mergedSent).sort() : null
   chk(
     JSON.stringify(sentKeys) === JSON.stringify(SENT) && !!merged && merged.time_estimate === T4.timeEstimate

@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 527 items: 2 open · 0 partly fixed · 468 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 529 items: 0 open · 0 partly fixed · 472 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8434,7 +8434,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 66, each reproduced
+## Found by the triage, 5 October, and since — 68, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -9833,13 +9833,32 @@ Checks:
 
 Regression on lanes 2, 4, 6 and 7: the 25 suites the four fixes of this batch touch (`call-realtime-access`, `call-survives-navigation`, `chat-realtime-access`, `comment-plus-menu`, `create-menu-ai`, `data-transfer-keys`, `doc-boundaries`, `doc-import`, `emoji-picker`, `guest-canvas-scope`, `guest-chat-scope`, `guest-create-menu`, `guest-read-scope`, `imports`, `malformed-ids`, `object-key-boundaries`, `realtime-access-ends`, `realtime-sends-access`, `sign-in-and-password`, `space-create-menu`, `syncup-live`, `task-depth`, `task-mentions`, `video1-fast-items` and `workspace-read-access`), 612 checks, all green.
 
-### `found-6-oct/timeline-and-gantt-draw-a-column-per-day` — open (performance, small; found reviewing `found-5-oct/years-below-100-read-back-wrong`) · reproduced 6 October
+### `found-6-oct/timeline-and-gantt-draw-a-column-per-day` — **closed** (performance, small; found reviewing `found-5-oct/years-below-100-read-back-wrong`) · reproduced 6 October
 
 **The list's Gantt and the workspace timeline lay out one column per day back to the earliest date, so one task dated far away freezes them**
 
 *Evidence, 6 October, lane 5 (`probe-year202-timeline.mjs`):* with one task starting in year 202, HEAD's bundle drew the timeline after 17.8 s (an axis of 18,653,936 px, 95,834 nodes); with 1902, 1.9 s; with year 2, now read back as stored, 26.4 s; the review measured the list's Gantt at 58–69 s with 1.5 million nodes, and its Day zoom unresponsive. The timeline's range and the Gantt's are sized from the earliest date, and their headers and grid draw an element per day.
 
 *To close:* the owner's decision (with the range of years a date may hold, recorded on `found-5-oct/years-below-100-read-back-wrong`): bound or virtualise the drawn range, or list an outlier apart. Then check a far-dated task leaves both views drawn in a second.
+
+*Closed, 8 October* (lane 5, the worktree's build). ClickUp's Timeline has "no limit to how far you can scroll into the future or past" (help centre, through search excerpts); so the span is kept, and drawn in part.
+
+- The workspace timeline and the list's Gantt draw only the days in their scroller's view and a view's width either side (`useDrawnDays`, `lib/drawn-days.ts`), the window moving a step at a time as the chart scrolls or changes size. The timeline's week band and date row, and the Gantt's day grid and month markers, are each a component of their own, so a scroll draws them again and not the bars. A header cell narrower than 24 px takes as many days, weeks or months as reach it, as Auto fit draws a long span.
+- A span is laid out no wider than 16 million px (`chartDayPx`): past Chromium's last pixel (33,554,431) and Firefox's (17,895,697) a browser draws what lies beyond at the end. A longer span narrows its days: from year 202 to this October the timeline draws 24 px a day at the Week zoom and the Day zoom alike, the two then differing in their cells, a week or a day.
+- A day cell is labelled with the day `addDays` reaches, the bars' days (`found-8-oct/timeline-day-labels-slip-after-the-clock-goes-back`, found here).
+
+Measured with `timeline-dates`' new section — a project holding a task that starts in year 202 and one of this October — on lane 3 (before, the main tree's build) and lane 5 (after), each while the preflight and a CI rehearsal ran:
+- Before: the timeline drew the project 60.7 s after it was chosen, with 95,192 elements in the chart; its Day zoom had not drawn after 180 s. The Gantt drew 107.8 s after its tab was chosen, with 1,354,324 elements, and its Day zoom took 107.5 s; neither far end could be read.
+- After: the timeline in 55 ms with 35 elements, its Day zoom in 139 ms, and scrolled to its end (16,000,000 px) this October's bar in view under "2026-10-07"; the Gantt in 356 ms with 337 elements, its Day zoom in 133 ms, this October's bar over its day. On lane 3, the main tree's build, with the rehearsal of `802554a` on the other cores: the timeline in 279 ms, its Day zoom in 235 ms; the Gantt mounted in 1.3 s the first time its tab was chosen and drew again in 78 ms the second. With nothing else running: the timeline in 144 ms, its Day zoom in 94 ms; the Gantt drawn again in 61 ms, its Day zoom in 110 ms.
+- The Gantt's check times the tab chosen a second time, in the page, until the bar is there: timed from the suite, the first choosing carried the view's first mount and Playwright's own waits before its click, 1.15 s on lane 3 under the rehearsal's load, where the draw was a tenth of that. And it times only once the Gantt has left the page: under `dtv-2`, which draws every day, the Gantt was still there 30 s after the List tab's press, and the timing read a press on the tab already open, 207 ms and then 195 ms, while the check went red on the elements alone; it now counts a Gantt that has not left as not drawn again.
+
+Checks:
+- `timeline-dates` 12 → 17, four of them here: "the workspace timeline draws a project holding a task that starts in year 202 within a second of its being chosen, …"; "and its Day zoom is drawn within a second, and scrolled to the span’s far end shows this October: …" (the timeline's and the Gantt's); "the list’s Gantt of a list holding a task that starts in year 202 is drawn within a second of its tab being chosen, …".
+- `drawn-days.test.ts`, 8 tests.
+- Patches, run on lane 5 against the worktree's build, then again on lane 3 against the main tree's once the suite read only drawn cells, and `dtv-2` once more after its Gantt was timed only once gone (these numbers): `dtv-1` (the timeline draws its whole span) reddens both of the timeline's, 14 of 17 (the project drawn after 128 s, 95,192 elements; the Day zoom not drawn after 180 s; and the clock-change check, its timeline, in the same workspace, never drawn); `dtv-2` (the Gantt draws every day) both of the Gantt's, 15 of 17 (its tab first drawn after 159.2 s, 1,354,324 elements, the Gantt still there 30 s after the List tab's press, the Day zoom after 169.8 s); `dtv-3` (no width cap) the timeline's far end, 16 of 17: laid out at 28 px a day the chart ends at Chromium's 33,554,432 px, and the cell under this October's bar reads "1843-04-09"; `dtv-4` (a scroll does not move the drawn days) both far ends, 15 of 17, no cell drawn under the bar. Unit claim `dtv-6`.
+- Re-aimed at the header drawn in part, and run again on lane 3: `gantt-controls-4` (every week labelled W1) reddens "the week containing 2026-03-02 is labelled W10, which is the ISO week it is", 29 of 30.
+
+Regression on lane 3: the 108 suites that write or read a task's dates, open the timeline or a Gantt, create tasks, import, sync a calendar, or apply a template (`task-values`, `timeline-dates`, `gantt-controls`, `create-modal-templates`, `imports`, `calendar-push-reach`, `video-regression` and 101 more), 2,393 checks: 106 suites green. `create-modal-templates` failed on the template route above, 45 of 45 since; `menu-reopen` failed on `found-8-oct/a-dialog-takes-each-render-for-its-opening`, closed beside these, 29 of 29 since.
 
 ### `found-6-oct/list-page-offers-task-edits-by-list-level` — **closed** (visible bug, small; found reviewing `found-30-sep/timeline-drags-refused-silently`) · reproduced 6 October
 
@@ -9860,13 +9879,33 @@ Checks:
 
 Regression on lanes 2, 4, 5, 6 and 7: the 42 suites the four changes to the product touch (`brain-entry-points`, `clip-created-card`, `clip-links`, `clip-setup`, `comment-plus-menu`, `comment-recording`, `comment-slash-commands`, `comment-thread`, `custom-field-types`, `full-edit-levels`, `gantt-controls`, `guest-task-edits`, `guest-task-making`, `list-assignee-filter`, `list-card-cover`, `list-customize`, `list-empty-states`, `list-export`, `list-page-levels`, `list-save-view`, `list-view-controls`, `mail-comments-by-level`, `own-capacity`, `paywall-sites`, `role-permissions-web`, `save-comment`, `sidebar-reorder`, `space-features`, `space-wizard`, `sticky-headers`, `task-ai-bar`, `task-attachments`, `task-cover`, `task-mentions`, `task-pickers-search`, `task-sheet-capabilities`, `task-values`, `team-view`, `timeline-dates`, `view-autosave`, `view-visibility` and `view-writes-by-level`), 793 checks, 40 suites green at once. `task-cover` (its second board never drew the card) and `view-writes-by-level` (a rename made from the ⋯ menu not saved) failed on lane 5 under the sweep’s load — two cores, beside the CI rehearsal — and each was green alone, twice.
 
-### `found-6-oct/a-time-on-utc-midnight-reads-as-no-time` — open (visible bug, small; found closing `found-30-sep/sheet-dates-write-as-typed`) · reproduced 6 October
+### `found-6-oct/a-time-on-utc-midnight-reads-as-no-time` — **closed** (visible bug, small; found closing `found-30-sep/sheet-dates-write-as-typed`) · reproduced 6 October
 
 **A real time that lands on UTC midnight is read back as a date with no time**
 
 *Evidence, 6 October, lane 5 (`probe-la-midnight.mjs`):* typed into the task sheet's due box and accepted with Enter, then reloaded: Los Angeles 8 Oct 17:00 → stored `2026-10-09 00:00:00+00` → shown 2026-10-09T00:00, as a date with no time; Karachi 8 Oct 05:00 → stored `2026-10-08 00:00:00+00` → shown as no time; UTC 17:00 right. A timeline drag across a clock change reaches it too (Los Angeles, −2 days on a task at 2 Nov 17:00 PST stored 2026-11-01T00:00Z, drawn as a two-day bar). `isDateOnly` (`lib/task-dates.ts`) treats every UTC-midnight instant as a date picked without a time; ClickUp's API keeps a separate `due_date_time` / `start_date_time` flag.
 
 *To close:* a has-time flag beside each date (a schema change, the owner's decision), written by every date write and read by `isDateOnly`; check it in the three zones.
+
+*Closed, 8 October* (lane 5, the worktree's build). ClickUp's API keeps `due_date_time` and `start_date_time` beside its dates, "true if the date includes a time of day"; so does `tasks` now.
+
+- `start_date_has_time` and `due_date_has_time` (migration 0174), every row before it read as it was read until now: a UTC midnight no time, any other instant a time.
+- Every date write sets the flag with the date (`taskDateTimeFlags`, `task-date-input.ts`): the one sent, or, none sent, the one its instant says; no date has no time. `POST /tasks`, `PATCH /tasks/:id` and the bulk editor take `startDateHasTime` and `dueDateHasTime`, true or false, and refuse anything else in words. A recurring task's next one and a template's copy carry the source's; the calendar pull writes a day's event as no time and a timed one as a time, whatever its instant; the ClickUp and spreadsheet importers write whether the cell held a clock, `12:00 AM` included; sample data and forms through the same rule.
+- The app reads the flag where it has it (`isDateOnly`, `lib/task-dates.ts`) and sends one with every date it writes: the sheet's date-and-time boxes, its presets, a row's or a subtask's day box, the Calendar's drop, the timeline's and the Gantt's drags, and the create modal. A date with no time whose day is changed in the sheet's box stays a date with no time; the box shows it at 00:00.
+
+Measured with `task-values`' new section — a time typed in the task sheet in each zone and read back after a reload — on lane 3 (before, the main tree's build) and lane 5 (after):
+- Before: 17:00 on 8 October in Los Angeles was stored at 00:00 UTC on the 9th and read back as "2026-10-09T00:00", its list row on the 9th; 05:00 in Karachi read back as "2026-10-08T00:00"; UTC was right. The API refused the flag: "These fields cannot be changed here: dueDateHasTime." 24 of 27.
+- After: each read back as typed and stored with its flag, the row on the 8th; the API keeps a flag sent, reads one not sent from the instant, writes none for no date, and refuses "yes" in words. 27 of 27.
+
+Checks:
+- `task-values` 24 → 27: "a time typed in the task sheet is read back as typed though it lands on UTC midnight: …"; "and the list row shows it on its own day in Los Angeles, the 8th, not the 9th its UTC midnight falls on"; "the API keeps the flag a write sends, and reads one not sent from the instant: …".
+- `task-dates.test.ts` +5, `task-date-input.test.ts` +4, `spreadsheet-import.util.test.ts` +1 (and its merge-keys check restated: a date goes with its flag).
+- Patches: `htf-1` (the instant decides the flag, a sent one ignored) reddens all three, 24 of 27; `htf-2` (the sheet's due box sends no flag) and `htf-3` (the app reads the instant and not the flag) the first two, 25 of 27 each; `htf-4` (a date written without a flag keeps the old one) the third, and a start of year 2 at 09:00 then reads 00:00 in the sheet, 25 of 27. Unit claims `htf-5` and `htf-6`. Run on lane 5 against the worktree's build, as the measurement.
+- Re-aimed at the lines the flag rewrote, and run again on lane 3 against the main tree's build, each reddening the check it names: `create-modal-templates-25` (44 of 45), `task-values-43` (26 of 27), `tsc-7` (4 of 5), and `timeline-dates-2` to `-8`, `-13` and `-14` (16 of 17; 15 for `-2`, which reddens both checks it names, and for `-5` and `-7`, which redden one beside theirs: the share's drag, the Gantt's date-only task). Unit claims `isu-5` and `tpm-3`.
+
+The regression found one date write that dropped the flag: the create modal sends its due date with its flag to a template's route too, and `POST /workspaces/:ws/task-templates/:id/instantiate` did not take it — `create-modal-templates`' "Create sends the template’s route what was set in the form and nothing left alone …" read `dueDateHasTime` among the keys sent, 44 of 45. The route now takes `startDateHasTime` and `dueDateHasTime` with the dates set in the form (`templateWithForm`; a template's own date is read from its instant), and the check counts the flag with its date: 45 of 45; `task-templates.service.test.ts` +1.
+
+Regression on lane 3: the 108 suites that write or read a task's dates, open the timeline or a Gantt, create tasks, import, sync a calendar, or apply a template (`task-values`, `timeline-dates`, `gantt-controls`, `create-modal-templates`, `imports`, `calendar-push-reach`, `video-regression` and 101 more), 2,393 checks: 106 suites green. `create-modal-templates` failed on the template route above, 45 of 45 since; `menu-reopen` failed on `found-8-oct/a-dialog-takes-each-render-for-its-opening`, closed beside these, 29 of 29 since.
 
 ### `found-6-oct/import-history-read-by-anyone` — **closed** (security, small; found closing `found-6-oct/a-guest-who-may-import-makes-a-space`) · reproduced 6 October
 
@@ -10204,6 +10243,30 @@ Checks: `planner-grid` 23 (unchanged in number). Patch `pg-6` (a drop posts noth
 Measured on lane 3: before, 12 of 13 (the sweep, this morning); after, 13 of 13. Replayed over the same 61 days, the label check fails a right chip on none of them, and the swapped chip and a chip reading today on all.
 
 Checks: `activity-rail` 13 (unchanged in number). Patch `arail-1` (the chip reads today) reddens the check, 12 of 13: "the chip reads "Created 10/8/2026" … which is "8/7/2026" in this reader's date format (system); today is "10/8/2026"". Patch `arail-5` is new: the chip writes the date day first whatever the reader's format, "Created 07/08/2026", which the numbers passed on every day but the 8th; it reddens the check, 12 of 13.
+
+### `found-8-oct/timeline-day-labels-slip-after-the-clock-goes-back` — **closed** (visible bug, small; found closing `found-6-oct/timeline-and-gantt-draw-a-column-per-day`) · reproduced 8 October
+
+**The timeline's day cells read the day before after the clock goes back**
+
+*Evidence, 8 October, lane 3:* the workspace timeline labelled a day cell, and a week cell, with the date of `start + i × 24 h`. After the clock goes back on 1 November that instant is 23:00 of the day before, so in Los Angeles every cell from then on read the day before the one it stood for, while the bars stood on their own days: at Day zoom a task of 10 November sat under "Nov 9" (the `timeline-dates` check added for it, on the main tree's build).
+
+*Closed, 8 October.* A cell is labelled with the day `addDays` reaches, the day the bars are placed by. After: "Nov 10".
+
+Checks: `timeline-dates`: "in Los Angeles, at Day zoom, a task of 10 November sits under the cell “Nov 10”, after the clock goes back on 1 November as before it". Patch: `dtv-5` (a cell labelled `start + i × 24 h` again) reddens it, 16 of 17: "Nov 9" (lane 5, and again on lane 3).
+
+Regression on lane 3: the 108 suites that write or read a task's dates, open the timeline or a Gantt, create tasks, import, sync a calendar, or apply a template (`task-values`, `timeline-dates`, `gantt-controls`, `create-modal-templates`, `imports`, `calendar-push-reach`, `video-regression` and 101 more), 2,393 checks: 106 suites green. `create-modal-templates` failed on the template route above, 45 of 45 since; `menu-reopen` failed on `found-8-oct/a-dialog-takes-each-render-for-its-opening`, closed beside these, 29 of 29 since.
+
+### `found-8-oct/a-dialog-takes-each-render-for-its-opening` — **closed** (visible bug, small; found in batch 16's regression, made by `found-30-sep/a-double-click-on-a-dialog-row-shuts-the-dialog`) · reproduced 8 October
+
+**A dialog that changes after it opens takes no press outside for half a second more**
+
+*Evidence, 8 October, lane 3:* batch 16's regression failed `menu-reopen`'s "and a press outside a dialog, once a double-click’s interval has passed since it opened, still closes it", 27 of 28, and it failed again in one of three runs after. The shared dialog refuses a press outside within 500 ms of its content being drawn, and took the drawing from each time its content's ref was set. A layer inside Radix composes that ref with an arrow made afresh at every render, so React sets it again whenever the dialog renders: the merge dialog's list, loading after it opened, started the interval over. Twelve rounds of the check's own flow, each logging the dialog's insertions and the press: the dialog inserted once each time, the press 730 ms after, and the dialog left open in 4 rounds of 12. Typed into 0.6 s after it opened and pressed outside at once, it stayed open in 2 runs of 2.
+
+*Closed, 8 October.* The interval starts when an element the dialog did not hold before is set: a dialog opened anew starts it, a render does not.
+
+Measured on lane 3, a CI rehearsal on the other cores: the twelve rounds closed in 12 of 12; `menu-reopen` 29 of 29, twice.
+
+Checks: `menu-reopen` 28 → 29: "and a dialog that has changed since it opened — typed into 0.6 s after — still closes at a press outside: the interval runs from its opening, not from its last render". Patch `menu-reopen-15` (every time the ref is set restarts the interval) reddens it, 28 of 29.
 
 ## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
 

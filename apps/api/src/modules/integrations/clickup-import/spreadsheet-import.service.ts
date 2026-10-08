@@ -507,6 +507,8 @@ export class SpreadsheetImportService {
                     priority: r.priority,
                     dueDate: r.dueDate,
                     startDate: r.startDate,
+                    dueDateHasTime: r.dueDateHasTime,
+                    startDateHasTime: r.startDateHasTime,
                   })
                   .returning({ id: tasks.id })
                 await this.applyPeopleAndTags(tx, workspaceId, task.id, r, memberByKey, labelCache, tally)

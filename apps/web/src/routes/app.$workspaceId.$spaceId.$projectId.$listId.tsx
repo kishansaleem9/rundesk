@@ -103,8 +103,9 @@ import {
   UNASSIGNED_FILTER,
 } from '../lib/task-filters'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
-import { toDateInput, withDatePart, shownDay, shiftByDays } from '../lib/task-dates'
+import { carriesTime, toDateInput, withDatePart, shownDay, shiftByDays } from '../lib/task-dates'
 import { criticalPath, GANTT_DRAG_THRESHOLD } from '../lib/gantt'
+import { chartDayPx, useDrawnDays } from '../lib/drawn-days'
 import { SPACE_VIEW_KEYS, type SpaceViewKey } from '../lib/space-views'
 import { TaskDetailSheet } from '../components/task-detail-sheet'
 import { DayBox } from '../components/date-time-box'
@@ -154,6 +155,8 @@ type Subtask = {
   statusCategory?: StatusCategory | null
   priority?: TaskPriority
   dueDate?: string | null
+  /** Whether the due date carries a time of day (`found-6-oct/a-time-on-utc-midnight-reads-as-no-time`). */
+  dueDateHasTime?: boolean
   isMilestone?: boolean
 }
 
@@ -202,6 +205,13 @@ type TaskItem = {
   taskType?: { id: string; name: string; icon: string | null; isDefault?: boolean } | null
   startDate?: string | null
   dueDate?: string | null
+  /**
+   * Whether each date carries a time of day, as ClickUp keeps `due_date_time`
+   * (`found-6-oct/a-time-on-utc-midnight-reads-as-no-time`): a UTC midnight
+   * may be a real time, 17:00 in Los Angeles.
+   */
+  startDateHasTime?: boolean
+  dueDateHasTime?: boolean
   createdAt?: string | null
   /** §V2-07 — "Date closed" in the filter list, frame 11:41. */
   completedAt?: string | null
@@ -2286,7 +2296,7 @@ function ListDetail() {
       // The day the due date is SHOWN as (`toDateInput`): a date-only day is that
       // day in any zone, where the local day of its UTC midnight drew it a day
       // early west of UTC (`found-5-oct/timeline-press-moves-dates`).
-      const key = task.dueDate ? toDateInput(task.dueDate) : 'No due date'
+      const key = task.dueDate ? toDateInput(task.dueDate, task.dueDateHasTime) : 'No due date'
       const arr = map.get(key) ?? []
       arr.push(task)
       map.set(key, arr)
@@ -2700,8 +2710,13 @@ function ListDetail() {
   // saved a task due at 17:30 as due at midnight
   // (`found-5-oct/timeline-press-moves-dates`, as the Gantt's drag did).
   const rescheduleTask = async (taskId: string, day: Date) => {
-    const current = tasks.find((task) => task.id === taskId)?.dueDate ?? null
-    await patchTaskSaying(taskId, { dueDate: withDatePart(current, format(day, 'yyyy-MM-dd')) })
+    const task = tasks.find((one) => one.id === taskId)
+    const current = task?.dueDate ?? null
+    await patchTaskSaying(taskId, {
+      dueDate: withDatePart(current, format(day, 'yyyy-MM-dd'), task?.dueDateHasTime),
+      // With the time it carried, or its lack of one (`carriesTime`).
+      dueDateHasTime: carriesTime(current, task?.dueDateHasTime),
+    })
   }
   // Shift a task's whole span by `deltaDays` (Gantt bar drag, Plan §5.4). Reuses
   // the same PATCH /tasks/:id path as the calendar reschedule above, moving
@@ -2711,11 +2726,12 @@ function ListDetail() {
   // saved a task due at 15:00 as due at midnight.
   const rescheduleTaskSpan = async (task: TaskItem, deltaDays: number) => {
     if (deltaDays === 0) return
-    const patch: Record<string, string> = {}
-    const start = shiftByDays(task.startDate, deltaDays)
-    const due = shiftByDays(task.dueDate, deltaDays)
-    if (start) patch.startDate = start
-    if (due) patch.dueDate = due
+    const patch: Record<string, string | boolean> = {}
+    const start = shiftByDays(task.startDate, deltaDays, task.startDateHasTime)
+    const due = shiftByDays(task.dueDate, deltaDays, task.dueDateHasTime)
+    // Each with the time it carried, or its lack of one (`carriesTime`).
+    if (start) Object.assign(patch, { startDate: start, startDateHasTime: carriesTime(task.startDate, task.startDateHasTime) })
+    if (due) Object.assign(patch, { dueDate: due, dueDateHasTime: carriesTime(task.dueDate, task.dueDateHasTime) })
     if (Object.keys(patch).length === 0) return
     await patchTaskSaying(task.id, patch)
   }
@@ -4668,8 +4684,9 @@ function TaskRow({
         <DayBox
           testId="list-row-due-date"
           stored={task.dueDate}
+          hasTime={task.dueDateHasTime}
           onClick={(e) => e.stopPropagation()}
-          onCommit={async (dueDate) => onPatchTask?.(task.id, { dueDate })}
+          onCommit={async (dueDate, dueDateHasTime) => onPatchTask?.(task.id, { dueDate, dueDateHasTime })}
           title={t('list.setDueDateTitle')}
           className="h-6 w-[7.5rem] shrink-0 rounded border border-transparent bg-transparent px-1 text-xs text-muted-foreground hover:border-border focus:border-border focus:bg-card focus:outline-none"
         />
@@ -4677,7 +4694,7 @@ function TaskRow({
         task.dueDate && (
           <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
             <CalendarIcon className="h-3 w-3" />
-            {shortDate(shownDay(task.dueDate)!, locale)}
+            {shortDate(shownDay(task.dueDate, task.dueDateHasTime)!, locale)}
           </div>
         )
       ))}
@@ -4761,7 +4778,7 @@ function SubtaskRow({
       {subtask.dueDate && (
         <div className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
           <CalendarIcon className="h-3 w-3" />
-          {shortDate(shownDay(subtask.dueDate)!, locale)}
+          {shortDate(shownDay(subtask.dueDate, subtask.dueDateHasTime)!, locale)}
         </div>
       )}
     </div>
@@ -4932,6 +4949,7 @@ function InlineAddTask({
 
 type TaskPatch = Partial<Pick<TaskItem, 'title' | 'status' | 'priority' | 'dueDate'>> & {
   dueDate?: string | null
+  dueDateHasTime?: boolean
 }
 
 const PRIORITY_ORDER: TaskPriority[] = ['urgent', 'high', 'normal', 'low']
@@ -5509,8 +5527,9 @@ function TableView({
                         autoFocus
                         testId="list-table-due-date"
                         stored={task.dueDate}
+                        hasTime={task.dueDateHasTime}
                         onClick={(e) => e.stopPropagation()}
-                        onCommit={async (dueDate) => onPatchTask(task.id, { dueDate })}
+                        onCommit={async (dueDate, dueDateHasTime) => onPatchTask(task.id, { dueDate, dueDateHasTime })}
                         onDone={() => setDateOpenFor(null)}
                         className="h-6 text-xs bg-card border border-border rounded px-1 outline-none focus:ring-1 focus:ring-brand-500 tabular-nums"
                       />
@@ -5530,7 +5549,7 @@ function TableView({
                         {task.dueDate ? (
                           <>
                             <CalendarIcon className="h-3 w-3 text-muted-foreground" />
-                            <span>{shortDate(shownDay(task.dueDate)!, locale)}</span>
+                            <span>{shortDate(shownDay(task.dueDate, task.dueDateHasTime)!, locale)}</span>
                           </>
                         ) : (
                           <span className="text-muted-foreground">—</span>
@@ -6172,7 +6191,7 @@ function BoardTaskCard({
             node: due ? (
               <span className={cn('inline-flex items-center gap-1', overdue && 'text-red-500 font-medium')}>
                 <CalendarIcon className="h-3 w-3" />
-                {shortDate(shownDay(task.dueDate)!, locale)}
+                {shortDate(shownDay(task.dueDate, task.dueDateHasTime)!, locale)}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 opacity-60">
@@ -6369,8 +6388,8 @@ function GanttBar({
   const state = useRef<{ startX: number; moved: boolean } | null>(null)
   /* A drag reschedules the task; a reader who may not change it gets the press, which opens it. */
   const mayDrag = useListCaps().mayEditTask(task)
-  const start = shownDay(task.startDate) ?? shownDay(task.dueDate)
-  const end = shownDay(task.dueDate) ?? shownDay(task.startDate)
+  const start = shownDay(task.startDate, task.startDateHasTime) ?? shownDay(task.dueDate, task.dueDateHasTime)
+  const end = shownDay(task.dueDate, task.dueDateHasTime) ?? shownDay(task.startDate, task.startDateHasTime)
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
@@ -6617,7 +6636,7 @@ function GanttView({
   const { t, locale } = useTranslation()
   const ordered = useOrderedStatuses()
   const [zoom, setZoom] = useState<GanttZoom>('week')
-  const dayW = GANTT_DAY_WIDTHS[zoom]
+  const scroller = useRef<HTMLDivElement | null>(null)
 
   // Each task's [start,end]; a task needs at least a due or start date to plot.
   // On the day each is SHOWN as (`shownDay`): a date-only day is that day in
@@ -6626,8 +6645,8 @@ function GanttView({
   const scheduled = useMemo(() => {
     return tasks
       .map((task) => {
-        const s = shownDay(task.startDate)
-        const d = shownDay(task.dueDate)
+        const s = shownDay(task.startDate, task.startDateHasTime)
+        const d = shownDay(task.dueDate, task.dueDateHasTime)
         if (!s && !d) return null
         const start = s ?? d!
         const end = d ?? s!
@@ -6648,6 +6667,8 @@ function GanttView({
     const end = addDays(max, 2)
     return { start, end, days: differenceInCalendarDays(end, start) + 1 }
   }, [scheduled])
+  // A zoom's width, narrowed for a span too long to lay out at it (`chartDayPx`).
+  const dayW = chartDayPx(GANTT_DAY_WIDTHS[zoom], range?.days ?? 0)
 
   // Critical path: longest cumulative-duration chain through blockedBy edges.
   const criticalIds = useMemo(() => {
@@ -6709,11 +6730,6 @@ function GanttView({
   const timelineW = range.days * dayW
   const bodyH = flatRows.length * GANTT_ROW_H
   const showDayNums = dayW >= GANTT_DAYNUM_MIN_W
-  const monthMarkers: Array<{ x: number; label: string }> = []
-  for (let i = 0; i < range.days; i++) {
-    const day = addDays(range.start, i)
-    if (i === 0 || day.getDate() === 1) monthMarkers.push({ x: i * dayW, label: day.toLocaleDateString(locale, { month: 'short', year: 'numeric' }) })
-  }
 
   // Arrow endpoints from blocker bar right-edge → blocked bar left-edge.
   const arrows: Array<{ id: string; d: string; critical: boolean }> = []
@@ -6798,37 +6814,17 @@ function GanttView({
         </div>
 
         {/* Timeline */}
-        <div className="overflow-x-auto flex-1">
+        <div ref={scroller} data-testid="gantt-scroller" className="overflow-x-auto flex-1">
           <div className="relative" style={{ width: timelineW, height: GANTT_HEADER_H + bodyH }}>
-            {/* month markers + day grid */}
-            <div className="absolute inset-x-0 top-0" style={{ height: GANTT_HEADER_H }}>
-              {monthMarkers.map((m) => (
-                <div
-                  key={m.x}
-                  className="absolute top-1 text-[10px] font-medium text-muted-foreground"
-                  style={{ left: m.x + 2 }}
-                >
-                  {m.label}
-                </div>
-              ))}
-            </div>
-            {Array.from({ length: range.days }).map((_, i) => {
-              const day = addDays(range.start, i)
-              const weekend = day.getDay() === 0 || day.getDay() === 6
-              return (
-                <div
-                  key={i}
-                  className={cn('absolute top-0 border-l border-border/40', weekend && 'bg-muted/20')}
-                  style={{ left: i * dayW, width: dayW, height: GANTT_HEADER_H + bodyH }}
-                >
-                  {showDayNums && (
-                    <div className="text-center text-[9px] text-muted-foreground" style={{ marginTop: GANTT_HEADER_H - 14 }}>
-                      {format(day, 'd')}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
+            <GanttDays
+              scroller={scroller}
+              start={range.start}
+              days={range.days}
+              dayW={dayW}
+              height={GANTT_HEADER_H + bodyH}
+              showDayNums={showDayNums}
+              locale={locale}
+            />
             {/* today line */}
             {todayX >= 0 && todayX <= timelineW && (
               <div
@@ -6888,6 +6884,73 @@ function GanttView({
         </div>
       </div>
     </Card>
+  )
+}
+
+/**
+ * The Gantt's month markers and day grid, for the days its scroller shows and
+ * a margin (`useDrawnDays`), not the whole span: one task in year 202 made the
+ * span 666,000 days, a column each, and the Gantt took a minute to draw with
+ * 1.5 million nodes (`found-6-oct/timeline-and-gantt-draw-a-column-per-day`).
+ * Its own component, so a scroll that moves the window draws the grid again
+ * and not the bars. A month's marker stands on its first day, and on the
+ * span's first.
+ */
+function GanttDays({
+  scroller,
+  start,
+  days,
+  dayW,
+  height,
+  showDayNums,
+  locale,
+}: {
+  scroller: React.RefObject<HTMLDivElement | null>
+  start: Date
+  days: number
+  dayW: number
+  height: number
+  showDayNums: boolean
+  locale: string
+}) {
+  const drawn = useDrawnDays(scroller, dayW, days)
+  const columns: Array<{ i: number; day: Date }> = []
+  for (let i = drawn.from; i < drawn.to; i++) columns.push({ i, day: addDays(start, i) })
+  return (
+    <>
+      <div className="absolute inset-x-0 top-0" style={{ height: GANTT_HEADER_H }}>
+        {columns
+          .filter(({ i, day }) => i === 0 || day.getDate() === 1)
+          .map(({ i, day }) => (
+            <div
+              key={i}
+              data-testid="gantt-month-marker"
+              className="absolute top-1 text-[10px] font-medium text-muted-foreground"
+              style={{ left: i * dayW + 2 }}
+            >
+              {day.toLocaleDateString(locale, { month: 'short', year: 'numeric' })}
+            </div>
+          ))}
+      </div>
+      {columns.map(({ i, day }) => {
+        const weekend = day.getDay() === 0 || day.getDay() === 6
+        return (
+          <div
+            key={i}
+            data-testid="gantt-day"
+            data-day={format(day, 'yyyy-MM-dd')}
+            className={cn('absolute top-0 border-l border-border/40', weekend && 'bg-muted/20')}
+            style={{ left: i * dayW, width: dayW, height }}
+          >
+            {showDayNums && (
+              <div className="text-center text-[9px] text-muted-foreground" style={{ marginTop: GANTT_HEADER_H - 14 }}>
+                {format(day, 'd')}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </>
   )
 }
 

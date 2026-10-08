@@ -143,6 +143,7 @@ import { COMPOSER_BLOCKS, applyBlockAtCaret, matchBlocks } from '../lib/composer
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { useDateFormat } from '../lib/date-format'
 import {
+  carriesTime,
   presetToIso,
   DATE_PRESETS,
 } from '../lib/task-dates'
@@ -368,6 +369,8 @@ type Subtask = {
   status: TaskStatus
   isArchived?: boolean
   dueDate?: string | null
+  /** Whether the due date carries a time of day (`found-6-oct/a-time-on-utc-midnight-reads-as-no-time`). */
+  dueDateHasTime?: boolean
   assignees?: Array<{ userId: string; displayName?: string | null; email?: string | null }>
 }
 
@@ -463,6 +466,9 @@ type TaskDetail = {
   priority: TaskPriority
   dueDate?: string | null
   startDate?: string | null
+  /** Whether each date carries a time of day, as ClickUp's `due_date_time` (`found-6-oct/a-time-on-utc-midnight-reads-as-no-time`). */
+  dueDateHasTime?: boolean
+  startDateHasTime?: boolean
   timeEstimate?: number | null
   defaultBillable?: boolean
   labels: Array<{ id: string; name: string; color: string }>
@@ -3570,7 +3576,8 @@ function OverviewPanel({
           <DateTimeBox
             testId="task-due-date"
             stored={detail.dueDate}
-            onCommit={(dueDate) => patchTask.mutateAsync({ dueDate })}
+            hasTime={detail.dueDateHasTime}
+            onCommit={(dueDate, dueDateHasTime) => patchTask.mutateAsync({ dueDate, dueDateHasTime })}
             disabled={!caps.edit}
             className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
           />
@@ -3590,7 +3597,13 @@ function OverviewPanel({
                 type="button"
                 data-testid={`task-due-preset-${preset.id}`}
                 disabled={patchTask.isPending || !caps.edit}
-                onClick={() => patchTask.mutate({ dueDate: presetToIso(preset.id, detail.dueDate) })}
+                onClick={() =>
+                  patchTask.mutate({
+                    dueDate: presetToIso(preset.id, detail.dueDate, undefined, detail.dueDateHasTime),
+                    // The preset keeps the time the date carried, or its lack of one.
+                    dueDateHasTime: carriesTime(detail.dueDate, detail.dueDateHasTime),
+                  })
+                }
                 className="rounded-full border border-border/70 px-2 py-0.5 text-[10px] text-muted-foreground hover:border-accent hover:text-foreground disabled:opacity-50"
               >
                 {t(preset.labelKey as TranslationKey)}
@@ -3611,7 +3624,8 @@ function OverviewPanel({
           <DateTimeBox
             testId="task-start-date"
             stored={detail.startDate}
-            onCommit={(startDate) => patchTask.mutateAsync({ startDate })}
+            hasTime={detail.startDateHasTime}
+            onCommit={(startDate, startDateHasTime) => patchTask.mutateAsync({ startDate, startDateHasTime })}
             disabled={!caps.edit}
             className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
           />
@@ -4584,8 +4598,8 @@ function SubtasksPanel({
   })
 
   const setDueDate = useMutation({
-    mutationFn: ({ id, dueDate }: { id: string; dueDate: string | null }) =>
-      api(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify({ dueDate }) }),
+    mutationFn: ({ id, dueDate, dueDateHasTime }: { id: string; dueDate: string | null; dueDateHasTime: boolean }) =>
+      api(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify({ dueDate, dueDateHasTime }) }),
     onSuccess: invalidateSubtasks,
     // A refused day is said in the server's words, as the sheet's own dates are.
     onError: (err) => toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotUpdateTask')),
@@ -4683,7 +4697,8 @@ function SubtasksPanel({
                   testId="subtask-due-date"
                   className="h-7 rounded border border-border bg-background px-1 text-[11px] text-muted-foreground"
                   stored={s.dueDate}
-                  onCommit={(dueDate) => setDueDate.mutateAsync({ id: s.id, dueDate })}
+                  hasTime={s.dueDateHasTime}
+                  onCommit={(dueDate, dueDateHasTime) => setDueDate.mutateAsync({ id: s.id, dueDate, dueDateHasTime })}
                   disabled={!caps.edit}
                   title={t('taskDetail.dueDateTitle')}
                 />

@@ -1,6 +1,7 @@
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsIn,
   IsInt,
@@ -71,6 +72,15 @@ export class CreateTaskDto {
   @IsOptional()
   @IsDateString()
   dueDate?: string
+
+  /** Whether each date carries a time of day; not sent, its instant says (`taskDateTimeFlags`). */
+  @IsOptional()
+  @IsBoolean()
+  startDateHasTime?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  dueDateHasTime?: boolean
 
   @IsOptional()
   @IsInt()

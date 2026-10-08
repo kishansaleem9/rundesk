@@ -18,6 +18,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
 import { assertMayImport } from '../integrations/clickup-import/import-access'
+import { taskDateTimeFlags } from '../tasks/task-date-input'
 
 type Priority = 'urgent' | 'high' | 'normal' | 'low'
 
@@ -303,6 +304,8 @@ export class SampleDataService {
         status,
         statusCategory,
         dueDate,
+        // With its time flag, as every date write (`taskDateTimeFlags`).
+        ...taskDateTimeFlags({ dueDate }),
         timeEstimate: taskDef.timeEstimateSeconds ?? null,
         completedAt: statusCategory === 'closed' ? now : null,
       })
@@ -364,6 +367,7 @@ export class SampleDataService {
             status: sub.status ?? 'todo',
             statusCategory: sub.status === 'done' ? 'closed' : 'open',
             dueDate: sub.dueInDays != null ? offsetDate(now, sub.dueInDays) : null,
+            ...taskDateTimeFlags({ dueDate: sub.dueInDays != null ? offsetDate(now, sub.dueInDays) : null }),
             completedAt: sub.status === 'done' ? now : null,
           })
           .returning()

@@ -174,6 +174,12 @@ export interface TemplateFormValues {
   /** ISO strings, as `POST /tasks` takes them. */
   startDate?: string
   dueDate?: string
+  /**
+   * Whether each carries a time of day (`found-6-oct/a-time-on-utc-midnight-reads-as-no-time`):
+   * 17:00 typed in Los Angeles is UTC midnight, and only the flag says it is a time.
+   */
+  startDateHasTime?: boolean
+  dueDateHasTime?: boolean
   /** Seconds. */
   timeEstimate?: number
   assigneeIds?: string[]
@@ -233,6 +239,9 @@ export function templateWithForm(
     timeEstimate: form.timeEstimate ?? payload.timeEstimate ?? undefined,
     startDate: form.startDate ? new Date(form.startDate) : offsetToDate(now, payload.startDateOffsetDays) ?? undefined,
     dueDate: form.dueDate ? new Date(form.dueDate) : offsetToDate(now, payload.dueDateOffsetDays) ?? undefined,
+    // A date set in the form goes with its time flag; the template's own is read from its instant (`taskDateTimeFlags`).
+    startDateHasTime: form.startDate ? form.startDateHasTime : undefined,
+    dueDateHasTime: form.dueDate ? form.dueDateHasTime : undefined,
     labelIds: labelIds.length ? labelIds : undefined,
     labelsByName: labelsByName.length ? labelsByName : undefined,
     assigneeIds: assigneeIds.length ? assigneeIds : undefined,
@@ -538,7 +547,12 @@ export class TaskTemplatesService {
     await this.assertTaskOpenTo(workspaceId, taskId, actor)
 
     const [src] = await this.db
-      .select({ startDate: tasks.startDate, dueDate: tasks.dueDate })
+      .select({
+        startDate: tasks.startDate,
+        dueDate: tasks.dueDate,
+        startDateHasTime: tasks.startDateHasTime,
+        dueDateHasTime: tasks.dueDateHasTime,
+      })
       .from(tasks)
       .where(eq(tasks.id, taskId))
       .limit(1)
@@ -570,6 +584,9 @@ export class TaskTemplatesService {
       timeEstimate: payload.timeEstimate ?? undefined,
       startDate: src?.startDate ?? undefined,
       dueDate: src?.dueDate ?? undefined,
+      // The copy's dates carry a time where the task's did (`taskDateTimeFlags`).
+      startDateHasTime: src?.startDateHasTime,
+      dueDateHasTime: src?.dueDateHasTime,
       labelIds: labelIds.length ? labelIds : undefined,
       assigneeIds: assigneeIds.length ? assigneeIds : undefined,
       createdById: actor.id,

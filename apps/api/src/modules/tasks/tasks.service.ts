@@ -122,6 +122,7 @@ import { isWorkspaceClipKey } from '../clips/clip-keys'
 import { CLIP_READ_REFUSAL, mayReadClip } from '../clips/clip-access'
 import { clipReaderOf } from '../clips/clip-reader'
 import { pickUpdatable } from './task-update-fields'
+import { taskDateTimeFlags } from './task-date-input'
 import { planLabelsByName, uniqueLabelNames, type LabelByName } from './task-values'
 import { CustomFieldsService, fieldIsOnTask } from '../custom-fields/custom-fields.service'
 import { guestMayRead, guestReachesList } from '../../common/permissions/guest-reach'
@@ -2044,6 +2045,9 @@ export class TasksService {
     position?: number
     startDate?: Date
     dueDate?: Date
+    /** Whether each date carries a time of day; not said, its instant says (`taskDateTimeFlags`). */
+    startDateHasTime?: boolean
+    dueDateHasTime?: boolean
     timeEstimate?: number
     parentTaskId?: string
     assigneeIds?: string[]
@@ -2166,6 +2170,12 @@ export class TasksService {
           position: data.position ?? 0,
           startDate: data.startDate,
           dueDate: data.dueDate,
+          ...taskDateTimeFlags({
+            startDate: data.startDate ?? null,
+            dueDate: data.dueDate ?? null,
+            startDateHasTime: data.startDateHasTime,
+            dueDateHasTime: data.dueDateHasTime,
+          }),
           timeEstimate: data.timeEstimate,
           isMilestone,
         })
@@ -2281,6 +2291,8 @@ export class TasksService {
         title: tasks.title,
         startDate: tasks.startDate,
         dueDate: tasks.dueDate,
+        startDateHasTime: tasks.startDateHasTime,
+        dueDateHasTime: tasks.dueDateHasTime,
         status: tasks.status,
         priority: tasks.priority,
         isMilestone: tasks.isMilestone,
@@ -2540,6 +2552,8 @@ export class TasksService {
         spaceName:         spaces.name,
         startDate:         tasks.startDate,
         dueDate:           tasks.dueDate,
+        startDateHasTime:  tasks.startDateHasTime,
+        dueDateHasTime:    tasks.dueDateHasTime,
         completedAt:       tasks.completedAt,
         createdAt:         tasks.createdAt,
         updatedAt:         tasks.updatedAt,
@@ -3869,6 +3883,8 @@ export class TasksService {
       status: TaskStatus
       startDate: Date | null
       dueDate: Date | null
+      startDateHasTime: boolean
+      dueDateHasTime: boolean
       position: number
       timeEstimate: number | null
       coverColor: string | null
@@ -3981,6 +3997,20 @@ export class TasksService {
     }
 
     const set: Record<string, unknown> = { ...patch, updatedAt: new Date() }
+    /*
+     * Each date written takes its time flag with it (`taskDateTimeFlags`), so a
+     * date-only write does not keep the flag of a time it replaced. A flag sent
+     * for a date the task does not hold is false: no date has no time.
+     */
+    const flags = taskDateTimeFlags({
+      startDate: 'startDate' in patch ? ((patch.startDate as Date | null | undefined) ?? null) : undefined,
+      dueDate: 'dueDate' in patch ? ((patch.dueDate as Date | null | undefined) ?? null) : undefined,
+      startDateHasTime: patch.startDateHasTime,
+      dueDateHasTime: patch.dueDateHasTime,
+    })
+    if (flags.startDateHasTime && !('startDate' in patch) && !before.startDate) flags.startDateHasTime = false
+    if (flags.dueDateHasTime && !('dueDate' in patch) && !before.dueDate) flags.dueDateHasTime = false
+    Object.assign(set, flags)
     if (nextCategory) {
       set.statusCategory = nextCategory
       const wasClosed = (before.statusCategory as StatusCategory) === 'closed'
@@ -4156,6 +4186,8 @@ export class TasksService {
       status: TaskStatus
       startDate: Date | null
       dueDate: Date | null
+      startDateHasTime: boolean
+      dueDateHasTime: boolean
       timeEstimate: number | null
       isArchived: boolean
       // Cross-list move: relocate every selected task into this list
@@ -4191,6 +4223,8 @@ export class TasksService {
       status: TaskStatus
       startDate: Date | null
       dueDate: Date | null
+      startDateHasTime: boolean
+      dueDateHasTime: boolean
       timeEstimate: number | null
       isArchived: boolean
     }> = {}
@@ -4198,6 +4232,8 @@ export class TasksService {
     if ('status' in patch) fieldPatch.status = patch.status
     if ('startDate' in patch) fieldPatch.startDate = patch.startDate
     if ('dueDate' in patch) fieldPatch.dueDate = patch.dueDate
+    if ('startDateHasTime' in patch) fieldPatch.startDateHasTime = patch.startDateHasTime
+    if ('dueDateHasTime' in patch) fieldPatch.dueDateHasTime = patch.dueDateHasTime
     if ('timeEstimate' in patch) fieldPatch.timeEstimate = patch.timeEstimate
     if ('isArchived' in patch) fieldPatch.isArchived = patch.isArchived
     const assigneeIdsAdd = [...new Set(patch.assigneeIdsAdd ?? [])].filter(Boolean)
@@ -4400,6 +4436,9 @@ export class TasksService {
           : source.status,
       startDate: shift(source.startDate),
       dueDate: shift(source.dueDate),
+      // Moved by whole days, each keeps the time it carried, or its lack of one.
+      startDateHasTime: source.startDateHasTime,
+      dueDateHasTime: source.dueDateHasTime,
       timeEstimate: source.timeEstimate ?? undefined,
       createdById: actorId,
       assigneeIds,

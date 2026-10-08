@@ -142,6 +142,17 @@ export function safeDate(value: string): Date | undefined {
   return new Date(ms)
 }
 
+/**
+ * Does a date cell carry a time of day — a clock reading, `17:00` or `5:00 pm`
+ * — and not only a day? Written as the task's time flag
+ * (`found-6-oct/a-time-on-utc-midnight-reads-as-no-time`), as ClickUp keeps
+ * `due_date_time` beside a due date: a cell of `12:00 AM` holds a time at
+ * midnight, which the instant alone would read as a day with none.
+ */
+export function cellHasTime(value: string | undefined): boolean {
+  return !!value && /\d{1,2}:\d{2}/.test(value)
+}
+
 // ── Custom-field type inference ──────────────────────────────────────────────
 
 const isPlainNumber = (v: string): boolean => v.trim() !== '' && Number.isFinite(Number(v))
@@ -375,11 +386,15 @@ export function mergeSetOf(t: ParsedTask, carries: CsvCarries): {
   status?: TaskStatus
   priority?: TaskPriority
   dueDate?: Date
+  dueDateHasTime?: boolean
 } {
+  const dueDate = t.dueDate ? safeDate(t.dueDate) : undefined
   return {
     description: t.description ?? undefined,
     ...(carries.status ? { status: mapStatus(t.status) } : {}),
     ...(carries.priority ? { priority: mapPriority(t.priority) } : {}),
-    dueDate: t.dueDate ? safeDate(t.dueDate) : undefined,
+    dueDate,
+    // With the date, whether its cell held a time (`cellHasTime`).
+    ...(dueDate ? { dueDateHasTime: cellHasTime(t.dueDate) } : {}),
   }
 }

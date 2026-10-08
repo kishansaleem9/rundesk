@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { toDateInput, toDateTimeInput, fromDateTimeInput, withDatePart, presetToIso, shownDay, shiftByDays, dayAsDateOnly } from './task-dates'
+import { toDateInput, toDateTimeInput, fromDateTimeInput, fromDateTimeBox, withDatePart, presetToIso, shownDay, shiftByDays, dayAsDateOnly, carriesTime, dateWriteOf } from './task-dates'
 
 /**
  * §G [21:36–23:38] — "START date aur DUE date … TIME ke saath."
@@ -233,6 +233,72 @@ describe('a year below 100 is the year it says', () => {
     inZone('UTC', () => {
       assert.equal(toDateTimeInput('0099-10-06T09:00:00.000Z'), '0099-10-06T09:00')
       assert.equal(toDateTimeInput(fromDateTimeInput('0002-10-06T09:00')), '0002-10-06T09:00')
+    })
+  })
+})
+
+/**
+ * `found-6-oct/a-time-on-utc-midnight-reads-as-no-time`: a real time can be UTC
+ * midnight — 17:00 in Los Angeles in October, 05:00 in Karachi — and read by the
+ * instant alone it came back as a date with no time. The task keeps a flag
+ * beside each date, as ClickUp keeps `due_date_time`, and every reader here
+ * takes it where it is given.
+ */
+describe('a time on UTC midnight is still a time', () => {
+  it('writes 17:00 in Los Angeles and 05:00 in Karachi as times, and reads them back as typed', () => {
+    for (const [zone, typed] of [['America/Los_Angeles', '2026-10-08T17:00'], ['Asia/Karachi', '2026-10-08T05:00'], ['UTC', '2026-10-08T17:00']] as const) {
+      inZone(zone, () => {
+        const write = fromDateTimeBox(typed, null)!
+        assert.equal(write.hasTime, true, zone)
+        assert.equal(toDateTimeInput(write.iso, write.hasTime), typed, zone)
+        assert.equal(toDateInput(write.iso, write.hasTime), typed.slice(0, 10), zone)
+      })
+    }
+    // The two that land on UTC midnight, read by the instant alone, were the bug.
+    inZone('America/Los_Angeles', () => {
+      const write = fromDateTimeBox('2026-10-08T17:00', null)!
+      assert.equal(write.iso, '2026-10-09T00:00:00.000Z')
+      assert.equal(toDateTimeInput(write.iso), '2026-10-09T00:00', 'without its flag it reads as the 9th, no time')
+    })
+  })
+
+  it('keeps a date with no time without one when its day is changed in the date-and-time box', () => {
+    inEachZone((zone) => {
+      const write = fromDateTimeBox('2026-10-20T00:00', '2026-10-19T00:00:00.000Z', false)!
+      assert.deepEqual(write, { iso: '2026-10-20T00:00:00.000Z', hasTime: false }, zone)
+      // A midnight that was a time stays one.
+      const timed = fromDateTimeBox('2026-10-20T00:00', new Date(2026, 9, 19, 0, 0).toISOString(), true)!
+      assert.equal(timed.hasTime, true, zone)
+    })
+  })
+
+  it('draws, moves and carries a flagged time on its own day and clock', () => {
+    inZone('America/Los_Angeles', () => {
+      const due = '2026-10-09T00:00:00.000Z' // 8 October 17:00 here
+      assert.equal(shownDay(due, true)!.getDate(), 8)
+      assert.equal(shownDay(due, false)!.getDate(), 9)
+      assert.equal(toDateTimeInput(shiftByDays(due, 1, true), true), '2026-10-09T17:00')
+      assert.equal(toDateTimeInput(withDatePart(due, '2026-10-12', true), true), '2026-10-12T17:00')
+      assert.equal(carriesTime(due, true), true)
+      assert.equal(carriesTime(due, false), false)
+      assert.equal(carriesTime(null, true), false)
+      // A preset keeps the 17:00 the date carried.
+      assert.equal(toDateTimeInput(presetToIso('tomorrow', due, new Date(2026, 9, 8, 12), true), true), '2026-10-09T17:00')
+    })
+  })
+
+  it('reads a date by its instant where no flag is given, as every date was read until the flag was kept', () => {
+    inEachZone((zone) => {
+      assert.equal(toDateInput('2026-10-19T00:00:00.000Z'), '2026-10-19', zone)
+      assert.equal(carriesTime('2026-10-19T00:00:00.000Z'), false, zone)
+      assert.equal(carriesTime('2026-10-19T09:30:00.000Z'), true, zone)
+    })
+  })
+
+  it('sends a new task’s typed dates with their flags, and nothing for no date', () => {
+    inZone('America/Los_Angeles', () => {
+      assert.deepEqual(dateWriteOf('dueDate', '2026-10-08T17:00'), { dueDate: '2026-10-09T00:00:00.000Z', dueDateHasTime: true })
+      assert.deepEqual(dateWriteOf('startDate', ''), {})
     })
   })
 })

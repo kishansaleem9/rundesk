@@ -38,6 +38,9 @@ export const TASK_UPDATABLE_FIELDS = [
   'status',
   'startDate',
   'dueDate',
+  // Whether each carries a time of day (`taskDateTimeFlags`).
+  'startDateHasTime',
+  'dueDateHasTime',
   'position',
   'timeEstimate',
   'coverColor',

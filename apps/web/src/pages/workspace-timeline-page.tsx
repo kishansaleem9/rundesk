@@ -16,8 +16,9 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
-import { dayAsDateOnly, shiftByDays, shownDay, toDateInput } from '../lib/task-dates'
+import { carriesTime, dayAsDateOnly, shiftByDays, shownDay, toDateInput } from '../lib/task-dates'
 import { GANTT_DRAG_THRESHOLD } from '../lib/gantt'
+import { cellStride, chartDayPx, useDrawnDays, type DrawnDays } from '../lib/drawn-days'
 import { InlineSkeleton } from '../components/loading-skeletons'
 
 type TimelineTask = {
@@ -25,6 +26,9 @@ type TimelineTask = {
   title: string
   startDate: string | null
   dueDate: string | null
+  /** Whether each date carries a time of day (`found-6-oct/a-time-on-utc-midnight-reads-as-no-time`). */
+  startDateHasTime?: boolean
+  dueDateHasTime?: boolean
   status: string
   priority: string
   isMilestone?: boolean
@@ -44,11 +48,18 @@ type TimelineTask = {
 
 type Zoom = 'day' | 'week' | 'month'
 
-/** What a drag changes: only the dates it moved. */
-type DatePatch = { startDate?: string | null; dueDate?: string | null }
+/** What a drag changes: only the dates it moved, each with whether it carries a time. */
+type DatePatch = {
+  startDate?: string | null
+  dueDate?: string | null
+  startDateHasTime?: boolean
+  dueDateHasTime?: boolean
+}
 
 const DAY_PX: Record<Zoom, number> = { day: 56, week: 28, month: 14 }
 const TASK_COL_WIDTH = 260
+/** The narrowest a header cell is drawn: narrower units share a cell (`cellStride`). */
+const MIN_CELL_PX = 24
 
 /** Header geometry. The week band (§S07-S12 frame `09:44`) sits ABOVE the date
  *  row, so turning week numbers on makes the header taller — that is why both
@@ -190,6 +201,14 @@ function mondayOf(ms: number): number {
   return startOfDay(d.getTime())
 }
 
+/** Local midnight on the first of a month, in any year: `new Date(y, m, 1)` reads a year below 100 as 19xx. */
+function monthStart(year: number, month: number): number {
+  const d = new Date(0)
+  d.setFullYear(year, month, 1)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
 /**
  * One CSV cell.
  *
@@ -212,8 +231,8 @@ function csvCell(value: string | null | undefined): string {
  * (`found-5-oct/timeline-press-moves-dates`).
  */
 function barSpan(task: TimelineTask): { from: Date; to: Date } {
-  const from = shownDay(task.startDate) ?? shownDay(task.dueDate)!
-  const to = shownDay(task.dueDate) ?? shownDay(task.startDate)!
+  const from = shownDay(task.startDate, task.startDateHasTime) ?? shownDay(task.dueDate, task.dueDateHasTime)!
+  const to = shownDay(task.dueDate, task.dueDateHasTime) ?? shownDay(task.startDate, task.startDateHasTime)!
   return { from, to }
 }
 
@@ -228,7 +247,7 @@ export function TimelinePage() {
   const { workspaceId } = useParams({ from: '/app/$workspaceId/timeline' })
   const qc = useQueryClient()
   const [zoom, setZoom] = useState<Zoom>('week')
-  const [localPatches, setLocalPatches] = useState<Record<string, { startDate?: string | null; dueDate?: string | null }>>({})
+  const [localPatches, setLocalPatches] = useState<Record<string, DatePatch>>({})
   const [projectFilter, setProjectFilter] = useState<string>('all')
   const [groupMode, setGroupMode] = useState<GroupMode>('project')
   // §S07-S12 frame `09:44` — `Auto fit`. `null` means "use the zoom's px/day";
@@ -339,8 +358,11 @@ export function TimelinePage() {
    * is ~3300px wide in a ~1200px viewport, so two thirds of it is behind a
    * scrollbar. Fitting divides the viewport by the span, so the last bar's
    * right edge lands inside the viewport instead of past it.
+   *
+   * A zoom's width is narrowed for a span too long to lay out at it
+   * (`chartDayPx`): a task in year 202 made the Day zoom 37 million px wide.
    */
-  const dayPx = fitDayPx ?? DAY_PX[zoom]
+  const dayPx = fitDayPx ?? chartDayPx(DAY_PX[zoom], days)
   const todayOffsetPx = ((startOfDay(Date.now()) - startMs) / 86400_000) * dayPx
   const totalWidth = days * dayPx
   const headerH = showWeekNumbers ? WEEK_ROW_H + DATE_ROW_H : DATE_ROW_H
@@ -471,32 +493,6 @@ export function TimelinePage() {
     [groups, collapsedGroups],
   )
 
-  const weekCells = useMemo(() => {
-    if (!showWeekNumbers) return []
-    const out: Array<{ key: string; left: number; width: number; week: number; monday: string }> = []
-    const endMs = startMs + days * 86400_000
-    let cursor = mondayOf(startMs)
-    /*
-     * Bounded by construction (cursor advances a week each pass); the guard is
-     * only there so a DST hour cannot turn that into a spin. It is derived from
-     * the span rather than a round number, because a fixed cap silently TRUNCATES
-     * the band on a long chart — and `Today` can stretch the range by months, so
-     * "400 is surely enough" stops being true the moment anyone presses it.
-     */
-    const maxCells = Math.ceil(days / 7) + 2
-    for (let guard = 0; cursor < endMs && guard < maxCells; guard += 1) {
-      out.push({
-        key: String(cursor),
-        left: ((cursor - startMs) / 86400_000) * dayPx,
-        width: 7 * dayPx,
-        week: isoWeekNumber(cursor),
-        monday: localIsoDate(cursor),
-      })
-      cursor = addDays(cursor, 7)
-    }
-    return out
-  }, [showWeekNumbers, startMs, days, dayPx])
-
   /*
    * LOCAL EXPORT — the file is written here, in the browser, from the rows on
    * screen. No endpoint, no admin guard (the server's whole-workspace CSV is
@@ -521,8 +517,8 @@ export function TimelinePage() {
             csvCell(task.status),
             csvCell(task.priority),
             // The day each date is drawn on (`shownDay`), so the file says what the chart shows.
-            csvCell(toDateInput(task.startDate)),
-            csvCell(toDateInput(task.dueDate)),
+            csvCell(toDateInput(task.startDate, task.startDateHasTime)),
+            csvCell(toDateInput(task.dueDate, task.dueDateHasTime)),
             csvCell(String(barDays(task))),
             csvCell(task.listName),
             csvCell(task.projectName),
@@ -863,6 +859,7 @@ export function TimelinePage() {
                     <div
                       data-testid="timeline-axis"
                       data-day-px={String(dayPx)}
+                      data-zoom={zoom}
                       data-span-days={String(days)}
                       data-range-start={localIsoDate(startMs)}
                       data-range-end={localIsoDate(addDays(startMs, days - 1))}
@@ -871,31 +868,14 @@ export function TimelinePage() {
                       className="relative h-full"
                       style={{ width: totalWidth }}
                     >
-                      {showWeekNumbers && (
-                        <div
-                          className="absolute left-0 right-0 top-0 overflow-hidden border-b border-border/40"
-                          style={{ height: WEEK_ROW_H }}
-                        >
-                          {weekCells.map((c) => (
-                            <div
-                              key={c.key}
-                              data-testid="timeline-week-number"
-                              data-week={String(c.week)}
-                              data-week-start={c.monday}
-                              className="absolute top-0 flex items-center justify-end border-r border-border/40 px-2 text-[10px] tabular-nums text-muted-foreground"
-                              style={{ left: c.left, width: c.width, height: WEEK_ROW_H }}
-                            >
-                              W{c.week}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      <div
-                        className="absolute left-0 right-0"
-                        style={{ top: showWeekNumbers ? WEEK_ROW_H : 0, height: DATE_ROW_H }}
-                      >
-                        <DateHeader startMs={startMs} days={days} dayPx={dayPx} zoom={zoom} />
-                      </div>
+                      <AxisCells
+                        scroller={viewportRef}
+                        startMs={startMs}
+                        days={days}
+                        dayPx={dayPx}
+                        zoom={zoom}
+                        showWeekNumbers={showWeekNumbers}
+                      />
                     </div>
                   </div>
 
@@ -947,59 +927,150 @@ export function TimelinePage() {
   )
 }
 
-function DateHeader({
+/**
+ * The header's week band and date row, for the days the chart's scroller shows
+ * and its margin (`useDrawnDays`), not the whole span
+ * (`found-6-oct/timeline-and-gantt-draw-a-column-per-day`). Its own component,
+ * so a scroll that moves the window draws the header again and not every bar.
+ */
+function AxisCells({
+  scroller,
   startMs,
   days,
   dayPx,
   zoom,
+  showWeekNumbers,
 }: {
+  scroller: React.RefObject<HTMLDivElement | null>
   startMs: number
   days: number
   dayPx: number
   zoom: Zoom
+  showWeekNumbers: boolean
 }) {
-  const cells: { label: string; left: number; width: number }[] = []
+  const drawn = useDrawnDays(scroller, dayPx, days)
 
-  if (zoom === 'day') {
-    for (let i = 0; i < days; i++) {
-      const d = new Date(startMs + i * 86400_000)
-      cells.push({
-        label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-        left: i * dayPx,
-        width: dayPx,
+  const weekCells = useMemo(() => {
+    if (!showWeekNumbers) return []
+    const out: Array<{ key: string; left: number; width: number; week: number; monday: string }> = []
+    /*
+     * The weeks are counted from the Monday of the chart's first week, so a
+     * cell is the same cell wherever the window stands, and the window's
+     * weeks start at a whole stride of them.
+     */
+    const firstMonday = mondayOf(startMs)
+    const lead = Math.round((startMs - firstMonday) / 86400_000)
+    const stride = cellStride(7 * dayPx, MIN_CELL_PX)
+    const fromWeek = Math.floor((drawn.from + lead) / 7 / stride) * stride
+    const toWeek = Math.ceil((drawn.to + lead) / 7)
+    for (let week = fromWeek; week < toWeek; week += stride) {
+      const monday = addDays(firstMonday, week * 7)
+      out.push({
+        key: String(monday),
+        left: ((monday - startMs) / 86400_000) * dayPx,
+        width: 7 * stride * dayPx,
+        week: isoWeekNumber(monday),
+        monday: localIsoDate(monday),
       })
     }
-  } else if (zoom === 'week') {
-    for (let i = 0; i < days; i += 7) {
-      const d = new Date(startMs + i * 86400_000)
+    return out
+  }, [showWeekNumbers, startMs, dayPx, drawn.from, drawn.to])
+
+  return (
+    <>
+      {showWeekNumbers && (
+        <div
+          className="absolute left-0 right-0 top-0 overflow-hidden border-b border-border/40"
+          style={{ height: WEEK_ROW_H }}
+        >
+          {weekCells.map((c) => (
+            <div
+              key={c.key}
+              data-testid="timeline-week-number"
+              data-week={String(c.week)}
+              data-week-start={c.monday}
+              className="absolute top-0 flex items-center justify-end border-r border-border/40 px-2 text-[10px] tabular-nums text-muted-foreground"
+              style={{ left: c.left, width: c.width, height: WEEK_ROW_H }}
+            >
+              W{c.week}
+            </div>
+          ))}
+        </div>
+      )}
+      <div
+        className="absolute left-0 right-0"
+        style={{ top: showWeekNumbers ? WEEK_ROW_H : 0, height: DATE_ROW_H }}
+      >
+        <DateHeader startMs={startMs} drawn={drawn} dayPx={dayPx} zoom={zoom} />
+      </div>
+    </>
+  )
+}
+
+/**
+ * The date row's cells within `drawn`: a day, a week from the chart's first
+ * day, or a calendar month a cell, or several where one would be narrower than
+ * `MIN_CELL_PX` (`cellStride`).
+ *
+ * A day's label is the day `addDays` reaches, as the bars' days are. It was the
+ * date of `startMs + i × 24 h`, which after the clock goes back is 23:00 of the
+ * day before: in Los Angeles every cell from 1 November on read the day before
+ * the one it stood for, so a task due on the 10th sat under "Nov 9".
+ */
+function DateHeader({
+  startMs,
+  drawn,
+  dayPx,
+  zoom,
+}: {
+  startMs: number
+  drawn: DrawnDays
+  dayPx: number
+  zoom: Zoom
+}) {
+  const cells: { at: number; label: string; left: number; width: number }[] = []
+
+  if (zoom === 'day' || zoom === 'week') {
+    const unit = zoom === 'day' ? 1 : 7
+    const span = unit * cellStride(unit * dayPx, MIN_CELL_PX)
+    for (let i = Math.floor(drawn.from / span) * span; i < drawn.to; i += span) {
+      const at = addDays(startMs, i)
       cells.push({
-        label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+        at,
+        label: new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
         left: i * dayPx,
-        width: 7 * dayPx,
+        width: span * dayPx,
       })
     }
   } else {
-    const start = new Date(startMs)
-    let cursor = new Date(start.getFullYear(), start.getMonth(), 1).getTime()
-    while (cursor < startMs + days * 86400_000) {
-      const d = new Date(cursor)
-      const next = new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime()
-      const left = ((cursor - startMs) / 86400_000) * dayPx
-      const width = ((next - cursor) / 86400_000) * dayPx
+    /*
+     * Months counted from year 0, so a cell holding several months holds the
+     * same ones wherever the window stands.
+     */
+    const stride = cellStride(28 * dayPx, MIN_CELL_PX)
+    const first = new Date(addDays(startMs, drawn.from))
+    const last = addDays(startMs, drawn.to)
+    let month = Math.floor((first.getFullYear() * 12 + first.getMonth()) / stride) * stride
+    for (let cursor = monthStart(Math.floor(month / 12), month % 12); cursor < last; ) {
+      const next = monthStart(Math.floor((month + stride) / 12), (month + stride) % 12)
       cells.push({
-        label: d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
-        left,
-        width,
+        at: cursor,
+        label: new Date(cursor).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+        left: ((cursor - startMs) / 86400_000) * dayPx,
+        width: ((next - cursor) / 86400_000) * dayPx,
       })
+      month += stride
       cursor = next
     }
   }
 
   return (
     <div className="absolute inset-0 overflow-hidden">
-      {cells.map((c, i) => (
+      {cells.map((c) => (
         <div
-          key={i}
+          key={c.at}
+          data-testid="timeline-date-cell"
+          data-day={localIsoDate(c.at)}
           className="absolute top-0 bottom-0 flex items-center px-2.5 text-[11px] text-muted-foreground tabular-nums border-r border-border/40 last:border-r-0"
           style={{ left: c.left, width: c.width }}
         >
@@ -1086,22 +1157,31 @@ function TaskBar({
     window.addEventListener('mouseup', onUp)
   }
   // The whole bar: each date the task has, and only those.
+  // Each date with the time it carried, or its lack of one (`carriesTime`).
+  const startMoved = (days: number): DatePatch => ({
+    startDate: shiftByDays(task.startDate, days, task.startDateHasTime),
+    startDateHasTime: carriesTime(task.startDate, task.startDateHasTime),
+  })
+  const dueMoved = (days: number): DatePatch => ({
+    dueDate: shiftByDays(task.dueDate, days, task.dueDateHasTime),
+    dueDateHasTime: carriesTime(task.dueDate, task.dueDateHasTime),
+  })
   const moveBar = (days: number): DatePatch => ({
-    ...(task.startDate ? { startDate: shiftByDays(task.startDate, days) } : {}),
-    ...(task.dueDate ? { dueDate: shiftByDays(task.dueDate, days) } : {}),
+    ...(task.startDate ? startMoved(days) : {}),
+    ...(task.dueDate ? dueMoved(days) : {}),
   })
   // The left handle: the start, no later than the day the bar ends on. A task
   // with no start is given one on the day dragged to, with no time.
   const moveStart = (days: number): DatePatch | null => {
     const d = Math.min(days, spanDays)
     if (d === 0) return null
-    return { startDate: task.startDate ? shiftByDays(task.startDate, d) : dayAsDateOnly(daysAfter(from, d)) }
+    return task.startDate ? startMoved(d) : { startDate: dayAsDateOnly(daysAfter(from, d)), startDateHasTime: false }
   }
   // The right handle: the due date, no earlier than the day the bar starts on.
   const moveDue = (days: number): DatePatch | null => {
     const d = Math.max(days, -spanDays)
     if (d === 0) return null
-    return { dueDate: task.dueDate ? shiftByDays(task.dueDate, d) : dayAsDateOnly(daysAfter(to, d)) }
+    return task.dueDate ? dueMoved(d) : { dueDate: dayAsDateOnly(daysAfter(to, d)), dueDateHasTime: false }
   }
   const mayMove = editable
 

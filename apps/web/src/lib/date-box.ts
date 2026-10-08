@@ -31,9 +31,13 @@
  * before the first write landed, left the 25th stored and the 8th discarded
  * (measured on lane 5 with each PATCH held three seconds).
  */
-export type DateBoxCommit = { kind: 'none' } | { kind: 'discard' } | { kind: 'write'; iso: string | null }
+export type DateBoxCommit<V = string> = { kind: 'none' } | { kind: 'discard' } | { kind: 'write'; iso: V | null }
 
-export function dateBoxCommit(box: {
+/**
+ * `V` is what a typed value is written as: the instant, or the instant with its
+ * time flag (`DateWrite`, `found-6-oct/a-time-on-utc-midnight-reads-as-no-time`).
+ */
+export function dateBoxCommit<V = string>(box: {
   /** What the box holds as typed, or null when nothing has been typed since the stored date was shown. */
   draft: string | null
   /** The stored date as the box shows it (`toDateTimeInput`, `toDateInput`). */
@@ -42,9 +46,9 @@ export function dateBoxCommit(box: {
   badInput: boolean
   /** The draft last accepted while its write is not yet settled — out, or waiting behind one that is — if any. */
   sending: string | null
-  /** What a whole typed value is written as (`fromDateTimeInput`, `withDatePart`), or null when it is no date. */
-  toValue: (typed: string) => string | null
-}): DateBoxCommit {
+  /** What a whole typed value is written as (`fromDateTimeBox`, `withDatePart`), or null when it is no date. */
+  toValue: (typed: string) => V | null
+}): DateBoxCommit<V> {
   const { draft, shown, badInput, sending, toValue } = box
   if (draft === null) return { kind: 'none' }
   if (badInput) return { kind: 'discard' }

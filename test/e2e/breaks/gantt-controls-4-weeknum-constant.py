@@ -13,11 +13,12 @@
 # the part that is really in the file — and the interpolated week number stays
 # outside the quotes.
 #
+# Re-aimed 8 October: the header draws the days in view (`found-6-oct/timeline-and-gantt-draw-a-column-per-day`).
 # Reddens: gantt-controls: "which is the ISO week it is"
 import io, os
 p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
 s = io.open(p, encoding='utf-8').read()
-a = "        week: isoWeekNumber(cursor),"
+a = "        week: isoWeekNumber(monday),"
 assert s.count(a) == 1, s.count(a)
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, "        week: 1,"))
 print('BROKE 3: every week in the band is labelled W1')
