@@ -114,7 +114,7 @@ const check = (ok, label, detail = '') => {
 
 const chain = makeChain(check)
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 60
+const EXPECTED_CHECKS = 61
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -497,16 +497,37 @@ try {
     return new Date(now.getTime() + minutesFromNoon * 60_000)
   }
 
+  /*
+   * A FIXTURE THAT WAS REFUSED SAYS SO (`found-8-oct/person-panel-reads-a-refused-fixture-as-a-wrong-bucket`).
+   * On the runner, at `802554a`, every POST /tasks into this list was refused
+   * while the profile's reads, the sign-ins and the restore all answered. This
+   * kept `data` alone: the bucket checks read the tasks it was never given as
+   * tasks in the wrong bucket ("the seeded due-today task is not in TODAY"), a
+   * check of what must NOT be in a bucket passed on a task that was not there,
+   * and `bDelegated.id` threw. Each refusal is kept with what the server
+   * answered, a check that stands on a fixture says it was refused, and
+   * nothing is read off a task that was not made.
+   */
+  const seedRefusals = []
+  const refusal = (what, answer) =>
+    `${what}: ${answer.status} ${answer.message || answer.error?.message || 'and no task'}`
   const seedTask = async (title, dueDate, assign) => {
     const created = await A('/tasks', {
       method: 'POST',
       body: { listId: bucketListId, title, ...(dueDate ? { dueDate } : {}) },
     })
-    if (assign && created.data?.id) {
-      await A(`/tasks/${created.data.id}/assignees`, { method: 'POST', body: { userId: meId } })
+    if (!created.data?.id) {
+      seedRefusals.push(refusal(`POST /tasks "${title}"`, created))
+      return null
+    }
+    if (assign) {
+      const linked = await A(`/tasks/${created.data.id}/assignees`, { method: 'POST', body: { userId: meId } })
+      if (!linked.ok) seedRefusals.push(refusal(`assigning "${title}"`, linked))
     }
     return created.data
   }
+  /** The first refusal, as a check's detail. */
+  const refusedFixture = () => `a fixture was refused — ${seedRefusals[0]}`
   // Midday in the zone this suite set on the account, so "today" means the
   // same thing to the fixture and to the service.
   const bToday = await seedTask(`bucket today ${Date.now()}`, middayIn('Asia/Karachi').toISOString(), true)
@@ -521,6 +542,7 @@ try {
   const profile = await A(`/workspaces/${workspaceId}/people/${meId}`)
   const buckets = profile.data?.taskBuckets
   const bucketChain = chain(
+    'the tasks the bucket checks look for are made: each one seeded, and assigned where it is asked to be',
     'a profile answers with task buckets, not one flat list',
     'TODAY holds what is due today',
     'OVERDUE holds what has already passed',
@@ -528,8 +550,11 @@ try {
     'and "created, not assigned to anyone" is its own question',
     'a task with an assignee is not counted as unassigned',
   )
+  bucketChain.step(seedRefusals.length === 0, seedRefusals.join(' · '))
   bucketChain.step(Boolean(buckets), 'the profile returned no taskBuckets at all')
-  if (!buckets) {
+  if (seedRefusals.length) {
+    bucketChain.rest(`skipped: ${refusedFixture()}`)
+  } else if (!buckets) {
     bucketChain.rest('skipped: there were no buckets to look in')
   } else {
     const holds = (key, id) => (buckets[key] ?? []).some((row) => row.id === id)
@@ -573,14 +598,15 @@ try {
   const crowded = await A(`/workspaces/${workspaceId}/people/${meId}`)
   const crowdedBuckets = crowded.data?.taskBuckets
   check(
-    (crowdedBuckets?.next ?? []).some((row) => row.id === bNext?.id),
+    seedRefusals.length === 0 && (crowdedBuckets?.next ?? []).some((row) => row.id === bNext?.id),
     `NEXT survives ${CROWD} overdue tasks ahead of it in the sort`,
-    `next held ${(crowdedBuckets?.next ?? []).length} rows and not the seeded one`,
+    seedRefusals.length ? refusedFixture() : `next held ${(crowdedBuckets?.next ?? []).length} rows and not the seeded one`,
   )
   check(
-    (crowdedBuckets?.unscheduled ?? []).length > 0 || (crowdedBuckets?.overdue ?? []).length >= CROWD,
+    seedRefusals.length === 0 &&
+      ((crowdedBuckets?.unscheduled ?? []).length > 0 || (crowdedBuckets?.overdue ?? []).length >= CROWD),
     'and each bucket is filled on its own, not carved out of one shared page',
-    `overdue held ${(crowdedBuckets?.overdue ?? []).length} of ${CROWD}+ seeded`,
+    seedRefusals.length ? refusedFixture() : `overdue held ${(crowdedBuckets?.overdue ?? []).length} of ${CROWD}+ seeded`,
   )
   for (const t of crowd) {
     if (t?.id) await A(`/tasks/${t.id}`, { method: 'DELETE' })
@@ -629,60 +655,70 @@ try {
   } else {
     // Delegated: created by me, assigned to somebody who is not me.
     const bDelegated = await seedTask(`bucket delegated ${Date.now()}`, null, false)
-    await A(`/tasks/${bDelegated.id}/assignees`, {
-      method: 'POST',
-      body: { userId: otherForBuckets.user.id },
-    })
+    if (bDelegated) {
+      const handed = await A(`/tasks/${bDelegated.id}/assignees`, {
+        method: 'POST',
+        body: { userId: otherForBuckets.user.id },
+      })
+      if (!handed.ok) seedRefusals.push(refusal(`assigning "${bDelegated.title}" to the second account`, handed))
+    }
     // Done: assigned to me, then finished.
     const bDone = await seedTask(`bucket done ${Date.now()}`, null, true)
-    await A(`/tasks/${bDone.id}`, { method: 'PATCH', body: { status: 'done' } })
+    if (bDone) {
+      const finished = await A(`/tasks/${bDone.id}`, { method: 'PATCH', body: { status: 'done' } })
+      if (!finished.ok) seedRefusals.push(refusal(`finishing "${bDone.title}"`, finished))
+    }
 
-    const withBoth = await A(`/workspaces/${workspaceId}/people/${meId}`)
-    const b2 = withBoth.data?.taskBuckets ?? {}
-    const holds2 = (key, id) => (b2[key] ?? []).some((row) => row.id === id)
+    if (seedRefusals.length) {
+      handedOver.rest(`skipped: ${refusedFixture()}`)
+    } else {
+      const withBoth = await A(`/workspaces/${workspaceId}/people/${meId}`)
+      const b2 = withBoth.data?.taskBuckets ?? {}
+      const holds2 = (key, id) => (b2[key] ?? []).some((row) => row.id === id)
 
-    handedOver.step(holds2('delegated', bDelegated.id), 'the delegated task is not in DELEGATED')
-    handedOver.step(holds2('done', bDone.id), 'the finished task is not in DONE')
-    /*
-     * The distinction that would be easy to get wrong: a task you created and
-     * kept is your own work, not something you delegated. Without the
-     * "somebody who is not you is on it" clause, every task you made would
-     * appear here.
-     */
-    /*
-     * Driven with an OPEN task you created and kept — `bToday` — not the done
-     * one.
-     *
-     * Using bDone made this check unable to fail: `delegated` excludes
-     * finished work anyway, so deleting the "nobody who is me is on it" clause
-     * changed nothing about it. A break test caught that; the fixture has to
-     * be something delegated would otherwise be willing to include.
-     */
-    handedOver.step(!holds2('delegated', bToday?.id), 'your own work is being counted as handed over')
-    /*
-     * And DONE must mean finished. Asserting only that the finished task is
-     * present leaves the bucket free to contain everything else too — which is
-     * exactly what dropping the closed-status filter does.
-     */
-    handedOver.step(!holds2('done', bToday?.id), 'an open task is being reported as done')
-    /*
-     * The other half of the same distinction, and the one a "nobody who is me
-     * is on it" clause alone would get wrong: a task you created and assigned
-     * to NOBODY was not delegated — it was dropped, which is what
-     * createdUnassigned is for. Without an "somebody IS on it" clause the two
-     * buckets would show the same rows.
-     */
-    handedOver.step(
-      !holds2('delegated', bMine?.id) && holds2('createdUnassigned', bMine?.id),
-      'created-unassigned work is being counted as handed over',
-    )
-    // …and DONE must not leak into the buckets that mean "still owed".
-    handedOver.step(
-      !holds2('today', bDone.id) && !holds2('overdue', bDone.id) && !holds2('unscheduled', bDone.id),
-      'a done task is still sitting in an open bucket',
-    )
-    await A(`/tasks/${bDelegated.id}`, { method: 'DELETE' })
-    await A(`/tasks/${bDone.id}`, { method: 'DELETE' })
+      handedOver.step(holds2('delegated', bDelegated.id), 'the delegated task is not in DELEGATED')
+      handedOver.step(holds2('done', bDone.id), 'the finished task is not in DONE')
+      /*
+       * The distinction that would be easy to get wrong: a task you created and
+       * kept is your own work, not something you delegated. Without the
+       * "somebody who is not you is on it" clause, every task you made would
+       * appear here.
+       */
+      /*
+       * Driven with an OPEN task you created and kept — `bToday` — not the done
+       * one.
+       *
+       * Using bDone made this check unable to fail: `delegated` excludes
+       * finished work anyway, so deleting the "nobody who is me is on it" clause
+       * changed nothing about it. A break test caught that; the fixture has to
+       * be something delegated would otherwise be willing to include.
+       */
+      handedOver.step(!holds2('delegated', bToday?.id), 'your own work is being counted as handed over')
+      /*
+       * And DONE must mean finished. Asserting only that the finished task is
+       * present leaves the bucket free to contain everything else too — which is
+       * exactly what dropping the closed-status filter does.
+       */
+      handedOver.step(!holds2('done', bToday?.id), 'an open task is being reported as done')
+      /*
+       * The other half of the same distinction, and the one a "nobody who is me
+       * is on it" clause alone would get wrong: a task you created and assigned
+       * to NOBODY was not delegated — it was dropped, which is what
+       * createdUnassigned is for. Without an "somebody IS on it" clause the two
+       * buckets would show the same rows.
+       */
+      handedOver.step(
+        !holds2('delegated', bMine?.id) && holds2('createdUnassigned', bMine?.id),
+        'created-unassigned work is being counted as handed over',
+      )
+      // …and DONE must not leak into the buckets that mean "still owed".
+      handedOver.step(
+        !holds2('today', bDone.id) && !holds2('overdue', bDone.id) && !holds2('unscheduled', bDone.id),
+        'a done task is still sitting in an open bucket',
+      )
+      await A(`/tasks/${bDelegated.id}`, { method: 'DELETE' })
+      await A(`/tasks/${bDone.id}`, { method: 'DELETE' })
+    }
   }
 
   /*
@@ -709,13 +745,14 @@ try {
     return [...(b.today ?? []), ...(b.overdue ?? []), ...(b.next ?? []), ...(b.unscheduled ?? [])]
       .some((row) => row.id === bGone?.id)
   }
-  check(await inAssignedBuckets(), 'a task assigned to you shows up in a bucket to begin with')
-  const gone = await A(`/tasks/${bGone.id}`, { method: 'DELETE' })
-  check(gone.status === 200, 'and deleting it is accepted', `DELETE returned ${gone.status}`)
+  const goneMissing = bGone ? '' : `there was no task to delete — ${seedRefusals.at(-1)}`
+  check(bGone != null && (await inAssignedBuckets()), 'a task assigned to you shows up in a bucket to begin with', goneMissing)
+  const gone = bGone ? await A(`/tasks/${bGone.id}`, { method: 'DELETE' }) : { status: 0 }
+  check(gone.status === 200, 'and deleting it is accepted', goneMissing || `DELETE returned ${gone.status}`)
   check(
-    !(await inAssignedBuckets()),
+    bGone != null && !(await inAssignedBuckets()),
     'after which it is no longer work you owe',
-    'a deleted task still shows on the profile as assigned work',
+    goneMissing || 'a deleted task still shows on the profile as assigned work',
   )
 
   await page.reload({ waitUntil: 'domcontentloaded' })
@@ -728,7 +765,7 @@ try {
   // fixed seconds after the panel opened.
   await page.getByTestId('person-email').waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
   check((await page.locator('[data-testid^=person-bucket-]').count()) >= 4,
-    'and the panel draws them as separate sections')
+    'and the panel draws them as separate sections', seedRefusals.length ? refusedFixture() : '')
   await page.keyboard.press('Escape')
   await page.waitForTimeout(600)
 
@@ -755,6 +792,7 @@ try {
    * filter deleted. It was only worth anything once the fixture could actually
    * land in the wrong bucket.
    */
+  const standupBefore = seedRefusals.length
   const finished = await seedTask(
     `standup finished ${Date.now()}`,
     new Date(now.getTime() - 2 * 86400000).toISOString(),
@@ -766,7 +804,12 @@ try {
     true,
   )
   // Closed through the API, so completedAt is set the way the app sets it.
-  if (finished?.id) await A(`/tasks/${finished.id}`, { method: 'PATCH', body: { status: 'done' } })
+  if (finished) {
+    const closed = await A(`/tasks/${finished.id}`, { method: 'PATCH', body: { status: 'done' } })
+    if (!closed.ok) seedRefusals.push(refusal(`finishing "${finished.title}"`, closed))
+  }
+  // What a check of these says when one of them was not made, or not finished.
+  const standupRefused = seedRefusals.length > standupBefore ? `a fixture was refused — ${seedRefusals[standupBefore]}` : ''
 
   const callsBefore = (await stubCalls())?.length ?? null
   const standup = await A(`/workspaces/${workspaceId}/people/${meId}/standup`, {
@@ -788,10 +831,11 @@ try {
    * sentence alone cannot tell you which query is wrong.
    */
   const holdsTask = (bucket, id) => (sd?.data?.[bucket] ?? []).some((r) => r.id === id)
-  check(holdsTask('done', finished?.id), 'work finished in the window is counted as finished', JSON.stringify(sd?.data?.done ?? []).slice(0, 160))
-  check(holdsTask('overdue', late?.id), 'and work already past its date is counted as overdue', JSON.stringify(sd?.data?.overdue ?? []).slice(0, 160))
-  check(!holdsTask('overdue', finished?.id), 'a task that is finished is not also reported as overdue')
-  check(!holdsTask('active', finished?.id), 'and a finished task is not reported as still in progress')
+  check(holdsTask('done', finished?.id), 'work finished in the window is counted as finished', standupRefused || JSON.stringify(sd?.data?.done ?? []).slice(0, 160))
+  check(holdsTask('overdue', late?.id), 'and work already past its date is counted as overdue', standupRefused || JSON.stringify(sd?.data?.overdue ?? []).slice(0, 160))
+  // Of a task that was made: with none, "not in that bucket" is true of nothing.
+  check(!!finished && !holdsTask('overdue', finished.id), 'a task that is finished is not also reported as overdue', standupRefused)
+  check(!!finished && !holdsTask('active', finished.id), 'and a finished task is not reported as still in progress', standupRefused)
 
   // The prose has to be about the same rows, or the panel is showing a
   // paragraph that its own data does not support.
@@ -827,7 +871,7 @@ try {
     check(
       !!finished?.title && (sd?.text ?? '').includes(finished.title),
       'and the sentence names the work it was written from',
-      (sd?.text ?? '').slice(0, 200),
+      standupRefused || (sd?.text ?? '').slice(0, 200),
     )
   }
 

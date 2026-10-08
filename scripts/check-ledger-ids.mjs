@@ -33,8 +33,14 @@ const DIRS = ['apps', 'test', 'scripts', 'deploy', 'packages', '.github']
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.turbo', 'coverage', 'build', '.git'])
 const TEXT = /\.(m?[jt]sx?|cjs|py|sh|ya?ml|json|md|sql|css|html|awk)$/
 
-/** The ledger's sections: an id is `<section>/<slug>`. */
-const SECTIONS = ['found-\\d{2}-sep', 'ledger-rows', 'commit-log', 'suite-hygiene', 'resume-defects', 'harness', 'product-siblings']
+/**
+ * The ledger's sections: an id is `<section>/<slug>`. A day's finds are
+ * `found-<day>-<month>`, the day in one digit or two: this read
+ * `found-\\d{2}-sep` alone, so not one of the 68 October ids cited in the tree
+ * (`found-5-oct/…` to `found-8-oct/…`) was read, and one naming no item passed
+ * (`found-8-oct/the-ledger-id-gate-reads-no-october-id`).
+ */
+const SECTIONS = ['found-\\d{1,2}-[a-z]{3}', 'ledger-rows', 'commit-log', 'suite-hygiene', 'resume-defects', 'harness', 'product-siblings']
 /*
  * Not after a path character, so `test/harness/x` is a path and not a citation.
  * A slug may carry capitals, because the ledger's do: read in lower case only,

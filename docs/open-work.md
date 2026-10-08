@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 529 items: 0 open · 0 partly fixed · 472 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 531 items: 0 open · 0 partly fixed · 474 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8434,7 +8434,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 68, each reproduced
+## Found by the triage, 5 October, and since — 70, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10267,6 +10267,30 @@ Regression on lane 3: the 108 suites that write or read a task's dates, open the
 Measured on lane 3, a CI rehearsal on the other cores: the twelve rounds closed in 12 of 12; `menu-reopen` 29 of 29, twice.
 
 Checks: `menu-reopen` 28 → 29: "and a dialog that has changed since it opened — typed into 0.6 s after — still closes at a press outside: the interval runs from its opening, not from its last render". Patch `menu-reopen-15` (every time the ref is set restarts the interval) reddens it, 28 of 29.
+
+### `found-8-oct/person-panel-reads-a-refused-fixture-as-a-wrong-bucket` — **closed** (test tooling, small; found by CI's Postgres harnesses on `802554a`) · reproduced 8 October
+
+**`person-panel` reads a task it was refused as a task in the wrong bucket, passes a check on a task never made, and stops at the null**
+
+*Evidence, 8 October:* CI's Postgres harnesses on `802554a`, pushed once its rehearsal here had passed, failed `person-panel`: 29 passed, 7 failed, only 36 of 60 run — "TODAY holds what is due today — the seeded due-today task is not in TODAY", the same of OVERDUE, NEXT and the unassigned pile, "next held 0 rows and not the seeded one", "overdue held 0 of 25+ seeded", then "TypeError: Cannot read properties of null (reading 'id')" at line 632, and the 263 steps after it skipped. Every POST /tasks the suite sent into the list it picked came back with no task, while its reads of the same profile, the second account's sign-in and the restore's writes all answered. `seedTask` kept `data` alone, so what the server said was lost; "a task with an assignee is not counted as unassigned" passed on a task that was never there; and `bDelegated.id` threw. On lane 3, a patch making the create gate refuse every list (`person-panel-6`) gave the runner's output line for line: the same six failures, 29 passed, 7 failed, the TypeError, 36 of 60.
+
+*Closed, 8 October.* Each fixture's refusal is kept with its status and the server's words, and a new first check says whether the tasks the bucket checks look for were made, naming every refusal. A check that stands on a refused fixture fails saying so — the bucket chain and Delegated and Done stop with it; the crowd's, the deleted task's, the panel's sections and the standup's name it — and nothing is read off a task that was not made: no check that a bucket does NOT hold a task passes on one that was never there.
+
+Measured on lane 3 with `person-panel-6`, every list refusing a task: before, 29 passed, 7 failed, the TypeError, 36 of 60 run; after, all 61 run, 38 passed, 23 failed, the first "the tasks the bucket checks look for are made …" — `POST /tasks "bucket today …": 403 You cannot add tasks to this list · …` — and each failure that stands on a fixture naming the refusal. Without the patch, 61 of 61.
+
+Read, not reproduced (so not counted): why the runner refused the tasks. The same commit passed `person-panel` 60 of 60 in its CI rehearsal here (step 22, 06:10 UTC), in a replay of the job's steps up to it on a fresh database (09:46 UTC) and on a lane (09:35 UTC), and the job does not print the API's log; the failure was reported on the pull request. If it comes again, the refusal is in the job's log.
+
+Checks: `person-panel` 60 → 61: "the tasks the bucket checks look for are made: each one seeded, and assigned where it is asked to be". Patch `person-panel-6` (the create gate refuses every list) reddens it, 38 of 61.
+
+### `found-8-oct/the-ledger-id-gate-reads-no-october-id` — **closed** (test tooling, small; found closing `found-8-oct/person-panel-reads-a-refused-fixture-as-a-wrong-bucket`) · reproduced 8 October
+
+**The ledger-id gate reads no October id, so one naming no item passes**
+
+*Evidence, 8 October:* the id above, cited in `person-panel` and its patch before the ledger had it, passed `check-ledger-ids.mjs`: "ok — 287 ledger id(s) cited, each an item of the ledger". The gate knows the ledger's sections by a pattern, and a day's finds by `found-\d{2}-sep`: `found-8-oct/…` matches none of them. A tree planted with `found-8-oct/no-such-item-in-the-ledger` passed, "ok — 1 ledger id(s) cited", the October id not even counted. 68 October ids are cited in the tree, and none of them was read.
+
+*Closed, 8 October.* A day's finds are `found-<day>-<month>`, the day in one digit or two. Read now, the gate named the one October id that named no item — the item above, before its entry was written — and each of the 68 names one since.
+
+Checks: `check-ledger-ids-cases.mjs` 11 → 13: "a day's find of another month, its day in one digit, is read and names its item" and "and an October id the ledger does not have is a failure too, not passed unread". Mutation `september-only` (the September pattern again) reddens both; 10 of 10 mutations bite.
 
 ## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
 

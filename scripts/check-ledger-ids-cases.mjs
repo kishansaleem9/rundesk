@@ -7,7 +7,8 @@
  * citation wrapped at a hyphen over two comment lines, joined whether it then
  * names an item or not; a path that looks like a section (`test/harness/…`);
  * a citation in a skipped directory; an id with capitals in it, read whole
- * whether the ledger has it or not; an empty ledger; a tree citing nothing.
+ * whether the ledger has it or not; a day's find of any month, its day in one
+ * digit or two (`found-8-oct/…`); an empty ledger; a tree citing nothing.
  * `--mutate` breaks the gate one rule at a time.
  *
  *   node scripts/check-ledger-ids-cases.mjs [--mutate]
@@ -95,6 +96,14 @@ console.log('\n▶ what the gate lets be')
   }))
   chk(r.code === 0 && /ok — 3 ledger id\(s\) cited, each an item of the ledger \(4 headings\)/.test(r.out), 'an id with capitals in it is read whole, and names its item', `it exited ${r.code}: ${r.out.trim()}`)
 }
+{
+  // October's ids carry a one-digit day (`found-8-oct/…`); September's two.
+  const r = plant(tree({
+    'docs/open-work.md': `${LEDGER}### \`found-8-oct/a-dialog-takes-each-render-for-its-opening\` — **closed**\n`,
+    'packages/ui/x.tsx': '// (`found-8-oct/a-dialog-takes-each-render-for-its-opening`)\n',
+  }))
+  chk(r.code === 0 && /ok — 3 ledger id\(s\) cited, each an item of the ledger \(4 headings\)/.test(r.out), 'a day\'s find of another month, its day in one digit, is read and names its item', `it exited ${r.code}: ${r.out.trim()}`)
+}
 
 console.log('\n▶ what the gate must find')
 {
@@ -108,6 +117,10 @@ console.log('\n▶ what the gate must find')
 {
   const r = plant(tree({ 'test/e2e/y.mjs': '// (`suite-hygiene/apiAs-duplicated-61`)\n' }))
   chk(r.code === 1 && /suite-hygiene\/apiAs-duplicated-61 is no item/.test(r.out), 'and one the ledger lacks is named whole, not cut at its first capital', `it exited ${r.code}: ${r.out.trim()}`)
+}
+{
+  const r = plant(tree({ 'test/e2e/x.mjs': '// (`found-8-oct/no-such-item-in-the-ledger`)\n' }))
+  chk(r.code === 1 && /found-8-oct\/no-such-item-in-the-ledger is no item/.test(r.out), 'and an October id the ledger does not have is a failure too, not passed unread', `it exited ${r.code}: ${r.out.trim()}`)
 }
 {
   const r = plant(tree({ '.github/workflows/ci.yml': '      # harness/wt-break-tripple-vite-build\n' }))
@@ -141,6 +154,7 @@ if (process.argv.includes('--mutate') && !process.env.GATE_UNDER_TEST) {
       ['no-join', "        if (rest) id += rest[0]\n", '\n'],
       ['paths-count', 'const CITED = new RegExp(`(?<![A-Za-z0-9_./-])(', 'const CITED = new RegExp(`(?<![A-Za-z0-9_])('],
       ['lower-case-slugs', "/[A-Za-z0-9][A-Za-z0-9-]*)`, 'g')", "/[a-z0-9][a-z0-9-]*)`, 'g')"],
+      ['september-only', "const SECTIONS = ['found-\\\\d{1,2}-[a-z]{3}',", "const SECTIONS = ['found-\\\\d{2}-sep',"],
       ['skips-nothing', "const SKIP_DIRS = new Set(['node_modules', 'dist', '.turbo', 'coverage', 'build', '.git'])", 'const SKIP_DIRS = new Set()'],
       ['no-ci', "'deploy', 'packages', '.github']", "'deploy', 'packages']"],
       ['empty-ledger-passes', 'if (headings.size === 0) problems.push(', 'if (false) problems.push('],
