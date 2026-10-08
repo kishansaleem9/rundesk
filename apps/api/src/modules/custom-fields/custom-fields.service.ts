@@ -21,8 +21,11 @@ import { assertTaskWritable } from '../../common/permissions/task-write'
 import { assertMayDefineFields, fieldsOnReadableLists, listOfProject } from '../../common/permissions/field-access'
 import { computeProgress, toProgressConfig, type ProgressInputs } from './progress'
 import {
+  compileFormula,
   evaluateFormula,
+  FIELD_ID_REF,
   parseFormula,
+  renameInFormula,
   toFormulaConfig,
   FormulaError,
   FORMULA_NUMERIC_TYPES,
@@ -55,6 +58,36 @@ export const TSHIRT_SIZES = ['xs', 's', 'm', 'l', 'xl'] as const
 
 /** The types that hold a list rather than one value. */
 const MULTI_TYPES: ReadonlySet<string> = new Set(['labels', 'people', 'files', 'voting', 'tasks'])
+
+/**
+ * A field's name holds no `{` or `}`: a formula reads them as the edges of the
+ * name it refers to, and a rename writes the name into every formula that
+ * reads the field (`renameInFormula`), where such a name would end the
+ * reference early. The same words for every field, whoever reads its formulas.
+ */
+export const FIELD_NAME_BRACES = 'A field’s name cannot hold { or }, which a formula reads as the edges of a field’s name'
+function assertFieldName(name: unknown): void {
+  if (typeof name === 'string' && /[{}]/.test(name)) throw new BadRequestException(FIELD_NAME_BRACES)
+}
+
+/** `{Old}` written `{New}` in a formula saved before formulas kept field ids: every reference to that name, spaced as typed. */
+export function renameLegacyRef(expression: string, from: string, to: string): string {
+  let out = ''
+  let i = 0
+  while (i < expression.length) {
+    if (expression[i] === '{') {
+      const end = expression.indexOf('}', i + 1)
+      if (end === -1) break
+      const name = expression.slice(i + 1, end).trim()
+      out += name === from ? `{${to}}` : expression.slice(i, end + 1)
+      i = end + 1
+      continue
+    }
+    out += expression[i]
+    i += 1
+  }
+  return out + expression.slice(i)
+}
 
 /**
  * THE FIELDS A TASK HAS: its project's, less those scoped to another list of it
@@ -267,6 +300,7 @@ export class CustomFieldsService {
     }
     // `labels` is a dropdown you can pick several of, so it needs options for
     // the same reason and the message names the type rather than assuming one.
+    assertFieldName(dto.name)
     if ((dto.type === 'dropdown' || dto.type === 'labels') && (!dto.options || dto.options.length === 0)) {
       throw new BadRequestException(`${dto.type === 'labels' ? 'Labels' : 'Dropdown'} fields require at least one option`)
     }
@@ -279,7 +313,7 @@ export class CustomFieldsService {
      * is a field nobody can tell from an empty one.
      */
     const formulaConfig =
-      dto.type === 'formula' ? await this.checkedFormulaConfig(projectId, dto.config) : null
+      dto.type === 'formula' ? await this.checkedFormulaConfig(projectId, dto.config, undefined, { workspaceId, reader }) : null
 
     // Position = current max + 1
     const existing = await this.db
@@ -371,7 +405,8 @@ export class CustomFieldsService {
     projectId: string,
     rawConfig: unknown,
     excludeFieldId?: string,
-  ): Promise<{ expression: string }> {
+    scope?: { workspaceId: string; reader?: ReadActor },
+  ): Promise<{ expression: string; compiled: string }> {
     const expressionInput = (rawConfig as { expression?: unknown } | null | undefined)?.expression
     let parsed: { expression: string; refs: string[] }
     try {
@@ -381,16 +416,29 @@ export class CustomFieldsService {
       throw err
     }
 
-    const siblings = await this.db
+    /*
+     * ONLY THE FIELDS ITS DEFINER MAY READ (`found-6-oct/field-checks-name-a-private-lists-fields`).
+     * Every field of the project answered: a member refused a private list
+     * defined `{Private cost} + 1` (201) for a field kept to it, and was told
+     * `{Secret margin}` "is a formula field" — what that list holds, confirmed.
+     * ClickUp: "You must have access to all of the fields used in Formula Custom
+     * Fields to see the results". A field kept to a list the definer may not
+     * open is, to them, no field: "there is no field called …", as for one that
+     * does not exist (`fieldsOnReadableLists`).
+     */
+    const allSiblings = await this.db
       .select({
         id: customFieldDefinitions.id,
         name: customFieldDefinitions.name,
         type: customFieldDefinitions.type,
+        listId: customFieldDefinitions.listId,
       })
       .from(customFieldDefinitions)
       .where(eq(customFieldDefinitions.projectId, projectId))
+    const siblings = scope?.reader ? await fieldsOnReadableLists(this.db, scope.workspaceId, allSiblings, scope.reader) : allSiblings
 
     const numeric: ReadonlySet<string> = new Set(FORMULA_NUMERIC_TYPES)
+    const idOf = new Map<string, string>()
     for (const ref of parsed.refs) {
       const hits = siblings.filter((s) => s.name === ref && s.id !== excludeFieldId)
       if (hits.length === 0) {
@@ -413,8 +461,10 @@ export class CustomFieldsService {
             `${FORMULA_NUMERIC_TYPES.join(', ')}`,
         )
       }
+      idOf.set(ref, hit.id)
     }
-    return { expression: parsed.expression }
+    // Each field named by its id as well: what is evaluated, and what a rename leaves standing.
+    return { expression: parsed.expression, compiled: compileFormula(parsed.expression, (name) => idOf.get(name)!) }
   }
 
   async updateDefinition(
@@ -442,6 +492,7 @@ export class CustomFieldsService {
     if (patch.options != null && !Array.isArray(patch.options)) {
       throw new BadRequestException('Custom field "options" must be an array')
     }
+    if (patch.name !== undefined) assertFieldName(patch.name)
     const set: Record<string, unknown> = { updatedAt: new Date() }
     for (const key of ['name', 'isRequired', 'options', 'position'] as const) {
       if (patch[key] !== undefined) set[key] = patch[key]
@@ -457,39 +508,49 @@ export class CustomFieldsService {
     /* 0158 — the same check the create path runs, so an expression cannot be
      * edited into one that create would have refused. */
     if (patch.config !== undefined && def.type === 'formula') {
-      set.config = await this.checkedFormulaConfig(def.projectId, patch.config, def.id)
+      set.config = await this.checkedFormulaConfig(def.projectId, patch.config, def.id, { workspaceId, reader })
     }
     /*
-     * 0158 — A RENAME THAT WOULD ORPHAN A FORMULA IS REFUSED.
+     * A RENAME CARRIES EVERY FORMULA THAT READS THE FIELD WITH IT, AND IS NEVER
+     * REFUSED (`found-6-oct/field-checks-name-a-private-lists-fields`).
      *
-     * A formula stores the NAME it reads, because a name is what somebody
-     * types. Rename "Budget" to "Budget (USD)" and every `{Budget}` stops
-     * resolving — and it stops quietly, drawing a dash where a number was. The
-     * refusal names the formula, so the fix is obvious: edit it first.
+     * A formula read the NAME it was typed with, so a rename was refused while
+     * one read the field — and the refusal named the formula, to a member who
+     * could not open the private list it was kept to ("cannot be renamed while
+     * "Secret margin" reads it"). A ClickUp formula reads a field, not its
+     * name. So a formula keeps each field's id beside what it shows
+     * (`compiled`), and a rename writes the new name into the text of each one
+     * that reads this field, in the same transaction; one saved before ids were
+     * kept is rewritten where the old name is this field's alone in the project.
      */
     if (patch.name !== undefined && patch.name !== def.name) {
-      const formulas = await this.db
-        .select({ name: customFieldDefinitions.name, config: customFieldDefinitions.config })
-        .from(customFieldDefinitions)
-        .where(
-          and(
-            eq(customFieldDefinitions.projectId, def.projectId),
-            eq(customFieldDefinitions.type, 'formula'),
-          ),
-        )
-      const users = formulas.filter((f) => {
-        try {
-          return parseFormula(toFormulaConfig(f.config).expression).refs.includes(def.name)
-        } catch {
-          return false
+      return this.db.transaction(async (tx) => {
+        const formulas = await tx
+          .select({ id: customFieldDefinitions.id, config: customFieldDefinitions.config })
+          .from(customFieldDefinitions)
+          .where(and(eq(customFieldDefinitions.projectId, def.projectId), eq(customFieldDefinitions.type, 'formula')))
+        const sameName = await tx
+          .select({ id: customFieldDefinitions.id })
+          .from(customFieldDefinitions)
+          .where(and(eq(customFieldDefinitions.projectId, def.projectId), eq(customFieldDefinitions.name, def.name)))
+        const nameIsTheirs = sameName.length === 1
+        for (const f of formulas) {
+          if (f.id === def.id) continue
+          const cfg = toFormulaConfig(f.config)
+          const expression = cfg.compiled
+            ? renameInFormula(cfg, def.id, String(patch.name))
+            : nameIsTheirs
+              ? renameLegacyRef(cfg.expression, def.name, String(patch.name))
+              : cfg.expression
+          if (expression === cfg.expression) continue
+          await tx
+            .update(customFieldDefinitions)
+            .set({ config: { ...cfg, expression }, updatedAt: new Date() })
+            .where(eq(customFieldDefinitions.id, f.id))
         }
+        const [row] = await tx.update(customFieldDefinitions).set(set).where(eq(customFieldDefinitions.id, def.id)).returning()
+        return row
       })
-      if (users.length > 0) {
-        throw new BadRequestException(
-          `"${def.name}" cannot be renamed while ${users.map((f) => `"${f.name}"`).join(', ')} ` +
-            'reads it — change the formula first',
-        )
-      }
     }
     const [row] = await this.db
       .update(customFieldDefinitions)
@@ -584,20 +645,19 @@ export class CustomFieldsService {
      * taken from the computed number rather than from a row that never exists.
      */
     const numericByName = new Map<string, number | null>()
+    const numericById = new Map<string, number | null>()
     if (defs.some((d) => d.type === 'formula')) {
       for (const d of defs) {
         if (!(FORMULA_NUMERIC_TYPES as readonly string[]).includes(d.type)) continue
+        let n: number | null
         if (d.type === 'progress_auto') {
-          numericByName.set(
-            d.name,
-            progress
-              ? computeProgress(toProgressConfig(d.config), progress.inputs, progress.taskIsDone)
-              : null,
-          )
-          continue
+          n = progress ? computeProgress(toProgressConfig(d.config), progress.inputs, progress.taskIsDone) : null
+        } else {
+          const stored = byField.get(d.id)?.value.v
+          n = typeof stored === 'number' ? stored : null
         }
-        const stored = byField.get(d.id)?.value.v
-        numericByName.set(d.name, typeof stored === 'number' ? stored : null)
+        numericByName.set(d.name, n)
+        numericById.set(d.id, n)
       }
     }
 
@@ -609,11 +669,15 @@ export class CustomFieldsService {
         }
       }
       if (d.type === 'formula') {
+        // By id where the formula keeps them (`compiled`), by name where it was saved before.
+        const cfg = toFormulaConfig(d.config)
         return {
           definition: d,
-          value: evaluateFormula(toFormulaConfig(d.config).expression, (name) =>
-            numericByName.has(name) ? numericByName.get(name)! : null,
-          ),
+          value: evaluateFormula(cfg.compiled ?? cfg.expression, (ref) => {
+            const id = FIELD_ID_REF.exec(ref)?.[1]
+            if (id) return numericById.has(id) ? numericById.get(id)! : null
+            return numericByName.has(ref) ? numericByName.get(ref)! : null
+          }),
         }
       }
       const stored = byField.get(d.id)?.value.v ?? null

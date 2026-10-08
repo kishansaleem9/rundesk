@@ -19,11 +19,13 @@
  *   node test/e2e/request-access.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
-import { waitUntil } from './lib/wait.mjs'
-import { apiAs as apiAsAt, madeAccount, madeRow } from './lib/fixture.mjs'
+import { readText, waitUntil } from './lib/wait.mjs'
+import { apiAs as apiAsAt, madeAccount, madeRow, must } from './lib/fixture.mjs'
+import { openDb } from './lib/db.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -35,7 +37,7 @@ const argOf = (name, fallback) => {
  * How many checks a complete run performs. "0 failed" is not "it ran": a
  * selector that matched nothing reports a clean sweep of whatever it reached.
  */
-const EXPECTED_CHECKS = 9
+const EXPECTED_CHECKS = 13
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -84,6 +86,9 @@ const browser = await chromium.launch(launchOptions())
  */
 let cleanupA = null
 let cleanupWorkspaceId = null
+let sql = null
+/** How many access asks one person may make in an hour (`ACCESS_ASKS_PER_HOUR`). */
+const ASKS_AN_HOUR = 20
 let cleanupOutsiderId = null
 
 try {
@@ -319,10 +324,99 @@ try {
     'and the check left the roster as it found it',
     `${outsider.email} is still a member of the workspace (the DELETE answered ${removed?.status ?? 'nothing: no id to remove'})`,
   )
+
+  /*
+   * SOMEONE OUTSIDE A WORKSPACE ASKS (`found-30-sep/access-asks-from-outside-the-workspace`).
+   * ClickUp lets people outside a Workspace ask for an item by its link, and its
+   * admins are told; so may anyone here. But an ask about anything else was
+   * recorded too, and "sent" or "no_owners" told whether a workspace id was real.
+   * The member, now off every roster but their own, asks about a workspace made
+   * here, so what their asks leave goes with it.
+   */
+  console.log('\n▶ someone outside a workspace asks for something in it')
+  sql = await openDb()
+  if (!sql) throw new Error('no DATABASE_URL: what the asks record is read by SQL')
+  const asked = must(await A('/workspaces', { method: 'POST', body: { name: `Asked ${stamp}` } }), 'make the workspace asked about').id
+  const askedSpace = must(await A('/spaces', { method: 'POST', body: { workspaceId: asked, name: `Asked ${stamp}` } }), 'its space').id
+  const askedProject = must(await A('/projects', { method: 'POST', body: { spaceId: askedSpace, name: `Asked ${stamp}` } }), 'its project').id
+  const askedList = must(await A('/lists', { method: 'POST', body: { projectId: askedProject, name: `Asked ${stamp}` } }), 'its list').id
+  const things = []
+  for (let i = 0; i <= ASKS_AN_HOUR; i += 1) {
+    things.push(must(await A('/tasks', { method: 'POST', body: { listId: askedList, title: `Asked about ${stamp} ${i}` } }), `task ${i}`).id)
+  }
+  const elsewhere = must(await A('/workspaces', { method: 'POST', body: { name: `Elsewhere ${stamp}` } }), 'another workspace').id
+  const elsewhereSpace = must(await A('/spaces', { method: 'POST', body: { workspaceId: elsewhere, name: `Elsewhere ${stamp}` } }), 'its space').id
+  const elsewhereProject = must(await A('/projects', { method: 'POST', body: { spaceId: elsewhereSpace, name: `Elsewhere ${stamp}` } }), 'its project').id
+  const elsewhereList = must(await A('/lists', { method: 'POST', body: { projectId: elsewhereProject, name: `Elsewhere ${stamp}` } }), 'its list').id
+  const elsewhereTask = must(await A('/tasks', { method: 'POST', body: { listId: elsewhereList, title: `Elsewhere ${stamp}` } }), 'its task').id
+  const O = apiAs(signup.data.accessToken)
+  const ask = (id, ws) => O(`/shares/task/${id}/request`, { method: 'POST', body: { workspaceId: ws } })
+  const recorded = async () => (await sql`select count(*)::int as n from content_access_requests where requester_id = ${outsiderId}`)[0].n
+  const toldOf = async (id) => (await sql`select count(*)::int as n from notifications where actor_id = ${outsiderId} and type = 'access_requested' and target->>'entityId' = ${id}`)[0].n
+
+  const first = await ask(things[0], asked)
+  chk(
+    first.status === 201 && first.data?.status === 'sent' && (await toldOf(things[0])) >= 1,
+    'someone outside the workspace may ask for one of its tasks, and those who may grant it are told',
+    `the ask answered ${first.status} ${JSON.stringify(first.data ?? first.error?.message ?? null)}; notices of it: ${await toldOf(things[0])}`,
+  )
+
+  const before = await recorded()
+  const refusals = {
+    'a made-up id': await ask(randomUUID(), asked),
+    'another workspace’s task': await ask(elsewhereTask, asked),
+    'a made-up workspace': await ask(things[0], randomUUID()),
+    'both made up': await ask(randomUUID(), randomUUID()),
+  }
+  const words = new Set(Object.values(refusals).map((r) => `${r.status} ${r.error?.message}`))
+  chk(
+    Object.values(refusals).every((r) => r.status === 404) && words.size === 1 && (await recorded()) === before,
+    'an ask about anything the workspace does not hold is one 404, in the same words whatever was named, and nothing is recorded',
+    `${JSON.stringify(Object.fromEntries(Object.entries(refusals).map(([k, r]) => [k, `${r.status} ${r.error?.message ?? ''}`])))}; asks recorded ${before} → ${await recorded()}`,
+  )
+
+  // Up to the hour's cap, counting the asks this run has made already (the member's, above).
+  const madeSoFar = await recorded()
+  const answers = []
+  for (const id of things.slice(1, 1 + ASKS_AN_HOUR - madeSoFar)) answers.push((await ask(id, asked)).status)
+  const atCap = await recorded()
+  const over = await ask(things[ASKS_AN_HOUR], asked)
+  chk(
+    answers.every((s) => s === 201) && atCap === ASKS_AN_HOUR && over.status === 429
+      && (await recorded()) === ASKS_AN_HOUR && (await toldOf(things[ASKS_AN_HOUR])) === 0,
+    `and one person’s asks are capped at ${ASKS_AN_HOUR} an hour: the next is refused, recorded nowhere and told to nobody`,
+    `${madeSoFar} made before; the ${answers.length} after answered ${JSON.stringify([...new Set(answers)])}; recorded ${atCap}; the next answered ${over.status} ${JSON.stringify(over.error?.message ?? null)}, recorded ${await recorded()}, notices ${await toldOf(things[ASKS_AN_HOUR])}`,
+  )
+
+  /*
+   * AND THE CARD SAYS SO. It said "sent" whatever came back, so an ask the
+   * server refused read as one passed on. The member, back on the first
+   * workspace's roster with their hour's asks spent, opens a second private
+   * task there and presses the card's button.
+   */
+  must(await A(`/workspaces/${workspaceId}/members`, { method: 'POST', body: { email: outsider.email, role: 'member' } }), 'the member back on the roster')
+  const second = must(await A('/tasks', { method: 'POST', body: { listId, title: `Private plan ${stamp} 2` } }), 'a second private task').id
+  madeRow('tasks', second)
+  must(await A(`/tasks/${second}`, { method: 'PATCH', body: { visibility: 'private' } }), 'the second task made private')
+  await page.goto(`${origin}/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=${second}`, { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('request-access-card').waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {})
+  await page.getByTestId('request-access-button').click({ timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('request-access-refused').or(page.getByTestId('request-access-sent')).first()
+    .waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
+  const cardSays = (await readText(page.getByTestId('request-access-refused').filter({ visible: true }), { timeoutMs: 1_000 })).trim() || null
+  const cardSaysSent = await page.getByTestId('request-access-sent').isVisible().catch(() => false)
+  // Off the roster again, as the run found it; `finally` asks the same, and a 404 there is fine.
+  await A(`/workspaces/${workspaceId}/members/${outsiderId}`, { method: 'DELETE' })
+  chk(
+    !!over.error?.message && cardSays === over.error.message && !cardSaysSent,
+    'and the card says such an ask was refused, in the server’s words, not that it was sent',
+    `the server said ${JSON.stringify(over.error?.message ?? null)}; the card said ${JSON.stringify(cardSays)}, and "sent" was ${cardSaysSent ? '' : 'not '}shown`,
+  )
 } catch (e) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)
 } finally {
+  await sql?.end({ timeout: 5 }).catch(() => {})
   // Whatever happened above, the workspace gets its roster back. Idempotent:
   // the happy path already removed them and this is a 404 it accepts; any
   // other answer leaves them on the roster, and is said above the totals.

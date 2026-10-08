@@ -62,9 +62,10 @@ export class SharesController {
    * §G10 [12:16–12:20] — ask the people who can grant it.
    *
    * Deliberately NOT under the permission check the other routes share: the
-   * whole point is that the caller cannot see this object. It needs only a
-   * workspace membership, which the service establishes by looking the object
-   * up inside `workspaceId`.
+   * whole point is that the caller cannot see this object, and, as in ClickUp,
+   * may be outside the workspace altogether. The service asks that the object
+   * is the named workspace's (404, in one sentence, for anything else) and caps
+   * each person's asks an hour (`requestAccess`).
    */
   @Post('request')
   @ApiOperation({ summary: 'Ask whoever can grant it for access to this object' })

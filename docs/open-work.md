@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 524 items: 10 open · 2 partly fixed · 455 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 526 items: 5 open · 1 partly fixed · 463 closed, and 57 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -2920,7 +2920,7 @@ Checks:
 - Regression on lane 3, with the other two items': the invitation suites among the 45 (`assignee-picker`, `credential-reads`, which claims a legacy invitation, `guest-invitations`, `list-empty-states`, `no-dead-ends`, `settings-tabs-by-key`, `video-regression`) all green; 44 of 45 in all, 743 of 744 checks.
 - Merged here onto `6f8e02c` and run again on lane 3: `sign-in-and-password` 29, `session-in-the-browser` 3, `auth-route-limits` 22, `password-hash-time` 4, the socket handshake's `chat-realtime-access` 6, `call-realtime-access` 2, `workspace-read-access` 30 and `guest-chat-scope` 7, `credential-reads` 11, `guest-invitations` 2, `settings-depth` 62 and `menu-reopen` 26, all green, 204 checks; `loading-states` 25/26, its known failure (`found-30-sep/loading-states-reads-the-clip-page-loading`).
 
-### `found-30-sep/a-burst-is-compared-before-the-lock` — partly-fixed (security, small; found closing `found-30-sep/password-change-guesses-600-an-hour`) · reproduced 5 October
+### `found-30-sep/a-burst-is-compared-before-the-lock` — **closed** (security, small; found closing `found-30-sep/password-change-guesses-600-an-hour`) · reproduced 5 October
 
 **Wrong passwords sent at once are all compared before the lockout locks the account, and a right one among them signs in**
 
@@ -2942,6 +2942,24 @@ OWASP's ASVS 2.2.1: "no more than 100 failed attempts per hour is possible on a 
 *Why partly:* the item's named check passes (the right password among twenty wrong ones sent at once is refused once five are counted), and the burst no longer signs in; whether one window must hold strictly to five, at the price above, is the owner's to decide.
 
 *Merged, 6 October,* into the main checkout with the batch's other two builders' work (fields, clips, sign-in and sockets), and run again there on lanes 2, 5 and 7: 47 suites, all green — `password-hash-time`, which compares timings, failed once at a load of 13 on four cores and passed 4/4 twice on a quiet lane — and the API's 1984 unit tests and the web's 320, both typechecks clean.
+
+*Closed, 7 October* (lane 3), on the bound. ClickUp documents no count of failed sign-ins (searches found none; its help centre is blocked here), so the measure is OWASP's ASVS 2.2.1: "no more than 100 failed attempts per hour is possible on a single account". The lock stays on failed attempts alone, so an account's own sign-ins sent at once all stand (`password-hash-time`'s eight at once), and a window answers only the compares that end before the lock.
+
+- What bounds a window: a wrong password is counted when its compare ends, and compares run on the hash pool's workers, at most `DEFAULT_THREADS` at once (one fewer than the machine's cores, and never more than four), the rest in turn. So a burst sent at once is answered by at most the threshold and the compares in flight beside the one that locks: the threshold plus the workers, less one, which is seven at the default five on four cores and eight on more, while a write by primary key takes less than a compare's 300 ms.
+- The pool's fallback, when no worker can be started (logged as an error), ran every compare of a burst on the event loop at once. They all ended together, so none was counted before the others were compared, and the window answered the whole burst. It now runs them one at a time, the rest in turn. Measured (`fallback-burst.ts`, eight compares at cost 12 sent at once): before, all eight ended at 2,843–2,844 ms; after, one after another, from 345 to 2,970 ms.
+
+Measured on lane 3 with three workers (`burst-bound-probe.mjs`): bursts of 24 sign-ins to one account, each from a loopback address of its own, 23 wrong and the right one at place k for k = 1 to 24, the count and lock cleared before each burst, two passes.
+- The right one signed in in 5 bursts of 24 in each pass, at places 1 to 5, 8 and 9 in the send order. It signed in only when it was answered among the first four, and answered seventh or later it was refused, 38 times of 38. Every burst locked the account.
+- So one window answered at most about six guesses, under the bound of seven. With the default 30-minute lock that is two windows an hour: at most 14 an hour with three workers and 16 with four, against ASVS's 100.
+
+An admin's policy may set up to 100 failures and a lock as short as a minute (the security settings' bounds), which allows 100 a minute one after another, bursts or not. That number is the workspace admin's choice of policy, not the burst's; the default keeps to ASVS.
+
+Checks:
+- `password-hash.test.ts` 7 → 9: "a pool runs at most its threads’ compares at once, never more than four on any machine, and the rest in turn"; "with no worker to be had, compares run on this thread one at a time, the rest in turn", red before (8 of 9).
+- Kept: `sign-in-and-password`'s "twenty wrong passwords and the right one sent at once are all refused 401 once five have been counted: …", and `password-hash-time`'s eight sign-ins at once.
+- Unit claims `sip-79` (a worker for every compare) and `sip-80` (every compare on this thread at once) each redden their test.
+
+Regression on lane 3 with the batch's other items: 66 suites, 1,413 checks, all green (listed under `found-30-sep/access-asks-from-outside-the-workspace`).
 
 ### `found-30-sep/an-open-socket-outlives-its-session` — **closed** (security, small; found closing `found-30-sep/revoked-sessions-keep-their-access-tokens`) · reproduced 5 October
 
@@ -3230,7 +3248,7 @@ Found while building it: `found-30-sep/private-task-reads-say-403`, `found-30-se
 `found-30-sep/two-zip-writers`.
 - Merged here and run again on lanes 5 and 7, with a CRC of its own where Node has none (`found-30-sep/node-engines-below-zlib-crc32`, below): `task-attachments` 32/32, `attach-on-create` 14, `object-key-boundaries` 23, `clip-created-card` 26, `task-cover` 42, `comment-recording` 33 and `list-export` 30, all green, 200 checks.
 
-### `found-30-sep/access-asks-from-outside-the-workspace` — open (security, small; found closing `found-30-sep/private-task-reads-say-403`) · reproduced 5 October
+### `found-30-sep/access-asks-from-outside-the-workspace` — **closed** (security, small; found closing `found-30-sep/private-task-reads-say-403`) · reproduced 5 October
 
 **Any account asks any workspace's admins for access, by the workspace's id**
 
@@ -3249,6 +3267,24 @@ nothing checks the asker at all, and a workspace's id reaches whoever holds any 
 - Check it with an outsider beside a member.
 
 *Triage, 5 October, after the revert:* reproduced on a lane. Any signed-in account outside a workspace still gets 201 for an access ask there: the ask is recorded and every admin is notified (lane 1). Whether outsiders may ask at all is still the owner's decision. Whether someone outside the workspace may ask at all is still the owner's decision; the defect counted is that nothing checks the asker, so any account notifies every admin about any id, and the answer tells whether a workspace id is real. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 7 October* (lane 3). ClickUp lets people outside a Workspace ask for an item by its link: "People outside your Workspace must request access to a public or private item", and those who may approve are the item's owner and whoever may invite guests (help centre, "Request and approve access to Workspace items", through search excerpts; the site is blocked here). So anyone signed in may still ask, and the approval path is the object's Share panel, which the notice links to, for those it tells: the object's admins and the workspace's.
+
+- An ask is only about something that is there. The object must be one of the named workspace's (`resolveSharedBatch`, the read the notice's title already made, now made first). A made-up id, a workspace that is not there, or another workspace's object is one 404, "There is nothing by that link to ask for access to", the same for each; nothing is recorded or sent. So no answer tells whether a workspace id, or an object, is real.
+- One person's asks are capped at 20 an hour, about anything, anywhere (`ACCESS_ASKS_PER_HOUR`). The next is refused 429, "You have asked for access too many times in the last hour — try again later", recorded nowhere and told to nobody. Asking about the same object again within the day is still "already asked", as before, and costs nothing.
+- The card on a refused page said "sent" whatever came back (`onSettled`), so a refused ask read as one passed on. It now says a refusal in the server's words (`request-access-refused`).
+
+Measured on lane 3 (`access-probe.mjs`), an account in no part of the workspace asking:
+- Before: a real task of the workspace 201 "sent", one admin told; a made-up id under the workspace 201 "sent"; another workspace's task named under this one 201 "sent"; a real task under a made-up workspace 201 "no_owners"; both made up 201 "no_owners"; thirty made-up ids one after another 201 each. 33 asks recorded.
+- After: the real task 201 "sent", one told; the four others 404 in the same words; the thirty made-up ids 404 each. 1 ask recorded, 1 notice.
+- `request-access` on lane 3 before the API changed: 10 of 12, the two refusal checks red; after, 12 of 12. Its card check on the bundle before, against lane 3's API: the card said "sent" after the 429, 12 of 13; on this bundle, 13 of 13.
+
+Checks:
+- `request-access` 9 → 13: "someone outside the workspace may ask for one of its tasks, and those who may grant it are told"; "an ask about anything the workspace does not hold is one 404, in the same words whatever was named, and nothing is recorded"; "and one person’s asks are capped at 20 an hour: the next is refused, recorded nowhere and told to nobody"; "and the card says such an ask was refused, in the server’s words, not that it was sent".
+- `request-access.test.ts` 5 → 7.
+- Patches `request-access-5` (an ask about anything is recorded) and `request-access-6` (no cap) each redden their check, 11 of 12 on lane 3 before the card's check came; `request-access-9` (the card says "sent" whatever came back) reddens the card's, 12 of 13. Unit claims `request-access-7` and `request-access-8`.
+
+Regression on lane 3, with this batch's other items, on the build they make together: 66 suites, 1,413 checks, all green. They are the suites that make tasks with assignees, ask for access, read or write custom fields, import, or sign in: `addressability-live`, `ai-answer-rendering`, `ai-assign`, `ai-read-access`, `assign-with-ai-picker`, `auth-route-limits`, `automation-notices`, `collapse-empty-fields`, `comment-recording`, `create-modal-templates`, `credential-reads`, `custom-field-access`, `custom-field-progress`, `custom-field-types`, `data-transfer-keys`, `dependency-read-access`, `doc-task-links`, `email-reply-routing`, `field-writes-by-level`, `file-exports`, `guest-invitations`, `guest-task-edits`, `guest-task-making`, `home-my-work`, `imports`, `inbox-scope`, `list-assignee-filter`, `list-customize`, `list-export`, `list-page-levels`, `list-statuses-seeded`, `list-view-controls`, `member-role-grants`, `notification-gaps`, `password-hash-time`, `paywall-sites`, `person-panel`, `planner-command-bar`, `project-page-controls`, `read-visibility`, `realtime-access-ends`, `refused-as-forbidden`, `related-task-access`, `report-read-access`, `request-access`, `role-permissions-web`, `search-read-access`, `session-in-the-browser`, `sign-in-and-password`, `super-admin-task-writes`, `task-boundaries`, `task-depth`, `task-edit-levels`, `task-field-create`, `task-merge`, `task-pickers-search`, `task-sheet-capabilities`, `task-space-levels`, `task-values`, `team-schedules-api`, `teams-person-cards`, `timeline-dates`, `video-regression`, `video1-acceptance`, `video1-fast-items`, `workspace-read-access`.
 
 ### `found-30-sep/list-export-saved-as-list-csv` — **closed** (visible bug, small; found closing `found-30-sep/attachments-have-no-download-all`)
 
@@ -8352,7 +8388,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 52, each reproduced
+## Found by the triage, 5 October, and since — 65, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -9688,13 +9724,32 @@ Checks:
 
 Regression on lanes 2, 4, 5, 6 and 7: the 34 suites the six fixes of this batch touch (`admin-audit-page`, `comment-plus-menu`, `data-transfer-keys`, `field-writes-by-level`, `file-exports`, `full-edit-levels`, `gantt-controls`, `goals-page`, `guest-canvas-scope`, `guest-chat-scope`, `guest-create-menu`, `guest-invitations`, `guest-read-scope`, `guest-space-level`, `guest-task-edits`, `guest-task-making`, `imports`, `list-export`, `local-dates`, `login-workspace-binding`, `lookup-read-access`, `menu-reopen`, `panel-collapse`, `realtime-access-ends`, `refused-as-forbidden`, `report-export-key`, `session-in-the-browser`, `sign-in-and-password`, `task-attachments`, `task-field-create`, `task-menu-favorite-archive`, `timeline-dates`, `view-visibility` and `view-writes-by-level`), 517 checks, all green.
 
-### `found-6-oct/field-checks-name-a-private-lists-fields` — open (security, small; found reviewing `found-6-oct/field-lists-name-a-private-lists-fields`) · reproduced 6 October
+### `found-6-oct/field-checks-name-a-private-lists-fields` — **closed** (security, small; found reviewing `found-6-oct/field-lists-name-a-private-lists-fields`) · reproduced 6 October
 
 **A field's rename refusal names a formula kept to a private list, and the formula check confirms a field kept to one, to a member refused that list**
 
 *Evidence, 6 October, lane 7, three runs alike (`private-field-names-elsewhere.mjs`, on the build that closes `found-6-oct/field-lists-name-a-private-lists-fields`):* in an open project the admin defined a project number "Budget" and, kept to the admin's private list, a formula "Secret margin" (`{Budget} * 2`) and a number "Private cost". A member refused that list (`GET /lists/:id` 403 "This list is private") sees only "Budget" in both field lists. Renaming Budget, which they may do, answered 400 '"Budget" cannot be renamed while "Secret margin" reads it — change the formula first'. Defining project formulas: `{Private cost} + 1` 201; `{Secret margin} + 1` 400 naming it as a formula field; `{Nothing by this name} + 1` 400 "there is no field called …". The rename guard reads every formula of the project, and `checkedFormulaConfig` resolves names against every field; neither asks `fieldsOnReadableLists`. ClickUp: "You must have access to all of the fields used in Formula Custom Fields to see the results. If a private field that you don't have access to is used, you won't see results" ("Custom Field permissions", read through search excerpts).
 
 *To close (the owner chooses):* what a member refused a list is told when a formula kept to that list reads a field they rename (refused without naming the formula, or allowed), and when a formula they define names a field kept to that list (refused with its reason, or allowed). Then check both in `custom-field-access`.
+
+*Closed, 7 October* (lane 3). ClickUp: "You must have access to all of the fields used in Formula Custom Fields to see the results. If a private field that you don't have access to is used, you won't see results" ("Custom Field permissions", through search excerpts). A ClickUp formula reads a field, not its name, so renaming a field leaves the formulas that read it working.
+
+- A formula keeps the id of each field it names (`compiled`, beside the expression it shows), resolved when it is saved, and is computed by those ids. A rename is never refused now: in one transaction it writes the new name into the shown expression of each formula of the project that reads the field (`renameInFormula`), so nothing is named to whoever renames it. A formula saved before ids were kept is rewritten where the old name is that field's alone in the project.
+- A formula's names are looked up only among the fields on lists its definer may read (`fieldsOnReadableLists`, the rule the field lists already ask). A field kept to a list they may not open reads "there is no field called …", the words for one that does not exist, whether it is a number or a formula.
+- A field's name may not hold `{` or `}`, made or renamed so: a formula reads them as the edges of a name, and a rename writes the name into the formulas that read the field.
+
+Measured on lane 3 (`formula-probe.mjs`): a member refused a private list of an open project, with the admin's formula "Secret margin" (`{Budget} * 2`) and number "Private cost" kept to that list.
+- Before: renaming Budget answered 400 '"Budget" cannot be renamed while "Secret margin" reads it — change the formula first'; defining `{Private cost} + 1` 201; `{Secret margin} + 1` 400 '"Secret margin" is a formula field …'; `{Nothing by this name} + 1` 400 "there is no field called …".
+- After: the rename 200; the formula reads the new name, and computes 20 from a Budget of 10 as before; the three definitions each 400 "there is no field called …".
+- `custom-field-access` before (lane 4, the API before): 10 of 12; after (lane 3): 12 of 12, three runs. `custom-field-types` before (lane 4): 33 of 35, the restated rename check and the brace check red; after (lane 3): 35 of 35.
+
+Checks:
+- `custom-field-access` 9 → 12: "a member renames a field that a formula kept to a list they may not open reads: the rename stands, and the formula reads the new name"; "and the formula still computes from the renamed field on the private list’s task: 20 from a Budget of 10"; "a formula the member defines over a field kept to that list is told there is no field called it, in the words for one that does not exist — a number or a formula".
+- `custom-field-types` 34 → 35: its check that a rename is refused naming the formula is restated, "renaming a field a formula reads carries the formula with it: the rename stands, the formula reads the new name, and it computes as before"; and "a field’s name may not hold { or }: made or renamed so, it is refused in one sentence, and the fields and the formula reading them are as they were".
+- `formula.test.ts` 7 → 9.
+- Patches `pff-1` (each formula written back as it was), `pff-2` (an id finds no field) and `pff-3` (checked against every field) each redden their check, 11 of 12 on lane 3; `pff-6` (a name may hold a brace) the brace check, 34 of 35. `custom-field-types-11` lost its line to the change (it took the refusal away) and is re-aimed at the rewrite (a rename rewrites no formula): it reddens the restated check, 34 of 35. `custom-field-types-5` (the expression stripped of its spaces on save) lost its line too, which now returns the ids beside the expression, and is re-aimed there: it reddens the verbatim check and the panel's, 33 of 35, as before; the rename and brace checks read a formula's names, not its spacing. Unit claims `pff-4` (compiled to its names) and `pff-5` (a rename writes over every reference).
+
+Regression on lane 3 with the batch's other items: 66 suites, 1,413 checks, all green (listed under `found-30-sep/access-asks-from-outside-the-workspace`).
 
 ### `found-6-oct/a-socket-sends-into-rooms-it-may-not-read` — **closed** (security, small; found reviewing `found-6-oct/an-open-socket-outlives-its-access`) · reproduced 6 October
 
@@ -9777,7 +9832,7 @@ Read, not reproduced (so not counted): the ClickUp enrichment takes any job of t
 
 Regression on lanes 2, 4 and 6: the 76 suites these touch, 1233 checks, 69 suites green at once. `app-catalogue` and `meetings-connect-calendar` failed on races in the suites, found here and closed beside these (`found-6-oct/app-catalogue-waits-for-a-tile-drawn-before-any-answer`, `found-6-oct/meetings-upcoming-read-after-a-fixed-wait`). At a load of about 12 on four cores, `comment-recording`, `sidebar-sections`, `task-menu` and `task-depth` each gave up a 20 s wait for a sheet or a menu, and `task-sheet-fetches` counted one of its sheet's opening fetches as the change's while its second sheet missed the change; each was green when run again on its own (33, 25, 37, 92 and 2 checks). API unit tests 2135/2135, web 350/350, both typechecks clean.
 
-### `found-6-oct/import-assigns-people-who-cannot-see-the-task` — open (security, small; found reviewing `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change`) · reproduced 6 October
+### `found-6-oct/import-assigns-people-who-cannot-see-the-task` — **closed** (security, small; found reviewing `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change`) · reproduced 6 October
 
 **An import assigns a task to somebody who cannot see it, which the assignee route refuses**
 
@@ -9785,13 +9840,60 @@ Regression on lanes 2, 4 and 6: the 76 suites these touch, 1233 checks, 69 suite
 
 *To close (the owner chooses):* what an import does with such a person — counted unmatched, the row's error, or not linked — then ask the assignee rule in both importers and check it in `imports`.
 
-### `found-6-oct/clickup-merge-writes-values-to-fields-the-task-lacks` — open (visible bug, small; found reviewing `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change`) · reproduced 6 October
+*Closed, 7 October* (lane 3). ClickUp's importers link assignees only to people of the Workspace who match, "or tasks will be imported but may not be assigned" (spreadsheet importer, through search excerpts). And a guest is assigned a task only once it, its List or its Folder is shared with them: "To assign a task to a guest, you must first share the task, List, or Folder with a guest so they have access".
+
+- Both importers ask, of each person a row names, the assignee route's question (`mayBeAssigned`: may they read this task as its assignee, which is the read rule without the assignee's own way in, `readableTask` with `asAssignee`). Somebody it refuses is not linked. The spreadsheet import counts them unmatched, and both runs say who and why: "<who> can't see this task, so it was not assigned to them".
+- Making a task asks its first assignees the list rule (`assertPeopleCanSeeList`), and that rule asked nothing of a guest's reach: a guest nothing is shared with was put on a new task. Found here, and closed with it: `found-7-oct/a-task-is-born-assigned-to-a-guest-who-cannot-see-it`, below.
+
+Measured on lane 3 (`import-probe.mjs`), a guest added to the workspace, nothing shared:
+- Before: a spreadsheet merge naming the guest on task one and on a new row completed with the guest on both; a ClickUp merge naming them on task two completed with the guest on it. `POST /tasks/:id/assignees` for the same guest: 400 "That person can't see this task, so it can't be assigned to them".
+- After: the guest is on none of them. The spreadsheet run's errors name the guest on rows 2 and 3, unmatched 2; the ClickUp run's name them on task two.
+- `imports` before (lane 4, the API before): 57 of 60, its three new checks red; after (lane 3): 60 of 60.
+
+Checks:
+- `imports` 57 → 60, its section 12b: "an import puts nobody on a task the assignee route would refuse them: a guest named by a spreadsheet merge, a new row and a ClickUp merge is on none of them, and each run says who and why"; the other two are the next item's and the found one's.
+- `spreadsheet-import.service.test.ts`: "a person the assignee route would refuse is not linked, on a merged row or a new one: counted unmatched, and the run says who and why"; `clickup-import.service.test.ts`: "a person the assignee route would refuse is not put on the task, and the run says who and why".
+- Patch `imports-75` (the rule answers yes to anybody with an account) reddens the check, 59 of 60 on lane 3. Unit claims `imports-78` and `imports-80`.
+
+Regression on lane 3 with the batch's other items: 66 suites, 1,413 checks, all green (listed under `found-30-sep/access-asks-from-outside-the-workspace`).
+
+### `found-7-oct/a-task-is-born-assigned-to-a-guest-who-cannot-see-it` — **closed** (security, small; found closing `found-6-oct/import-assigns-people-who-cannot-see-the-task`) · reproduced 7 October
+
+**A task is made with a guest nothing is shared with among its assignees**
+
+*Evidence, 7 October, lane 3 (`born-assigned-probe.mjs`):* `POST /tasks` with `assigneeIds` naming a guest of the workspace that nothing was shared with answered 201, the guest among the task's assignees, while the guest's `GET` of it answered 403 "This is not shared with you", and the assignee route, the same guest onto a task of the same list, 400 "That person can't see this task, so it can't be assigned to them". A new task's assignees are asked the list rule (`assertPeopleCanSeeList`), which asks a private list's privacy and nothing of a guest's reach. ClickUp: "To assign a task to a guest, you must first share the task, List, or Folder with a guest so they have access" (through search excerpts; a request to assign without sharing is "not on the roadmap").
+
+*To close:* ask a guest's reach in the list rule, and check that a task made with such a guest is refused in the assignee route's words.
+
+*Closed, 7 October* (lane 3). The list rule asks, of a guest, that the list or what holds it is shared with them (`guestReachesList`, the rule a guest's reads ask); a super admin and a member are asked as before. A task made with such a guest is refused 400, "That person can't see this task, so it can't be assigned to them", and not made.
+- Before (lane 3): 201, the guest an assignee. After: 400 in those words, no task made.
+- `imports` 12b: "and a task made with that guest as its assignee is refused in the assignee route’s words, and not made", red before (lane 4), green after.
+- Patch `imports-77` (the list rule asks no guest reach) reddens it, 59 of 60 on lane 3.
+
+The create modal still offers every member as an assignee (read, not measured): choosing such a guest now ends in the refusal's words in its toast (`quickCreate`'s `onError`), where it made the task. Offering only those who may see the list, or sharing it on the way, as ClickUp's "share first" asks, is the picker's to do, not counted here.
+
+Regression on lane 3 with the batch's other items: 66 suites, 1,413 checks, all green (listed under `found-30-sep/access-asks-from-outside-the-workspace`).
+
+### `found-6-oct/clickup-merge-writes-values-to-fields-the-task-lacks` — **closed** (visible bug, small; found reviewing `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change`) · reproduced 6 October
 
 **The ClickUp merge writes custom-field values onto fields of the import's own project that the merged task does not have**
 
 *Evidence, 6 October, lane 4 (`probe-r5`):* a merge with a Budget column answered 201 with `customFieldValuesSet` 1; the value row sits on the task for the field "Budget" of the import's new project, not the task's own. `GET /tasks/:id/custom-fields` answers 200 [], and `PUT` of that field 404 "Custom field not found on this task".
 
 *To close (the owner chooses):* skip and report such a value, or write it to the task's own field of that name; then check it by SQL in `imports`.
+
+*Closed, 7 October* (lane 3). ClickUp's importers map a column to a field of the place the tasks go: "Only Custom Fields that are available in the target location will be available for selection" (through search excerpts). A merged task's place is its own.
+
+- A merged task's value goes on its own field of that name: a field the task has (`fieldIsOnTask`), the name matched whatever its case. A value with no such field, or more than one, or of a kind the import does not fill, or that is not of the field's type, or not one of a dropdown's options, is not written, and the run says which and why: 'Custom value "<column>" on "<task>": the task has no field by that name, so it was not written'. A new task's values go on the run's fields, as before.
+
+Measured on lane 3 (`import-probe.mjs`): before, a ClickUp merge with a Budget of 42 on task two wrote it on the import project's Budget, a field task two does not have. After, task two having no Budget, nothing is written and the run says so; with a Budget of its own, the value lands there (`imports`).
+
+Checks:
+- `imports` 12b: "a ClickUp merge writes a value on the task’s own field of that name, and reports one the task has no field for, writing it nowhere", red before (lane 4), green after.
+- `clickup-import.service.test.ts`: "a merged task’s value goes on its own field of that name; a value it has no field for, or one its dropdown does not offer, is reported and not written".
+- Patch `imports-76` (a merged value goes on the run's field) reddens the check, 59 of 60 on lane 3. Unit claim `imports-79`.
+
+Regression on lane 3 with the batch's other items: 66 suites, 1,413 checks, all green (listed under `found-30-sep/access-asks-from-outside-the-workspace`).
 
 ### `found-6-oct/adding-a-subtask-is-refused-as-deleting` — **closed** (visible bug, small; found reviewing `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change`) · reproduced 6 October
 
@@ -9814,13 +9916,25 @@ Checks:
 
 Regression on lanes 2, 4 and 6: the 76 suites these touch, 1233 checks, 69 suites green at once. `app-catalogue` and `meetings-connect-calendar` failed on races in the suites, found here and closed beside these (`found-6-oct/app-catalogue-waits-for-a-tile-drawn-before-any-answer`, `found-6-oct/meetings-upcoming-read-after-a-fixed-wait`). At a load of about 12 on four cores, `comment-recording`, `sidebar-sections`, `task-menu` and `task-depth` each gave up a 20 s wait for a sheet or a menu, and `task-sheet-fetches` counted one of its sheet's opening fetches as the change's while its second sheet missed the change; each was green when run again on its own (33, 25, 37, 92 and 2 checks). API unit tests 2135/2135, web 350/350, both typechecks clean.
 
-### `found-6-oct/enrichment-files-comments-under-a-matched-name` — open (security, small; found reviewing `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change`) · reproduced 6 October
+### `found-6-oct/enrichment-files-comments-under-a-matched-name` — **closed** (security, small; found reviewing `found-6-oct/import-merge-writes-tasks-its-importer-may-not-change`) · reproduced 6 October
 
 **The ClickUp enrichment files an imported comment under whichever member's name matches the ClickUp author**
 
 *Evidence, 6 October, lane 4 (the review's `probe-r3`, at the service):* a comment whose ClickUp username equalled another member's display name got that member's `author_id`. With a token for a ClickUp workspace they control, an importer can file comments in another member's name. ClickUp's Jira importer imports "comments with their authors" after a user-mapping step in which the importer chooses each user ("Import from Jira", search excerpts).
 
 *To close (the owner chooses):* email only, an explicit mapping the importer confirms, or always the importer with the author named in the text; then check it with a comment whose author matches a member only by name.
+
+*Closed, 7 October* (lane 3). ClickUp's own importers map each person in a step the importer confirms, and only then bring comments in "with their authors" (Jira and Asana importers, through search excerpts). An author is never guessed from a name.
+
+- An imported comment is filed under a member only when its ClickUp author has that member's email, which ClickUp's API gives with each comment. Otherwise it is the importer's, with "Originally by <name>" in its text, as a comment whose author is no member already was. Members are no longer looked up by their display name.
+
+Measured at the service, as the item was found (`clickup-import.enrich.test.ts`, the review's case): before, a comment whose ClickUp username was another member's display name was filed under that member; after, it is the importer's, its author named in it, and a comment whose author has a member's email is that member's.
+
+Checks:
+- `clickup-import.enrich.test.ts` 8 → 9: "a ClickUp author who has only a member’s name is not that member: the comment is the importer’s, its author named in it".
+- Unit claim `enr-1` (members looked up by name as well) reddens it.
+
+Regression on lane 3 with the batch's other items: 66 suites, 1,413 checks, all green (listed under `found-30-sep/access-asks-from-outside-the-workspace`).
 
 ### `found-6-oct/calendar-pull-uses-a-leavers-connection` — **closed** (security, small; found closing `found-5-oct/calendar-push-ignores-who-may-read`) · reproduced 6 October
 
@@ -10001,6 +10115,23 @@ Regression on lanes 2, 4, 6 and 7: the 23 suites that open the App Center or Mee
 *Evidence, 6 October:* CI's Postgres harnesses job failed at `5049db0` on this suite alone: "threw: page.evaluate: Error: no drag source [data-testid="tree-list-…"] — the list row this section drags is not drawn" (15 passed, 2 failed). The section "the strip is keyed on the KIND, never on a stale parent" drags `listIds[0]`, which the section before it had just moved into P1 (`movedList = drawnLists[0]`, the first list drawn, which is `listIds[0]`). The tree has opened only P0, so that row is drawn only until the tree refetches after the move. On lane 4 the suite as it stands passed (23 of 23), and failed as CI did — 15 passed, 2 failed, the same throw — when it first waited for the tree to drop the moved list's row.
 
 *Closed, 6 October* (lane 4). The section drags a list that stayed in P0, and waits for its row: a list in flight is all the check needs, and one of the two still in P0 is drawn whether the tree has refetched or not. With the same wait for the refetch first, 23 of 23, twice; and as it stands, through `verify.sh` on lane 7, 23 of 23.
+
+### `found-8-oct/planner-grid-aims-its-drop-after-one-scroll` — **closed** (test tooling, small; found rehearsing CI for `4465e68`) · reproduced 8 October
+
+**`planner-grid` aims its drop by a column measured after one scroll home, so a grid not at home takes the drop on nothing**
+
+*Evidence, 8 October:* the third CI rehearsal of `4465e68` failed the Postgres job's "Planner grid", 20 of 23: "dropping it posts a block for that task — the page sent {}", and the start-time and rounding checks after it. The step ran at 23:53 UTC, when the grid's arrival scroll is deepest (it opens an hour before now). It passed in the four rehearsals before, and here 34 times of 34: on this tree's bundle and the rehearsal's own, at 00:xx UTC and with the browser's clock at 23:xx, and with the page's CPU shared with two busy loops. The suite scrolls the grid home once, waits 150 ms, measures the first day column and lets go 127 px below its top, and says nothing about where the drop landed. Reproduced: a copy of the suite that puts the grid back where the page's own arrival scroll leaves it at 23:00, after its scroll home, fails the same three checks in the same words, "the page sent {}" (20 of 23). Its fixed 900 ms wait for the block's POST was not the cause here: with the page slowed forty times just before the drop, the POST still came in time, both versions 23 of 23.
+
+*To close:* aim the drop only once the grid has stayed at home, say where a drop landed when no block comes of it, and wait for the POST rather than a fixed time.
+
+*Closed, 8 October.*
+- The suite scrolls the grid home until the column's top is on screen and has not moved between two reads 100 ms apart, and aims the drop by that box.
+- When no block comes of a drop it says what the drop landed on (the element at the point, or that the point is off the page).
+- It waits for the block's POST, up to 8 s, instead of 900 ms.
+
+Measured: the copy with the late scroll put in, on the new suite, 23 of 23, twice; the new suite as it is, 23 of 23, three times on the rehearsal's bundle.
+
+Checks: `planner-grid` 23 (unchanged in number). Patch `pg-6` (a drop posts nothing) is new: it reddens the three drop checks, 20 of 23, saying "the drop landing on the day column". `pg-4` (the drop keeps pointer precision) still reddens the rounding check alone, 22 of 23.
 
 ## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
 

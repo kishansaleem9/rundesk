@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, HttpException } from '@nestjs/common'
 import { and, eq } from 'drizzle-orm'
-import { lists, projects, spaces, tasks, workspaceMembers } from '@rundesk/db'
+import { lists, projects, spaces, tasks, users, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { taskInReachFilter } from '../../../common/permissions/container-access.guard-helper'
 import { resolveIsManager, taskVisibilityFilter } from '../../../common/permissions/item-visibility'
@@ -34,6 +34,29 @@ export type Importer = { id: string; role?: string | null }
  * Refused with the reason, before anything is read or written.
  */
 export const GUESTS_CANNOT_IMPORT = 'Guests cannot import data into a workspace'
+
+/**
+ * WHOM AN IMPORT PUTS ON A TASK: whom the assignee route would, someone who
+ * can see the task once assigned to it (`found-6-oct/import-assigns-people-who-cannot-see-the-task`).
+ *
+ * Both importers linked anyone a row named, by name or email: a guest nothing
+ * was shared with was put on an open space's task by a spreadsheet merge, a new
+ * row and a ClickUp merge (lane 3, measured), where `POST /tasks/:id/assignees`
+ * answers 400 for the same guest. ClickUp's importers assign only existing
+ * Workspace members, and "tasks will be imported but may not be assigned"
+ * otherwise; and ClickUp has a guest's task, List or Folder shared before the
+ * guest can be assigned. So a person the task's read rule refuses, asked as
+ * its assignee (`readableTask`, `asAssignee`), is not linked, and the import
+ * says so with this reason. Asked of `db` as handed: a row's own transaction
+ * sees the task it has just written.
+ */
+export const MAY_NOT_BE_ASSIGNED = "can't see this task, so it was not assigned to them"
+
+export async function mayBeAssigned(db: Db, p: { workspaceId: string; taskId: string; userId: string }): Promise<boolean> {
+  const [person] = await db.select({ role: users.role }).from(users).where(eq(users.id, p.userId)).limit(1)
+  if (!person) return false
+  return (await readableTask(db, p.workspaceId, p.taskId, { id: p.userId, role: person.role }, { asAssignee: true })) !== null
+}
 
 export async function assertMayImport(db: Db, params: { workspaceId: string; actorId: string }): Promise<void> {
   const [member] = await db
@@ -242,6 +265,7 @@ export type ImportAccess = {
   assertMayMerge: typeof assertMayMerge
   assertMayLinkSubtask: typeof assertMayLinkSubtask
   enrichmentRefusals: typeof enrichmentRefusals
+  mayBeAssigned: typeof mayBeAssigned
 }
 
-export const IMPORT_ACCESS: ImportAccess = { assertMayImport, matchableTaskIndex, assertMayMerge, assertMayLinkSubtask, enrichmentRefusals }
+export const IMPORT_ACCESS: ImportAccess = { assertMayImport, matchableTaskIndex, assertMayMerge, assertMayLinkSubtask, enrichmentRefusals, mayBeAssigned }

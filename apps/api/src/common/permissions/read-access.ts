@@ -113,12 +113,20 @@ export async function readableList(
   return { listId: row.listId, spaceId: row.spaceId, role }
 }
 
-/** The task's list and project when `actor` may open it in `workspaceId`, else null. */
+/**
+ * The task's list and project when `actor` may open it in `workspaceId`, else null.
+ *
+ * `asAssignee`: whether they could open it ONCE assigned to it — the question
+ * an assignment asks of the person given the task (`TasksService.assertPersonCanSeeTask`).
+ * A private task is its assignees' too; its workspace, its private containers,
+ * its private list and a guest's reach are not granted by being assigned.
+ */
 export async function readableTask(
   db: Db,
   workspaceId: string,
   taskId: string,
   actor: ReadActor,
+  opts: { asAssignee?: boolean } = {},
 ): Promise<{ taskId: string; listId: string; projectId: string } | null> {
   const [row] = await db
     .select({
@@ -154,7 +162,7 @@ export async function readableTask(
   if (role === 'guest' && !(await guestMayRead(db, actor.id, 'task', row.taskId))) return null
   const isManager = isManagerRole(role)
   if (!canSeePrivateItem({ visibility: row.listVisibility, createdById: row.listCreatedById }, { userId: actor.id, isManager })) return null
-  if (row.taskVisibility === 'private' && !isManager && row.taskCreatedById !== actor.id) {
+  if (row.taskVisibility === 'private' && !isManager && row.taskCreatedById !== actor.id && !opts.asAssignee) {
     const [assigned] = await db
       .select({ userId: taskAssignees.userId })
       .from(taskAssignees)

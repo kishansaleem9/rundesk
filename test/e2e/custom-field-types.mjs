@@ -62,7 +62,7 @@ const argOf = (name, fallback) => {
 }
 
 /** Exact, never `<`: a branch that silently skipped is a shorter run. */
-const EXPECTED_CHECKS = 34
+const EXPECTED_CHECKS = 35
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3029))
@@ -246,25 +246,58 @@ try {
       'would be worse than accepting it, because the caller would believe it',
   )
 
+  /*
+   * A RENAME CARRIES THE FORMULA WITH IT (`found-6-oct/field-checks-name-a-private-lists-fields`).
+   * It was refused while a formula read the field, naming the formula — to a
+   * member who could not open the private list it was kept to. A ClickUp
+   * formula reads a field, not its name: a rename now writes the new name into
+   * every formula that reads the field, which computes as it did.
+   */
+  // The names a formula reads, not its spacing: whether an expression is kept as typed is the verbatim check's.
+  const sameFormula = (got, want) => typeof got === 'string' && got.replace(/\s+/g, '') === want.replace(/\s+/g, '')
   const rename = await A(`/workspaces/${W}/custom-fields/${budget.data.id}`, {
     method: 'PATCH', body: { name: `Budget USD ${TAG}` },
   })
+  const remainingNow = ((await A(`/workspaces/${W}/projects/${project.id}/custom-fields`)).data ?? []).find((f) => f.id === remainingId)
+  const renamedValues = await serverValues(subject.id)
   chk(
-    rename.status === 400 && said(rename).includes('Remaining'),
-    'renaming a field a formula reads is refused, naming the formula that reads it',
-    `it answered ${rename.status} "${said(rename)}" — a rename that goes through leaves the ` +
-      'formula silently drawing a dash where a number was',
+    rename.status === 200 && sameFormula(remainingNow?.config?.expression, `({Budget USD ${TAG}} - {Spent}) * 2`) && renamedValues.Remaining === 400,
+    'renaming a field a formula reads carries the formula with it: the rename stands, the formula reads the new name, and it computes as before',
+    `the rename answered ${rename.status} "${said(rename)}"; the formula reads ${JSON.stringify(remainingNow?.config?.expression ?? null)} and is worth ${JSON.stringify(renamedValues.Remaining)}`,
   )
-  /*
-   * Put the fixture back if the refusal did not hold. Without this a patch
-   * that removes the guard reddens this check AND every later one that reads
-   * `Remaining`, because a rename that goes through is exactly what orphans
-   * the formula — and a patch whose damage spreads cannot be attributed.
-   */
-  if (rename.status !== 400) {
+  // The name back, for what follows: and the formula with it.
+  if (rename.status === 200) {
     await A(`/workspaces/${W}/custom-fields/${budget.data.id}`, {
       method: 'PATCH', body: { name: 'Budget' },
     })
+  }
+
+  /*
+   * NO BRACE IN A FIELD'S NAME. A formula reads `{` and `}` as the edges of the
+   * name it refers to, and a rename writes the new name into each formula that
+   * reads the field, where a brace would end the reference early. Made or
+   * renamed so, a name is refused in one sentence, and nothing changes.
+   */
+  const braced = await define({ name: `Budget {2} ${TAG}`, type: 'number' })
+  const bracedRename = await A(`/workspaces/${W}/custom-fields/${budget.data.id}`, {
+    method: 'PATCH', body: { name: 'Budget}' },
+  })
+  const fieldsNow = (await A(`/workspaces/${W}/projects/${project.id}/custom-fields`)).data ?? []
+  const budgetNow = fieldsNow.find((f) => f.id === budget.data.id)
+  const formulaNow = fieldsNow.find((f) => f.id === remainingId)
+  chk(
+    braced.status === 400 && bracedRename.status === 400 && said(braced) === said(bracedRename) && /cannot hold \{ or \}/.test(said(braced)) &&
+      !fieldsNow.some((f) => f.name === `Budget {2} ${TAG}`) && budgetNow?.name === 'Budget' && sameFormula(formulaNow?.config?.expression, '({Budget} - {Spent}) * 2'),
+    'a field’s name may not hold { or }: made or renamed so, it is refused in one sentence, and the fields and the formula reading them are as they were',
+    `making one answered ${braced.status} "${said(braced)}"; renaming Budget so answered ${bracedRename.status} "${said(bracedRename)}"; Budget is now ${JSON.stringify(budgetNow?.name ?? null)}, the formula reads ${JSON.stringify(formulaNow?.config?.expression ?? null)}`,
+  )
+  // Whatever got through, put back for what follows: the field, Budget's name, and the formula.
+  if (braced.data?.id) await A(`/workspaces/${W}/custom-fields/${braced.data.id}`, { method: 'DELETE' })
+  if (budgetNow && budgetNow.name !== 'Budget') {
+    await A(`/workspaces/${W}/custom-fields/${budget.data.id}`, { method: 'PATCH', body: { name: 'Budget' } })
+  }
+  if (formulaNow && !sameFormula(formulaNow.config?.expression, '({Budget} - {Spent}) * 2')) {
+    await A(`/workspaces/${W}/custom-fields/${remainingId}`, { method: 'PATCH', body: { config: { expression: '({Budget} - {Spent}) * 2' } } })
   }
 
   // =========================================================================

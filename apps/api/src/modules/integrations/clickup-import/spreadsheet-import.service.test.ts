@@ -2,10 +2,10 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { BadRequestException, ForbiddenException } from '@nestjs/common'
 import { PgDialect } from 'drizzle-orm/pg-core'
-import { clickupImportJobs, labels, projects, spaces, taskLabelAssignments, tasks } from '@rundesk/db'
+import { clickupImportJobs, labels, projects, spaces, taskAssignees, taskLabelAssignments, tasks } from '@rundesk/db'
 import { SpreadsheetImportService } from './spreadsheet-import.service'
 import { dupKey } from './clickup-csv.util'
-import { GUESTS_CANNOT_IMPORT, IMPORT_ACCESS, type ImportAccess } from './import-access'
+import { GUESTS_CANNOT_IMPORT, IMPORT_ACCESS, MAY_NOT_BE_ASSIGNED, type ImportAccess } from './import-access'
 import { NOT_DELIMITED_TEXT } from './spreadsheet-import.util'
 
 /**
@@ -106,8 +106,8 @@ const IMPORTER = { id: 'user-1' }
  * before it answers, as the real one reads the task and the person's role — so a read it sends
  * while a row's transaction is open is one the stand-in sees waiting.
  */
-function access(opts: { refuse?: Record<string, Error>; reads?: boolean } = {}) {
-  const asked = { index: [] as unknown[], merges: [] as unknown[] }
+function access(opts: { refuse?: Record<string, Error>; reads?: boolean; refuseAssignee?: (userId: string) => boolean } = {}) {
+  const asked = { index: [] as unknown[], merges: [] as unknown[], assignees: [] as unknown[] }
   const rules: ImportAccess = {
     assertMayImport: async () => {},
     matchableTaskIndex: async (db: any, params) => {
@@ -128,6 +128,10 @@ function access(opts: { refuse?: Record<string, Error>; reads?: boolean } = {}) 
     // Neither is asked by the spreadsheet import: its rows link no subtasks, and it has no enrichment.
     assertMayLinkSubtask: async () => {},
     enrichmentRefusals: async () => ({ task: null, comments: null, attachments: null }),
+    mayBeAssigned: async (_db, params) => {
+      asked.assignees.push({ ...params })
+      return !opts.refuseAssignee?.(params.userId)
+    },
   }
   return { rules, asked }
 }
@@ -327,6 +331,26 @@ describe('SpreadsheetImportService.processSheetImport — the merge and the tags
   })
 })
 
+
+describe('SpreadsheetImportService.processSheetImport — whom a row puts on its task (found-6-oct/import-assigns-people-who-cannot-see-the-task)', () => {
+  it('a person the assignee route would refuse is not linked, on a merged row or a new one: counted unmatched, and the run says who and why', async () => {
+    const members = [{ userId: 'u-guest', displayName: 'Guest', email: 'guest@x.com' }]
+    const existing = [{ id: 'task-two', listName: 'Alpha', title: 'two' }]
+    const { db, committed } = makeDb({ selects: [members, existing] })
+    const { rules, asked } = access({ refuseAssignee: (u) => u === 'u-guest' })
+    const summary = await serviceOn(db, rules).processSheetImport('job-a', 'ws-1', IMPORTER, {
+      content: 'Title,List,Assignees\ntwo,Alpha,guest@x.com\nnew,Alpha,guest@x.com\n',
+      preset: 'generic',
+      strategy: 'merge',
+    })
+    assert.equal(asked.assignees.length, 2, 'the assignee rule was not asked of each row’s task')
+    assert.deepEqual(into(committed, taskAssignees), [], 'a person the rule refuses was put on a task')
+    assert.equal(summary.assigneesLinked, 0)
+    assert.equal(summary.assigneesUnmatched, 2)
+    assert.ok(summary.errors.includes(`Row 2 ("two"): guest@x.com ${MAY_NOT_BE_ASSIGNED}`), `the run did not say who was not assigned: ${JSON.stringify(summary.errors)}`)
+    assert.ok(summary.errors.includes(`Row 3 ("new"): guest@x.com ${MAY_NOT_BE_ASSIGNED}`), JSON.stringify(summary.errors))
+  })
+})
 
 describe('SpreadsheetImportService — who may import, and which tasks an import may match and merge into', () => {
   it('a guest is refused the preview and the import, 403 “Guests cannot import data into a workspace”, before anything is read or written (found-6-oct/a-guest-who-may-import-makes-a-space)', async () => {

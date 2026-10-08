@@ -58,7 +58,7 @@ const argOf = (name, fallback) => {
  * run that still passes — and half of this suite is branches that only run once
  * an earlier step really happened.
  */
-const EXPECTED_CHECKS = 57
+const EXPECTED_CHECKS = 60
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -1584,6 +1584,52 @@ try {
     guestSees.sheet?.said === PAGE_GUEST_WORDS && guestSees.sheet?.offered === 0 && guestSees.clickup?.said === PAGE_GUEST_WORDS && guestSees.clickup?.offered === 0,
     'the import page offers that guest neither the spreadsheet nor the ClickUp import, and says why in the server’s words: “Guests cannot import data into a workspace.”',
     `the spreadsheet tab ${JSON.stringify(guestSees.sheet ?? null)}; the ClickUp tab ${JSON.stringify(guestSees.clickup ?? null)}`,
+  )
+
+  // ══ 12b. WHOM AN IMPORT PUTS ON A TASK, AND WHERE A MERGED TASK'S VALUE GOES ═══
+  /*
+   * `found-6-oct/import-assigns-people-who-cannot-see-the-task`: both importers
+   * linked anyone a row named, so a guest nothing was shared with was put on a
+   * spreadsheet merge's task, a new row's and a ClickUp merge's, where the
+   * assignee route refuses them (lane 3, measured). An import now puts on a
+   * task whom that route would, and its run says who it did not and why; and a
+   * task made with such a person as its assignee is refused in the route's
+   * words (`found-7-oct/a-task-is-born-assigned-to-a-guest-who-cannot-see-it`).
+   * `found-6-oct/clickup-merge-writes-values-to-fields-the-task-lacks`: a ClickUp
+   * merge wrote a value onto the run's own field of that name, which the task
+   * does not have; it goes on the task's own field now, and one the task has no
+   * field for is reported and written nowhere.
+   */
+  console.log('\n▶ whom an import puts on a task, and where a merged task’s value goes')
+  const assigneeGuest = await joined('assignee-guest', 'guest')
+  const assignTarget = await placed(OPEN, `Assign ${TAG}`, `Assign one ${TAG}`)
+  const ownBudget = await api(`/workspaces/${WT}/projects/${assignTarget.project}/custom-fields`, { method: 'POST', body: { name: `Budget ${TAG}`, type: 'number' } })
+  const sheetAssign = await api(`/workspaces/${WT}/import/spreadsheet`, { method: 'POST', body: { content: `Title,List,Assignees\n${assignTarget.title},${assignTarget.list},${assigneeGuest.email}\nAssign new ${TAG},${assignTarget.list},${assigneeGuest.email}\n`, preset: 'generic', strategy: 'merge', targetSpaceId: OPEN, targetProjectName: `Assign sheet ${TAG}` } })
+  const sheetAssignJob = await jobOf(api, WT, 'spreadsheet', sheetAssign)
+  const clickupAssign = await api(`/workspaces/${WT}/import/clickup`, { method: 'POST', body: { csv: `Task Name,List,Assignee,Budget ${TAG},Mood ${TAG}\n${assignTarget.title},${assignTarget.list},${assigneeGuest.email},42,happy\n`, strategy: 'merge', targetSpaceId: OPEN, targetProjectName: `Assign clickup ${TAG}` } })
+  const clickupAssignJob = await jobOf(api, WT, 'clickup', clickupAssign)
+  const guestOnTasks = (await sql`select count(*)::int as n from task_assignees where user_id = ${assigneeGuest.userId}`)[0].n
+  const saysWhy = (job) => (job?.result?.errors ?? []).filter((e) => e.includes(assigneeGuest.email) && e.includes("can't see this task")).length
+  chk(
+    sheetAssignJob?.status === 'completed' && clickupAssignJob?.status === 'completed' && guestOnTasks === 0
+      && saysWhy(sheetAssignJob) === 2 && saysWhy(clickupAssignJob) === 1,
+    'an import puts nobody on a task the assignee route would refuse them: a guest named by a spreadsheet merge, a new row and a ClickUp merge is on none of them, and each run says who and why',
+    `the spreadsheet job ${sheetAssignJob?.status ?? 'none'}, the ClickUp job ${clickupAssignJob?.status ?? 'none'}; the guest is on ${guestOnTasks} task(s); the reasons given: ${saysWhy(sheetAssignJob)} and ${saysWhy(clickupAssignJob)} (${JSON.stringify([...(sheetAssignJob?.result?.errors ?? []), ...(clickupAssignJob?.result?.errors ?? [])]).slice(0, 400)})`,
+  )
+  const mergedValues = await sql`select v.field_id::text as field, v.value from custom_field_values v where v.task_id = ${assignTarget.id}`
+  chk(
+    ownBudget.ok && mergedValues.length === 1 && mergedValues[0].field === ownBudget.data?.id && mergedValues[0].value?.v === 42
+      && (clickupAssignJob?.result?.errors ?? []).some((e) => e.includes(`Mood ${TAG}`) && e.includes('the task has no field by that name')),
+    'a ClickUp merge writes a value on the task’s own field of that name, and reports one the task has no field for, writing it nowhere',
+    `the task's own field answered ${ownBudget.status}; its value rows ${JSON.stringify(mergedValues)}; the run's errors ${JSON.stringify(clickupAssignJob?.result?.errors ?? null).slice(0, 300)}`,
+  )
+  const [assignList] = await sql`select list_id::text as id from tasks where id = ${assignTarget.id}`
+  const bornAssigned = await api('/tasks', { method: 'POST', body: { listId: assignList.id, title: `Born assigned ${TAG}`, assigneeIds: [assigneeGuest.userId] } })
+  chk(
+    bornAssigned.status === 400 && bornAssigned.message === "That person can't see this task, so it can't be assigned to them"
+      && (await sql`select count(*)::int as n from tasks where title = ${`Born assigned ${TAG}`}`)[0].n === 0,
+    'and a task made with that guest as its assignee is refused in the assignee route’s words, and not made',
+    `POST /tasks answered ${bornAssigned.status} ${JSON.stringify(bornAssigned.message ?? null)}`,
   )
 
   // ══ 13. IMPORTS THAT RUN WHILE EVERYTHING ELSE DOES ═════════════════════════

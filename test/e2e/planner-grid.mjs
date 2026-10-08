@@ -271,13 +271,31 @@ try {
    * scrolled and the same test passes. That is the exact fault the 24-hour grid
    * was built to fix, reappearing in the test that guards it, so the fix is the
    * same in spirit: do not assume the hours on screen are the hours you want.
+   *
+   * AND HOME UNTIL IT IS READ (`found-8-oct/planner-grid-aims-its-drop-after-one-scroll`).
+   * One scroll and 150 ms was all this asked, and a rehearsal of CI at 23:53
+   * failed the three drop checks below as "the page sent {}": a grid that was
+   * not at home when the column was measured put the drop off the page again.
+   * Put back where the page's own arrival scroll leaves it at 23:00, after the
+   * scroll home, the grid fails those three checks in the same words. So the
+   * scroll is applied until the column's top is on screen and has not moved
+   * between two reads, and that is the box the drag is aimed by.
    */
-  await page.evaluate(() => {
+  const scrollHome = () => page.evaluate(() => {
     let el = document.querySelector('[data-testid="planner-day-column"]')?.parentElement
     while (el && el.scrollHeight <= el.clientHeight) el = el.parentElement
     if (el) el.scrollTop = 0
   })
-  await page.waitForTimeout(150)
+  const viewportHeight = page.viewportSize()?.height ?? 0
+  let homeBox = null
+  await waitUntil(async () => {
+    await scrollHome()
+    const first = await column.boundingBox({ timeout: 2000 }).catch(() => null)
+    await page.waitForTimeout(100)
+    const then = await column.boundingBox({ timeout: 2000 }).catch(() => null)
+    homeBox = then
+    return !!first && !!then && first.y === then.y && then.y >= 0 && then.y + 127 < viewportHeight
+  }, { timeoutMs: 8000, lastLookGraceMs: 5000 })
 
   /*
    * `boundingBox()` THROWS when the locator matches nothing — it waits for the
@@ -291,7 +309,7 @@ try {
    * no block — which is the honest account of a grid with nothing to drag.
    */
   const from = await item.boundingBox({ timeout: 6000 }).catch(() => null)
-  const to = await column.boundingBox({ timeout: 6000 }).catch(() => null)
+  const to = homeBox ?? (await column.boundingBox({ timeout: 6000 }).catch(() => null))
   const draggable = !!from && !!to
   if (draggable) {
     await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
@@ -309,16 +327,30 @@ try {
     'the drag shows what is being dragged',
     'nothing followed the pointer — a drag with no feedback is one people do not believe is happening',
   )
+  // What the drop lands on, said if no block comes of it: the column, or what covers the point instead.
+  const landsOn = draggable
+    ? await page.evaluate(([x, y]) => {
+        const el = document.elementFromPoint(x, y)
+        if (!el) return `nothing (${Math.round(x)}, ${Math.round(y)} is off the page)`
+        if (el.closest('[data-testid="planner-day-column"]')) return 'the day column'
+        const holder = el.closest('[data-testid]')
+        if (!holder) return `${el.tagName.toLowerCase()}, not the day column`
+        return `${el.tagName.toLowerCase()} in [${holder.getAttribute('data-testid')}], not the day column`
+      }, [to.x + to.width / 2, to.y + 127]).catch(() => 'unknown')
+    : 'nothing: there was no drag'
+  const callsBeforeDrop = calls.length
   if (draggable) await page.mouse.up()
-  await page.waitForTimeout(900)
+  // The block's POST when it is sent, not after a fixed 900 ms: a drop answered later read as one that sent nothing.
+  const posted = () => calls.slice(callsBeforeDrop).filter((c) => c.method === 'POST' && c.url.includes('/blocks')).at(-1)
+  if (draggable) await waitUntil(() => !!posted(), { timeoutMs: 8000, lastLookGraceMs: 0 })
 
-  const post = calls.filter((c) => c.method === 'POST' && c.url.includes('/blocks')).at(-1)
+  const post = posted()
   let sent = null
   try { sent = JSON.parse(post?.body ?? '{}') } catch { /* reported below */ }
   chk(
     !!post && sent?.taskId === BACKLOG_TASK,
     'dropping it posts a block for that task',
-    `the page sent ${JSON.stringify(sent)} — the grid would be a picture you can drag onto`,
+    `the page sent ${JSON.stringify(sent)}, the drop landing on ${landsOn} — the grid would be a picture you can drag onto`,
   )
   chk(
     typeof sent?.startsAt === 'string' && !Number.isNaN(Date.parse(sent.startsAt)),

@@ -34,7 +34,17 @@ export const FORMULA_NUMERIC_TYPES = [
   'progress_auto',
 ] as const
 
-export type FormulaConfig = { expression: string }
+/**
+ * `expression` is what the definer typed, and what the field shows; `compiled`
+ * is the same expression with each field named by its id, `{#<id>}`, resolved
+ * when it was saved — what is evaluated, and what a rename leaves standing
+ * (`found-6-oct/field-checks-name-a-private-lists-fields`). A formula saved
+ * before there was `compiled` reads its fields by name.
+ */
+export type FormulaConfig = { expression: string; compiled?: string }
+
+/** A field named by id in a compiled expression: `#<id>`, as `{#<id>}` is read. */
+export const FIELD_ID_REF = /^#([0-9a-f-]{36})$/i
 
 /** Thrown for a bad expression. The service turns it into a 400 with this text. */
 export class FormulaError extends Error {}
@@ -248,5 +258,61 @@ export function evaluateFormula(
 export function toFormulaConfig(raw: unknown): FormulaConfig {
   if (!raw || typeof raw !== 'object') return { expression: '' }
   const expression = (raw as Partial<FormulaConfig>).expression
-  return { expression: typeof expression === 'string' ? expression : '' }
+  const compiled = (raw as Partial<FormulaConfig>).compiled
+  return {
+    expression: typeof expression === 'string' ? expression : '',
+    ...(typeof compiled === 'string' ? { compiled } : {}),
+  }
+}
+
+/**
+ * Each `{…}` of an expression, as the tokenizer reads one: from `{` to the next
+ * `}`, its name trimmed. In the order they are written, duplicates kept.
+ */
+function refSpans(expression: string): Array<{ start: number; end: number; name: string }> {
+  const out: Array<{ start: number; end: number; name: string }> = []
+  let i = 0
+  while (i < expression.length) {
+    if (expression[i] === '{') {
+      const end = expression.indexOf('}', i + 1)
+      if (end === -1) break
+      out.push({ start: i, end: end + 1, name: expression.slice(i + 1, end).trim() })
+      i = end + 1
+      continue
+    }
+    i += 1
+  }
+  return out
+}
+
+/** The expression with each field it names written as `{#<id>}`: `idOf` answers each name. */
+export function compileFormula(expression: string, idOf: (name: string) => string): string {
+  let out = ''
+  let at = 0
+  for (const ref of refSpans(expression)) {
+    out += `${expression.slice(at, ref.start)}{#${idOf(ref.name)}}`
+    at = ref.end
+  }
+  return out + expression.slice(at)
+}
+
+/**
+ * The expression shown, with every reference the compiled one makes to
+ * `fieldId` written under `name`: the shown and compiled expressions name the
+ * same fields in the same order, one for one. Answers the expression as it was
+ * when the two do not line up (a config written by hand).
+ */
+export function renameInFormula(config: FormulaConfig, fieldId: string, name: string): string {
+  if (!config.compiled) return config.expression
+  const shown = refSpans(config.expression)
+  const ids = refSpans(config.compiled).map((r) => FIELD_ID_REF.exec(r.name)?.[1] ?? null)
+  if (shown.length !== ids.length) return config.expression
+  let out = ''
+  let at = 0
+  shown.forEach((ref, i) => {
+    if (ids[i]?.toLowerCase() !== fieldId.toLowerCase()) return
+    out += `${config.expression.slice(at, ref.start)}{${name}}`
+    at = ref.end
+  })
+  return out + config.expression.slice(at)
 }

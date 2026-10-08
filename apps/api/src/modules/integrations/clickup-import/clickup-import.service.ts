@@ -35,7 +35,8 @@ import {
 import { NOT_DELIMITED_TEXT, storable } from './spreadsheet-import.util'
 import { undoRun, type RunMade } from './run-undo'
 import { assertImportTarget } from './import-target'
-import { IMPORT_ACCESS, writtenFields, type Importer } from './import-access'
+import { IMPORT_ACCESS, MAY_NOT_BE_ASSIGNED, writtenFields, type Importer } from './import-access'
+import { fieldIsOnTask } from '../../custom-fields/custom-fields.service'
 import {
   ClickUpApiClient,
   extractCommentText,
@@ -116,6 +117,16 @@ export type ImportSummary = {
   notImported: { comments: string; attachments: string }
   /** Present only when the API enrichment path ran. */
   enrichment?: EnrichmentReport
+}
+
+/** The field types a file's cell fills, and how it is read for each (money is a number). */
+const FILE_FILLS: Record<string, CustomFieldColumn['type']> = {
+  text: 'text',
+  number: 'number',
+  money: 'number',
+  dropdown: 'dropdown',
+  date: 'date',
+  checkbox: 'checkbox',
 }
 
 @Injectable()
@@ -372,7 +383,7 @@ export class ClickUpImportService {
               summary.tasksUpdated++
               if (t.taskId) created.set(t.taskId, { ourId: targetId, parentId: t.parentId, title: t.title })
               seenByKey.set(key, targetId)
-              await this.applyAssigneesTagsFields(targetId, t, memberByKey, ensureLabel, fieldDefs, summary)
+              await this.applyAssigneesTagsFields(workspaceId, targetId, t, memberByKey, ensureLabel, fieldDefs, summary, { merged: true })
             } else {
               // create (either not a duplicate, or "import anyway")
               const [task] = await this.db
@@ -400,7 +411,7 @@ export class ClickUpImportService {
               madeHere.add(task.id)
               if (t.taskId) created.set(t.taskId, { ourId: task.id, parentId: t.parentId, title: t.title })
               if (!seenByKey.has(key)) seenByKey.set(key, task.id)
-              await this.applyAssigneesTagsFields(task.id, t, memberByKey, ensureLabel, fieldDefs, summary)
+              await this.applyAssigneesTagsFields(workspaceId, task.id, t, memberByKey, ensureLabel, fieldDefs, summary, { merged: false })
             }
           } catch (e: any) {
             summary.errors.push(`Task "${t.title}": ${e?.message ?? 'unknown error'}`)
@@ -579,7 +590,7 @@ export class ClickUpImportService {
       workspaceId,
       pairs.map((p) => p.taskId),
     )
-    const memberByKey = await this.loadMemberIndex(workspaceId)
+    const memberByEmail = await this.loadMemberEmails(workspaceId)
     const client: ClickUpClientLike = opts.client ?? new ClickUpApiClient({ apiToken })
 
     let tasksEnriched = 0
@@ -605,7 +616,7 @@ export class ClickUpImportService {
           const comments = await client.getTaskComments(clickupTaskId)
           for (const c of comments) {
             try {
-              await this.importComment(taskId, userId, c, memberByKey)
+              await this.importComment(taskId, userId, c, memberByEmail)
               summary.commentsImported++
             } catch (e: any) {
               summary.errors.push(`Comment ${c?.id} on ClickUp task ${clickupTaskId}: ${e?.message ?? 'error'}`)
@@ -674,20 +685,23 @@ export class ClickUpImportService {
    * for `author_id` (a NOT NULL FK) and preserve the original author + timestamp
    * as text at the head of the body. The original timestamp is also mirrored
    * into `created_at` when ClickUp provided one.
+   *
+   * BY EMAIL ALONE (`found-6-oct/enrichment-files-comments-under-a-matched-name`).
+   * A comment is filed under a member only when ClickUp's author has that
+   * member's email. A name is anybody's to give, in the ClickUp workspace the
+   * importer's token reads: matched by name, a comment went in under whichever
+   * member was called that, in their name. ClickUp's own importers map each
+   * person before comments come in "with their authors", and guess nobody.
    */
   private async importComment(
     taskId: string,
     userId: string,
     c: ClickUpComment,
-    memberByKey: Map<string, string>,
+    memberByEmail: Map<string, string>,
   ): Promise<void> {
     const text = extractCommentText(c)
     const emailKey = c.user?.email?.trim().toLowerCase()
-    const nameKey = c.user?.username?.trim().toLowerCase()
-    const resolvedAuthor =
-      (emailKey ? memberByKey.get(emailKey) : undefined) ??
-      (nameKey ? memberByKey.get(nameKey) : undefined) ??
-      null
+    const resolvedAuthor = (emailKey ? memberByEmail.get(emailKey) : undefined) ?? null
     const createdAt = clickupDate(c.date)
 
     let body = text
@@ -792,6 +806,18 @@ export class ClickUpImportService {
       .catch(() => undefined)
   }
 
+  /** The workspace's members by email, and only by email: whom a comment may be filed under. */
+  private async loadMemberEmails(workspaceId: string): Promise<Map<string, string>> {
+    const memberRows = await this.db
+      .select({ userId: users.id, email: users.email })
+      .from(workspaceMembers)
+      .innerJoin(users, eq(users.id, workspaceMembers.userId))
+      .where(eq(workspaceMembers.workspaceId, workspaceId))
+    const byEmail = new Map<string, string>()
+    for (const m of memberRows) if (m.email) byEmail.set(m.email.trim().toLowerCase(), m.userId)
+    return byEmail
+  }
+
   private async loadMemberIndex(workspaceId: string): Promise<Map<string, string>> {
     const memberRows = await this.db
       .select({ userId: users.id, displayName: users.displayName, email: users.email })
@@ -893,25 +919,36 @@ export class ClickUpImportService {
   }
 
   private async applyAssigneesTagsFields(
+    workspaceId: string,
     taskId: string,
     t: ParsedTask,
     memberByKey: Map<string, string>,
     ensureLabel: (name: string) => Promise<string | null>,
     fieldDefs: Map<string, { id: string; type: CustomFieldColumn['type']; optionByLower?: Map<string, string> }>,
     summary: ImportSummary,
+    how: { merged: boolean },
   ) {
     for (const who of splitList(t.assignees)) {
       const uid = memberByKey.get(who.toLowerCase())
-      if (uid) {
-        await this.db.insert(taskAssignees).values({ taskId, userId: uid }).onConflictDoNothing()
-        summary.assigneesLinked++
+      if (!uid) continue
+      // Whom the assignee route would put on it (`mayBeAssigned`), and the run's report says who was not.
+      if (!(await this.access.mayBeAssigned(this.db, { workspaceId, taskId, userId: uid }))) {
+        summary.errors.push(`Assignee "${who}" on "${t.title}": ${MAY_NOT_BE_ASSIGNED}`)
+        continue
       }
+      await this.db.insert(taskAssignees).values({ taskId, userId: uid }).onConflictDoNothing()
+      summary.assigneesLinked++
     }
     for (const tag of splitList(t.tags)) {
       const labelId = await ensureLabel(tag)
       if (labelId) {
         await this.db.insert(taskLabelAssignments).values({ taskId, labelId }).onConflictDoNothing()
       }
+    }
+    // A merged task takes its values on its own fields (`ownFieldValue`); a new one on the run's.
+    if (how.merged) {
+      await this.applyOwnFieldValues(taskId, t, summary)
+      return
     }
     // Custom-field values — reuse the { v } value-write shape.
     for (const [colName, rawValue] of Object.entries(t.custom)) {
@@ -924,6 +961,82 @@ export class ClickUpImportService {
       }
       try {
         await this.setCustomValue(taskId, def.id, v)
+        summary.customFieldValuesSet++
+      } catch (e: any) {
+        summary.errors.push(`Custom value "${colName}" on "${t.title}": ${e?.message ?? 'unknown error'}`)
+      }
+    }
+  }
+
+  /**
+   * A MERGED TASK'S VALUES GO ON ITS OWN FIELDS
+   * (`found-6-oct/clickup-merge-writes-values-to-fields-the-task-lacks`).
+   *
+   * The run makes its fields in its own new project, for the tasks it makes
+   * there. A merge wrote the file's values onto those fields for a task that
+   * lives elsewhere: a Budget of 42 sat on a field of the import's project,
+   * which the task does not have, so no page showed it and `PUT` of it answered
+   * "Custom field not found on this task" (lane 3, measured). ClickUp's
+   * importers map a column to a field of the location the task goes to ("Only
+   * Custom Fields that are available in the target location will be available
+   * for selection"). So a merged task's value goes on its own field of that
+   * name (`fieldIsOnTask`), a type the file can fill, a dropdown's value one of
+   * its options; any other is not written, and the run's report says why.
+   */
+  private async applyOwnFieldValues(taskId: string, t: ParsedTask, summary: ImportSummary) {
+    const cells = Object.entries(t.custom).filter(([, raw]) => raw.trim() !== '')
+    if (cells.length === 0) return
+    const [place] = await this.db
+      .select({ projectId: lists.projectId, listId: tasks.listId })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    if (!place) return
+    const own = (
+      await this.db
+        .select({
+          id: customFieldDefinitions.id,
+          name: customFieldDefinitions.name,
+          type: customFieldDefinitions.type,
+          options: customFieldDefinitions.options,
+          projectId: customFieldDefinitions.projectId,
+          listId: customFieldDefinitions.listId,
+        })
+        .from(customFieldDefinitions)
+        .where(eq(customFieldDefinitions.projectId, place.projectId))
+    ).filter((f) => fieldIsOnTask(f, place))
+    for (const [colName, raw] of cells) {
+      const named = own.filter((f) => f.name.trim().toLowerCase() === colName.trim().slice(0, 200).toLowerCase())
+      const not = (why: string) => summary.errors.push(`Custom value "${colName}" on "${t.title}": ${why}, so it was not written`)
+      if (named.length !== 1) {
+        not(named.length === 0 ? 'the task has no field by that name' : 'the task has more than one field by that name')
+        continue
+      }
+      const field = named[0]!
+      const type = FILE_FILLS[field.type as string]
+      if (!type) {
+        not(`its field is a ${field.type} field, which a file does not fill`)
+        continue
+      }
+      let v = coerceCustomValue(type, raw)
+      if (v === null) {
+        not(`"${raw.trim()}" is not a ${type}`)
+        continue
+      }
+      if (type === 'dropdown') {
+        const wanted = String(v).trim().toLowerCase()
+        const option = (Array.isArray(field.options) ? field.options : []).find(
+          (o: { label?: string; value?: string }) => o?.value?.toLowerCase() === wanted || o?.label?.toLowerCase() === wanted,
+        )
+        if (!option?.value) {
+          not(`"${raw.trim()}" is not one of its options`)
+          continue
+        }
+        v = option.value
+      }
+      try {
+        await this.setCustomValue(taskId, field.id, v)
         summary.customFieldValuesSet++
       } catch (e: any) {
         summary.errors.push(`Custom value "${colName}" on "${t.title}": ${e?.message ?? 'unknown error'}`)

@@ -30,6 +30,15 @@ import { compare as compareOnThisThread, getRounds, hash as hashOnThisThread } f
  * idle, so it holds no process open. If no worker can be started, or one keeps
  * dying, the job runs on this thread with bcryptjs's async form: slower for
  * everybody else, never a failed sign-in.
+ *
+ * AT MOST {@link DEFAULT_THREADS} COMPARES AT ONCE, AND ONE ON THIS THREAD
+ * (`found-30-sep/a-burst-is-compared-before-the-lock`). The lockout counts a
+ * wrong password when its compare ends, so a burst sent at once is answered
+ * only by the compares that end before the lock: at most the threshold and
+ * the compares in flight beside the one that locks. The rest wait their turn
+ * here and find the account locked. On this thread a compare runs alone too:
+ * all at once, every compare of a burst ended together, after the loop had run
+ * each of their chunks in turn, and none waited for the lock.
  */
 
 /** The cost of every password hash the API makes: 2^12 rounds. */
@@ -96,6 +105,9 @@ export class PasswordHasher {
   private readonly waiting: Job[] = []
   private lossesInARow = 0
   private workersUnavailable = false
+  /** Jobs on this thread: one at a time, the rest in turn. */
+  private hereRunning = 0
+  private readonly hereWaiting: Job[] = []
 
   /** `threads` below one means no workers: every job on this thread. */
   constructor(private readonly threads = DEFAULT_THREADS) {
@@ -201,10 +213,21 @@ export class PasswordHasher {
     return worker
   }
 
-  /** bcryptjs's async form, on this thread: what is left when no worker can be had. */
+  /** bcryptjs's async form, on this thread: what is left when no worker can be had. One job at a time. */
   private onThisThread(job: Job): void {
-    if (job.op === 'hash') hashOnThisThread(job.plain, job.cost).then(job.resolve, job.reject)
-    else compareOnThisThread(job.plain, job.hashed).then(job.resolve, job.reject)
+    if (this.hereRunning > 0) {
+      this.hereWaiting.push(job)
+      return
+    }
+    this.hereRunning += 1
+    const done = job.op === 'hash'
+      ? hashOnThisThread(job.plain, job.cost).then(job.resolve, job.reject)
+      : compareOnThisThread(job.plain, job.hashed).then(job.resolve, job.reject)
+    void done.finally(() => {
+      this.hereRunning -= 1
+      const next = this.hereWaiting.shift()
+      if (next) this.onThisThread(next)
+    })
   }
 }
 

@@ -2,11 +2,11 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { BadRequestException, ForbiddenException } from '@nestjs/common'
 import { PgDialect } from 'drizzle-orm/pg-core'
-import { customFieldDefinitions, customFieldValues, tasks, clickupImportJobs, labels, taskLabelAssignments, projects, spaces } from '@rundesk/db'
+import { customFieldDefinitions, customFieldValues, tasks, clickupImportJobs, labels, taskAssignees, taskLabelAssignments, projects, spaces } from '@rundesk/db'
 import { ClickUpImportService } from './clickup-import.service'
 import { dupKey } from './clickup-csv.util'
 import { NOT_DELIMITED_TEXT } from './spreadsheet-import.util'
-import { GUESTS_CANNOT_IMPORT, IMPORT_ACCESS, type ImportAccess } from './import-access'
+import { GUESTS_CANNOT_IMPORT, IMPORT_ACCESS, MAY_NOT_BE_ASSIGNED, type ImportAccess } from './import-access'
 
 /**
  * §12.5 ClickUp import — service behaviour that needs the DB shape:
@@ -93,8 +93,8 @@ const IMPORTER = { id: 'user-1' }
  * them is recorded.
  */
 type LinkAsked = { childId: string; parentId: string; actorId: string; childWasThere: boolean; parentWasThere: boolean }
-function access(opts: { refuse?: Record<string, Error>; refuseLink?: (link: LinkAsked) => Error | null } = {}) {
-  const asked = { index: [] as unknown[], merges: [] as unknown[], links: [] as LinkAsked[] }
+function access(opts: { refuse?: Record<string, Error>; refuseLink?: (link: LinkAsked) => Error | null; refuseAssignee?: (userId: string) => boolean } = {}) {
+  const asked = { index: [] as unknown[], merges: [] as unknown[], links: [] as LinkAsked[], assignees: [] as unknown[] }
   const rules: ImportAccess = {
     assertMayImport: async () => {},
     matchableTaskIndex: async (db: any, params) => {
@@ -117,6 +117,10 @@ function access(opts: { refuse?: Record<string, Error>; refuseLink?: (link: Link
       if (refusal) throw refusal
     },
     enrichmentRefusals: async () => ({ task: null, comments: null, attachments: null }),
+    mayBeAssigned: async (_db, params) => {
+      asked.assignees.push({ ...params })
+      return !opts.refuseAssignee?.(params.userId)
+    },
   }
   return { rules, asked }
 }
@@ -476,6 +480,40 @@ describe('ClickUpImportService.processImport — a run that fails, and a row tha
     const stored = JSON.stringify(completed.result)
     assert.ok(!stored.includes('\\u0000') && !completed.result.errors[0].includes('\u0000'), 'what it stores holds no NUL')
     assert.match(completed.result.errors[0], /^Task "Be\uFFFDta"/)
+  })
+})
+
+describe('ClickUpImportService.processImport — a merge writes what the task can take (found-6-oct/import-assigns-people-who-cannot-see-the-task, found-6-oct/clickup-merge-writes-values-to-fields-the-task-lacks)', () => {
+  it('a person the assignee route would refuse is not put on the task, and the run says who and why', async () => {
+    const members = [{ userId: 'u-guest', displayName: 'Guest', email: 'guest@x.com' }]
+    const existing = [{ id: 'existing-two', listName: 'Alpha', title: 'two' }]
+    const { db, inserts } = makeDb([members, existing])
+    const { rules, asked } = access({ refuseAssignee: (u) => u === 'u-guest' })
+    const summary = await serviceOn(db, rules).processImport('job-a', 'ws-1', IMPORTER, { csv: 'Task Name,List,Assignee\ntwo,Alpha,guest@x.com\n', strategy: 'merge' })
+    assert.deepEqual(asked.assignees, [{ workspaceId: 'ws-1', taskId: 'existing-two', userId: 'u-guest' }], 'the assignee rule was not asked of the merged task')
+    assert.deepEqual(insertsInto(inserts, taskAssignees), [], 'a person the rule refuses was put on the task')
+    assert.equal(summary.assigneesLinked, 0)
+    assert.ok(summary.errors.includes(`Assignee "guest@x.com" on "two": ${MAY_NOT_BE_ASSIGNED}`), `the run did not say who was not assigned: ${JSON.stringify(summary.errors)}`)
+  })
+
+  it('a merged task’s value goes on its own field of that name; a value it has no field for, or one its dropdown does not offer, is reported and not written', async () => {
+    const existing = [{ id: 'existing-two', listName: 'Alpha', title: 'two' }]
+    const place = [{ projectId: 'p-task', listId: 'l-task' }]
+    const own = [
+      { id: 'f-own-budget', name: 'budget', type: 'number', options: null, projectId: 'p-task', listId: null },
+      { id: 'f-own-size', name: 'Size', type: 'dropdown', options: [{ label: 'Small', value: 'small' }], projectId: 'p-task', listId: 'l-task' },
+      { id: 'f-elsewhere', name: 'Mood', type: 'text', options: null, projectId: 'p-task', listId: 'l-other' },
+    ]
+    const { db, inserts } = makeDb([[], existing, place, own])
+    const summary = await serviceOn(db).processImport('job-b', 'ws-1', IMPORTER, {
+      csv: 'Task Name,List,Budget,Mood,Size\ntwo,Alpha,42,happy,huge\n',
+      strategy: 'merge',
+    })
+    const values = insertsInto(inserts, customFieldValues)
+    assert.deepEqual(values.map((v: any) => [v.taskId, v.fieldId, v.value]), [['existing-two', 'f-own-budget', { v: 42 }]], 'the merged task’s values did not go on its own fields alone')
+    assert.equal(summary.customFieldValuesSet, 1)
+    assert.ok(summary.errors.includes('Custom value "Mood" on "two": the task has no field by that name, so it was not written'), JSON.stringify(summary.errors))
+    assert.ok(summary.errors.includes('Custom value "Size" on "two": "huge" is not one of its options, so it was not written'), JSON.stringify(summary.errors))
   })
 })
 

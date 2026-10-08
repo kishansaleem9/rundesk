@@ -45,7 +45,7 @@ import { DB_TOKEN } from '../../../common/database/database.module'
 import { dupKey } from './clickup-csv.util'
 import { assertImportTarget } from './import-target'
 import { undoRun as undoImportRun, type RunMade } from './run-undo'
-import { IMPORT_ACCESS, writtenFields, type Importer } from './import-access'
+import { IMPORT_ACCESS, MAY_NOT_BE_ASSIGNED, writtenFields, type Importer } from './import-access'
 import {
   ACCEPTED_SHEET_EXTENSIONS,
   DEFAULT_STATUSES,
@@ -82,6 +82,8 @@ type RowTally = {
   labelsCreated: number
   labelKeys: string[]
   labelIds: string[]
+  /** People the row named whom the task's read rule refuses, said in the run's report once the row is written. */
+  notAssigned: string[]
 }
 
 
@@ -461,7 +463,7 @@ export class SpreadsheetImportService {
         }
 
         for (const r of listRows) {
-          const tally: RowTally = { assigneesLinked: 0, assigneesUnmatched: 0, labelsCreated: 0, labelKeys: [], labelIds: [] }
+          const tally: RowTally = { assigneesLinked: 0, assigneesUnmatched: 0, labelsCreated: 0, labelKeys: [], labelIds: [], notAssigned: [] }
           try {
             const key = dupKey(listName, r.title)
             const targetId = existing.get(key) ?? seenByKey.get(key)
@@ -617,6 +619,12 @@ export class SpreadsheetImportService {
         tally.assigneesUnmatched++
         continue
       }
+      // Whom the assignee route would put on it (`mayBeAssigned`), asked on the row's transaction.
+      if (!(await this.access.mayBeAssigned(db as Db, { workspaceId, taskId, userId }))) {
+        tally.assigneesUnmatched++
+        tally.notAssigned.push(`Row ${row.row} ("${row.title}"): ${who} ${MAY_NOT_BE_ASSIGNED}`)
+        continue
+      }
       await db.insert(taskAssignees).values({ taskId, userId }).onConflictDoNothing()
       tally.assigneesLinked++
     }
@@ -632,6 +640,7 @@ export class SpreadsheetImportService {
   private count(summary: SheetImportSummary, tally: RowTally, made: RunMade) {
     summary.assigneesLinked += tally.assigneesLinked
     summary.assigneesUnmatched += tally.assigneesUnmatched
+    summary.errors.push(...tally.notAssigned)
     summary.labelsCreated += tally.labelsCreated
     made.labelIds.push(...tally.labelIds)
   }

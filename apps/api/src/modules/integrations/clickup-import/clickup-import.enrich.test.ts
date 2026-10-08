@@ -136,6 +136,41 @@ describe('ClickUpImportService.enrichTasks — comments', () => {
   })
 })
 
+/*
+ * BY EMAIL ALONE (`found-6-oct/enrichment-files-comments-under-a-matched-name`).
+ * Measured at the service on 6 October: a comment whose ClickUp username was
+ * another member's display name got that member's author_id. A name is
+ * anybody's to give in the ClickUp workspace a token reads.
+ */
+describe('ClickUpImportService.enrichTasks — a comment is filed under a member by email alone', () => {
+  it('a ClickUp author who has only a member’s name is not that member: the comment is the importer’s, its author named in it', async () => {
+    const members = [
+      { userId: 'u-john', displayName: 'John', email: 'john@x.com' },
+      // A member whose display name is somebody else's address.
+      { userId: 'u-mallory', displayName: 'ann@y.com', email: 'mallory@x.com' },
+      { userId: 'u-ann', displayName: 'Ann', email: 'ann@y.com' },
+    ]
+    const { db, inserts } = makeDb([[{ id: 'our-1' }], members])
+    const { svc } = serviceOn(db, makeR2(true).r2)
+    const client: ClickUpClientLike = {
+      getTaskComments: async () => [
+        { id: 'c1', comment_text: 'Ship it', user: { username: 'John', email: 'someone-else@z.com' }, date: '1700000000000' },
+        { id: 'c2', comment_text: 'Agreed', user: { username: 'Ann B', email: 'ANN@y.com' }, date: '1700000001000' },
+        { id: 'c3', comment_text: 'No address', user: { username: 'John' }, date: '1700000002000' },
+      ],
+      getTaskAttachments: async () => [],
+      downloadAttachment: async () => null,
+    }
+    await svc.enrichTasks('ws-1', IMPORTER, 'tok', [{ clickupTaskId: 'cu-1', taskId: 'our-1' }], { client })
+    const rows = insertsInto(inserts, taskComments)
+    assert.equal(rows.length, 3)
+    assert.equal(rows[0].authorId, 'user-1', 'a comment by a ClickUp author named John, with another address, was filed under the member John')
+    assert.match(rows[0].body, /John/, 'the comment filed under the importer does not name its author')
+    assert.equal(rows[1].authorId, 'u-ann', 'a comment by the member’s own address, in another case, was not filed under them (or went to whoever’s name is that address)')
+    assert.equal(rows[2].authorId, 'user-1', 'a comment by a name with no address was filed under the member of that name')
+  })
+})
+
 describe('ClickUpImportService.enrichTasks — attachments', () => {
   it('re-uploads bytes to R2 and rows the metadata (real client + mock fetch)', async () => {
     const { db, inserts } = makeDb([[{ id: 'our-1' }], []])

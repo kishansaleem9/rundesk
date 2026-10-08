@@ -123,7 +123,7 @@ import { clipReaderOf } from '../clips/clip-reader'
 import { pickUpdatable } from './task-update-fields'
 import { planLabelsByName, uniqueLabelNames, type LabelByName } from './task-values'
 import { CustomFieldsService, fieldIsOnTask } from '../custom-fields/custom-fields.service'
-import { guestMayRead } from '../../common/permissions/guest-reach'
+import { guestMayRead, guestReachesList } from '../../common/permissions/guest-reach'
 import { likeContaining } from '../../common/sql/like'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
@@ -954,12 +954,19 @@ export class TasksService {
       // A private list is its creator's and the managers' — the list half of
       // the item rule in `assertTaskReadAccess`. The task's own privacy does
       // not apply: somebody it is born assigned to is one of its assignees.
+      //
+      // And a guest reaches the new task only through the list, or what holds
+      // it, shared with them — the guest half of that rule
+      // (`found-7-oct/a-task-is-born-assigned-to-a-guest-who-cannot-see-it`):
+      // made with a guest nothing was shared with as its assignee, a task
+      // answered 201 and its guest 403, where the assignee route refuses them.
+      // ClickUp shares the task, List or Folder before a guest can be assigned.
       const visible = await this.assertContainerReadAccess(ctx, userId).then(
-        (access) =>
+        async (access) =>
           canSeePrivateItem(
             { visibility: ctx.listVisibility, createdById: ctx.listCreatedById },
             { userId, isManager: access.superAdmin || isManagerRole(access.workspaceRole) },
-          ),
+          ) && (access.superAdmin || access.workspaceRole !== 'guest' || (await guestReachesList(this.db, userId, listId))),
         () => false,
       )
       if (!visible) throw new BadRequestException(PERSON_CANNOT_SEE[as])

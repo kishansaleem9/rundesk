@@ -35,6 +35,7 @@ export function RequestAccessCard({
 }) {
   const { t } = useTranslation()
   const [asked, setAsked] = useState(false)
+  const [refused, setRefused] = useState<string | null>(null)
 
   const request = useMutation({
     mutationFn: () =>
@@ -43,14 +44,18 @@ export function RequestAccessCard({
         body: { workspaceId },
       }),
     /*
-     * Settled, not success: the confirmation is the same whatever comes back.
+     * The confirmation is the same whatever success comes back.
      *
      * The server distinguishes 'sent' from 'already_asked' from 'no_owners',
      * and showing those apart would leak how the object is owned to somebody
      * who cannot see the object. "We passed it on" is true of all three and
-     * tells the requester the one thing they need.
+     * tells the requester the one thing they need. A refusal passed nothing on
+     * — an hour's worth of asks already made, or nothing there to ask about
+     * (`found-30-sep/access-asks-from-outside-the-workspace`) — so it is said in its
+     * own words, not as sent.
      */
-    onSettled: () => setAsked(true),
+    onSuccess: () => setAsked(true),
+    onError: (err) => setRefused(err instanceof ApiError ? err.message : t('requestAccess.failed')),
   })
 
   if (!(error instanceof ApiError) || error.status !== 403) return null
@@ -66,7 +71,11 @@ export function RequestAccessCard({
         {t('requestAccess.title')}
       </div>
       <p className="text-xs text-muted-foreground">{t('requestAccess.body')}</p>
-      {asked ? (
+      {refused ? (
+        <span className="text-xs text-destructive" data-testid="request-access-refused">
+          {refused}
+        </span>
+      ) : asked ? (
         <span
           className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
           data-testid="request-access-sent"

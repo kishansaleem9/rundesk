@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
-import { parseFormula, evaluateFormula, toFormulaConfig, FormulaError } from './formula'
+import { describe, it, test } from 'node:test'
+import { parseFormula, evaluateFormula, toFormulaConfig, FormulaError, compileFormula, renameInFormula, FIELD_ID_REF } from './formula'
 
 /**
  * 0158 — the parts of a formula field with edges, away from the database.
@@ -59,4 +59,28 @@ test('a stored expression that no longer parses reads as null rather than throwi
   assert.equal(toFormulaConfig(null).expression, '')
   assert.equal(toFormulaConfig({ expression: 7 }).expression, '')
   assert.equal(toFormulaConfig({ expression: '{A}' }).expression, '{A}')
+})
+
+/*
+ * A FORMULA READS A FIELD, NOT ITS NAME (`found-6-oct/field-checks-name-a-private-lists-fields`).
+ * A rename was refused while a formula read the field, naming the formula to a
+ * member who could not open the private list it was kept to. A formula keeps
+ * each field's id beside what it shows, and a rename rewrites what it shows.
+ */
+describe('a formula names its fields by id, and a rename rewrites what it shows', () => {
+  const B = '11111111-1111-4111-8111-111111111111'
+  const C = '22222222-2222-4222-8222-222222222222'
+  it('compiles each reference, however it is spaced, to its field’s id, and evaluates by them', () => {
+    const compiled = compileFormula('{Budget} * 2 + { Cost }', (name) => (name === 'Budget' ? B : C))
+    assert.equal(compiled, `{#${B}} * 2 + {#${C}}`)
+    assert.equal(evaluateFormula(compiled, (ref) => ({ [B]: 10, [C]: 1 } as Record<string, number>)[FIELD_ID_REF.exec(ref)?.[1] ?? ''] ?? null), 21)
+  })
+  it('a rename writes the new name over every reference to that field, and over no other, even one of the same name', () => {
+    const cfg = { expression: '{Budget} * 2 + {Budget} - { Budget }', compiled: `{#${B}} * 2 + {#${B}} - {#${C}}` }
+    assert.equal(renameInFormula(cfg, B, 'Budget (USD)'), '{Budget (USD)} * 2 + {Budget (USD)} - { Budget }')
+    assert.equal(renameInFormula(cfg, C, 'Other'), '{Budget} * 2 + {Budget} - {Other}')
+    // Saved before ids were kept, or shown and compiled out of step: left as it is.
+    assert.equal(renameInFormula({ expression: '{Budget} + 1' }, B, 'New'), '{Budget} + 1')
+    assert.equal(renameInFormula({ expression: '{Budget} + {Cost}', compiled: `{#${B}} + 1` }, B, 'New'), '{Budget} + {Cost}')
+  })
 })

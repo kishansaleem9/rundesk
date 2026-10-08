@@ -1,5 +1,5 @@
 import { WS_ADMIN_ROLES } from '../../common/permissions/workspace-roles'
-import { Injectable, Inject, BadRequestException, ForbiddenException, NotFoundException, Logger } from '@nestjs/common'
+import { Injectable, Inject, BadRequestException, ForbiddenException, HttpException, HttpStatus, NotFoundException, Logger } from '@nestjs/common'
 import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm'
 import {
   objectShares, users, workspaceMembers, contentAccessRequests,
@@ -7,6 +7,7 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { isUuid } from '../../common/validation/uuid'
 import { SecurityService } from '../security/security.service'
 import { EmailService } from '../email/email.service'
 import { ConfigService } from '@nestjs/config'
@@ -25,6 +26,12 @@ export type ShareType = (typeof SHARE_TYPES)[number]
 export const SHARE_LEVELS = ['view', 'comment', 'edit', 'admin'] as const
 export type ShareLevel = (typeof SHARE_LEVELS)[number]
 const RANK: Record<ShareLevel, number> = { view: 0, comment: 1, edit: 2, admin: 3 }
+/** An access ask about anything that is not the named workspace's own: one sentence for every such id. */
+export const NOTHING_TO_ASK_FOR = 'There is nothing by that link to ask for access to'
+/** How many access asks one person may make in an hour, about anything, in any workspace. */
+export const ACCESS_ASKS_PER_HOUR = 20
+export const TOO_MANY_ASKS = 'You have asked for access too many times in the last hour — try again later'
+
 /** The places a space's levels reach, and so what a member holds on them without a share of their own. */
 const LOCATION_TYPES: ReadonlySet<ShareType> = new Set<ShareType>(['space', 'folder', 'project', 'list', 'task', 'view'])
 const WITHIN_TYPES: ReadonlySet<string> = new Set(['task', 'list', 'project', 'folder'])
@@ -687,6 +694,21 @@ export class SharesService {
     if (!SHARE_TYPES.includes(type)) throw new BadRequestException('unknown object type')
 
     /*
+     * ONLY ABOUT SOMETHING THAT IS THERE, IN THE SAME WORDS FOR EVERYTHING THAT IS NOT
+     * (`found-30-sep/access-asks-from-outside-the-workspace`). ClickUp lets people
+     * outside a Workspace ask for an item by its link ("People outside your
+     * Workspace must request access to a public or private item"), and the people
+     * who may grant it are told, so anyone signed in may ask here too. But nothing
+     * was asked of what they named: an ask about any id was recorded, and the
+     * answer, "sent" or "no_owners", told whether a workspace id was real. The
+     * object must be one of the named workspace's; anything else, a made-up id, a
+     * workspace that is not there, another workspace's object, is the same 404.
+     */
+    if (!isUuid(workspaceId) || !isUuid(objectId)) throw new NotFoundException(NOTHING_TO_ASK_FOR)
+    const meta = (await this.resolveSharedBatch(workspaceId, type, [objectId])).get(objectId)
+    if (!meta) throw new NotFoundException(NOTHING_TO_ASK_FOR)
+
+    /*
      * Who can actually grant it: whoever holds admin on the object itself, plus
      * the workspace's admins. Anyone below admin on the object cannot widen it,
      * so telling them would be noise they can do nothing about.
@@ -739,6 +761,14 @@ export class SharesService {
       .limit(1)
     if (recent) return { status: 'already_asked', notified: 0 }
 
+    // A few an hour, from anyone: whoever holds a link may be anyone, and each ask tells somebody.
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000)
+    const [asked] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(contentAccessRequests)
+      .where(and(eq(contentAccessRequests.requesterId, requester.id), gte(contentAccessRequests.createdAt, hourAgo)))
+    if ((asked?.n ?? 0) >= ACCESS_ASKS_PER_HOUR) throw new HttpException(TOO_MANY_ASKS, HttpStatus.TOO_MANY_REQUESTS)
+
     // Recorded BEFORE the fan-out, so a request that dies partway through is
     // still an ask that happened rather than one that can be repeated at will.
     await this.db
@@ -746,8 +776,7 @@ export class SharesService {
       .values({ workspaceId, objectType: type, objectId, requesterId: requester.id })
       .catch(() => undefined)
 
-    const meta = (await this.resolveSharedBatch(workspaceId, type, [objectId])).get(objectId)
-    const what = meta?.name ?? `this ${type}`
+    const what = meta.name ?? `this ${type}`
     const who = requester.name?.trim() || requester.email || 'Someone'
 
     let notified = 0
@@ -759,7 +788,7 @@ export class SharesService {
         type: 'access_requested',
         title: `${who} asked for access to ${what}`,
         body: `${who} tried to open ${what} and could not. You can give them access from its Share panel.`,
-        target: { entityType: type, entityId: objectId, url: meta?.url ?? `/app/${workspaceId}` },
+        target: { entityType: type, entityId: objectId, url: meta.url ?? `/app/${workspaceId}` },
       })
       // Delivery, not the row — see the de-dup note above. Somebody who took
       // the email and not the bell was told.

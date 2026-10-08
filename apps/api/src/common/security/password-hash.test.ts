@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { describe, it } from 'node:test'
 import { compareSync, getRounds, hashSync } from 'bcryptjs'
-import { NO_ACCOUNT_HASH, PASSWORD_HASH_COST, PasswordHasher, passwords } from './password-hash'
+import { DEFAULT_THREADS, NO_ACCOUNT_HASH, PASSWORD_HASH_COST, PasswordHasher, passwords } from './password-hash'
 
 /**
  * PASSWORDS ARE HASHED ON WORKER THREADS, AT ONE COST
@@ -74,6 +74,42 @@ describe('Passwords are hashed on worker threads, at one cost', () => {
     const made = await hereOnly.hash('Correct@12345!', 4)
     assert.equal(await hereOnly.compare('Correct@12345!', made), true)
     assert.equal(await hereOnly.compare('Wrong@12345!', made), false)
+  })
+
+  /*
+   * A BURST IS ANSWERED BY THE COMPARES THAT END BEFORE THE LOCK
+   * (`found-30-sep/a-burst-is-compared-before-the-lock`): at most the lockout's
+   * threshold and the compares in flight beside the one that locks. So the
+   * compares in flight are bounded, by the pool's threads, and on this thread
+   * by one.
+   */
+  it('a pool runs at most its threads’ compares at once, never more than four on any machine, and the rest in turn', async () => {
+    assert.ok(DEFAULT_THREADS >= 1 && DEFAULT_THREADS <= 4, `the pool has ${DEFAULT_THREADS} threads`)
+    const hasher = new PasswordHasher(2)
+    const stored = hashSync('Correct@12345!', 4)
+    const answers = ['Correct@12345!', 'Wrong@1', 'Wrong@2', 'Wrong@3', 'Correct@12345!'].map((plain) => hasher.compare(plain, stored))
+    const inside = hasher as unknown as { running: Map<unknown, unknown>; waiting: unknown[] }
+    assert.equal(inside.running.size, 2, 'compares running at once')
+    assert.equal(inside.waiting.length, 3, 'compares waiting their turn')
+    assert.deepEqual(await Promise.all(answers), [true, false, false, false, true])
+  })
+
+  it('with no worker to be had, compares run on this thread one at a time, the rest in turn', async () => {
+    const hereOnly = new PasswordHasher(0)
+    const stored = hashSync('Correct@12345!', 4)
+    const order: number[] = []
+    const answers = ['Correct@12345!', 'Wrong@1', 'Correct@12345!'].map((plain, i) =>
+      hereOnly.compare(plain, stored).then((value) => {
+        order.push(i)
+        return value
+      }),
+    )
+    const inside = hereOnly as unknown as { hereRunning: number; hereWaiting: unknown[] }
+    assert.equal(inside.hereRunning, 1, 'compares running on this thread at once')
+    assert.equal(inside.hereWaiting.length, 2, 'compares waiting their turn')
+    assert.deepEqual(await Promise.all(answers), [true, false, true])
+    assert.deepEqual(order, [0, 1, 2])
+    assert.equal(inside.hereRunning, 0)
   })
 
   it('a worker that dies mid-compare costs no answer: the compare is finished on this thread', async () => {

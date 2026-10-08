@@ -52,7 +52,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 9
+const EXPECTED_CHECKS = 12
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -301,6 +301,46 @@ try {
       adminSearchFields.status === 200 && idsOf(adminSearchFields).includes(privateField),
     'and search’s field filter leaves it out to the member, the project’s own field still offered — while the admin’s offers it',
     `the member's (${memberSearchFields.status}): ${JSON.stringify(namesOf(memberSearchFields))}; the admin's (${adminSearchFields.status}): ${JSON.stringify(namesOf(adminSearchFields))}`,
+  )
+
+  console.log('\n▶ formulas, beside a private list the member may not open')
+  /*
+   * `found-6-oct/field-checks-name-a-private-lists-fields`. Kept to the admin's
+   * private list: a formula reading the project's Budget, and a number field.
+   * The member's rename of Budget was refused with that formula's name, and a
+   * formula they defined over the private number was taken (201), while one
+   * over the private formula was told it "is a formula field" (lane 3, measured).
+   * ClickUp reads a field, not its name, and a field kept from someone is, to
+   * them, no field. The task in the private list, the admin's, has Budget 10.
+   */
+  const budget = await make(A, `/workspaces/${WS}/projects/${open.project}/custom-fields`, { name: `${TAG} Budget`, type: 'number' }, 'the project’s Budget')
+  const margin = await make(A, `/workspaces/${WS}/projects/${open.project}/custom-fields`, { name: `${TAG} Secret margin`, type: 'formula', listId: privateList, config: { expression: `{${TAG} Budget} * 2` } }, 'the private formula')
+  await make(A, `/workspaces/${WS}/projects/${open.project}/custom-fields`, { name: `${TAG} Private cost`, type: 'number', listId: privateList }, 'the private number')
+  const privateTask = await make(A, '/tasks', { listId: privateList, title: `${TAG} private task` }, 'the private list’s task')
+  const ten = await A(`/workspaces/${WS}/tasks/${privateTask}/custom-fields/${budget}`, { method: 'PUT', body: { value: 10 } })
+  if (!ten.ok) throw new Error(`could not set the private task's Budget: ${said(ten)}`)
+  const renamed = await M(`/workspaces/${WS}/custom-fields/${budget}`, { method: 'PATCH', body: { name: `${TAG} Budget (USD)` } })
+  const [marginNow] = await sql`select config from custom_field_definitions where id = ${margin}`
+  const marginOnTask = ((await A(`/workspaces/${WS}/tasks/${privateTask}/custom-fields`)).data ?? []).find((f) => (f.definition?.id ?? f.id) === margin)
+  chk(
+    renamed.ok && (await fieldNamed(budget)) === `${TAG} Budget (USD)` && marginNow?.config?.expression === `{${TAG} Budget (USD)} * 2`,
+    'a member renames a field that a formula kept to a list they may not open reads: the rename stands, and the formula reads the new name',
+    `the rename answered ${said(renamed)}; the formula now reads ${JSON.stringify(marginNow?.config?.expression ?? null)}`,
+  )
+  chk(
+    marginOnTask?.value === 20,
+    'and the formula still computes from the renamed field on the private list’s task: 20 from a Budget of 10',
+    `the admin reads the formula on that task as ${JSON.stringify(marginOnTask?.value ?? null)}`,
+  )
+  const defineOver = (name) => M(`/workspaces/${WS}/projects/${open.project}/custom-fields`, { method: 'POST', body: { name: `${TAG} over ${name}`, type: 'formula', config: { expression: `{${TAG} ${name}} + 1` } } })
+  const overCost = await defineOver('Private cost')
+  const overMargin = await defineOver('Secret margin')
+  const overNothing = await defineOver('Nothing by this name')
+  const noField = (res, name) => res.status === 400 && res.error?.message === `Formula: there is no field called "${TAG} ${name}" on this project`
+  chk(
+    noField(overCost, 'Private cost') && noField(overMargin, 'Secret margin') && noField(overNothing, 'Nothing by this name'),
+    'a formula the member defines over a field kept to that list is told there is no field called it, in the words for one that does not exist — a number or a formula',
+    `over the private number ${said(overCost)}; over the private formula ${said(overMargin)}; over nothing ${said(overNothing)}`,
   )
 } catch (e) {
   failed += 1
