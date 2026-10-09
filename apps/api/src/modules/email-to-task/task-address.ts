@@ -43,3 +43,14 @@ export const taskAddressMatches = (given: string, localPart: string, taskId: str
   }
   return same(given, taskAddressTag(localPart, taskId)) || same(given, localPart)
 }
+
+/**
+ * AN EMAIL SENT FROM A TASK'S COMMENT BOX IS ANSWERED AT AN ADDRESS OF ITS OWN
+ * (`resume-defects/s4-composer-email`): `reply-<id>@domain`, `<id>` the outbound
+ * message's row. Not the list's address: that carries the list's alias, the
+ * secret that lets mail make tasks in it, and an email goes to people outside
+ * the workspace. Knowing this one lets nobody in — a reply is taken from that
+ * email's own recipients, or from a member who may comment on the task.
+ */
+export const EMAIL_REPLY_PREFIX = 'reply-'
+export const emailReplyAddress = (outboundId: string): string => `${EMAIL_REPLY_PREFIX}${outboundId}@${inboundDomain()}`

@@ -1,5 +1,6 @@
-import { pgTable, text, timestamp, uuid, integer, unique, index } from 'drizzle-orm/pg-core'
-import { relations } from 'drizzle-orm'
+import { pgTable, text, timestamp, uuid, integer, unique, index, check } from 'drizzle-orm/pg-core'
+import { relations, sql } from 'drizzle-orm'
+import { taskComments } from './comments'
 import { lists } from './lists'
 import { users } from './users'
 import { tasks } from './tasks'
@@ -91,9 +92,33 @@ export const outboundEmailMessages = pgTable(
     recipient: text('recipient').notNull(),
     replyTo:   text('reply_to'),
     sentAt:    timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
+    // The email comment this message was, so a reply to it is threaded under it (migration 0180).
+    commentId: uuid('comment_id').references(() => taskComments.id, { onDelete: 'set null' }),
   },
   (t) => [
     unique('uq_outbound_email_messages_message_id').on(t.messageId),
     index('idx_outbound_email_messages_task').on(t.taskId),
   ],
+)
+
+/**
+ * AN EMAIL COMMENT'S ENVELOPE (`resume-defects/s4-composer-email`,
+ * `ledger-rows/row-1252`): who it went to or came from, and its subject, beside
+ * the comment that holds its words. `out` for one sent from the comment box,
+ * `in` for a reply that came back to the task's address.
+ */
+export const taskCommentEmails = pgTable(
+  'task_comment_emails',
+  {
+    commentId:     uuid('comment_id').primaryKey().references(() => taskComments.id, { onDelete: 'cascade' }),
+    direction:     text('direction').notNull(),
+    fromAddress:   text('from_address').notNull(),
+    toAddresses:   text('to_addresses').array().notNull().default([]),
+    ccAddresses:   text('cc_addresses').array().notNull().default([]),
+    bccAddresses:  text('bcc_addresses').array().notNull().default([]),
+    subject:       text('subject').notNull(),
+    messageId:     text('message_id').notNull(),
+    createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [check('task_comment_emails_direction_check', sql`${t.direction} IN ('out', 'in')`)],
 )

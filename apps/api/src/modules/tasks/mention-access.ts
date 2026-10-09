@@ -33,6 +33,8 @@ export type TaskAccessContext = {
   projectVisibility: string | null
   listVisibility: string | null
   listCreatedById: string | null
+  /** Whose Personal List the task is in, if any: theirs alone, a manager's reach included. */
+  listPersonalOf?: string | null
   taskVisibility: string | null
   taskCreatedById: string | null
   /** Members of the task's space, when that space is private. */
@@ -52,6 +54,8 @@ export type Candidate = {
 }
 
 export function canReachTask(ctx: TaskAccessContext, actor: Candidate): boolean {
+  // 0. Somebody's Personal List is theirs alone, before anybody's role is asked (`canSeePrivateItem`).
+  if (ctx.listPersonalOf) return ctx.listPersonalOf === actor.userId
   // 1. Managers and admins see everything in the workspace, container privacy
   //    included — the first line of `checkContainerAccess`.
   if (isManagerRole(actor.workspaceRole)) return true

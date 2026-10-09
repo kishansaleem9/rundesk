@@ -26,6 +26,8 @@ type TargetSpace = {
   folders: { id: string; name: string }[]
   projects: { id: string; name: string; folderId: string | null }[]
   lists?: { id: string; name: string; projectId: string }[]
+  /** The mover's own Personal List, which is no space: a place for a task, and nothing else (`spaces.service.ts` moveTargets). */
+  personal?: boolean
 }
 
 /** One selectable destination row, flattened from the space → folder/project tree. */
@@ -33,8 +35,8 @@ type Destination =
   | { kind: 'space'; id: string; label: string; spaceId: string; depth: 0 }
   | { kind: 'folder'; id: string; label: string; spaceId: string; depth: 1 }
   | { kind: 'project'; id: string; label: string; spaceId: string; depth: 1 }
-  // Only reachable when moving a task, which nests one level deeper.
-  | { kind: 'list'; id: string; label: string; spaceId: string; depth: 2 }
+  // Only reachable when moving a task, which nests one level deeper — or, for one's Personal List, sits at the top.
+  | { kind: 'list'; id: string; label: string; spaceId: string; depth: 0 | 2; personal?: boolean }
 
 export function MoveDialog({
   open,
@@ -76,8 +78,15 @@ export function MoveDialog({
   // Flatten the tree into selectable rows. A folder can only move to a space; a
   // project can move to a space or one of its folders; a list moves into a project.
   const rows = useMemo<Destination[]>(() => {
-    const spaces = targetsQuery.data ?? []
+    const all = targetsQuery.data ?? []
+    const spaces = all.filter((sp) => !sp.personal)
     const out: Destination[] = []
+    // ClickUp's Personal List heads the picker, for a task: a list of the mover's own, outside the hierarchy.
+    if (kind === 'task') {
+      for (const sp of all.filter((s) => s.personal)) {
+        for (const li of sp.lists ?? []) out.push({ kind: 'list', id: li.id, label: sp.name, spaceId: sp.id, depth: 0, personal: true })
+      }
+    }
     for (const sp of spaces) {
       out.push({ kind: 'space', id: sp.id, label: sp.name, spaceId: sp.id, depth: 0 })
       if (kind === 'project') {
@@ -215,6 +224,7 @@ export function MoveDialog({
                   <li key={`${r.kind}:${r.id}`}>
                     <button
                       type="button"
+                      data-testid={r.kind === 'list' && r.personal ? 'move-target-personal-list' : undefined}
                       disabled={!selectable || current || move.isPending}
                       onClick={() => move.mutate(r)}
                       className={cn(

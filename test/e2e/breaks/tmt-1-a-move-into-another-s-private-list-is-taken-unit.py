@@ -2,7 +2,7 @@
 # Reddens: unit: task-move-target.test.ts "refuses another’s private list in an open space as the guard refuses it, 403 “This list is private”, and moves nothing"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
-a = "    if (\n      !canSeePrivateItem(\n        { visibility: target.listVisibility, createdById: target.listCreatedById },\n        { userId: actorId, isManager: superAdmin || isManagerRole(membership?.role) },\n      )\n    ) {\n      throw new ForbiddenException('This list is private')\n    }\n"
+a = "    if (\n      !canSeePrivateItem(\n        { visibility: target.listVisibility, createdById: target.listCreatedById, personalOf: target.listPersonalOf },\n        { userId: actorId, isManager: superAdmin || isManagerRole(membership?.role) },\n      )\n    ) {\n      throw new ForbiddenException('This list is private')\n    }\n"
 b = ''
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

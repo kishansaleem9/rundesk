@@ -80,13 +80,14 @@ export async function readableList(
   workspaceId: string,
   listId: string,
   actor: ReadActor,
-): Promise<{ listId: string; spaceId: string; role: string } | null> {
+): Promise<{ listId: string; spaceId: string; role: string; personalOf: string | null } | null> {
   if (!isUuid(listId)) return null
   const [row] = await db
     .select({
       listId: lists.id,
       listVisibility: lists.visibility,
       listCreatedById: lists.createdById,
+      listPersonalOf: lists.personalOf,
       projectId: projects.id,
       projectVisibility: projects.visibility,
       spaceId: spaces.id,
@@ -98,7 +99,7 @@ export async function readableList(
     .where(and(eq(lists.id, listId), eq(spaces.workspaceId, workspaceId)))
     .limit(1)
   if (!row) return null
-  if (actor.role === 'super_admin') return { listId: row.listId, spaceId: row.spaceId, role: 'super_admin' }
+  if (actor.role === 'super_admin') return { listId: row.listId, spaceId: row.spaceId, role: 'super_admin', personalOf: row.listPersonalOf }
   const role = await workspaceRole(db, workspaceId, actor.id)
   if (!role) return null
   const inContainer = await checkContainerAccess(
@@ -107,10 +108,10 @@ export async function readableList(
     { userId: actor.id, workspaceRole: role },
   )
   if (!inContainer) return null
-  if (!canSeePrivateItem({ visibility: row.listVisibility, createdById: row.listCreatedById }, { userId: actor.id, isManager: isManagerRole(role) })) return null
+  if (!canSeePrivateItem({ visibility: row.listVisibility, createdById: row.listCreatedById, personalOf: row.listPersonalOf }, { userId: actor.id, isManager: isManagerRole(role) })) return null
   // A guest sees a list in reach, or one holding a task shared with them (`guest-reach.ts`).
   if (role === 'guest' && !(await guestMayRead(db, actor.id, 'list', row.listId))) return null
-  return { listId: row.listId, spaceId: row.spaceId, role }
+  return { listId: row.listId, spaceId: row.spaceId, role, personalOf: row.listPersonalOf }
 }
 
 /**
@@ -159,6 +160,7 @@ export async function taskReadAnswer(
       taskCreatedById: tasks.createdById,
       listVisibility: lists.visibility,
       listCreatedById: lists.createdById,
+      listPersonalOf: lists.personalOf,
       projectId: projects.id,
       projectVisibility: projects.visibility,
       spaceId: spaces.id,
@@ -184,7 +186,7 @@ export async function taskReadAnswer(
   // A guest reads only the tasks in their reach (`guest-reach.ts`).
   if (role === 'guest' && !(await guestMayRead(db, actor.id, 'task', row.taskId))) return { refused: READ_REFUSALS.notShared }
   const isManager = isManagerRole(role)
-  if (!canSeePrivateItem({ visibility: row.listVisibility, createdById: row.listCreatedById }, { userId: actor.id, isManager })) {
+  if (!canSeePrivateItem({ visibility: row.listVisibility, createdById: row.listCreatedById, personalOf: row.listPersonalOf }, { userId: actor.id, isManager })) {
     return { refused: READ_REFUSALS.privateList }
   }
   if (row.taskVisibility === 'private' && !isManager && row.taskCreatedById !== actor.id && !opts.asAssignee) {

@@ -675,6 +675,34 @@ try {
     await sql`delete from user_dock_configs where user_id = ${outsider.id} and workspace_id = ${shared}`
   }
   {
+    // A shared account's Personal List, made the first time they need one (found-24-sep/planner-default-list-read-by-nothing):
+    // the workspace's personal space and its container, made by the first, and the list with its statuses.
+    const a = await account('personal')
+    const planted = {}
+    const r = await whileRunning('probe-personal-list', [{ t: 'users', id: a.id }], async () => {
+      const [sp] = await sql`insert into spaces (workspace_id, name, is_personal, default_permission) values (${shared}, 'Personal', true, 'admin') returning id::text as id`
+      const [pr] = await sql`insert into projects (space_id, name, is_default_container) values (${sp.id}, 'Lists', true) returning id::text as id`
+      const [li] = await sql`insert into lists (project_id, name, visibility, created_by_id, personal_of) values (${pr.id}, 'Personal List', 'private', ${outsider.id}, ${outsider.id}) returning id::text as id`
+      await sql`insert into list_statuses (list_id, key, name, color, category, position) values (${li.id}, 'todo', 'To do', '#888888', 'open', 0)`
+      Object.assign(planted, { space: sp.id, project: pr.id, list: li.id })
+      return null
+    })
+    chk(r.up && r.code === 0 && !/✗ this run left/.test(r.out),
+      'and one during which a shared account’s Personal List is made — the list and its statuses, and the workspace’s personal space and its container — passes: the product makes those the first time they are needed',
+      `ready ${r.up}; it exited ${r.code}; it said ${JSON.stringify(r.out.trim().slice(-300))}`)
+    // But a list it put there that is nobody's Personal List is a run's to say. (The first probe took its account with it.)
+    const a2 = await account('personal-other')
+    const r2 = await whileRunning('probe-personal-other', [{ t: 'users', id: a2.id }], async () => {
+      const [li] = await sql`insert into lists (project_id, name, created_by_id) values (${planted.project}, ${slug('list')}, ${outsider.id}) returning id::text as id`
+      return li.id
+    })
+    chk(r2.up && r2.code === 1 && /✗ this run left 1 row that nothing it registered removes: 1 list\b/.test(r2.out),
+      'but one that leaves a list it made in the personal space that is nobody’s Personal List fails, naming it',
+      `ready ${r2.up}; it exited ${r2.code}; it said ${JSON.stringify(r2.out.trim().slice(-300))}`)
+    if (r2.made) await sql`delete from lists where id = ${r2.made}`
+    if (planted.space) await sql`delete from spaces where id = ${planted.space}`
+  }
+  {
     // Any other channel is a run's to say: one it made and never registered fails it.
     const a = await account('a-channel')
     const r = await whileRunning('probe-a-channel', [{ t: 'users', id: a.id }], async () => {
@@ -895,6 +923,11 @@ if (process.argv.includes('--mutate') && !process.env.MADE_LIB_UNDER_TEST && !pr
       ['general-counted-as-left', "? await sql`select count(*)::int as n from chat_channels c where c.created_at >= ${since} and not (${GENERAL(sql)})`", "? await sql`select count(*)::int as n from chat_channels c where c.created_at >= ${since}`"],
       ['every-channel-first-use', "const GENERAL = sql => sql`c.name = 'general' and not c.is_dm and not c.is_private`", "const GENERAL = sql => sql`true`"],
       ['every-shared-dock-counted', "and exists (select 1 from users u where u.id = d.user_id and u.created_at >= ${since})`", "`"],
+      ['personal-space-counted-as-left', "from spaces s where s.${sql(at)} >= ${since} and not s.is_personal`", "from spaces s where s.${sql(at)} >= ${since}`"],
+      ['personal-container-counted-as-left', "                    and not exists (select 1 from spaces s where s.id = p.space_id and s.is_personal)`", "`"],
+      ['personal-statuses-counted-as-left', "                    and not exists (select 1 from lists l where l.id = x.list_id and ${SHARED_PERSONAL_LIST(sql, since)})`", "`"],
+      ['every-list-in-it-personal', "const SHARED_PERSONAL_LIST = (sql, since) => sql`l.personal_of is not null and exists", "const SHARED_PERSONAL_LIST = (sql, since) => sql`true or exists"],
+      ['personal-lists-counted-as-left', "and not (${SHARED_PERSONAL_LIST(sql, since)})`", "`"],
       ['unscheduled-notifications-pass', "and (actor_id is not null or not (type::text = any(${SCHEDULED}::text[])))", 'and actor_id is not null'],
       ['scheduled-notifications-counted', 'created_at >= to_timestamp(${started} / 1000.0) and (actor_id is not null or not (type::text = any(${SCHEDULED}::text[])))`', 'created_at >= to_timestamp(${started} / 1000.0)`'],
     ],

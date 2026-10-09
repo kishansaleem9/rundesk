@@ -24,6 +24,23 @@ function askDeleteKey(roles: PermissionAsker, workspaceId: string, actorId: stri
   return null
 }
 
+/**
+ * THE PERSONAL SPACE IS NOBODY'S TO SHAPE (`found-24-sep/planner-default-list-read-by-nothing`).
+ * Everybody's Personal List lives in the workspace's personal space, which
+ * ClickUp keeps "not part of the Workspace hierarchy": it is not renamed,
+ * moved, archived or deleted — renaming it is still asked for on ClickUp's
+ * feedback board, 9 October — and nothing but tasks is made in it. Its space,
+ * its container and each list in it are made by `ensurePersonalList` alone,
+ * which writes past these gates.
+ */
+export const PERSONAL_PLACE_REFUSAL = 'A Personal List keeps its name and its place: it cannot be renamed, moved or deleted'
+export const PERSONAL_PLACE_HOLDS_TASKS = 'A Personal List holds tasks: nothing else can be made in it'
+
+async function isPersonalSpace(db: Db, spaceId: string): Promise<boolean> {
+  const [row] = await db.select({ isPersonal: spaces.isPersonal }).from(spaces).where(eq(spaces.id, spaceId)).limit(1)
+  return row?.isPersonal === true
+}
+
 /** For a caller that passed no `roles`: a keyed delete cannot be decided without them, and says so. */
 const NO_ROLES: PermissionAsker = {
   hasPermission: async () => {
@@ -83,6 +100,9 @@ export async function assertCanManageContainer(
   },
 ): Promise<void> {
   const action = params.action ?? 'manage'
+
+  // Whoever asks, its owner and an admin among them: the personal space, its container and its lists stay as they are.
+  if (params.spaceId && (await isPersonalSpace(db, params.spaceId))) throw new ForbiddenException(PERSONAL_PLACE_REFUSAL)
 
   /*
    * §V2-06 frame `06:52` — the space's Default permission, honoured.
@@ -210,6 +230,8 @@ export async function assertCanCreateInSpace(
   },
 ): Promise<void> {
   if (!params.spaceId || !params.actorId) return
+  // A task goes in a Personal List, by its owner (the list's read rule decides who); nothing else is made there.
+  if (params.kind !== 'task' && (await isPersonalSpace(db, params.spaceId))) throw new ForbiddenException(PERSONAL_PLACE_HOLDS_TASKS)
   await assertSpaceLevel(db, {
     spaceId: params.spaceId,
     actorId: params.actorId,

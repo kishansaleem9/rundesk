@@ -5,7 +5,7 @@ import {
   BadRequestException,
   ConflictException,
 } from '@nestjs/common'
-import { eq, and, ne, asc, sql, type SQL } from 'drizzle-orm'
+import { eq, and, ne, asc, isNull, sql, type SQL } from 'drizzle-orm'
 import { customFieldDefinitions, lists, listStatuses, projects, spaces, folders, spaceStatuses } from '@rundesk/db'
 import { holdersNotInTrash } from '../../common/permissions/task-create'
 import type { Db } from '@rundesk/db'
@@ -288,7 +288,8 @@ export class ListsService {
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
       // None held in the trash, which takes no task (`found-6-oct/task-fallback-files-into-a-deleted-project`).
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(lists.isArchived, false), holdersNotInTrash(), visFilter))
+      // Nor a Personal List: no place in the hierarchy, where a task with no place goes by itself (`personal-list.ts`).
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(lists.isArchived, false), isNull(lists.personalOf), holdersNotInTrash(), visFilter))
       .orderBy(asc(lists.name))
   }
 

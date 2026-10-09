@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, ne, notInArray, or, type SQL } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull, ne, notInArray, or, type SQL } from 'drizzle-orm'
 import { spaceMembers, projectMembers, workspaceMembers, spaces, projects, lists, tasks, folders } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { isManagerRole, listVisibilityFilter } from './item-visibility'
@@ -180,7 +180,13 @@ export function containerVisibilityFilter(db: Db, actorId: string, isManager: bo
  * `found-24-sep/reach-skipped-private-lists`).
  */
 export function taskInReachFilter(db: Db, workspaceId: string, actorId: string, isManager: boolean): SQL | undefined {
-  if (isManager) return undefined
+  // Somebody else's Personal List is in nobody's reach, a manager's included (`listVisibilityFilter`).
+  if (isManager) {
+    return notInArray(
+      tasks.listId,
+      db.select({ id: lists.id }).from(lists).where(and(isNotNull(lists.personalOf), ne(lists.personalOf, actorId))),
+    )
+  }
   const reachable = db
     .select({ id: lists.id })
     .from(lists)

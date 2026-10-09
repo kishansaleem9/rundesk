@@ -57,7 +57,7 @@ heal () {
   # The stores are separate processes and die separately; `lane_store_up` keeps
   # a healthy one and its objects, so this is cheap when nothing is wrong.
   . scripts/e2e-lanes/lane-env.sh
-  for k in $LANES; do lane_store_up "$k" >> "$LOG" 2>&1; lane_model_up "$k" >> "$LOG" 2>&1; lane_calendar_up "$k" >> "$LOG" 2>&1; lane_media_up "$k" >> "$LOG" 2>&1; done
+  for k in $LANES; do lane_store_up "$k" >> "$LOG" 2>&1; lane_model_up "$k" >> "$LOG" 2>&1; lane_calendar_up "$k" >> "$LOG" 2>&1; lane_media_up "$k" >> "$LOG" 2>&1; lane_mail_up "$k" >> "$LOG" 2>&1; done
   # NOT THE SEARCH STUB, which is not restarted under a running API: the index
   # is in its memory and the API makes it only at boot, so a fresh stub beside
   # an old API answers every search 404 (lane-env.sh). A lane whose stub is

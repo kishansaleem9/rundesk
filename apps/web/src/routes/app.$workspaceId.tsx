@@ -58,7 +58,11 @@ type PersonalTask = {
   done: boolean
   position: number
   createdAt: string
+  dueDate: string | null
+  listId: string
 }
+/** The person's Personal List: a list like any other, kept to them (`GET /workspaces/:id/personal-list`). */
+type PersonalListPlace = { id: string; spaceId: string; projectId: string; name: string; openCount: number }
 type WorkspaceAnnouncement = {
   id: string
   title: string
@@ -217,6 +221,18 @@ function WorkspaceHome() {
     enabled: Boolean(workspaceId),
     queryFn: () => api<PersonalTask[]>(`/workspaces/${workspaceId}/personal-tasks`),
   })
+  /*
+   * WHERE THESE TASKS LIVE. Home's Personal List is a list of tasks now
+   * (`found-24-sep/planner-default-list-read-by-nothing`), so each opens as a
+   * task does, and the whole list opens as a list — ClickUp's "Personal List"
+   * under My Tasks, a place of its own.
+   */
+  const personalListQuery = useQuery({
+    queryKey: ['personal-list', workspaceId],
+    enabled: Boolean(workspaceId) && section === 'personal-list',
+    queryFn: () => api<PersonalListPlace | null>(`/workspaces/${workspaceId}/personal-list`),
+  })
+  const personalList = personalListQuery.data ?? null
   const [newPersonalTitle, setNewPersonalTitle] = useState('')
 
   const markRead = useMutation({
@@ -505,6 +521,18 @@ function WorkspaceHome() {
 
           {section === 'personal-list' && (
             <div className="space-y-3" data-testid="home-section-personal-list">
+              {personalList && (
+                <div className="flex justify-end">
+                  <Link
+                    to="/app/$workspaceId/$spaceId/$projectId/$listId"
+                    params={{ workspaceId, spaceId: personalList.spaceId, projectId: personalList.projectId, listId: personalList.id }}
+                    className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                    data-testid="home-personal-open-list"
+                  >
+                    <ListChecks className="h-3.5 w-3.5" /> {t('appWorkspace.openPersonalList')}
+                  </Link>
+                </div>
+              )}
               <form
                 onSubmit={(e) => {
                   e.preventDefault()
@@ -534,7 +562,7 @@ function WorkspaceHome() {
               ) : (
                 <div className="space-y-1.5">
                   {personalTasks.map((task) => (
-                    <Card key={task.id} variant="glass" className="p-2.5 flex items-center gap-2.5">
+                    <Card key={task.id} variant="glass" className="p-2.5 flex items-center gap-2.5" data-testid="home-personal-task" data-task-id={task.id}>
                       <button
                         type="button"
                         onClick={() => togglePersonalTask.mutate(task)}
@@ -547,9 +575,22 @@ function WorkspaceHome() {
                           <Circle className="h-4 w-4" />
                         )}
                       </button>
-                      <span className={`flex-1 text-sm ${task.done ? 'line-through text-muted-foreground' : ''}`}>
-                        {task.title}
-                      </span>
+                      {personalList ? (
+                        // A task like any other: it opens in its list, as Assigned to me's rows do.
+                        <Link
+                          to="/app/$workspaceId/$spaceId/$projectId/$listId"
+                          params={{ workspaceId, spaceId: personalList.spaceId, projectId: personalList.projectId, listId: task.listId }}
+                          search={{ task: task.id } as any}
+                          className={`flex-1 text-sm hover:underline ${task.done ? 'line-through text-muted-foreground' : ''}`}
+                          data-testid="home-personal-task-open"
+                        >
+                          {task.title}
+                        </Link>
+                      ) : (
+                        <span className={`flex-1 text-sm ${task.done ? 'line-through text-muted-foreground' : ''}`}>
+                          {task.title}
+                        </span>
+                      )}
                       <button
                         type="button"
                         onClick={() => deletePersonalTask.mutate(task.id)}

@@ -45,7 +45,7 @@
  */
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
-import { apiClient, login, ensureDm } from './lib/fixture.mjs'
+import { apiClient, login, ensureDm, madeRow } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
@@ -196,6 +196,8 @@ try {
   const personal = []
   for (let i = 0; i < 3; i++) {
     personal.push(await post(`/workspaces/${WS}/personal-tasks`, { title: `todo ${TAG} ${i}` }, 'a personal task'))
+    // Tasks of the admin's Personal List now (`found-24-sep/planner-default-list-read-by-nothing`): this run's, and removed with it.
+    madeRow('tasks', personal[i].id)
   }
 
   browser = await chromium.launch(launchOptions())
@@ -573,7 +575,6 @@ try {
     if (seededThreadIds.length) {
       await sql`delete from ai_chat_threads where id = any(${seededThreadIds})`.catch(() => {})
     }
-    await sql`delete from personal_tasks where title like ${'%' + TAG + '%'}`.catch(() => {})
     await sql`delete from chat_channels where name like ${'%' + TAG + '%'}`.catch(() => {})
     await sql`delete from lists where name like ${'%' + TAG}`.catch(() => {})
     await sql`delete from folders where name like ${'%' + TAG}`.catch(() => {})

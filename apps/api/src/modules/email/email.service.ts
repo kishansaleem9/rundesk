@@ -12,6 +12,17 @@ import nodemailer, { type Transporter } from 'nodemailer'
  */
 export type ReplyThread = { messageId?: string; replyTo?: string }
 
+/** A task email the mail server did not take: its reply code when it answered, and its words. */
+export class TaskEmailRefused extends Error {
+  constructor(
+    readonly code: number | null,
+    readonly said: string,
+  ) {
+    super(said)
+    this.name = 'TaskEmailRefused'
+  }
+}
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name)
@@ -51,6 +62,65 @@ export class EmailService {
       this.logger.warn(
         'SMTP is not fully configured. Provide SMTP_* keys or MAIL_* fallback keys (host/user/pass). Email delivery is disabled.',
       )
+    }
+  }
+
+  /** Whether this server sends mail at all: with no SMTP, every send is a line in the log. */
+  isConfigured(): boolean {
+    return this.transport !== null
+  }
+
+  /** The bare address mail goes from: `SMTP_FROM` may carry a name, `"Rundesk" <noreply@…>`. */
+  senderAddress(): string {
+    return /<([^>]+)>/.exec(this.from)?.[1]?.trim() ?? this.from
+  }
+
+  /**
+   * A COMMENT SENT AS EMAIL (`resume-defects/s4-composer-email`, `ledger-rows/row-1252`):
+   * ClickUp's Email ClickApp sends from the comment box to people outside the
+   * workspace, and their replies land in the task. Sent as the writer, "Ana
+   * via Rundesk", from the server's address, with the email's own address to
+   * reply to and a Message-ID a reply names; a reply BY email to one that came
+   * in names it (`inReplyTo`), so the other side's mail client threads it.
+   *
+   * Not through `send()`, whose failure is one sentence for every mail: a
+   * person pressed Send here, and when the mail server will not take it they
+   * are told what it said (`TaskEmailRefused`) — never a quiet log line.
+   */
+  async sendTaskEmail(opts: {
+    fromName: string
+    to: string[]
+    cc: string[]
+    bcc: string[]
+    subject: string
+    text: string
+    replyTo: string
+    messageId: string
+    inReplyTo?: string
+    attachments?: Array<{ filename: string; content: Buffer; contentType?: string }>
+  }): Promise<void> {
+    if (!this.transport) throw new TaskEmailRefused(null, 'Email is not set up on this server')
+    const html = `<div style="font-family:system-ui,sans-serif;font-size:14px;line-height:1.5;white-space:pre-wrap">${this.esc(opts.text)}</div>`
+    try {
+      await this.transport.sendMail({
+        from: { name: `${opts.fromName} via Rundesk`, address: this.senderAddress() },
+        to: opts.to,
+        ...(opts.cc.length ? { cc: opts.cc } : {}),
+        ...(opts.bcc.length ? { bcc: opts.bcc } : {}),
+        subject: opts.subject,
+        text: opts.text,
+        html,
+        replyTo: opts.replyTo,
+        messageId: opts.messageId,
+        ...(opts.inReplyTo ? { inReplyTo: opts.inReplyTo, references: [opts.inReplyTo] } : {}),
+        ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
+      })
+      this.logger.log(`[TASK EMAIL SENT] To: ${opts.to.join(', ')} | Subject: ${opts.subject}`)
+    } catch (err) {
+      const e = err as { response?: string; responseCode?: number; code?: string; message?: string }
+      this.logger.error(`A task email to ${opts.to.join(', ')} was not sent: ${e.response ?? e.message}`)
+      // The server's own reply when it gave one ("554 5.7.1 …"); else it was never reached.
+      throw new TaskEmailRefused(e.responseCode ?? null, e.response?.trim() || `the mail server could not be reached (${e.code ?? e.message ?? 'no answer'})`)
     }
   }
 

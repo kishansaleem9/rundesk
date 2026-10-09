@@ -741,7 +741,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Task-detail AI bar ("Ask Brain² for a presentation, document or prototype") — closed by `task-ai-bar.mjs`, 18 checks. `ANTHROPIC_API_KEY` is empty here, so every surface ends in "AI features are not configured"; the suite asserts that MESSAGE, never the status alone, and no check may pass on a 404. *(Where a lane runs the model stub the bar is answered instead: `harness/ai-rows-blocked-on-empty-key`.)* |
 | B | "Collapse empty fields" — one preference across the grid and the Fields tab |
 | B | Relative times in the activity feed + "Show more" |
-| B\* | **"Comment ▾" split button** — frame `04:11`, closed by `task-mentions.mjs`. It is a MODE switch, not two actions: the menu draws Comment with a tick and Email under it, and `[04:11]` says what the other is for. **Email is listed and disabled, with its reason on the row**, because Rundesk's mail goes the other way — `email-to-task.ts` turns mail sent to a task's address into a comment and nothing posts a composed body out — so a selectable Email mode would be a dead control wearing a tick, and that disabled mode is what the asterisk records (it waits on outbound mail, `ledger-rows/row-1252`). **`"Create Task ▾"` is built**, closed by `create-task-chevron.mjs`, 7 checks. `00:07` draws the split button in the create modal's footer — a primary `Create Task` with a chevron segment beside it — and no frame in the video ever opens that chevron; `video2-frame-observations.md` names it once, at line 11, and never again. So its menu is ClickUp's own (help centre "Create a task" and "Create tasks and subtasks on mobile"): **Create and close**, **Create and open**, **Create and start another** (a blank form, the same space, project and list) and **Create and duplicate** (the same content, kept). The primary button (`quick-create-submit`) keeps what it did; each item makes one task and ends where its name says. This row said "blocked on the reference" until 29 September: a chevron no frame opens still has a menu somebody has written down |
+| B | **"Comment ▾" split button** — frame `04:11`, closed by `task-mentions.mjs`. It is a MODE switch, not two actions: the menu draws Comment with a tick and Email under it, and `[04:11]` says what the other is for. **Email sends** (`comment-email.mjs`, 18 checks; `resume-defects/s4-composer-email`), as ClickUp's Email ClickApp does: turned on by an owner or admin and never a guest's, it turns the box into an email — From, To, CC and BCC, a subject, the words and the files — and the answers of the people it went to land in the task under it. Until 9 October Email was listed and disabled with its reason, because nothing posted a composed body out, and that disabled mode was what this row's asterisk recorded. **`"Create Task ▾"` is built**, closed by `create-task-chevron.mjs`, 7 checks. `00:07` draws the split button in the create modal's footer — a primary `Create Task` with a chevron segment beside it — and no frame in the video ever opens that chevron; `video2-frame-observations.md` names it once, at line 11, and never again. So its menu is ClickUp's own (help centre "Create a task" and "Create tasks and subtasks on mobile"): **Create and close**, **Create and open**, **Create and start another** (a blank form, the same space, project and list) and **Create and duplicate** (the same content, kept). The primary button (`quick-create-submit`) keeps what it did; each item makes one task and ends where its name says. This row said "blocked on the reference" until 29 September: a chevron no frame opens still has a menu somebody has written down |
 | — | Toast "Task created — `<title>` › `<list>`" with Copy / View — satisfied differently: creating a task NAVIGATES to it, where Copy link is already in its menu |
 | B | **Time estimate takes `12`, `90m`, `1h 30m`** with a suggestion row; reads back `12h` |
 | B | Attachments "Drop files here" — **the drop handler exists.** The row said "the panel exists, no drop handler" and that reason is now false: `task-detail-sheet.tsx` carries `onDrop`/`onDragOver`/`onDragEnter` on the zone, it takes a drop AND opens the picker on click through the SAME mutation, and `isFileDrag` guards on the dataTransfer TYPES rather than on `files.length`, because during dragover the file list is deliberately empty. The status was always `B`; only the parenthetical was stale, which is worse than a wrong status — a reader trusts a reason |
@@ -814,10 +814,11 @@ Legend: **B** built · **P** partial · **M** missing.
 
 **B\*** — built, and the row also records something the frame asks for that is
 not there; the asterisk is where that remainder is written down, and §4 counts
-the row as built. Two rows in these tables carry one: the Comment split button,
-whose Email mode is listed and disabled until mail can go out (its "Create Task
-▾" menu, the remainder until 29 September, is built), and the plan-tier
-paywall, whose metered "uses have expired" state no frame explains.
+the row as built. One row in these tables carries one: the plan-tier paywall,
+whose metered "uses have expired" state no frame explains. The Comment split
+button carried one until 9 October, for its Email mode, listed and disabled
+until mail could go out; it sends now (its "Create Task ▾" menu, the remainder
+until 29 September, is built too).
 
 THIS LEGEND USED TO GIVE THE ASTERISK A SECOND MEANING, and four rows above
 carried it: the board's Customize switches, the export paywall caption, the
@@ -915,7 +916,7 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 
 ## 4. Counts
 
-**174 rows: 157 built · 8 partial · 9 missing.**
+**174 rows: 159 built · 8 partial · 7 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -952,8 +953,8 @@ rather than believed:
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
 | §2, the sections table | 121 | 7 | 5 | 133 |
-| §5, recovered from the frame observations | 36 | 1 | 4 | 41 |
-| **consolidated** | **157** | **8** | **9** | **174** |
+| §5, recovered from the frame observations | 38 | 1 | 2 | 41 |
+| **consolidated** | **159** | **8** | **7** | **174** |
 
 FOUR ROWS MOVED FROM `P` TO `B` AND THE TOTAL DID NOT CHANGE, which is the
 only shape of movement this table should ever show for a build — and the fourth
@@ -1003,13 +1004,26 @@ theirs, and each row says who added it (`assign-to-priorities.mjs`, 22 checks;
 `ledger-rows/row-850`). So §2 moves `120 · 7 · 6` → `121 · 7 · 5`: 119 `B`,
 2 `B*`, 7 `P` and 5 `M`.
 
-§2's 121 built includes the two marked `B*` — built, but the row also records
-something the frame asks for that is not there. They are counted as built
-because that is what they are; the asterisk is where the remainder is written
-down. This read "the four" until 29 September while §2 held six: the two above,
-and four whose asterisk meant something else — a suite not yet run — which had
-stopped being true (the legend under §2 records it). §5's 34 built includes one
-`B*` of its own, the busy state, whose remainder is the frame's own words.
+TWO OF §5's ROWS MOVED FROM `M` TO `B` ON 9 OCTOBER, AND THE TOTAL DID NOT. A
+clip's link pasted into a comment is drawn as the clip (`05:35`;
+`clip-link-embeds.mjs`, `resume-defects/s4-clip-link`) — built on 8 October and
+not moved here when it was, which this records rather than hides — and the
+composer posts as Comment or Email (`04:11`; `comment-email.mjs`, 18 checks;
+`resume-defects/s4-composer-email`, `ledger-rows/row-1252`). So §5 moves
+`36 · 1 · 4` → `38 · 1 · 2`, and the total stays 174. The Email mode was also the
+remainder of §2's `Comment ▾` row, which was `B*` for it alone; it is `B` now,
+and §2's split does not move, `B*` being counted as built: 120 `B`, 1 `B*`,
+7 `P` and 5 `M`.
+
+§2's 121 built includes the one marked `B*` — built, but the row also records
+something the frame asks for that is not there. It is counted as built
+because that is what it is; the asterisk is where the remainder is written
+down. This read "the four" until 29 September while §2 held six: the two that
+were left, and four whose asterisk meant something else — a suite not yet run —
+which had stopped being true (the legend under §2 records it); and "the two"
+until 9 October, when the `Comment ▾` row's Email mode was built. §5's 38 built
+includes one `B*` of its own, the busy state, whose remainder is the frame's own
+words.
 
 **AND IT WAS 112 RATHER THAN 113 FOR MOST OF THIS PASS BECAUSE ONE ROW WAS
 STRUCK, NOT CLOSED.** The strike below still stands and still costs a row; the
@@ -1038,7 +1052,7 @@ requirement that does not exist while the header pill stays open"* — no longer
 applies: the header pill was built, and its row now names the evidence. The
 doc-error ground stands on its own.
 
-Sixteen of §5's rows closed after it was written, each named with the suite
+Twenty-three of §5's rows closed after it was written, each named with the suite
 that proves it — see the `closed by:` line on the row itself. A row is not
 moved here on the strength of the code having been written; it is moved when a
 suite exercises it against a real API, a real Postgres and a real browser, and
@@ -1085,19 +1099,20 @@ said so. §4's table credits §5 with **31 · 4 · 6**; the line above says
 survived several readings — which is precisely how the 173-that-was-two-numbers
 got as far as it did, recorded at the top of §4.
 
-They are the same forty-one rows at two moments. Twenty-one have closed
-since this section was written — seventeen that were missing and four that
-were partial — and twenty-one is the whole difference. (Seventeen until 29
+They are the same forty-one rows at two moments. Twenty-three have closed
+since this section was written — nineteen that were missing and four that
+were partial — and twenty-three is the whole difference. (Seventeen until 29
 September, when the project-status breakdown and the busy state were read
 against the tree and found built and measured; nineteen until 30 September,
-when the create modal's Templates menu was built, and twenty until the
-Template Center's Tags and Created-by facets were.)
+when the create modal's Templates menu was built, twenty until the
+Template Center's Tags and Created-by facets were, and twenty-one until 9
+October, when a pasted clip link and the composer's Email were.)
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
 | as recovered (this section, and the three appendices below) | 15 | 5 | 21 | 41 |
-| closed since, each named on its own row by the suite that proves it | +21 | −4 | −17 | 0 |
-| **live (what §4 credits §5 with)** | **36** | **1** | **4** | **41** |
+| closed since, each named on its own row by the suite that proves it | +23 | −4 | −19 | 0 |
+| **live (what §4 credits §5 with)** | **38** | **1** | **2** | **41** |
 
 Both numbers are kept rather than one being overwritten, because the
 as-recovered split is what the three appendices below add up to, and a section
@@ -1335,7 +1350,8 @@ Frames extracted and looked at for this pass: `00:05`, `00:50`, `00:52`,
   (`apps/api/src/modules/tasks/tasks.controller.ts:434`), backed by
   `packages/db/src/schema/email-to-task.ts`, whose own comment says mail sent to
   it *becomes a comment*. Mail flows IN; nothing sends a composed body OUT.
-- status: M
+- status: B
+- closed by: comment-email 18/18, task-mentions 17/17 (9 October; `resume-defects/s4-composer-email`)
 - defect class: none
 - why not already a row: the ledger has `M | "Comment ▾" split button; "Create
   Task ▾" split button`, which files this as **chrome** — a button shape. The
@@ -1388,7 +1404,8 @@ Frames extracted and looked at for this pass: `00:05`, `00:50`, `00:52`,
   only, and only when the body actually contains block markdown (the rule
   recorded in `docs/video2-reaudit.md` §0 under *Slash commands in the comment
   composer*), so a pasted link is neither a card nor an anchor.
-- status: M
+- status: B
+- closed by: clip-link-embeds (8 October; `resume-defects/s4-clip-link`; moved here 9 October)
 - defect class: none
 - why not already a row: the ledger's `B | Clip in a comment is a card with its
   name; a clip still arriving says so` is the ATTACHED clip — the blob that this

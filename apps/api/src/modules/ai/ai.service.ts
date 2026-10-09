@@ -1996,8 +1996,9 @@ Current date: ${new Date().toISOString().split('T')[0]}`
           .limit(1),
         this.db
           .select({
-            spaces: sql<number>`count(distinct ${spaces.id})::int`,
-            projects: sql<number>`count(distinct ${projects.id})::int`,
+            // The personal space and its container are nobody's space or project (`personal-list.ts`); one's own Personal List is a list of theirs.
+            spaces: sql<number>`count(distinct case when not ${spaces.isPersonal} then ${spaces.id} end)::int`,
+            projects: sql<number>`count(distinct case when not ${spaces.isPersonal} then ${projects.id} end)::int`,
             lists: sql<number>`count(distinct case when (${listInView ?? sql`true`}) then ${lists.id} end)::int`,
             openTasks: sql<number>`count(distinct case when ${tasks.statusCategory} <> 'closed' and ${tasks.isArchived} = false and (${taskInView ?? sql`true`}) then ${tasks.id} end)::int`,
           })
@@ -2009,14 +2010,14 @@ Current date: ${new Date().toISOString().split('T')[0]}`
         this.db
           .select({ id: spaces.id, name: spaces.name })
           .from(spaces)
-          .where(and(eq(spaces.workspaceId, workspaceId), spaceVisibilityFilter(this.db, userId, isManager)))
+          .where(and(eq(spaces.workspaceId, workspaceId), eq(spaces.isPersonal, false), spaceVisibilityFilter(this.db, userId, isManager)))
           .orderBy(asc(spaces.name))
           .limit(20),
         this.db
           .select({ id: projects.id, name: projects.name, spaceId: projects.spaceId })
           .from(projects)
           .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-          .where(and(eq(spaces.workspaceId, workspaceId), inView))
+          .where(and(eq(spaces.workspaceId, workspaceId), eq(spaces.isPersonal, false), inView))
           .orderBy(asc(projects.name))
           .limit(60),
         this.db
@@ -3383,7 +3384,8 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
       this.db
         .select({ id: spaces.id, name: spaces.name, visibility: spaces.visibility })
         .from(spaces)
-        .where(and(eq(spaces.workspaceId, workspaceId), spaceVisibilityFilter(this.db, actorId, isManager)))
+        // Nothing but tasks is made in the personal space (`assertCanCreateInSpace`).
+        .where(and(eq(spaces.workspaceId, workspaceId), eq(spaces.isPersonal, false), spaceVisibilityFilter(this.db, actorId, isManager)))
         .orderBy(asc(spaces.name))
         .limit(100),
     ])

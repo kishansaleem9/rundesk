@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { ForbiddenException } from '@nestjs/common'
-import { assertCanManageContainer } from './container-access'
+import { assertCanCreateInSpace, assertCanManageContainer, PERSONAL_PLACE_HOLDS_TASKS, PERSONAL_PLACE_REFUSAL } from './container-access'
 
 /**
  * A stand-in for `CustomRolesService.hasPermission`: holds `keys`, and records
@@ -106,6 +106,8 @@ const gate = (
   explicit?: { spaceMember?: any[]; share?: any[] },
 ) => {
   const rows: any[][] = [
+    // Asked before the level: whether this is the personal space (`personal-list.ts`). It is not.
+    [{ isPersonal: false }],
     [{ workspaceId: 'w1', defaultPermission }],
     role ? [{ role }] : [],
   ]
@@ -419,5 +421,42 @@ describe('assertCanManageContainer — the space Default permission (§V2-06 `06
     await assertCanManageContainer(dbQueue([...gate('view', null)]), {
       workspaceId: 'w1', createdById: 'root', actorId: 'root', kind: 'space', spaceId: 's1',
     })
+  })
+})
+
+describe('the personal space (everybody’s Personal List)', () => {
+  const refused = (message: string) => (err: unknown) => err instanceof ForbiddenException && err.message === message
+
+  it('keeps its lists, its container and itself as they are — for the list’s own owner and for an admin', async () => {
+    for (const [kind, actorId, createdById] of [['list', 'owner', 'owner'], ['project', 'admin', 'other'], ['space', 'admin', 'other']]) {
+      for (const action of ['manage', 'delete'] as const) {
+        await assert.rejects(
+          () => assertCanManageContainer(dbQueue([[{ isPersonal: true }], [{ role: 'workspace_admin' }]]), {
+            workspaceId: 'w1', createdById, actorId, kind, action, spaceId: 's1', roles: holding('space.delete', 'project.delete', 'list.delete'),
+          }),
+          refused(PERSONAL_PLACE_REFUSAL),
+          `${kind} ${action}`,
+        )
+      }
+    }
+  })
+
+  it('takes tasks, and nothing else: no list, folder, project, doc or sprint is made in it', async () => {
+    for (const kind of ['list', 'folder', 'project', 'doc', 'sprint']) {
+      await assert.rejects(
+        () => assertCanCreateInSpace(dbQueue([[{ isPersonal: true }]]), { spaceId: 's1', actorId: 'owner', kind }),
+        refused(PERSONAL_PLACE_HOLDS_TASKS),
+        kind,
+      )
+    }
+    // A task goes on to the space's own level (Full edit, as the personal space is made), and is let in.
+    await assertCanCreateInSpace(dbQueue([[{ workspaceId: 'w1', defaultPermission: 'admin' }], [{ role: 'member' }], [], []]), { spaceId: 's1', actorId: 'owner', kind: 'task' })
+  })
+
+  it('is asked of a space that is not personal, which then goes on to its level as before', async () => {
+    await assert.rejects(
+      () => assertCanCreateInSpace(dbQueue([[{ isPersonal: false }], [{ workspaceId: 'w1', defaultPermission: 'view' }], [{ role: 'member' }], [], []]), { spaceId: 's1', actorId: 'u1', kind: 'list' }),
+      /View only/,
+    )
   })
 })

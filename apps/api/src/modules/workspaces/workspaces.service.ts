@@ -1560,14 +1560,15 @@ export class WorkspacesService {
     const cnt = sql<number>`count(*)::int`
 
     const spacesCount = await this.count(
-      this.db.select({ c: cnt }).from(spaces).where(eq(spaces.workspaceId, workspaceId)),
+      // The personal space is made for whoever first opens Home (`personal-list.ts`): no space anybody made.
+      this.db.select({ c: cnt }).from(spaces).where(and(eq(spaces.workspaceId, workspaceId), eq(spaces.isPersonal, false))),
     )
     const projectsCount = await this.count(
       this.db
         .select({ c: cnt })
         .from(projects)
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-        .where(eq(spaces.workspaceId, workspaceId)),
+        .where(and(eq(spaces.workspaceId, workspaceId), eq(spaces.isPersonal, false))),
     )
     const tasksCount = await this.count(
       this.db

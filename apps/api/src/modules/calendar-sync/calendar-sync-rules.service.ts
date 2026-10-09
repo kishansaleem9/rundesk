@@ -184,7 +184,7 @@ export class CalendarSyncRulesService {
     const spaceRows = await this.db
       .select({ id: spaces.id, name: spaces.name })
       .from(spaces)
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(spaces.isArchived, false), spaceVisibilityFilter(this.db, actorId, isManager)))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(spaces.isArchived, false), eq(spaces.isPersonal, false), spaceVisibilityFilter(this.db, actorId, isManager)))
       .orderBy(asc(spaces.createdAt), asc(spaces.id))
     if (spaceRows.length === 0) return []
     const spaceIds = spaceRows.map((s) => s.id)

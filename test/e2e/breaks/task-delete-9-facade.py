@@ -6,9 +6,9 @@
 import io
 p = '/home/user/rundesk/apps/api/src/modules/trash/trash.service.ts'
 s = io.open(p, encoding='utf-8').read()
-a = "        .where(and(eq(spaces.workspaceId, workspaceId), isNotNull(tasks.deletedAt)))"
+a = "        .where(and(eq(spaces.workspaceId, workspaceId), isNotNull(tasks.deletedAt), personalListOpenTo(actor.id)))"
 assert s.count(a) == 1, s.count(a)
 io.open(p, 'w', encoding='utf-8').write(
-    s.replace(a, "        .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, true)))")
+    s.replace(a, "        .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, true), personalListOpenTo(actor.id)))")
 )
 print('BROKE check 9: the Trash lists tasks by is_archived again, so archived tasks are binned')

@@ -5,6 +5,7 @@ import { spaces, folders, projects, lists, tasks, docs, users, workspaceMembers 
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { isAdminRole } from '../../common/permissions/workspace-roles'
+import { personalListOpenTo } from '../../common/permissions/item-visibility'
 import { SecurityService } from '../security/security.service'
 import { SearchService } from '../search/search.service'
 import { CalendarSyncService } from '../calendar-sync/calendar-sync.service'
@@ -159,7 +160,7 @@ export class TrashService {
       const res = await this.db
         .select({
           id: tasks.id, name: tasks.title, at: tasks.deletedAt,
-          spaceName: spaces.name, projectName: projects.name, listName: lists.name,
+          spaceName: spaces.name, projectName: projects.name, listName: lists.name, personalOf: lists.personalOf,
           byId: users.id, byName: users.displayName, byAvatar: users.avatarUrl,
         })
         .from(tasks)
@@ -167,8 +168,13 @@ export class TrashService {
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
         .leftJoin(users, eq(users.id, tasks.deletedById))
-        .where(and(eq(spaces.workspaceId, workspaceId), isNotNull(tasks.deletedAt)))
-      for (const r of res) rows.push({ id: r.id, type: 'task', name: r.name, location: `${r.spaceName} › ${r.projectName} › ${r.listName}`, deletedAt: stamp(r.at), deletedBy: deleter(r) })
+        // An admin's Trash holds the PUBLIC items: what was deleted from somebody else's Personal List is theirs alone (`personal-list.ts`).
+        .where(and(eq(spaces.workspaceId, workspaceId), isNotNull(tasks.deletedAt), personalListOpenTo(actor.id)))
+      for (const r of res) {
+        // A Personal List is no place in the hierarchy, and is named as Home names it.
+        const location = r.personalOf ? r.listName : `${r.spaceName} › ${r.projectName} › ${r.listName}`
+        rows.push({ id: r.id, type: 'task', name: r.name, location, deletedAt: stamp(r.at), deletedBy: deleter(r) })
+      }
     }
 
     if (wanted.has('doc')) {
@@ -217,7 +223,7 @@ export class TrashService {
    * (`restore`, `deleteForever`) go through here, and restore on a live item
    * was silently a no-op reported as success.
    */
-  private async locate(workspaceId: string, type: TrashType, id: string) {
+  private async locate(workspaceId: string, type: TrashType, id: string, actorId?: string) {
     const q = {
       space: () => this.db.select({ name: spaces.name, by: spaces.archivedById, ws: spaces.workspaceId, trashed: spaces.isArchived })
         .from(spaces).where(eq(spaces.id, id)).limit(1),
@@ -231,7 +237,7 @@ export class TrashService {
       // A task is in the trash when it was DELETED. Archived is a different
       // state with a different surface, and restoring or purging one from here
       // would be acting on something the Trash never showed.
-      task: () => this.db.select({ name: tasks.title, by: tasks.deletedById, ws: spaces.workspaceId, trashed: sql<boolean>`${tasks.deletedAt} is not null` })
+      task: () => this.db.select({ name: tasks.title, by: tasks.deletedById, ws: spaces.workspaceId, trashed: sql<boolean>`${tasks.deletedAt} is not null`, personalOf: lists.personalOf })
         .from(tasks).innerJoin(lists, eq(lists.id, tasks.listId))
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId)).where(eq(tasks.id, id)).limit(1),
@@ -240,6 +246,8 @@ export class TrashService {
     }[type]
     const [row] = await q()
     if (!row || row.ws !== workspaceId) throw new NotFoundException('Item not found in this workspace trash')
+    // Somebody else's Personal List's task is not in this person's Trash, an admin's included — as the listing has it.
+    if ('personalOf' in row && row.personalOf && row.personalOf !== actorId) throw new NotFoundException('Item not found in this workspace trash')
     if (!row.trashed) throw new NotFoundException(`This ${type} is not in the trash`)
     return row
   }
@@ -247,7 +255,7 @@ export class TrashService {
   /** Admins act on anything; a member may only act on what they deleted. */
   private async assertMayAct(workspaceId: string, actor: { id: string; role?: string }, type: TrashType, id: string) {
     const { isAdmin } = await this.resolveScope(workspaceId, actor)
-    const row = await this.locate(workspaceId, type, id)
+    const row = await this.locate(workspaceId, type, id, actor.id)
     if (!isAdmin && row.by !== actor.id) throw new ForbiddenException('You can only manage items you deleted')
     return row
   }

@@ -644,6 +644,7 @@ export const LEFT_BY_USE = {
   audit_logs: "the audit trail (a workspace's own goes with it)",
   flag_audit_log: "the feature flags' audit trail",
   search_engagement: 'what somebody opened from a search (one about a row the run removes goes with it)',
+  personal_tasks: "Home's old to-dos, which nothing writes now: a person's first Personal List takes theirs in as its tasks, and removes them here",
 }
 /*
  * And a notification the API's own schedules write (task reminders every
@@ -693,6 +694,16 @@ const madeAtColumns = (sql) => sql`
  * an account the run made.
  */
 const GENERAL = sql => sql`c.name = 'general' and not c.is_dm and not c.is_private`
+/*
+ * And a person's Personal List (`found-24-sep/planner-default-list-read-by-nothing`),
+ * made the first time they need one — Home's Personal List opened, a task made
+ * with no list chosen, the Move picker read — with its statuses, and the
+ * workspace's personal space and its container, made by the first person's
+ * (`ensurePersonalList`). An account the run made takes its own list with it;
+ * a shared account's is nobody's run's, as its dock is not. What is put in it
+ * counts, as anything put anywhere does.
+ */
+const SHARED_PERSONAL_LIST = (sql, since) => sql`l.personal_of is not null and exists (select 1 from users u where u.id = l.personal_of and u.created_at < ${since})`
 
 export async function leftSince(sql, started) {
   const madeAt = (await madeAtColumns(sql)).filter((r) => !(r.t in LEFT_BY_USE))
@@ -707,6 +718,16 @@ export async function leftSince(sql, started) {
       : t === 'user_dock_configs'
       ? await sql`select count(*)::int as n from user_dock_configs d where d.${sql(at)} >= ${since}
                     and exists (select 1 from users u where u.id = d.user_id and u.created_at >= ${since})`
+      : t === 'spaces'
+      ? await sql`select count(*)::int as n from spaces s where s.${sql(at)} >= ${since} and not s.is_personal`
+      : t === 'projects'
+      ? await sql`select count(*)::int as n from projects p where p.${sql(at)} >= ${since}
+                    and not exists (select 1 from spaces s where s.id = p.space_id and s.is_personal)`
+      : t === 'lists'
+      ? await sql`select count(*)::int as n from lists l where l.${sql(at)} >= ${since} and not (${SHARED_PERSONAL_LIST(sql, since)})`
+      : t === 'list_statuses'
+      ? await sql`select count(*)::int as n from list_statuses x where x.${sql(at)} >= ${since}
+                    and not exists (select 1 from lists l where l.id = x.list_id and ${SHARED_PERSONAL_LIST(sql, since)})`
       : t === 'notifications'
       ? await sql`select count(*)::int as n from notifications where created_at >= to_timestamp(${started} / 1000.0) and (actor_id is not null or not (type::text = any(${SCHEDULED}::text[])))`
       : t === 'project_templates'

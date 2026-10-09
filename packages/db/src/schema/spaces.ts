@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, boolean, jsonb, index, check } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, uuid, boolean, jsonb, index, check, uniqueIndex } from 'drizzle-orm/pg-core'
 import { relations, sql } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { projects } from './projects'
@@ -62,6 +62,17 @@ export const spaces = pgTable('spaces', {
    * record of why is a space nobody can explain later.
    */
   presetKey:   text('preset_key'),
+  /*
+   * THE WORKSPACE'S PERSONAL LISTS LIVE HERE (`found-24-sep/planner-default-list-read-by-nothing`,
+   * migration 0181). ClickUp gives each person a Personal List, "the default
+   * location for new tasks", private to them and "not part of the Workspace
+   * hierarchy". It is held in a space of the workspace's own, one per
+   * workspace, so every rule a task answers to reaches it as any other list —
+   * and this flag keeps that space out of the hierarchy anybody is shown: the
+   * sidebar, the Move picker, search. Its lists are their owners' alone
+   * (`lists.personal_of`).
+   */
+  isPersonal:  boolean('is_personal').notNull().default(false),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
@@ -69,6 +80,8 @@ export const spaces = pgTable('spaces', {
   // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
   index('idx_spaces_archived').on(t.isArchived, t.archivedAt),
   check('chk_spaces_default_permission', sql`${t.defaultPermission} IN ('view', 'comment', 'edit', 'admin')`),
+  // One personal space a workspace: two people's first Personal List made at once both find none, and one insert wins.
+  uniqueIndex('uq_spaces_personal_per_workspace').on(t.workspaceId).where(sql`${t.isPersonal}`),
 ])
 
 export const spacesRelations = relations(spaces, ({ one, many }) => ({

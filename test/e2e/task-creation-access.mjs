@@ -9,7 +9,9 @@
  *     and from an AI plan sent straight to the executor (201 each);
  *   - a user of ANOTHER organisation made a task in this workspace's list from
  *     a message of their own (201);
- *   - `/task` filed the task in the workspace's oldest list, whoever asked;
+ *   - `/task` filed the task in the workspace's oldest list, whoever asked
+ *     (it goes to its maker's own Personal List now, as ClickUp's does:
+ *     `found-24-sep/planner-default-list-read-by-nothing`);
  *   - and in a space whose default permission is "view only" or "comment", a
  *     member made tasks through `POST /tasks` itself (201) — ClickUp's view
  *     and comment permissions make none.
@@ -180,10 +182,15 @@ try {
   const aSlash = await slash(A)
   const mList = mSlash.data?.task?.listId
   const aList = aSlash.data?.task?.listId
+  // Whose Personal List each went to, read by SQL: the maker's own, in this workspace.
+  const ownerOf = async (listId) => (listId ? (await sql`select l.personal_of from lists l join projects p on p.id = l.project_id join spaces s on s.id = p.space_id where l.id = ${listId} and s.workspace_id = ${WS}`)[0]?.personal_of ?? null : null)
+  const [memberId, adminId] = [(await M('/users/me')).data?.id, (await A('/users/me')).data?.id]
+  const [mOwner, aOwner] = [await ownerOf(mList), await ownerOf(aList)]
   chk(
-    mSlash.ok && mList && mList !== first.id && mList !== PRIVATE && aSlash.ok && aList === first.id,
-    'the member’s /task goes to the oldest list they may make a task in, not the older one they are refused — the admin’s goes to the oldest',
-    `the member's ${said(mSlash)} went to ${mList === first.id ? 'the REFUSED oldest list' : mList === PRIVATE ? 'the PRIVATE list' : mList === OPEN ? 'the open list' : JSON.stringify(mList)}; the admin's ${said(aSlash)} to ${aList === first.id ? 'the oldest' : JSON.stringify(aList)}`,
+    mSlash.ok && mList && mList !== first.id && mList !== PRIVATE && !!memberId && mOwner === memberId
+      && aSlash.ok && !!adminId && aOwner === adminId && aList !== mList,
+    'the member’s /task goes to their own Personal List, not the oldest list they are refused nor the private one — and the admin’s to the admin’s',
+    `the member's ${said(mSlash)} went to ${mList === first.id ? 'the REFUSED oldest list' : mList === PRIVATE ? 'the PRIVATE list' : mList === OPEN ? 'the open list' : JSON.stringify(mList)} (the Personal List of ${mOwner === memberId ? 'the member' : JSON.stringify(mOwner)}); the admin's ${said(aSlash)} to ${aList === first.id ? 'the oldest' : JSON.stringify(aList)} (the Personal List of ${aOwner === adminId ? 'the admin' : JSON.stringify(aOwner)})`,
   )
 
   // ══ 5. A SPACE'S DEFAULT PERMISSION ══════════════════════════════════════

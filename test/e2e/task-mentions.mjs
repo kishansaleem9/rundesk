@@ -36,7 +36,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil } from './lib/wait.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeWorkspace } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -76,6 +76,9 @@ const chromium = await resolveChromium()
 const stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
 const browser = await chromium.launch(launchOptions())
 let sql = null
+// The workspace the mode switch is read in, with Email on; removed at the end.
+let mailWorkspace = null
+let A = null
 
 /*
  * One nonsense word per run, and every fixture wears it. The e2e database is
@@ -94,7 +97,7 @@ const TAG = `zqx${Date.now().toString(36)}`
  */
 try {
   const auth = await signInApi(API, ME.email, ME.password)
-  const A = apiAs(auth.accessToken)
+  A = apiAs(auth.accessToken)
   const workspaces = (await A('/workspaces')).data ?? []
   const workspaceId = workspaces[0]?.workspace?.id ?? workspaces[0]?.id
   if (!workspaceId) throw new Error('no workspace')
@@ -354,7 +357,29 @@ try {
   // -------------------------------------------------------------------------
   console.log('\n▶ the `Comment ▾` split button, frame `04:11` — a MODE switch')
 
-  await input.fill('')
+  /*
+   * BOTH MODES SEND NOW (`resume-defects/s4-composer-email`,
+   * `suite-hygiene/task-mentions-pins-unbuilt-email-mode`): this section pinned
+   * Email as disabled, which was the truth while nothing sent a composed
+   * comment out. Email is ClickUp's Email ClickApp, off until an owner turns it
+   * on — so the switch is read on a task in a workspace of this section's own,
+   * with Email on: turning a ClickApp on in the shared workspace would change it
+   * for every suite that reads it. `comment-email` sends; here, the switch.
+   */
+  const mailWs = (await A('/workspaces', { method: 'POST', body: { name: `Mail ${TAG}` } })).data
+  if (!mailWs?.id) throw new Error('could not make the workspace the mode switch is read in')
+  mailWorkspace = mailWs.id
+  madeWorkspace(mailWs.id)
+  const mSpace = (await A('/spaces', { method: 'POST', body: { workspaceId: mailWs.id, name: `Space ${TAG}` } })).data
+  const mProject = (await A('/projects', { method: 'POST', body: { spaceId: mSpace?.id, name: `Project ${TAG}` } })).data
+  const mList = (await A('/lists', { method: 'POST', body: { projectId: mProject?.id, name: `List ${TAG}` } })).data
+  const mTask = (await A('/tasks', { method: 'POST', body: { listId: mList?.id, title: `Mailed ${TAG}` } })).data
+  const turnedOn = await A('/feature-flags/tasks.email', { method: 'PUT', body: { enabled: true, scope: 'workspace', scopeId: mailWs.id, workspaceId: mailWs.id } })
+  if (!mTask?.id || turnedOn.status !== 200) throw new Error(`could not make the mailed task (${turnedOn.status})`)
+  await page.goto(`${stack.base}/app/${mailWs.id}/${mSpace.id}/${mProject.id}/${mList.id}?task=${mTask.id}`, { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('task-tab-comments').click({ timeout: 20_000 }).catch(() => {})
+  await page.getByTestId('comment-input').waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
+
   const trigger = page.getByTestId('comment-mode-trigger')
   chk(
     await trigger.isVisible().catch(() => false),
@@ -375,54 +400,58 @@ try {
     `the menu holds ${itemCount} items; the frame draws two`,
   )
 
+  // Offered once the server has said this person may send email from here.
+  const offered = await waitUntil(async () => (await emailItem.getAttribute('data-available').catch(() => null)) === 'yes', { timeoutMs: 10_000 })
+  const reasonRows = await page.getByTestId('comment-mode-reason-email').filter({ visible: true }).count()
   chk(
-    (await commentItem.getAttribute('data-selected').catch(() => null)) === 'yes'
-      && (await emailItem.getAttribute('data-available').catch(() => null)) === 'no',
-    'Comment carries the tick and Email is not selectable',
-    `Comment is marked "${await commentItem.getAttribute('data-selected').catch(() => null)}" and ` +
-      `Email is marked "${await emailItem.getAttribute('data-available').catch(() => null)}" — an ` +
-      'Email mode you can choose is a mode that cannot post',
+    (await commentItem.getAttribute('data-selected').catch(() => null)) === 'yes' && offered && reasonRows === 0,
+    'Comment carries the tick, and Email — on in this workspace — is offered, with no reason against it',
+    `Comment is marked "${await commentItem.getAttribute('data-selected').catch(() => null)}", Email "${await emailItem.getAttribute('data-available').catch(() => null)}", ` +
+      `and ${reasonRows} reason row(s) say why not`,
   )
 
-  // Bounded and caught: nothing short-circuits a standalone assignment, so an
-  // absent element spends Playwright's default thirty seconds here and ends
-  // the section. The consumer below already treats the caught value as a
-  // miss, so absence reports rather than throws.
-  const reason =
-    (await page.getByTestId('comment-mode-reason-email').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => null)) ?? ''
-  chk(
-    reason.toLowerCase().includes('email') && reason.trim().length > 30,
-    `and the row itself says why: "${reason.trim().slice(0, 80)}…"`,
-    reason.trim().length === 0
-      ? 'Email is greyed out and says nothing — a disabled row with no reason sends the reader looking for a setting ' +
-        'that does not exist'
-      : `the reason reads "${reason.trim()}"`,
-  )
-
-  /*
-   * Pressing it must not move the mode. A disabled item that still fires would
-   * leave the composer in a state it cannot post from, which is worse than the
-   * absence this row started as.
-   */
-  await emailItem.click({ force: true }).catch(() => {})
-  await page.keyboard.press('Escape').catch(() => {})
+  await emailItem.click({ timeout: 8000 }).catch(() => {})
+  const formShown = await waitUntil(() => page.getByTestId('comment-email-form').isVisible().catch(() => false), { timeoutMs: 10_000 })
   /*
    * A chk message is built whether the check passes or fails, so read the mode
    * once up here, bounded and caught — `trigger` is a locator held in a variable,
    * the shape rule six could not see until it learnt to track locator variables.
    * A trigger that is gone reads null, which fails the check rather than hanging.
    */
-  const composerMode = await trigger.getAttribute('data-mode', { timeout: 8000 }).catch(() => null)
+  const emailMode = await trigger.getAttribute('data-mode', { timeout: 8000 }).catch(() => null)
+  const sends = {
+    email: await page.getByTestId('comment-email-send').isVisible().catch(() => false),
+    comment: await page.getByTestId('comment-post').isVisible().catch(() => false),
+  }
   chk(
-    composerMode === 'comment',
-    'and pressing Email leaves the composer in Comment mode rather than a mode with no send behind it',
-    `the composer is now in ${JSON.stringify(composerMode)} mode`,
+    formShown && emailMode === 'email' && sends.email && !sends.comment,
+    'choosing Email turns the box into an email — its fields over the words, and Send in place of Comment',
+    `the form ${formShown ? 'is' : 'is not'} drawn, the mode reads ${JSON.stringify(emailMode)}, and the buttons are ${JSON.stringify(sends)}`,
+  )
+
+  await trigger.click({ timeout: 8000 }).catch(() => {})
+  await commentItem.click({ timeout: 8000 }).catch(() => {})
+  const formGone = await waitUntil(async () => !(await page.getByTestId('comment-email-form').isVisible().catch(() => false)), { timeoutMs: 10_000 })
+  const commentMode = await trigger.getAttribute('data-mode', { timeout: 8000 }).catch(() => null)
+  chk(
+    formGone && commentMode === 'comment' && (await page.getByTestId('comment-post').isVisible().catch(() => false)),
+    'and choosing Comment turns it back: no email fields, and Comment posts',
+    `the composer is now in ${JSON.stringify(commentMode)} mode, and the form ${formGone ? 'went' : 'stayed'}`,
   )
 } catch (err) {
   failed += 1
   const frame = String(err?.stack ?? '').split('\n').find((l) => l.includes('task-mentions.mjs'))
   console.error('\n\x1b[31mSUITE ERROR\x1b[0m', err?.message ?? err, frame ? `\n  at ${frame.trim()}` : '')
 } finally {
+  if (mailWorkspace && A) {
+    // This client throws when nothing answers (`noAnswer: 'throw'`): said, so the rest of the clean-up still runs.
+    try {
+      const gone = await A(`/workspaces/${mailWorkspace}`, { method: 'DELETE' })
+      if (![200, 204, 404].includes(gone.status)) console.log(`  cleanup left behind: DELETE /workspaces/${mailWorkspace} answered ${gone.status}`)
+    } catch (e) {
+      console.log(`  cleanup left behind: DELETE /workspaces/${mailWorkspace} had no answer (${e?.message ?? e})`)
+    }
+  }
   sql = await openDb().catch(() => null)
   if (sql) {
     await sql`delete from tasks where title like ${'%' + TAG}`.catch(() => {})

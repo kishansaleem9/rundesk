@@ -13,6 +13,7 @@ import {
 import { SecurityService } from '../security/security.service'
 import { CustomRolesService } from '../custom-roles/custom-roles.service'
 import { ListsService } from '../lists/lists.service'
+import { ensurePersonalList, PERSONAL_LIST_NAME } from '../lists/personal-list'
 import { PlansService } from '../plans/plans.service'
 import { PLAN_TIERS, type PlanId } from '../plans/plans.constants'
 import {
@@ -325,7 +326,8 @@ export class SpacesService {
   async moveTargets(workspaceId: string, actorId?: string) {
     const seen = await this.getSpacesByWorkspace(workspaceId, actorId)
     const visible = actorId ? await this.narrowToWritable(workspaceId, seen, actorId) : seen
-    if (visible.length === 0) return []
+    // Nowhere in the hierarchy to put anything: their own Personal List still is a place for a task.
+    if (visible.length === 0) return this.withPersonalList([], workspaceId, actorId)
     const spaceIds = visible.map((s) => s.id)
 
     const [folderRows, projectRows] = await Promise.all([
@@ -348,7 +350,7 @@ export class SpacesService {
           .where(and(inArray(lists.projectId, projectIds), eq(lists.isArchived, false)))
       : []
 
-    return visible.map((sp) => {
+    const tree = visible.map((sp) => {
       const spProjects = projectRows.filter((pr) => pr.spaceId === sp.id)
       const spProjectIds = new Set(spProjects.map((pr) => pr.id))
       return {
@@ -363,6 +365,31 @@ export class SpacesService {
           .map((l) => ({ id: l.id, name: l.name, projectId: l.projectId })),
       }
     })
+    return this.withPersonalList(tree, workspaceId, actorId)
+  }
+
+  /*
+   * AND THE MOVER'S OWN PERSONAL LIST, last, on its own: ClickUp moves a task
+   * into a Personal List, where it takes that list's sharing — its owner's
+   * alone (`found-24-sep/planner-default-list-read-by-nothing`). Nobody
+   * else's is offered; a guest has none.
+   */
+  private async withPersonalList<T extends object>(tree: T[], workspaceId: string, actorId?: string) {
+    const personal = actorId ? await ensurePersonalList(this.db, workspaceId, actorId) : null
+    if (!personal) return tree
+    return [
+      ...tree,
+      {
+        id: personal.spaceId,
+        name: PERSONAL_LIST_NAME,
+        icon: null,
+        color: null,
+        personal: true,
+        folders: [],
+        projects: [],
+        lists: [{ id: personal.id, name: PERSONAL_LIST_NAME, projectId: personal.projectId }],
+      },
+    ]
   }
 
   /**
@@ -392,7 +419,8 @@ export class SpacesService {
   }
 
   async getSpacesByWorkspace(workspaceId: string, actorId?: string) {
-    const base = and(eq(spaces.workspaceId, workspaceId), eq(spaces.isArchived, false))
+    // Never the personal space: Personal Lists are "not part of the Workspace hierarchy" (`ensurePersonalList`).
+    const base = and(eq(spaces.workspaceId, workspaceId), eq(spaces.isArchived, false), eq(spaces.isPersonal, false))
     /*
      * IN THE ORDER THEY WERE MADE. There was no order at all, so the sidebar,
      * the Move picker and every space picker drew spaces in the order Postgres

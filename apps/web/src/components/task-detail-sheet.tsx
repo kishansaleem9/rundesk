@@ -137,6 +137,15 @@ import { presentationFor } from '../lib/composer-recording'
 import { MentionText } from './mention-text'
 import { ImageGenerator } from './image-generator'
 import { ClipEmbeds } from './clip-embed'
+import {
+  CommentEmailEnvelope,
+  CommentEmailFields,
+  emailAnswerDefaults,
+  emailUnavailableReason,
+  useCommentEmailSetup,
+  type CommentEmail,
+  type EmailDraft,
+} from './comment-email'
 import { clipTokensIn } from '../lib/clip-links'
 import { RecurringTaskDialog, type RecurrenceRule } from './recurring-task-dialog'
 import { MoveDialog } from './move-dialog'
@@ -510,6 +519,9 @@ type TaskComment = {
   attachments?: Array<{ id: string; fileName: string; fileSize?: number | null; mimeType?: string | null; url?: string | null }>
   /** §V2-S06 frame `05:55` — whether *I* saved it. Per person, never shared. */
   savedByMe?: boolean
+  /** Sent from the comment box as email, or an answer that came in by email (`resume-defects/s4-composer-email`). */
+  channel?: 'comment' | 'email'
+  email?: CommentEmail | null
 }
 
 type ActivityEntry = {
@@ -2335,6 +2347,7 @@ export function TaskDetailSheet({
               {activeTab === 'comments' && (
                 <CommentsPanel
                   taskId={detailQuery.data.id}
+                  taskTitle={detailQuery.data.title}
                   workspaceId={fallbackWorkspaceId}
                   focusCommentId={focusCommentId}
                   listId={detailQuery.data.listId}
@@ -6699,11 +6712,14 @@ function CommentAttachments({
 
 function CommentsPanel({
   taskId,
+  taskTitle,
   workspaceId,
   focusCommentId,
   listId,
 }: {
   taskId: string
+  /** An email's subject until one is typed (`resume-defects/s4-composer-email`). */
+  taskTitle?: string
   workspaceId?: string
   /** §V2-S06 — the one comment to scroll to and mark, arriving from a link. */
   focusCommentId?: string | null
@@ -6720,7 +6736,32 @@ function CommentsPanel({
   const currentUser = useAuthStore((s) => s.user)
   const [text, setText] = useState('')
   const [commentFiles, setCommentFiles] = useState<File[]>([])
+  // Each file already put on the task, by the file: a send that failed is retried without a second copy.
+  const uploadedFilesRef = useRef(new Map<File, string>())
   const [replyTo, setReplyTo] = useState<string | null>(null)
+  /*
+   * COMMENT ▾ IS A MODE (`resume-defects/s4-composer-email`, `ledger-rows/row-1252`):
+   * Comment posts into the task; Email sends the same words and files as an
+   * email, from the fields `CommentEmailFields` puts over the box, when this
+   * person may (`useCommentEmailSetup`: the ClickApp on, not a guest, mail set
+   * up on the server).
+   */
+  const [mode, setMode] = useState<'comment' | 'email'>('comment')
+  const [emailDraft, setEmailDraft] = useState<EmailDraft>({ to: [], cc: [], bcc: [], subject: '' })
+  const [emailError, setEmailError] = useState<string | null>(null)
+  const emailSetup = useCommentEmailSetup(taskId)
+  const emailAvailable = emailSetup.data?.available === true
+  /*
+   * WHERE THE CURSOR GOES WHEN EMAIL IS CHOSEN. The form is drawn at the choice,
+   * and the closing menu then hands the cursor back to its trigger: measured on
+   * lane 10, an address typed into To at once lost the box mid-word, and what
+   * was typed became an address of its own on the way out — the shape of
+   * `found-29-sep/brain-loses-early-typing`, closed the same way. The row only
+   * records the choice; `onCloseAutoFocus` puts the cursor in To (in the words,
+   * for an answer whose people are filled in) and keeps Radix from moving it.
+   */
+  const emailChosenRef = useRef(false)
+  const emailToInputRef = useRef<HTMLInputElement>(null)
   /*
    * §V2-S06 frame `05:50` — which comment's THREAD is open, if any.
    *
@@ -6947,30 +6988,42 @@ function CommentsPanel({
     },
   })
 
+  // The composer's files, put on the task: what a comment and an email both carry, by id.
+  const uploadCommentFiles = async (): Promise<string[]> => {
+    const attachmentIds: string[] = []
+    for (const file of commentFiles) {
+      const already = uploadedFilesRef.current.get(file)
+      if (already) {
+        attachmentIds.push(already)
+        continue
+      }
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        throw new Error(t('taskDetail.fileExceedsLimit', { name: file.name, limit: MAX_ATTACHMENT_BYTES / (1024 * 1024) }))
+      }
+      const presign = await api<{ uploadUrl: string; storageKey: string }>(`/tasks/${taskId}/attachments/presign`, {
+        method: 'POST',
+        body: { fileName: file.name, contentType: file.type || 'application/octet-stream', sizeBytes: file.size },
+      })
+      const putRes = await fetch(presign.uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+        body: file,
+      })
+      if (!putRes.ok) throw new Error(t('taskDetail.uploadFailedFor', { name: file.name, status: putRes.status }))
+      const rec = await api<{ id: string }>(`/tasks/${taskId}/attachments`, {
+        method: 'POST',
+        body: { fileName: file.name, storageKey: presign.storageKey, contentType: file.type || 'application/octet-stream', sizeBytes: file.size },
+      })
+      uploadedFilesRef.current.set(file, rec.id)
+      attachmentIds.push(rec.id)
+    }
+    return attachmentIds
+  }
+
   const create = useMutation({
     mutationFn: async () => {
       // Upload any attached files first, then post the comment referencing them.
-      const attachmentIds: string[] = []
-      for (const file of commentFiles) {
-        if (file.size > MAX_ATTACHMENT_BYTES) {
-          throw new Error(t('taskDetail.fileExceedsLimit', { name: file.name, limit: MAX_ATTACHMENT_BYTES / (1024 * 1024) }))
-        }
-        const presign = await api<{ uploadUrl: string; storageKey: string }>(`/tasks/${taskId}/attachments/presign`, {
-          method: 'POST',
-          body: { fileName: file.name, contentType: file.type || 'application/octet-stream', sizeBytes: file.size },
-        })
-        const putRes = await fetch(presign.uploadUrl, {
-          method: 'PUT',
-          headers: { 'Content-Type': file.type || 'application/octet-stream' },
-          body: file,
-        })
-        if (!putRes.ok) throw new Error(t('taskDetail.uploadFailedFor', { name: file.name, status: putRes.status }))
-        const rec = await api<{ id: string }>(`/tasks/${taskId}/attachments`, {
-          method: 'POST',
-          body: { fileName: file.name, storageKey: presign.storageKey, contentType: file.type || 'application/octet-stream', sizeBytes: file.size },
-        })
-        attachmentIds.push(rec.id)
-      }
+      const attachmentIds = await uploadCommentFiles()
       const posted = await api<{ id: string }>(`/tasks/${taskId}/comments`, {
         method: 'POST',
         body: JSON.stringify({
@@ -7007,6 +7060,7 @@ function CommentsPanel({
     onSuccess: async () => {
       setText('')
       setCommentFiles([])
+      uploadedFilesRef.current.clear()
       setReplyTo(null)
       setSelectedMentionUserIds([])
       setAssignTo('')
@@ -7018,6 +7072,57 @@ function CommentsPanel({
       toast.error(err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('taskDetail.couldNotPostComment'))
     },
   })
+  /*
+   * SEND, IN EMAIL MODE (`resume-defects/s4-composer-email`): the box's words
+   * and files, to the form's people, as the thread's answer when one is being
+   * answered. Refused — the mail server's words, an address that is not one —
+   * the form keeps everything typed and says why, beside the box and in a toast.
+   */
+  const sendEmail = useMutation({
+    mutationFn: async () => {
+      const attachmentIds = await uploadCommentFiles()
+      return api<{ id: string }>(`/tasks/${taskId}/comments/email`, {
+        method: 'POST',
+        body: {
+          to: emailDraft.to,
+          cc: emailDraft.cc,
+          bcc: emailDraft.bcc,
+          subject: emailDraft.subject.trim() || undefined,
+          body: text,
+          parentCommentId: replyTo ?? undefined,
+          attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
+        },
+      })
+    },
+    onSuccess: async () => {
+      setText('')
+      setCommentFiles([])
+      uploadedFilesRef.current.clear()
+      setReplyTo(null)
+      setEmailDraft({ to: [], cc: [], bcc: [], subject: '' })
+      setEmailError(null)
+      setMode('comment')
+      toast.success(t('taskDetail.emailSent'))
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'comments'] })
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'attachments'] })
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'activity'] })
+    },
+    onError: (err) => {
+      const said = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('taskDetail.emailSendFailed')
+      setEmailError(said)
+      toast.error(said)
+    },
+  })
+  /** Email mode; answering an email, its people and its subject filled in where nothing was typed. */
+  const startEmail = (answering?: TaskComment | null) => {
+    setMode('email')
+    setEmailError(null)
+    const env = answering?.email
+    if (env) {
+      const d = emailAnswerDefaults(env)
+      setEmailDraft((prev) => ({ ...prev, to: prev.to.length ? prev.to : d.to, subject: prev.subject || d.subject }))
+    }
+  }
   const update = useMutation({
     mutationFn: ({ commentId, body }: { commentId: string; body: string }) =>
       api(`/tasks/${taskId}/comments/${commentId}`, {
@@ -7263,12 +7368,13 @@ function CommentsPanel({
                 )}
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium">
-                    {c.author?.displayName ?? c.author?.email ?? t('taskDetail.userFallback')}
+                    {c.email?.direction === 'in' ? c.email.from : (c.author?.displayName ?? c.author?.email ?? t('taskDetail.userFallback'))}
                   </span>
                   <span className="text-xs text-muted-foreground">
                     {new Date(c.createdAt).toLocaleString()}
                   </span>
                 </div>
+                {c.email && <CommentEmailEnvelope commentId={c.id} email={c.email} />}
                 {/*
                   §V2-S05c — `markdown` on, so a block the slash menu inserted
                   is laid out rather than shown as its own syntax. A comment
@@ -7297,6 +7403,22 @@ function CommentsPanel({
                   >
                     {t('taskDetail.reply')}
                   </button>
+                  {/* An email is answered as a comment, above, or by email (`resume-defects/s4-composer-email`). */}
+                  {c.email && emailAvailable && (
+                    <button
+                      type="button"
+                      data-testid={`comment-email-answer-${c.id}`}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        setReplyTo(c.id)
+                        startEmail(c)
+                        // Its people and subject are filled in: what is left to write is the words.
+                        requestAnimationFrame(() => commentTextRef.current?.focus())
+                      }}
+                    >
+                      {t('taskDetail.emailAnswer')}
+                    </button>
+                  )}
                   {/*
                     §V2-S06 frame `05:50` — the way into the thread panel, ON
                     EVERY ROOT COMMENT and not only on ones that already have
@@ -7313,7 +7435,7 @@ function CommentsPanel({
                   >
                     {t('taskDetail.thread')}
                   </button>
-                  {isAuthor(c) && (
+                  {isAuthor(c) && c.channel !== 'email' && (
                     <button
                       type="button"
                       className="text-xs text-muted-foreground hover:text-foreground"
@@ -7407,12 +7529,13 @@ function CommentsPanel({
                       >
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-medium">
-                            {reply.author?.displayName ?? reply.author?.email ?? t('taskDetail.userFallback')}
+                            {reply.email?.direction === 'in' ? reply.email.from : (reply.author?.displayName ?? reply.author?.email ?? t('taskDetail.userFallback'))}
                           </span>
                           <span className="text-xs text-muted-foreground">
                             {new Date(reply.createdAt).toLocaleString()}
                           </span>
                         </div>
+                        {reply.email && <CommentEmailEnvelope commentId={reply.id} email={reply.email} />}
                         <MentionText markdown text={reply.body} namesById={namesById} className="mt-1 text-sm" />
                         <ClipEmbeds tokens={clipTokensIn(reply.body, window.location.origin)} />
                         <CommentAttachments files={reply.attachments} commentId={reply.id} />
@@ -7424,7 +7547,21 @@ function CommentsPanel({
                           >
                             {t('taskDetail.reply')}
                           </button>
-                          {isAuthor(reply) && (
+                          {reply.email && emailAvailable && (
+                            <button
+                              type="button"
+                              data-testid={`comment-email-answer-${reply.id}`}
+                              className="text-xs text-muted-foreground hover:text-foreground"
+                              onClick={() => {
+                                setReplyTo(reply.id)
+                                startEmail(reply)
+                                requestAnimationFrame(() => commentTextRef.current?.focus())
+                              }}
+                            >
+                              {t('taskDetail.emailAnswer')}
+                            </button>
+                          )}
+                          {isAuthor(reply) && reply.channel !== 'email' && (
                             <button
                               type="button"
                               className="text-xs text-muted-foreground hover:text-foreground"
@@ -7505,6 +7642,21 @@ function CommentsPanel({
             </button>
           </div>
         )}
+        {mode === 'email' && (
+          <CommentEmailFields
+            taskId={taskId}
+            taskTitle={taskTitle ?? ''}
+            from={emailSetup.data?.from ?? null}
+            draft={emailDraft}
+            onChange={setEmailDraft}
+            toInputRef={emailToInputRef}
+          />
+        )}
+        {mode === 'email' && emailError && (
+          <p className="mb-2 text-xs text-destructive" data-testid="comment-email-error">
+            {emailError}
+          </p>
+        )}
         <Textarea
           ref={commentTextRef}
           value={text}
@@ -7526,7 +7678,7 @@ function CommentsPanel({
             setCommentSlashOpen(opensCommand)
             setCommentSlashQuery(opensCommand ? before.slice(slash + 1) : '')
           }}
-          placeholder={t('taskDetail.commentPlaceholder')}
+          placeholder={mode === 'email' ? t('taskDetail.emailBodyPlaceholder') : t('taskDetail.commentPlaceholder')}
           data-testid="comment-input"
           rows={3}
           onKeyDown={(e) => {
@@ -8170,61 +8322,90 @@ function CommentsPanel({
               §V2-S05 frame `04:11` — the `Comment ▾` split button, OPEN.
 
               IT IS A MODE SWITCH, NOT TWO ACTIONS. The menu draws **Comment**
-              with a tick beside it and **Email** under it: the tick says which
-              mode the composer is in, and `[04:11]` names what the other one is
-              for — *"main is ko EMAIL bhi kar sakti hoon."*
+              and **Email**, the tick beside the mode the box is in, and
+              `[04:11]` names what the other one is for — *"main is ko EMAIL bhi
+              kar sakti hoon."*
 
-              AND THE OTHER MODE CANNOT SEND. Rundesk's mail goes the opposite
-              way: `email-to-task.ts` turns mail sent to a task's address INTO a
-              comment, and the task menu's "Send email" shows you that INBOUND
-              address. There is no endpoint anywhere that posts a composed body
-              out to a recipient, so an Email mode you could select would be a
-              dead control wearing a tick.
-
-              So the menu SAYS SO. Email is listed, because the frame lists it
-              and because a reader who came looking for it deserves an answer
-              rather than an absence; it is disabled, and it carries its reason
-              on the row. Choosing it cannot move the mode — `onSelect` is not
-              even wired, so there is no path by which the composer ends up in a
-              state it cannot post from.
+              EMAIL SENDS (`resume-defects/s4-composer-email`, `ledger-rows/row-1252`),
+              as ClickUp's Email ClickApp does: the box takes From, To, CC, BCC
+              and a subject over its words and files, and sends. It is offered
+              when this person may send from here — the ClickApp on, not a
+              guest, mail set up on the server — and otherwise listed, disabled,
+              with why on the row, so a reader who came looking for it is
+              answered rather than shown an absence.
             */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
                   data-testid="comment-mode-trigger"
-                  data-mode="comment"
+                  data-mode={mode}
                   title={t('taskDetail.commentModeLabel')}
                   className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-card px-2 text-xs text-muted-foreground hover:text-foreground"
                 >
-                  {t('taskDetail.comment')}
+                  {mode === 'email' ? t('taskDetail.commentModeEmail') : t('taskDetail.comment')}
                   <ChevronDown className="h-3 w-3" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64">
-                <DropdownMenuItem data-testid="comment-mode-item-comment" data-selected="yes" onSelect={() => {}}>
-                  <CheckIcon className="mr-2 h-4 w-4 text-accent" />
+              <DropdownMenuContent
+                align="end"
+                className="w-64"
+                onCloseAutoFocus={(e) => {
+                  if (!emailChosenRef.current) return
+                  emailChosenRef.current = false
+                  e.preventDefault()
+                  if (emailDraft.to.length > 0) commentTextRef.current?.focus()
+                  else emailToInputRef.current?.focus()
+                }}
+              >
+                <DropdownMenuItem
+                  data-testid="comment-mode-item-comment"
+                  data-selected={mode === 'comment' ? 'yes' : 'no'}
+                  onSelect={() => {
+                    setMode('comment')
+                    setEmailError(null)
+                  }}
+                >
+                  {mode === 'comment' ? <CheckIcon className="mr-2 h-4 w-4 text-accent" /> : <span className="mr-2 inline-block h-4 w-4" />}
                   {t('taskDetail.commentModeComment')}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   data-testid="comment-mode-item-email"
-                  data-available="no"
-                  disabled
+                  data-available={emailAvailable ? 'yes' : 'no'}
+                  data-selected={mode === 'email' ? 'yes' : 'no'}
+                  disabled={!emailAvailable}
+                  onSelect={() => {
+                    emailChosenRef.current = true
+                    startEmail(parentPreview)
+                  }}
                   className="flex-col items-start gap-0.5"
                 >
                   <span className="inline-flex items-center">
-                    <Mail className="mr-2 h-4 w-4" />
+                    {mode === 'email' ? <CheckIcon className="mr-2 h-4 w-4 text-accent" /> : <Mail className="mr-2 h-4 w-4" />}
                     {t('taskDetail.commentModeEmail')}
                   </span>
-                  <span
-                    data-testid="comment-mode-reason-email"
-                    className="pl-6 text-[10px] leading-snug text-muted-foreground"
-                  >
-                    {t('taskDetail.commentModeEmailReason')}
-                  </span>
+                  {!emailAvailable && (
+                    <span
+                      data-testid="comment-mode-reason-email"
+                      className="pl-6 text-[10px] leading-snug text-muted-foreground"
+                    >
+                      {emailUnavailableReason(t, emailSetup.data, emailSetup.isError)}
+                    </span>
+                  )}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            {mode === 'email' && (
+              <Button
+                size="sm"
+                data-testid="comment-email-send"
+                onClick={() => sendEmail.mutate()}
+                disabled={emailDraft.to.length === 0 || (!text.trim() && commentFiles.length === 0) || sendEmail.isPending}
+              >
+                {sendEmail.isPending ? t('taskDetail.emailSending') : t('taskDetail.emailSend')}
+              </Button>
+            )}
+            {mode === 'comment' && (
             <Button
               size="sm"
               data-testid="comment-post"
@@ -8239,6 +8420,7 @@ function CommentsPanel({
             >
               {create.isPending ? t('taskDetail.posting') : t('taskDetail.comment')}
             </Button>
+            )}
           </div>
         </div>
       </div>
@@ -10373,6 +10555,7 @@ function CommentThreadPanel({
           <span className="text-xs font-medium">{authorName}</span>
           <span className="text-xs text-muted-foreground">{new Date(root.createdAt).toLocaleString()}</span>
         </div>
+        {root.email && <CommentEmailEnvelope commentId={root.id} email={root.email} />}
         <MentionText markdown text={root.body} namesById={namesById} className="mt-1 text-sm" />
         <ClipEmbeds tokens={clipTokensIn(root.body, window.location.origin)} />
         <CommentAttachments files={root.attachments} commentId={root.id} />
@@ -10412,12 +10595,13 @@ function CommentThreadPanel({
             >
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium">
-                  {r.author?.displayName ?? r.author?.email ?? t('taskDetail.userFallback')}
+                  {r.email?.direction === 'in' ? r.email.from : (r.author?.displayName ?? r.author?.email ?? t('taskDetail.userFallback'))}
                 </span>
                 <span className="text-[11px] text-muted-foreground">
                   {new Date(r.createdAt).toLocaleString()}
                 </span>
               </div>
+              {r.email && <CommentEmailEnvelope commentId={r.id} email={r.email} />}
               <MentionText markdown text={r.body} namesById={namesById} className="mt-1 text-sm" />
               <ClipEmbeds tokens={clipTokensIn(r.body, window.location.origin)} />
               <CommentAttachments files={r.attachments} commentId={r.id} />

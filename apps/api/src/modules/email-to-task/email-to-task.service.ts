@@ -13,6 +13,7 @@ import {
   listEmailAliases,
   inboundEmailMessages,
   outboundEmailMessages,
+  taskCommentEmails,
   lists,
   tasks,
   taskComments,
@@ -29,7 +30,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { taskCommentAllowed } from '../../common/permissions/task-write'
 import { canCreateTaskIn, heldInTrash, listTrashState } from '../../common/permissions/task-create'
 import { isUuid } from '../../common/validation/uuid'
-import { LOCAL_PART_PREFIX, TASK_TAG, inboundDomain, taskAddressMatches, taskReplyAddress } from './task-address'
+import { EMAIL_REPLY_PREFIX, LOCAL_PART_PREFIX, TASK_TAG, inboundDomain, taskAddressMatches, taskReplyAddress } from './task-address'
 
 /**
  * Email-to-task: convert inbound emails into rundesk tasks or comments.
@@ -222,6 +223,19 @@ export class EmailToTaskService {
       return this.appendComment(payload, replyContext, totalBytes)
     }
 
+    // An email sent from a task's comment box, answered at its own address (`emailReplyAddress`).
+    const replyId = this.parseReplyRecipient(payload.recipient)
+    if (replyId) {
+      const [sent] = await this.db
+        .select({ taskId: outboundEmailMessages.taskId, listId: outboundEmailMessages.listId, commentId: outboundEmailMessages.commentId })
+        .from(outboundEmailMessages)
+        .where(eq(outboundEmailMessages.id, replyId))
+        .limit(1)
+      if (sent) return this.appendComment(payload, { taskId: sent.taskId, listId: sent.listId, commentId: sent.commentId }, totalBytes)
+      await this.recordOutcome(payload, totalBytes, 'rejected_no_alias', 'reply address not recognized')
+      return { outcome: 'rejected_no_alias', reason: `No email sent from a task answers to ${payload.recipient}` }
+    }
+
     // Otherwise: route via recipient sub-address.
     const route = this.parseRecipient(payload.recipient)
     if (!route) {
@@ -348,7 +362,7 @@ export class EmailToTaskService {
 
   private async appendComment(
     payload: InboundEmailPayload,
-    ctx: { taskId: string; listId: string },
+    ctx: { taskId: string; listId: string; commentId?: string | null },
     totalBytes: number,
   ): Promise<{ outcome: InboundOutcome; commentId?: string; reason?: string }> {
     /*
@@ -361,7 +375,17 @@ export class EmailToTaskService {
      * A sender who may not comment on this task is refused, and the refusal
      * recorded; no comment is written in somebody else's name.
      */
-    const authorId = await this.memberWhoMayComment(ctx.taskId, payload.fromAddress)
+    /*
+     * A REPLY TO AN EMAIL SENT FROM THE TASK, BY SOMEBODY IT WENT TO
+     * (`resume-defects/s4-composer-email`): ClickUp's Email ClickApp lands the
+     * replies of the people emailed — who are not on ClickUp — in the task's
+     * activity. Taken when the sender is one of that email's recipients, and
+     * written down as its writer's thread, the sender's address beside it; a
+     * stranger who learns the reply address is still refused, as any mail is
+     * from somebody who may not comment.
+     */
+    const thread = ctx.commentId ? await this.emailThread(ctx.commentId, payload.fromAddress) : null
+    const authorId = (thread?.fromRecipient ? thread.writerId : null) ?? (await this.memberWhoMayComment(ctx.taskId, payload.fromAddress))
     if (!authorId) {
       await this.recordOutcome(payload, totalBytes, 'rejected_not_allowed', 'the sender may not comment on this task', ctx.listId, ctx.taskId)
       return { outcome: 'rejected_not_allowed', reason: 'the sender may not comment on this task' }
@@ -373,8 +397,20 @@ export class EmailToTaskService {
         taskId: ctx.taskId,
         authorId,
         body: body || '(empty reply)',
+        // An answer to an email from the task is part of that email's thread.
+        ...(thread ? { channel: 'email', parentCommentId: thread.rootId } : {}),
       })
       .returning()
+    if (thread) {
+      await this.db.insert(taskCommentEmails).values({
+        commentId: comment.id,
+        direction: 'in',
+        fromAddress: payload.fromAddress.trim().toLowerCase(),
+        toAddresses: [payload.recipient.trim().toLowerCase()],
+        subject: payload.subject ?? '',
+        messageId: payload.messageId,
+      })
+    }
 
     await this.recordOutcome(
       payload,
@@ -421,9 +457,48 @@ export class EmailToTaskService {
     return { localPart, taskId }
   }
 
+  /** `reply-<id>@domain` — an email sent from a task's comment box (`emailReplyAddress`) — names that email's row. */
+  parseReplyRecipient(recipient: string): string | null {
+    const lower = recipient.trim().toLowerCase()
+    const at = lower.indexOf('@')
+    if (at < 1) return null
+    const left = lower.slice(0, at)
+    if (!left.startsWith(EMAIL_REPLY_PREFIX)) return null
+    const id = left.slice(EMAIL_REPLY_PREFIX.length)
+    return isUuid(id) ? id : null
+  }
+
+  /**
+   * The email comment a reply answers: the thread it belongs to (a comment's
+   * replies hang off its first comment, so an answer to a later email of the
+   * thread joins the same one), who wrote that email, and whether `fromAddress`
+   * is one of the people it went to.
+   */
+  private async emailThread(commentId: string, fromAddress: string): Promise<{ rootId: string; writerId: string; fromRecipient: boolean } | null> {
+    const [row] = await this.db
+      .select({
+        writerId: taskComments.authorId,
+        parentId: taskComments.parentCommentId,
+        to: taskCommentEmails.toAddresses,
+        cc: taskCommentEmails.ccAddresses,
+        bcc: taskCommentEmails.bccAddresses,
+      })
+      .from(taskCommentEmails)
+      .innerJoin(taskComments, eq(taskComments.id, taskCommentEmails.commentId))
+      .where(and(eq(taskCommentEmails.commentId, commentId), eq(taskCommentEmails.direction, 'out')))
+      .limit(1)
+    if (!row) return null
+    const from = fromAddress.trim().toLowerCase()
+    return {
+      rootId: row.parentId ?? commentId,
+      writerId: row.writerId,
+      fromRecipient: [...row.to, ...row.cc, ...row.bcc].some((a) => a.toLowerCase() === from),
+    }
+  }
+
   private async resolveReplyContext(
     payload: InboundEmailPayload,
-  ): Promise<{ taskId: string; listId: string } | null> {
+  ): Promise<{ taskId: string; listId: string; commentId?: string | null } | null> {
     const candidates: string[] = []
     if (payload.inReplyTo) candidates.push(payload.inReplyTo.trim())
     if (payload.references) candidates.push(...payload.references.split(/\s+/).map((s) => s.trim()))
@@ -432,11 +507,11 @@ export class EmailToTaskService {
       if (!ref) continue
       // A notification this server sent about a task: what a reply answers.
       const [sent] = await this.db
-        .select({ taskId: outboundEmailMessages.taskId, listId: outboundEmailMessages.listId })
+        .select({ taskId: outboundEmailMessages.taskId, listId: outboundEmailMessages.listId, commentId: outboundEmailMessages.commentId })
         .from(outboundEmailMessages)
         .where(eq(outboundEmailMessages.messageId, ref))
         .limit(1)
-      if (sent) return { taskId: sent.taskId, listId: sent.listId }
+      if (sent) return { taskId: sent.taskId, listId: sent.listId, commentId: sent.commentId }
       const [row] = await this.db
         .select({ taskId: inboundEmailMessages.taskId, listId: inboundEmailMessages.listId })
         .from(inboundEmailMessages)

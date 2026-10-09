@@ -662,6 +662,52 @@ lane_media_up () {
   return 1
 }
 
+# ── THE LANE'S MAIL SERVER ──────────────────────────────────────────────────
+#
+#   lane_mail_up  <k>   start lane k's mail stub, wait for it to say ready
+#   lane_mail_env <k>   export the variables that point the API at it
+#
+# A TASK'S COMMENT BOX SENDS EMAIL (`resume-defects/s4-composer-email`), through
+# the server's SMTP — `EmailService`, which needs SMTP_HOST, SMTP_USER and
+# SMTP_PASS to send at all. No lane reaches a mail server, so every lane points
+# the API at `mail-stub.mjs`, which takes every message, and a suite reads back
+# what went. So every mail the API sends on a lane is taken there — a
+# notification's, an invitation's — where before it was a line in the API's
+# log. On for every lane, as the calendars are: without it the comment box says
+# the server has no mail set up, a different page.
+#
+# Lane k's SMTP is on port 96<k>, beside the photo library on 95<k>, and the
+# stub's control seam — the port its version is asked on — on 97<k>.
+lane_mail_port () { echo $((9600 + $1)); }
+lane_mail_control_port () { echo $((9700 + $1)); }
+
+lane_mail_env () {
+  export SMTP_HOST=127.0.0.1
+  export SMTP_PORT="$(lane_mail_port "$1")"
+  export SMTP_USER=lane-mail
+  export SMTP_PASS=lane-mail-key
+  export SMTP_SECURE=false
+}
+
+lane_mail_up () {
+  local k="$1" port log
+  port="$(lane_mail_control_port "$k")"
+  log="/tmp/claude-0/mail-v$k.log"
+  if grep -q '"ready":true' "$log" 2>/dev/null && stub_is_current "$port" "$LANE_ENV_DIR/mail-stub.mjs"; then
+    return 0
+  fi
+  stub_down "$port" "$LANE_ENV_DIR/mail-stub.mjs"
+  : > "$log"
+  RUNDESK_MAIL_STUB=1 nohup node "$LANE_ENV_DIR/mail-stub.mjs" --port "$port" --smtp-port "$(lane_mail_port "$k")" >> "$log" 2>&1 &
+  for _ in $(seq 1 50); do
+    grep -q '"ready":true' "$log" 2>/dev/null && return 0
+    sleep 0.2
+  done
+  echo "lane $k: the mail stub never announced itself on $port" >&2
+  tail -3 "$log" 2>/dev/null >&2
+  return 1
+}
+
 # ── STOP A LANE'S API, AND WAIT UNTIL IT HAS GONE ──────────────────────────
 #
 # `lane_api_down <port>`. Every script that starts a lane's API has to stop the

@@ -24,6 +24,8 @@ import { isUuid } from '../../../common/validation/uuid'
 type ResolvedItem = {
   listVisibility?: string | null
   listCreatedById?: string | null
+  /** Whose Personal List it is, if it is one: theirs alone (`canSeePrivateItem`). */
+  listPersonalOf?: string | null
   taskVisibility?: string | null
   taskCreatedById?: string | null
   taskIsAssignee?: boolean
@@ -96,7 +98,7 @@ export class ResourceMemberGuard implements CanActivate {
       if (
         item.listVisibility !== undefined &&
         !canSeePrivateItem(
-          { visibility: item.listVisibility, createdById: item.listCreatedById },
+          { visibility: item.listVisibility, createdById: item.listCreatedById, personalOf: item.listPersonalOf },
           { userId: user.id, isManager },
         )
       ) {
@@ -211,7 +213,7 @@ export class ResourceMemberGuard implements CanActivate {
     }
     if (kind === 'list') {
       const [r] = await this.db
-        .select({ w: spaces.workspaceId, spaceId: spaces.id, sv: spaces.visibility, projectId: projects.id, pv: projects.visibility, lv: lists.visibility, lc: lists.createdById })
+        .select({ w: spaces.workspaceId, spaceId: spaces.id, sv: spaces.visibility, projectId: projects.id, pv: projects.visibility, lv: lists.visibility, lc: lists.createdById, lp: lists.personalOf })
         .from(lists)
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
@@ -221,7 +223,7 @@ export class ResourceMemberGuard implements CanActivate {
         ? {
             workspaceId: r.w,
             container: { spaceId: r.spaceId, spaceVisibility: r.sv, projectId: r.projectId, projectVisibility: r.pv },
-            item: { listVisibility: r.lv, listCreatedById: r.lc },
+            item: { listVisibility: r.lv, listCreatedById: r.lc, listPersonalOf: r.lp },
             guestTarget: { kind: 'list', id },
           }
         : null
@@ -230,7 +232,7 @@ export class ResourceMemberGuard implements CanActivate {
       const [r] = await this.db
         .select({
           w: spaces.workspaceId, spaceId: spaces.id, sv: spaces.visibility, projectId: projects.id, pv: projects.visibility,
-          lv: lists.visibility, lc: lists.createdById, tv: tasks.visibility, tc: tasks.createdById,
+          lv: lists.visibility, lc: lists.createdById, lp: lists.personalOf, tv: tasks.visibility, tc: tasks.createdById,
           isAssignee: sql<boolean>`exists (select 1 from task_assignees ta where ta.task_id = ${tasks.id} and ta.user_id = ${actorId})`,
         })
         .from(tasks)
@@ -246,6 +248,7 @@ export class ResourceMemberGuard implements CanActivate {
             item: {
               listVisibility: r.lv,
               listCreatedById: r.lc,
+              listPersonalOf: r.lp,
               taskVisibility: r.tv,
               taskCreatedById: r.tc,
               taskIsAssignee: Boolean(r.isAssignee),
@@ -256,7 +259,7 @@ export class ResourceMemberGuard implements CanActivate {
     }
     if (kind === 'view') {
       const [r] = await this.db
-        .select({ w: spaces.workspaceId, spaceId: spaces.id, sv: spaces.visibility, projectId: projects.id, pv: projects.visibility, lv: lists.visibility, lc: lists.createdById, listId: lists.id })
+        .select({ w: spaces.workspaceId, spaceId: spaces.id, sv: spaces.visibility, projectId: projects.id, pv: projects.visibility, lv: lists.visibility, lc: lists.createdById, lp: lists.personalOf, listId: lists.id })
         .from(taskViews)
         .innerJoin(lists, eq(lists.id, taskViews.listId))
         .innerJoin(projects, eq(projects.id, lists.projectId))
@@ -267,7 +270,7 @@ export class ResourceMemberGuard implements CanActivate {
         ? {
             workspaceId: r.w,
             container: { spaceId: r.spaceId, spaceVisibility: r.sv, projectId: r.projectId, projectVisibility: r.pv },
-            item: { listVisibility: r.lv, listCreatedById: r.lc },
+            item: { listVisibility: r.lv, listCreatedById: r.lc, listPersonalOf: r.lp },
             guestTarget: { kind: 'list', id: r.listId },
           }
         : null

@@ -15,6 +15,7 @@ import {
   taskChecklistItems,
   taskDependencies,
   taskComments,
+  taskCommentEmails,
   taskDescriptionRevisions,
   taskTimeBlocks,
   reminders,
@@ -106,6 +107,7 @@ import { WebhooksService } from '../webhooks/webhooks.service'
 import { SlackService } from '../integrations/slack/slack.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import { R2Service } from '../../common/storage/r2.service'
+import { ensurePersonalList } from '../lists/personal-list'
 import { safeFileName } from '../../common/storage/file-name'
 import { CalendarSyncService } from '../calendar-sync/calendar-sync.service'
 import { SecurityService } from '../security/security.service'
@@ -750,6 +752,7 @@ export class TasksService {
         projectVisibility: projects.visibility,
         listVisibility: lists.visibility,
         listCreatedById: lists.createdById,
+        listPersonalOf: lists.personalOf,
         taskVisibility: tasks.visibility,
       })
       .from(tasks)
@@ -776,7 +779,7 @@ export class TasksService {
      */
     if (ctx.listVisibility === 'private' || ctx.taskVisibility === 'private') {
       const isManager = isManagerRole(access.workspaceRole)
-      if (!canSeePrivateItem({ visibility: ctx.listVisibility, createdById: ctx.listCreatedById }, { userId: actorId, isManager })) {
+      if (!canSeePrivateItem({ visibility: ctx.listVisibility, createdById: ctx.listCreatedById, personalOf: ctx.listPersonalOf }, { userId: actorId, isManager })) {
         throw new ForbiddenException('This list is private')
       }
       if (ctx.taskVisibility === 'private') {
@@ -947,6 +950,7 @@ export class TasksService {
         projectVisibility: projects.visibility,
         listVisibility: lists.visibility,
         listCreatedById: lists.createdById,
+        listPersonalOf: lists.personalOf,
       })
       .from(lists)
       .innerJoin(projects, eq(projects.id, lists.projectId))
@@ -968,7 +972,7 @@ export class TasksService {
       const visible = await this.assertContainerReadAccess(ctx, userId).then(
         async (access) =>
           canSeePrivateItem(
-            { visibility: ctx.listVisibility, createdById: ctx.listCreatedById },
+            { visibility: ctx.listVisibility, createdById: ctx.listCreatedById, personalOf: ctx.listPersonalOf },
             { userId, isManager: access.superAdmin || isManagerRole(access.workspaceRole) },
           ) && (access.superAdmin || access.workspaceRole !== 'guest' || (await guestReachesList(this.db, userId, listId))),
         () => false,
@@ -1998,9 +2002,9 @@ export class TasksService {
            * gate did not ask whether a list was deleted, so `/task`, a chat
            * message and the AI filed their tasks into a deleted Default list,
            * where nobody could find them. ClickUp files a task with no location
-           * in the person's Personal List, which Rundesk does not have; where its
-           * help does not say what becomes of a deleted Default list, the person
-           * is told rather than their task sent somewhere they did not choose —
+           * in the person's Personal List, as below; where its help does not say
+           * what becomes of a deleted Default list, the person is told rather
+           * than their task sent somewhere they did not choose —
            * and told what THEY may do: restore it when the Trash lets them (an
            * admin, or whoever deleted it), else ask (`ListInTrashException`).
            */
@@ -2024,6 +2028,17 @@ export class TasksService {
         }
       }
     }
+    /*
+     * NONE CHOSEN, OR NONE USABLE: THE PERSONAL LIST, as ClickUp's — "your
+     * Personal List is the default location for new tasks", which is what
+     * frame `14:20` says the Default list defaults to. It took the oldest list
+     * the person could add to, because no Personal List existed: the empty
+     * choice read "My personal list" and then "The first list I can add to"
+     * (`found-24-sep/planner-default-list-read-by-nothing`).
+     */
+    const personal = await ensurePersonalList(this.db, workspaceId, actorId)
+    if (personal) return personal.id
+    // A guest has none: the oldest list they may add to, as before.
     const candidates = await this.db
       .select({ id: lists.id })
       .from(lists)
@@ -4798,6 +4813,7 @@ export class TasksService {
         projectVisibility: projects.visibility,
         listVisibility: lists.visibility,
         listCreatedById: lists.createdById,
+        listPersonalOf: lists.personalOf,
         listInTrash: lists.isArchived,
         listDeletedById: lists.archivedById,
         ...HOLDER_TRASH_COLUMNS,
@@ -4826,7 +4842,7 @@ export class TasksService {
     }
     if (
       !canSeePrivateItem(
-        { visibility: target.listVisibility, createdById: target.listCreatedById },
+        { visibility: target.listVisibility, createdById: target.listCreatedById, personalOf: target.listPersonalOf },
         { userId: actorId, isManager: superAdmin || isManagerRole(membership?.role) },
       )
     ) {
@@ -5200,6 +5216,7 @@ export class TasksService {
         taskCreatedById: tasks.createdById,
         listVisibility: lists.visibility,
         listCreatedById: lists.createdById,
+        listPersonalOf: lists.personalOf,
         projectId: projects.id,
         projectVisibility: projects.visibility,
         spaceId: spaces.id,
@@ -5258,6 +5275,7 @@ export class TasksService {
       projectVisibility: row.projectVisibility,
       listVisibility: row.listVisibility,
       listCreatedById: row.listCreatedById,
+      listPersonalOf: row.listPersonalOf,
       taskVisibility: row.taskVisibility,
       taskCreatedById: row.taskCreatedById,
       spaceMemberIds: new Set(spaceRows.map((s) => s.userId)),
@@ -5853,11 +5871,34 @@ export class TasksService {
         ))
       for (const s of saves) savedIds.add(s.commentId)
     }
-    return rows.map((r: { id: string }) => ({
-      ...r,
-      attachments: byComment.get(r.id) ?? [],
-      savedByMe: savedIds.has(r.id),
-    }))
+    /*
+     * AN EMAIL COMMENT'S ENVELOPE (`resume-defects/s4-composer-email`): who it
+     * went to or came from, and its subject. Its blind copies are its writer's
+     * to read and nobody else's, as they are in any mail client.
+     */
+    const envelopes = new Map<string, typeof taskCommentEmails.$inferSelect>()
+    const emailIds = rows.filter((r: { channel?: string }) => r.channel === 'email').map((r: { id: string }) => r.id)
+    if (emailIds.length > 0) {
+      for (const e of await this.db.select().from(taskCommentEmails).where(inArray(taskCommentEmails.commentId, emailIds))) envelopes.set(e.commentId, e)
+    }
+    return rows.map((r: { id: string; authorId: string }) => {
+      const e = envelopes.get(r.id)
+      return {
+        ...r,
+        attachments: byComment.get(r.id) ?? [],
+        savedByMe: savedIds.has(r.id),
+        email: e
+          ? {
+              direction: e.direction,
+              from: e.fromAddress,
+              to: e.toAddresses,
+              cc: e.ccAddresses,
+              bcc: viewerId && viewerId === r.authorId ? e.bccAddresses : [],
+              subject: e.subject,
+            }
+          : null,
+      }
+    })
   }
 
   /**
@@ -5967,7 +6008,7 @@ export class TasksService {
    * whoever may open the task, at the space's "comment" level or above (or a
    * share of it), so the bin is checked here directly.
    */
-  private async assertMayComment(taskId: string, authorId: string) {
+  async assertMayComment(taskId: string, authorId: string) {
     const [target] = await this.db
       .select({ isArchived: tasks.isArchived })
       .from(tasks)
@@ -6093,7 +6134,20 @@ export class TasksService {
     return { edit, progress, comment, full, restore, estimate, tags, track }
   }
 
-  async createComment(taskId: string, authorId: string, body: string, parentCommentId?: string, mentions?: Array<{ userId: string; offset: number; length: number }>, attachmentIds?: string[]) {
+  async createComment(
+    taskId: string,
+    authorId: string,
+    body: string,
+    parentCommentId?: string,
+    mentions?: Array<{ userId: string; offset: number; length: number }>,
+    attachmentIds?: string[],
+    /**
+     * A comment sent as email from the comment box (`CommentEmailService`): its
+     * envelope is written with it, before anybody is told there is a comment,
+     * so the thread never draws an email without who it went to.
+     */
+    opts: { email?: Omit<typeof taskCommentEmails.$inferInsert, 'commentId'> } = {},
+  ) {
     await this.assertMayComment(taskId, authorId)
 
     /*
@@ -6125,8 +6179,9 @@ export class TasksService {
     const finalMentions = mentions && mentions.length > 0 ? mentions : extracted
     const [comment] = await this.db
       .insert(taskComments)
-      .values({ taskId, authorId, body, parentCommentId, mentions: finalMentions.length > 0 ? finalMentions : null })
+      .values({ taskId, authorId, body, parentCommentId, mentions: finalMentions.length > 0 ? finalMentions : null, channel: opts.email ? 'email' : 'comment' })
       .returning()
+    if (opts.email) await this.db.insert(taskCommentEmails).values({ ...opts.email, commentId: comment.id })
     // Link the resolved attachments to this comment. Only rows belonging to the
     // same task are linked, so a caller can't attach files from elsewhere.
     if (linkable.length > 0) {
@@ -6256,6 +6311,8 @@ export class TasksService {
     const [existing] = await this.db.select().from(taskComments).where(eq(taskComments.id, commentId))
     if (!existing) throw new NotFoundException('Comment not found')
     if (existing.authorId !== authorId) throw new BadRequestException('Cannot edit another user\'s comment')
+    // What an email said is what went, or came (`resume-defects/s4-composer-email`): the task keeps that copy.
+    if (existing.channel === 'email') throw new BadRequestException('An email cannot be edited once it is sent')
     await this.assertSpaceAllowsComments(existing.taskId, authorId)
     const [updated] = await this.db
       .update(taskComments)

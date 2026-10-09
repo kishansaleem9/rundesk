@@ -13,6 +13,13 @@ import type { CurrentUserPayload } from '../tasks/types'
 export class PersonalTasksController {
   constructor(private svc: PersonalTasksService) {}
 
+  /** The caller's Personal List (`found-24-sep/planner-default-list-read-by-nothing`): made the first time it is asked for. */
+  @Get('workspaces/:workspaceId/personal-list')
+  @UseGuards(WorkspaceMemberGuard)
+  personalList(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.svc.personalList(workspaceId, user.id)
+  }
+
   @Get('workspaces/:workspaceId/personal-tasks')
   @UseGuards(WorkspaceMemberGuard)
   list(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {

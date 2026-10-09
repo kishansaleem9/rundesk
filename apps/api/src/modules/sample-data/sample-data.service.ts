@@ -113,7 +113,8 @@ export class SampleDataService {
     const [row] = await this.db
       .select({ value: count() })
       .from(spaces)
-      .where(eq(spaces.workspaceId, workspaceId))
+      // Somebody's Personal List does not make a workspace somebody has built (`personal-list.ts`).
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(spaces.isPersonal, false)))
     const existing = Number(row?.value ?? 0)
     if (existing > 0) {
       throw new ConflictException(

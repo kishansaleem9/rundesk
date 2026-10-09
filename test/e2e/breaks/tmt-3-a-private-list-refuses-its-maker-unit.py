@@ -3,8 +3,8 @@
 # Reddens: unit: task-move-target.test.ts "and moves the task into the mover’s own private list, so the refusals above are about whose list it is"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
-a = '        { visibility: target.listVisibility, createdById: target.listCreatedById },\n'
-b = '        { visibility: target.listVisibility, createdById: null },\n'
+a = '        { visibility: target.listVisibility, createdById: target.listCreatedById, personalOf: target.listPersonalOf },\n'
+b = '        { visibility: target.listVisibility, createdById: null, personalOf: target.listPersonalOf },\n'
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

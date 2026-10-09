@@ -79,6 +79,8 @@ export const FLAGS = {
 
   // The Teams hub's Analytics (ClickUp's Pulse ClickApp): off until an owner or admin turns it on.
   TEAMS_ANALYTICS: 'teams.analytics',
+  // A task's comment box sends email (ClickUp's Email ClickApp): off until an owner or admin turns it on.
+  TASK_EMAIL: 'tasks.email',
   // Reporting
   REPORTING: 'reporting',
   REPORTING_PRODUCTIVITY: 'reporting.productivity',

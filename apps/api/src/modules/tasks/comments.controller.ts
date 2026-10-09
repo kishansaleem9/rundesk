@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards } from '@nestjs/common'
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
@@ -6,6 +6,8 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { TasksService } from './tasks.service'
 import { CreateCommentDto } from './dto/comment.dto'
+import { SendCommentEmailDto } from './dto/comment-email.dto'
+import { CommentEmailService } from './comment-email.service'
 import type { CurrentUserPayload } from './types'
 
 @ApiTags('tasks')
@@ -13,7 +15,10 @@ import type { CurrentUserPayload } from './types'
 @Controller('tasks/:taskId/comments')
 @UseGuards(JwtAuthGuard, ResourceMemberGuard)
 export class TaskCommentsController {
-  constructor(private tasks: TasksService) {}
+  constructor(
+    private tasks: TasksService,
+    private emails: CommentEmailService,
+  ) {}
 
   @Get()
   list(@Param('taskId') taskId: string, @CurrentUser() user: CurrentUserPayload) {
@@ -43,6 +48,27 @@ export class TaskCommentsController {
     @Body() body: CreateCommentDto,
   ) {
     return this.tasks.createComment(taskId, user.id, body.body, body.parentCommentId, body.mentions, body.attachmentIds)
+  }
+
+  /**
+   * THE COMMENT BOX'S EMAIL (`resume-defects/s4-composer-email`): whether this
+   * person may send one from this task, and why not, in words; who it goes from.
+   */
+  @Get('email')
+  emailSetup(@Param('taskId') taskId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.emails.setup(taskId, user)
+  }
+
+  /** Addresses for To, CC and BCC: the task's Email fields, this person's contacts, the workspace's members. */
+  @Get('email/suggestions')
+  emailSuggestions(@Param('taskId') taskId: string, @CurrentUser() user: CurrentUserPayload, @Query('q') q?: string) {
+    return this.emails.suggestions(taskId, user, typeof q === 'string' ? q.slice(0, 200) : '')
+  }
+
+  /** Sends it, and keeps it in the task as an email comment; its answers land under it. */
+  @Post('email')
+  sendEmail(@Param('taskId') taskId: string, @CurrentUser() user: CurrentUserPayload, @Body() body: SendCommentEmailDto) {
+    return this.emails.send(taskId, user, body)
   }
 
   @Patch(':commentId')

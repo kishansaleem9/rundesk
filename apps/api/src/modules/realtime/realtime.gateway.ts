@@ -12,7 +12,7 @@ import { Server, Socket } from 'socket.io'
 import { Logger, Inject, OnModuleDestroy } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { ConfigService } from '@nestjs/config'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { workspaceMembers, lists, projects, spaces, tasks, taskAssignees, docs, workspaceCanvases, users, calls, chatChannels } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -627,6 +627,17 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   /** The container rule, the private-list rule and, for a task, the private-task rule. */
   private async canReadListOrTask(kind: 'list' | 'task', id: string, userId: string, workspaceRole: string): Promise<boolean> {
+    /*
+     * Somebody's Personal List is theirs alone, a manager's events included
+     * (`found-24-sep/planner-default-list-read-by-nothing`): asked before the
+     * manager's pass, which every other private list grants.
+     */
+    const [home] = await this.db
+      .select({ personalOf: lists.personalOf })
+      .from(lists)
+      .where(eq(lists.id, kind === 'list' ? id : sql`(select ${tasks.listId} from ${tasks} where ${tasks.id} = ${id})`))
+      .limit(1)
+    if (home?.personalOf && home.personalOf !== userId) return false
     if (isManagerRole(workspaceRole)) return true
     let listId = id
     if (kind === 'task') {

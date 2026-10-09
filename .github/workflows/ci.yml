@@ -631,6 +631,13 @@ jobs:
       - name: The photo library seam is really a seam, and each case bites
         run: node scripts/check-media-stub.mjs --mutate
 
+      # And for the mail server (`resume-defects/s4-composer-email`): the
+      # product's own sender against the stub every lane and the suites' job
+      # start, a bare SMTP session beside it, and each rule of the stub broken
+      # in turn.
+      - name: The mail seam is really a seam, and each case bites
+        run: node scripts/check-mail-stub.mjs --mutate
+
       # And the other direction from the ledger's own reconciliations: does a
       # line of the SPECIFICATION appear anywhere in the evidence? 115
       # timestamped frame observations, and asking found `03:15` — a cover
@@ -779,6 +786,10 @@ jobs:
       # And the photo library's (`commit-log/log-601eacc-1`): `test/e2e/lib/media.mjs`
       # reads this, as `lib/calendar.mjs` reads the calendars' port.
       E2E_MEDIA_PORT: 9500
+      # And the mail server's (`resume-defects/s4-composer-email`): SMTP, which the
+      # API sends to, and the control seam `test/e2e/lib/mail.mjs` reads back.
+      E2E_MAIL_PORT: 9600
+      E2E_MAIL_CONTROL_PORT: 9700
 
     steps:
       - name: Checkout
@@ -913,6 +924,22 @@ jobs:
           done
           echo "The media stub never announced itself. Its output:"; cat /tmp/media.log; exit 1
 
+      # THE MAIL SERVER EVERY LANE HAS (`resume-defects/s4-composer-email`). A
+      # task's comment box sends email through the API's SMTP, and every lane
+      # points it at `scripts/e2e-lanes/mail-stub.mjs`, which takes every
+      # message and lets a suite read back what went.
+      - name: Start the mail server
+        timeout-minutes: 15
+        run: |
+          RUNDESK_MAIL_STUB=1 nohup node scripts/e2e-lanes/mail-stub.mjs \
+            --port "$E2E_MAIL_CONTROL_PORT" --smtp-port "$E2E_MAIL_PORT" > /tmp/mail.log 2>&1 &
+          disown
+          for i in $(seq 1 50); do
+            if grep -q '"ready":true' /tmp/mail.log; then echo "mail server up"; exit 0; fi
+            sleep 0.2
+          done
+          echo "The mail stub never announced itself. Its output:"; cat /tmp/mail.log; exit 1
+
       # Backgrounded and waited for: a suite that starts talking to an API that
       # is not up yet fails for a reason that has nothing to do with calls.
       - name: Start the API
@@ -958,6 +985,13 @@ jobs:
           # And the AI's images (`ledger-rows/row-870`), from the same stub in OpenAI's shape.
           IMAGES_API_URL: http://127.0.0.1:${{ env.E2E_MEDIA_PORT }}/openai/v1
           IMAGES_API_KEY: lane-images
+          # The mail server started above — the five variables `lane_mail_env`
+          # exports. Not a credential: the stub takes this one sign-in.
+          SMTP_HOST: 127.0.0.1
+          SMTP_PORT: ${{ env.E2E_MAIL_PORT }}
+          SMTP_USER: lane-mail
+          SMTP_PASS: lane-mail-key
+          SMTP_SECURE: 'false'
           # Integration keys that are not real — the six `lane_oauth_env`
           # exports. A grant's start refuses a provider with no keys, and the
           # suites that read a grant's state start Google, Microsoft and
@@ -2006,6 +2040,19 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # `resume-defects/s4-composer-email`, `ledger-rows/row-1252` — the comment
+      # box sends email, as ClickUp's Email ClickApp does: off until an owner
+      # turns it on, never for a guest; To, CC, BCC, a subject, the words and
+      # the files go through the mail server (the stub above, read back), the
+      # email stays in the task with its envelope, and the answers of the
+      # people it went to land under it.
+      - name: The comment box sends email, and the answers land in the task
+        timeout-minutes: 15
+        run: node test/e2e/comment-email.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §P frame `19:05` — Status and My-runs filters. Both are asserted to reach
       # the SERVER: `userId` was accepted by the endpoint and sent by nothing.
       - name: AI activity filters
@@ -2769,6 +2816,12 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
+
+      # A task with no place had nowhere of its own to go: Home's Personal List
+      # was a to-do card, and /task filed into the oldest list of the hierarchy.
+      - name: Everybody has a Personal List, theirs alone, where a task with no place goes
+        timeout-minutes: 15
+        run: node test/e2e/personal-list.mjs --api 3011 --dist apps/web/dist
 
       # The web gated Create, templates and Reports on the base role or on
       # nothing, and never read what custom roles grant: a member was offered

@@ -38,6 +38,15 @@ export const lists = pgTable('lists', {
   // §2 per-item privacy: a 'private' list is visible only to its creator and
   // workspace managers/admins (enforced on every read path).
   visibility: containerVisibilityEnum('visibility').notNull().default('public'),
+  /*
+   * WHOSE PERSONAL LIST THIS IS, if it is one (`found-24-sep/planner-default-list-read-by-nothing`,
+   * migration 0181): ClickUp's Personal List, where a task made with no
+   * location lands, private to its owner. Private lists are their makers' and
+   * a workspace's managers'; a Personal List is its owner's alone, managers
+   * included, as ClickUp's is hidden from "other Workspace members". It lives
+   * in the workspace's personal space (`spaces.is_personal`).
+   */
+  personalOf: uuid('personal_of').references(() => users.id, { onDelete: 'cascade' }),
   createdAt:  timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:  timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
@@ -70,7 +79,10 @@ export const lists = pgTable('lists', {
    */
   uqNameActive: uniqueIndex('uq_lists_project_name_active')
     .on(t.projectId, sql`lower(${t.name})`)
-    .where(sql`${t.isArchived} = false`),
+    // Every Personal List is called one, side by side in the personal space's container (migration 0181).
+    .where(sql`${t.isArchived} = false AND ${t.personalOf} IS NULL`),
+  // One Personal List a person a workspace (the personal space's container is the workspace's own).
+  uqPersonal: uniqueIndex('uq_lists_personal_per_project').on(t.projectId, t.personalOf).where(sql`${t.personalOf} IS NOT NULL`),
   // Made by 0036, 0084 and 0124. Declared here as well: a database built by
   // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
   archived: index('idx_lists_archived').on(t.isArchived, t.archivedAt),

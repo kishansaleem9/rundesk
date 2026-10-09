@@ -74,6 +74,8 @@ type MoveTargetSpace = {
   name: string
   projects: Array<{ id: string; name: string }>
   lists?: Array<{ id: string; name: string; projectId: string }>
+  /** The reader's own Personal List: a task's place, never a form's. */
+  personal?: boolean
 }
 
 type Submission = {
@@ -862,7 +864,8 @@ function FormSettings({
     queryKey: ['move-targets', workspaceId],
     queryFn: () => api<MoveTargetSpace[]>(`/spaces/workspace/${workspaceId}/move-targets`),
   })
-  const listChoices = (targetsQuery.data ?? []).flatMap((sp) =>
+  // A form files what strangers send; one's Personal List is one's own (`found-24-sep/planner-default-list-read-by-nothing`).
+  const listChoices = (targetsQuery.data ?? []).filter((sp) => !sp.personal).flatMap((sp) =>
     (sp.lists ?? []).map((l) => ({
       id: l.id,
       label: `${sp.name} › ${(sp.projects.find((p) => p.id === l.projectId) || {}).name ?? ''} › ${l.name}`,

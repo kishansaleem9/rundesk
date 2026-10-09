@@ -1464,7 +1464,8 @@ export class SearchService implements OnModuleInit {
         ? this.db
             .select({ id: spaces.id, name: spaces.name })
             .from(spaces)
-            .where(and(eq(spaces.workspaceId, workspaceId), ilike(spaces.name, like), spaceVisibilityFilter(this.db, userId, isManager)))
+            // The personal space is nobody's place to go (`personal-list.ts`); one's own Personal List is found as a list.
+            .where(and(eq(spaces.workspaceId, workspaceId), eq(spaces.isPersonal, false), ilike(spaces.name, like), spaceVisibilityFilter(this.db, userId, isManager)))
             .limit(limit)
         : Promise.resolve([]),
       /*

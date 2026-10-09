@@ -530,6 +530,8 @@ export class FormsService {
   private async assertMayFileInto(workspaceId: string, listId: string, actorId: string) {
     const list = isUuid(listId) ? await readableList(this.db, workspaceId, listId, { id: actorId }) : null
     if (!list) throw new NotFoundException('List not found')
+    // A form files what anybody sends, and a Personal List is its owner's alone (`personal-list.ts`).
+    if (list.personalOf) throw new BadRequestException('A form cannot file into a Personal List')
     // Nor a list in the trash, which takes no task (`ListInTrashException`), asked
     // of somebody who may open it, as the create gate asks it: a form was made,
     // and aimed, at a list already deleted (201).

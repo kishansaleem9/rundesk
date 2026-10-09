@@ -81,6 +81,7 @@ for k in "${LANES[@]}"; do
   lane_search_up "$k"
   lane_calendar_up "$k"
   lane_media_up "$k"
+  lane_mail_up "$k"
   (
     cd "$R/apps/api"
     export PORT="$PORT"
@@ -95,6 +96,7 @@ for k in "${LANES[@]}"; do
     lane_search_env "$k"
     lane_calendar_env "$k"
     lane_media_env "$k"
+    lane_mail_env "$k"
     lane_oauth_env "$k"
     lane_proxy_env "$k"
     nohup node --require "$TSX/dist/preflight.cjs" \

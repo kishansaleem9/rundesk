@@ -86,7 +86,8 @@ export class PlansService {
       .select({ c: sql<number>`count(*)::int` })
       .from(projects)
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(projects.isArchived, false)))
+      // The personal space's container is nobody's project, and counts toward no plan (`personal-list.ts`).
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(spaces.isPersonal, false), eq(projects.isArchived, false)))
     return row?.c ?? 0
   }
 

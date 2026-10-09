@@ -11,9 +11,12 @@
  * the browser.
  *
  * A list is chosen, and each of the three is asked for a task. With none
- * chosen, the oldest list the person can add to is still where they land; and
- * a chosen list is passed over where it cannot be used — in another workspace,
- * or where the person may not add to it.
+ * chosen they land in the person's own Personal List — ClickUp's "your
+ * Personal List is the default location for new tasks", which is what the
+ * frame says the choice defaults to (`personal-list.mjs` checks the list
+ * itself); and a chosen list is passed over for it where it cannot be used —
+ * in another workspace, or where the person may not add to it. They landed in
+ * the oldest list the person could add to, there being no Personal List.
  *
  * And deleted after it was chosen (`found-5-oct/default-list-files-into-an-archived-list`):
  * the list went on taking those tasks, in the trash where nobody could find
@@ -21,10 +24,10 @@
  * trash, and the chat page says so in those words. What to do is said by the
  * Trash's rule: a member whose list an admin deleted is told to ask for it to
  * be restored, not to restore it (found by the review). And the picker the
- * refusal sends them to shows the deleted choice as what it is: it showed "The
- * first list I can add to" as chosen, and choosing that saved nothing. In
- * another workspace, where that list is not the workspace's and /task passes it
- * over, the picker still shows the first list they can add to.
+ * refusal sends them to shows the deleted choice as what it is: it showed the
+ * empty choice as chosen, and choosing that saved nothing. In another
+ * workspace, where that list is not the workspace's and /task passes it over,
+ * the picker shows the empty choice, "My Personal List"
  *
  *   node test/e2e/planner-default-list.mjs --api 3021
  */
@@ -100,7 +103,12 @@ try {
     select l.id from lists l join projects p on p.id = l.project_id join spaces s on s.id = p.space_id
     where s.workspace_id = ${WS} and not l.is_archived order by l.created_at limit 1`
   const listOf = async (title) => (await sql`select list_id from tasks where title = ${title} limit 1`)[0]?.list_id ?? null
-  const named = (id) => (id === CHOSEN ? 'the chosen list' : id === oldest?.id ? 'the oldest list' : JSON.stringify(id))
+  /** The person's own Personal List in this workspace, read by SQL: null until a task with nowhere else to go has made it. */
+  const personalOf = async (userId) => (await sql`
+    select l.id from lists l join projects p on p.id = l.project_id join spaces s on s.id = p.space_id
+    where s.workspace_id = ${WS} and s.is_personal and l.personal_of = ${userId} limit 1`)[0]?.id ?? null
+  const personalIds = new Set()
+  const named = (id) => (id === CHOSEN ? 'the chosen list' : id === oldest?.id ? 'the oldest list' : personalIds.has(id) ? 'the Personal List' : JSON.stringify(id))
 
   const chose = await call(`/planner/${WS}/settings`, { method: 'PATCH', body: { defaultListId: CHOSEN } })
   if (chose.status >= 300) throw new Error(`could not choose the list: ${chose.status}`)
@@ -164,10 +172,12 @@ try {
   const PLAIN = `${TAG} made with no list chosen`
   await call(`/chat/channels/${CHANNEL}/commands`, { method: 'POST', body: { command: 'task', text: PLAIN } })
   const plainList = await listOf(PLAIN)
+  const mine = await personalOf(me)
+  if (mine) personalIds.add(mine)
   chk(
-    !!oldest && plainList === oldest.id,
-    'with no list chosen, /task still lands in the oldest list the person can add to',
-    `the task is in ${named(plainList)}`,
+    !!mine && plainList === mine,
+    'with no list chosen, /task lands in the person’s own Personal List, not the oldest list they can add to',
+    `the task is in ${named(plainList)}; the Personal List ${JSON.stringify(mine)}`,
   )
 
   // ══ 5. A LIST CHOSEN IN ANOTHER WORKSPACE ════════════════════════════════
@@ -181,8 +191,8 @@ try {
   await call(`/chat/channels/${CHANNEL}/commands`, { method: 'POST', body: { command: 'task', text: CROSS } })
   const crossList = await listOf(CROSS)
   chk(
-    !!oldest && crossList === oldest.id,
-    'a list chosen in another workspace is not where this workspace’s tasks go: the oldest list here is',
+    !!mine && crossList === mine,
+    'a list chosen in another workspace is not where this workspace’s tasks go: the person’s Personal List here is',
     `the task is in ${crossList === ELSEWHERE ? 'THE OTHER WORKSPACE’S LIST' : named(crossList)}`,
   )
   await call(`/planner/${WS}/settings`, { method: 'PATCH', body: { defaultListId: null } })
@@ -207,10 +217,12 @@ try {
     ? await asMember(`/chat/channels/${memberChannel.data.id}/commands`, { method: 'POST', body: { command: 'task', text: REFUSED } })
     : { status: memberChannel.status }
   const refusedList = await listOf(REFUSED)
+  const membersOwn = await personalOf(member.user.id)
+  if (membersOwn) personalIds.add(membersOwn)
   chk(
-    made.status < 300 && !!oldest && refusedList === oldest.id,
-    'a chosen list the person may not add to is passed over, not refused: the task lands in the oldest list they can add to',
-    `/task answered ${made.status}; the task is in ${refusedList === PRIVATE_LIST ? 'THE PRIVATE LIST' : named(refusedList)}`,
+    made.status < 300 && !!membersOwn && refusedList === membersOwn && membersOwn !== mine,
+    'a chosen list the person may not add to is passed over, not refused: the task lands in their own Personal List — the member’s, not the admin’s',
+    `/task answered ${made.status}; the task is in ${refusedList === PRIVATE_LIST ? 'THE PRIVATE LIST' : refusedList === mine ? 'THE ADMIN’S PERSONAL LIST' : named(refusedList)}`,
   )
 
   // ══ 7. THE CHOSEN LIST, DELETED ══════════════════════════════════════════
@@ -301,13 +313,13 @@ try {
     afterChoice = (await call(`/planner/${WS}/settings`)).data?.defaultListId
     return afterChoice === null || afterChoice === undefined
   }, { timeoutMs: 10_000 })
-  const T_AFTER = `${TAG} by slash, the first list chosen again`
+  const T_AFTER = `${TAG} by slash, the Personal List chosen again`
   const tAfter = await call(`/chat/channels/${CHANNEL}/commands`, { method: 'POST', body: { command: 'task', text: T_AFTER } })
   const afterList = await listOf(T_AFTER)
   chk(
-    shown?.value === DOOMED && shown?.text === 'A list in the trash' && elsewhere?.text === 'The first list I can add to'
-      && (afterChoice === null || afterChoice === undefined) && tAfter.status < 300 && !!oldest && afterList === oldest.id,
-    'and the picker it sends them to shows the deleted choice as a list in the trash, not “The first list I can add to” — which it still shows in another workspace, where /task passes that list over — and choosing that saves it, so /task lands in the oldest list again',
+    shown?.value === DOOMED && shown?.text === 'A list in the trash' && elsewhere?.text === 'My Personal List'
+      && (afterChoice === null || afterChoice === undefined) && tAfter.status < 300 && !!mine && afterList === mine,
+    'and the picker it sends them to shows the deleted choice as a list in the trash, not “My Personal List” — which it shows in another workspace, where /task passes that list over — and choosing that saves it, so /task lands in the Personal List again',
     `the picker showed ${JSON.stringify(shown)} (in the other workspace ${JSON.stringify(elsewhere)}); after choosing the first list the setting holds ${JSON.stringify(afterChoice)}; /task ${tAfter.status}, in ${named(afterList)}`,
   )
 
@@ -351,6 +363,8 @@ try {
   const T_HELD = `${TAG} by slash, the oldest list's project deleted`
   const tHeld = await call(`/chat/channels/${CHANNEL}/commands`, { method: 'POST', body: { command: 'task', text: T_HELD } })
   const heldList = await listOf(T_HELD)
+  // The Personal List is no place in the hierarchy, and no picker of lists offers it.
+  const offeredPersonal = mine ? ((await call(`/lists/workspace/${WS}`)).data ?? []).some((l) => l.id === mine) : true
   const T_STRAIGHT = `${TAG} straight into the deleted project's list`
   const intoHeld = await call('/tasks', { method: 'POST', body: { listId: oldest.id, title: T_STRAIGHT } })
   const [moving] = await sql`select id from tasks where title = ${T_HELD} limit 1`
@@ -360,11 +374,11 @@ try {
   const [heldHome] = heldList ? await sql`select p.is_archived from lists l join projects p on p.id = l.project_id where l.id = ${heldList}` : []
   const PROJECT_IN_TRASH = "This list's project is in the trash. Restore the project from Trash before adding tasks to the list."
   chk(
-    tHeld.status < 300 && !!heldList && heldList !== oldest.id && heldHome?.is_archived === false && intoHeld.status === 409 && intoHeld.message === PROJECT_IN_TRASH
+    tHeld.status < 300 && !!mine && heldList === mine && heldHome?.is_archived === false && intoHeld.status === 409 && intoHeld.message === PROJECT_IN_TRASH
       && movedIn.status === 409 && movedIn.message === PROJECT_IN_TRASH && inHeld === 0
-      && !offered.includes(oldest.id) && offered.includes(OTHER_LIST),
-    'with the oldest list’s project deleted and no list chosen, /task passes that list over for one it may add to; a task made or moved straight into it is refused — 409, saying its project is in the trash and what to do — and none lands there; the picker no longer offers it',
-    `/task ${tHeld.status}, in ${heldList === OTHER_LIST ? 'the other project’s list' : named(heldList)} (its project in the trash: ${JSON.stringify(heldHome?.is_archived ?? null)}); POST /tasks ${intoHeld.status} ${JSON.stringify(intoHeld.message)}; the move ${movedIn.status} ${JSON.stringify(movedIn.message)}; ${inHeld} in the deleted project’s list; the picker offers it: ${offered.includes(oldest.id)}, the other: ${offered.includes(OTHER_LIST)}`,
+      && !offered.includes(oldest.id) && offered.includes(OTHER_LIST) && !offeredPersonal,
+    'with the oldest list’s project deleted and no list chosen, /task lands in the Personal List as ever; a task made or moved straight into the deleted project’s list is refused — 409, saying its project is in the trash and what to do — and none lands there; the picker no longer offers it, offers the other project’s list, and offers no Personal List as a list of the hierarchy',
+    `/task ${tHeld.status}, in ${heldList === OTHER_LIST ? 'the other project’s list' : named(heldList)} (its project in the trash: ${JSON.stringify(heldHome?.is_archived ?? null)}); POST /tasks ${intoHeld.status} ${JSON.stringify(intoHeld.message)}; the move ${movedIn.status} ${JSON.stringify(movedIn.message)}; ${inHeld} in the deleted project’s list; the picker offers it: ${offered.includes(oldest.id)}, the other: ${offered.includes(OTHER_LIST)}, the Personal List: ${offeredPersonal}`,
   )
 } catch (e) {
   failed += 1

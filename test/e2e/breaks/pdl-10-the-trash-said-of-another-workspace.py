@@ -1,6 +1,7 @@
 # THE SETTINGS SAY A DEFAULT LIST IS IN THE TRASH IN EVERY WORKSPACE: in one whose /task passes that list over, the
 # picker calls it a list in the trash.
-# Reddens: planner-default-list: "and the picker it sends them to shows the deleted choice as a list in the trash, not “The first list I can add to” — which it still shows in another workspace, where /task passes that list over — and choosing that saves it, so /task lands in the oldest list again"
+# Re-claimed 9 October: the empty choice reads “My Personal List”, where a task with no list chosen goes (`found-24-sep/planner-default-list-read-by-nothing`).
+# Reddens: planner-default-list: "and the picker it sends them to shows the deleted choice as a list in the trash, not “My Personal List” — which it shows in another workspace, where /task passes that list over — and choosing that saves it, so /task lands in the Personal List again"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/planner/planner.service.ts'
 a = '    if (home?.workspaceId !== workspaceId) return false\n'

@@ -3,7 +3,7 @@
 # Reddens: refused-as-forbidden: "a member cannot move their task into another’s private list (403 “This list is private”) or a list in a private space (403 “You do not have access to that list”) — the task stays in its list, and a list that does not exist is 404"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
-a = "    if (\n      !canSeePrivateItem(\n        { visibility: target.listVisibility, createdById: target.listCreatedById },\n        { userId: actorId, isManager: superAdmin || isManagerRole(membership?.role) },\n      )\n    ) {\n      throw new ForbiddenException('This list is private')\n    }\n"
+a = "    if (\n      !canSeePrivateItem(\n        { visibility: target.listVisibility, createdById: target.listCreatedById, personalOf: target.listPersonalOf },\n        { userId: actorId, isManager: superAdmin || isManagerRole(membership?.role) },\n      )\n    ) {\n      throw new ForbiddenException('This list is private')\n    }\n"
 b = ''
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

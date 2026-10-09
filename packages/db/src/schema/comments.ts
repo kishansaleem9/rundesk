@@ -6,9 +6,10 @@ import {
   jsonb,
   index,
   uniqueIndex,
+  check,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
-import { relations } from 'drizzle-orm'
+import { relations, sql } from 'drizzle-orm'
 import { tasks } from './tasks'
 import { users } from './users'
 
@@ -26,7 +27,17 @@ export const taskComments = pgTable('task_comments', {
   mentions:        jsonb('mentions').$type<Array<{ userId: string; offset: number; length: number }>>(),
   editedAt:        timestamp('edited_at', { withTimezone: true }),
   createdAt:       timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-})
+  /*
+   * HOW IT WAS SAID: in the task, or by email (`resume-defects/s4-composer-email`,
+   * `ledger-rows/row-1252`). ClickUp's comment box posts a comment or, with its
+   * Email ClickApp, an email to people outside the workspace, and the replies
+   * land in the task's activity; an email comment's recipients and subject are
+   * `task_comment_emails`'s (migration 0180).
+   */
+  channel:         text('channel').notNull().default('comment'),
+}, (t) => [
+  check('task_comments_channel_check', sql`${t.channel} IN ('comment', 'email')`),
+])
 
 export const taskCommentReactions = pgTable('task_comment_reactions', {
   id:        uuid('id').primaryKey().defaultRandom(),

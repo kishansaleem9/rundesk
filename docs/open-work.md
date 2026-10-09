@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 535 items: 0 open · 0 partly fixed · 501 closed, and 34 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 9 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 536 items: 0 open · 0 partly fixed · 504 closed, and 32 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 9 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -10326,7 +10326,7 @@ Checks: `check-ledger-ids-cases.mjs` 11 → 13: "a day's find of another month, 
 
 *Closed, 8 October.* The save reads a folder's lists by `position`, then when they were made, then id — the sidebar's order — and each list's tasks the same way (`project-templates.service.ts`). The suite now makes the folder's second list first and dates the first a minute earlier, so the table's order is not the order made: `template-center` 84 of 85 before the fix with that fixture (the lists second first), 85 of 85 after, on lane 1. Patch `template-center-42` (the lists by position alone) reddens the check, 84 of 85 on lane 1.
 
-## Closed from the uncounted list, as ClickUp works them (8 October) — 23
+## Closed from the uncounted list, as ClickUp works them (8 and 9 October) — 26
 
 On the owner's word of 8 October ("close all of these properly … close them as they work on clickup"), the
 items the triage set aside as features and decisions are closed one by one: as ClickUp works each where its
@@ -10830,13 +10830,71 @@ Measured:
 Checks (`ai-image-generation`, 9): "the comment box’s AI makes the pictures asked for — two, as the image service drew them for that description — each shown and chosen", "only the one left chosen is posted on the comment — the first picture, as a PNG of its very bytes, named after its description", "the chat composer’s AI makes a picture too: added, it is attached to the message, and sent with it", "each ask is one run of `image.generate`, and the AI value report counts it under Images generated, a tile it now fills", "a guest is refused as on every AI route, and five pictures, a blank description and a size the service does not draw are refused 400", "the service’s rate limit is said as too many requests (429), its failure as a service that did not answer (502), and each is written down as a failed run", "and the composer says the service did not answer, in its words, and draws no picture", "the Ask AI dock makes pictures too: opened by Brain² on a task, the one made is added to the task’s files, its very bytes", "and opened on no task, its Download saves the picture made — …". `ai-action-categories`: "two are marked as something this product cannot do — the connected apps’ — and Images generated, which image generation fills, is not" (was: three), "and two `image.generate` runs land in Images generated", and the seeds' counts twelve where they were ten. Unit: `image-generation.test.ts`, 4.
 - Patches `aig-1` to `aig-8` (the API) and `aig-w1` to `aig-w8` (the web) redden their checks on lane 9 — `aig-1` five, the others one or two, past the first only checks that stand on what it broke — and the unit claims `aig-9` to `aig-11` their tests; `ac-4` (the seeds now twelve) and `ac-5` (renamed `ac-5-images-look-unsupported`: Images said to be unfillable) re-aimed, 27 and 26 of 30.
 
+### `resume-defects/s4-composer-email` — **closed** (feature, large; was not counted, a feature) · reproduced 9 October
+
+**Section 4: 'The composer posts as Email' is still unbuilt. The mode menu now exists with Email disabled, a suite locks that state in, and the ledger's 'today' text is stale**
+
+*Evidence:* task-detail-sheet.tsx:7202-7260: the `Comment ▾` DropdownMenu has comment-mode-item-comment (ticked) and comment-mode-item-email, which is `disabled` and data-available="no" with no onSelect, carrying the reason catalogs.ts:2717-2718 'Rundesk cannot send a comment as email...'. test/e2e/task-mentions.mjs:357-400 asserts exactly this disabled state ('Comment carries the tick and Email is not selectable', and the reason length is over 30), so building the feature must rewrite those checks. The ledger entry docs/video2-reaudit.md:1252-1270 still says 'There is no mode switch on the comment composer', which is stale now that the switch exists. The row is M at docs/video2-reaudit.md:1532. Plumbing status, verified: the inbound threading exists (email-to-task.service.ts:28-33 and 184-187). Missing: replyTo, cc and bcc on send() (email.service.ts:584-589); a channel column (comments.ts:16-29); any route that sends a composed body; outbound Message-ID recording (resume-8-reply-routing). ClickUp research: in the task comment box, click Comment, then choose Email; fill To/CC/BCC, subject and body, add attachments and a signature, then Send (or schedule it). Responses appear in the task's activity feed, and a reply to an emailed comment can be sent as a comment or as an email (help.clickup.com 'Use Email in ClickUp', 'Create tasks and comments via email').
+
+*To close:* Build to ClickUp. Selecting Email switches the composer into an email form (To, CC and BCC with member and contact suggestions, Subject, body, attachments). Add a route such as POST /tasks/:id/comments/email. It sends through the extended send() with Reply-To set to the task's +task- address, stores the comment with channel='email' and the metadata, and records the outbound Message-ID. The thread renders email comments distinctly, and inbound replies land as channel='email'. Rewrite the task-mentions checks to assert the working mode, not the disabled one. Add e2e checks against a captured transport (the email itself, its Reply-To, and the stored channel read back in the thread), and a break patch for each (drop replyTo; store the channel but do not render it). Update docs/video2-reaudit.md:1260-1270 and the row at 1532.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Still unbuilt: the Comment ▾ menu lists Email as disabled with a reason (task-mentions 17/17 on lane 1), there is no route that sends a composed email, and send() has no cc/bcc while comments have no channel. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 9 October* (lane 10), as ClickUp works it. ClickUp (help centre, "Use Email in ClickUp" and "Create tasks and comments via email", through search excerpts, 9 October): an owner or admin turns on the Email ClickApp, and guests may not use it; in a task's comment box, Comment ▾ → Email; From, To, CC and BCC, its contacts and the task's Email field suggested as one types; a subject, the message and its files; Send. The email is kept in the task's activity, the answers of those it went to land there under it, and an answer is answered as a comment or by email. Built so:
+- the Email ClickApp (`tasks.email`), off until an owner or admin turns it on in Settings → ClickApps; with it off, Comment ▾ draws Email disabled with who turns it on, and a send is refused in words (403); a guest is told Email is not for guests (403), and a server with no mail set up says so (503);
+- the comment box becomes an email: From (the writer "via Rundesk"), To, CC and BCC as chips with suggestions — the task's Email fields, the addresses the task has written to or heard from, and the workspace's members — a subject that is the task's title until one is typed, the words and the files; Send. Fifty people at most, each address once, To required, an address that is not one named in the refusal (`comment-email.ts`);
+- `POST /tasks/:id/comments/email` sends it through the mail server with its own Message-ID, and its answers come back to an address of its own (`reply-<id>@` the inbound domain), never the list's; the mail server's refusal is said in its own words (502) and nothing is kept as sent. Sent, it is the task's comment with `channel = 'email'` and its envelope (`task_comment_emails`: whom it went to, copied and blind-copied, its subject and Message-ID; migration 0180), its files attached, the blind copies read by its writer alone; an email cannot be edited (400);
+- an answer from somebody it went to (or a member who may comment) lands under it as an email that came in from them, threaded by its reply address; a stranger's is refused and nothing is written; Reply by email fills in whom and "Re:", and names the message it answers;
+- the lanes and CI run a mail server of their own (`scripts/e2e-lanes/mail-stub.mjs`: SMTP, MIME read into text, files and headers, a refusal staged for one address), which every lane's API sends all its mail to; `check-mail-stub.mjs` drives the product's own mail client against it, 16 cases, each of 12 mutations reddening one.
+
+Measured:
+- Before (lane 9, batch 28's build, with a mail stub started for it): `comment-email` 0 passed, 8 failed, then stopped where the comment had no channel — the route 404, Email disabled with "Rundesk cannot send a comment as email"; `task-mentions` 12 passed, then stopped where the base has no `tasks.email` ClickApp (400), 13 of 17 run.
+- After (lane 10): `comment-email` 18 of 18 (8, then 15 of 18 on the way: the closing menu took focus from To, and the inbound helper read the API's envelope as the body); `task-mentions` 17 of 17; unit `comment-email.test.ts` 4; `check-mail-stub` 16 of 16, 12 of 12 mutations. On the main tree's lane 1, integrated: 18 of 18 and 17 of 17.
+
+Checks (`comment-email`, 18): "Email is off until an owner or admin turns it on: the box is told so, a send is refused in words (403), and nothing is sent or kept", "Comment ▾ lists Email disabled, saying it is off and who turns it on", "Settings → ClickApps lists Email, off; switched on, it is kept for the workspace (read by SQL) and Comment ▾ offers Email", "the box becomes an email: From the writer “via Rundesk”, To, a subject that is the task’s title until one is typed, and Send", "typing in To suggests the task’s Email field and the workspace’s members, and a suggestion chosen is an address in To", "the mail server takes one email: to the three, the blind copy in no header, from the writer “via Rundesk”, with its own address to answer to and its own Message-ID", "its words are the box’s, and its file is the one attached, byte for byte", "it is the task’s email comment: its words, its envelope, its file, and the address its answers come back to — all read by SQL", "the thread draws it as an email — whom it went to, copied and blind-copied, and its subject — and the box is a comment box again", "its blind copies are its writer’s to read: a member reading the task is told whom it went to and copied to, not whom it was blind-copied to", "an answer from somebody it went to lands in the task, under the email, as an email that came in from them (read by SQL)", "a stranger who writes to the same address is refused, and nothing is written in anybody’s name", "the answer is drawn as from its sender; Reply by email fills in whom and “Re:”, and the email sent names the answer it answers and joins the same thread", "refused by the mail server, the box says what it said, keeps everything typed, and nothing is kept as sent", "a guest who may comment on the task is told Email is not for guests, and a send is refused in words (403)", "an address that is not one is named in the refusal, and an email with nobody in To is refused (400)", "what an email said is what went: an edit is refused in words (400), and the thread offers none", "turned off again, Email is off again". `task-mentions`, its mode section in a workspace of its own with Email on: "Comment carries the tick, and Email — on in this workspace — is offered, with no reason against it", "choosing Email turns the box into an email — its fields over the words, and Send in place of Comment", "and choosing Comment turns it back: no email fields, and Comment posts".
+- Patches `cem-1` to `cem-13` (the API) and `cem-w1` to `cem-w7` (the web) redden their checks on lane 10 — past the first, only checks that stand on what it broke — and `cem-14` to `cem-19` their unit tests; `tmn-11` (Comment keeps the email form) reddens its check; `tmn-7` and `tmn-8` re-aimed and renamed (`tmn-7-email-is-never-offered`, `tmn-8-a-reason-against-an-offered-email`: they pinned Email as disabled), 2 and 1 of 17. Three patches that did not compile (`cem-2`, `cem-5`, `cem-10`) were made to, and `tmn-8`, which drew an empty line, now draws a reason's words: each reddens.
+
+What ClickUp's Email does that this does not — send from the person's own mailbox, with signatures, templates and a send time — is `found-9-oct/task-email-sends-from-the-server`, not counted.
+
+### `ledger-rows/row-1252` — **closed** (feature, large; was not counted, a feature) · reproduced 9 October
+
+**Composer posts as Email — absent (Email mode listed but disabled)**
+
+*Evidence:* reaudit.md:1252-1269 (M); resume.md:247-249 and 253-257. email.service.ts:584-603: the private send() takes {to, subject, html, attachments} with no replyTo or cc. comments.ts has no channel column. The mode menu exists with Email disabled (task-detail-sheet.tsx:7242-7258). The inbound half exists: the email-to-task address (tasks.controller GET /tasks/:id/email-address).
+
+*To close:* Add replyTo (the task's inbound address) and cc to send(), a channel column on task_comments that the thread renders, and a route that sends a composed body. Then enable the Email mode (it also closes row-730's first remainder).
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Sending a comment as email is unbuilt. The Email mode is drawn disabled with a reason, and there is no channel column, no cc and no send route; send() has had replyTo since resume-8. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 9 October*, with `resume-defects/s4-composer-email`, which says how: the composer posts as Email (Comment ▾ → Email, once the Email ClickApp is on), sends through the mail server with cc and bcc and an address of its own to answer to, keeps the comment with `channel = 'email'` and its envelope, which the thread draws, and threads the answers under it. It closes row-730's first remainder too: `docs/video2-reaudit.md` marks both `B`.
+
+### `suite-hygiene/task-mentions-pins-unbuilt-email-mode` — **closed** (feature, large; was not counted, a feature) · reproduced 9 October
+
+**task-mentions pins the unbuilt 'Comment ▾ → Email' mode as disabled; the ledger row's 'Create Task ▾' half is blocked for a reason the owner no longer accepts**
+
+*Evidence:* task-detail-sheet.tsx:7242-7258 hard-codes `data-testid="comment-mode-item-email" data-available="no" disabled`, with the reason from catalogs.ts:2717-2718 ('Rundesk cannot send a comment as email'). task-mentions.mjs:378-409 asserts `data-available === 'no'`, that a reason is present, and that clicking it does not change the mode, so the suite locks the unbuilt state in. Ledger docs/video2-reaudit.md:730 (row B*) records Email as deliberately disabled and 'Create Task ▾' as 'Blocked on the reference … no frame in the video ever opens that chevron', a reason the owner's policy no longer accepts. I did not research ClickUp's behaviour in this session; the lens was suites.
+
+*To close:* Research how ClickUp's comment composer handles Email and the Create Task split-button menu, build both, then rewrite task-mentions:378-409 to drive the built mode. Re-mark row B* as unbuilt until then.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Only the Email mode remains, and it is unbuilt and duplicates s4-composer-email. The Create Task ▾ half is built (create-task-chevron 9/9 on lane 1), and task-mentions pinning the disabled Email row is accurate reporting, not a tooling defect. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 9 October*, with `resume-defects/s4-composer-email`: Email is built, and `task-mentions` drives the built mode in a workspace of its own with Email on — offered with no reason against it, the box turned into an email, and turned back — 17 of 17 on lane 10; `tmn-7` and `tmn-8`, which pinned it as disabled, re-aimed.
+
 ## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
 
 Moved here by the triage of 5 October, at the owner's request: these are not open defects and are not in the
 counts. Each says what it is in its heading, with the status it had before. Their full evidence is in
 `docs/triage-2026-10-05.md`.
 
-#### Features and ClickUp gaps — 22
+#### Features and ClickUp gaps — 20
+
+### `found-9-oct/task-email-sends-from-the-server` — feature, not counted (found closing `resume-defects/s4-composer-email`, 9 October)
+
+**A task's email is sent from the server's address, "via Rundesk"; ClickUp sends it from the person's own mailbox**
+
+*Evidence, 9 October:* ClickUp's Email ClickApp sends from the person's connected email account — Gmail, Outlook, or another over IMAP — with their signature, saved templates and a time to send (help centre, "Use Email in ClickUp", through search excerpts). Rundesk sends a task's email from the server's own address, named "<the writer> via Rundesk", its answers coming back to an address of its own (`comment-email.service.ts`), with no signature, template or send time.
+
+*To close:* connect a mailbox per person (each provider's OAuth app, the owner's to register), send from it and read its answers from it; signatures, templates and a send time on the Email form.
 
 ### `found-24-sep/planner-default-list-read-by-nothing` — feature, not counted (triage, 5 October; was: partly-fixed, small (dead control; found fixing the block prefix))
 
@@ -10970,16 +11028,6 @@ The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the fi
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The rotating placeholder is built. The composer '+' and generated slide decks are unbuilt features, and the credit meter waits on the owner's Credits decision. None of it is a defect. Evidence: `docs/triage-2026-10-05.md`.
 
-### `resume-defects/s4-composer-email` — feature, not counted (triage, 5 October; was: open, large)
-
-**Section 4: 'The composer posts as Email' is still unbuilt. The mode menu now exists with Email disabled, a suite locks that state in, and the ledger's 'today' text is stale**
-
-*Evidence:* task-detail-sheet.tsx:7202-7260: the `Comment ▾` DropdownMenu has comment-mode-item-comment (ticked) and comment-mode-item-email, which is `disabled` and data-available="no" with no onSelect, carrying the reason catalogs.ts:2717-2718 'Rundesk cannot send a comment as email...'. test/e2e/task-mentions.mjs:357-400 asserts exactly this disabled state ('Comment carries the tick and Email is not selectable', and the reason length is over 30), so building the feature must rewrite those checks. The ledger entry docs/video2-reaudit.md:1252-1270 still says 'There is no mode switch on the comment composer', which is stale now that the switch exists. The row is M at docs/video2-reaudit.md:1532. Plumbing status, verified: the inbound threading exists (email-to-task.service.ts:28-33 and 184-187). Missing: replyTo, cc and bcc on send() (email.service.ts:584-589); a channel column (comments.ts:16-29); any route that sends a composed body; outbound Message-ID recording (resume-8-reply-routing). ClickUp research: in the task comment box, click Comment, then choose Email; fill To/CC/BCC, subject and body, add attachments and a signature, then Send (or schedule it). Responses appear in the task's activity feed, and a reply to an emailed comment can be sent as a comment or as an email (help.clickup.com 'Use Email in ClickUp', 'Create tasks and comments via email').
-
-*To close:* Build to ClickUp. Selecting Email switches the composer into an email form (To, CC and BCC with member and contact suggestions, Subject, body, attachments). Add a route such as POST /tasks/:id/comments/email. It sends through the extended send() with Reply-To set to the task's +task- address, stores the comment with channel='email' and the metadata, and records the outbound Message-ID. The thread renders email comments distinctly, and inbound replies land as channel='email'. Rewrite the task-mentions checks to assert the working mode, not the disabled one. Add e2e checks against a captured transport (the email itself, its Reply-To, and the stored channel read back in the thread), and a break patch for each (drop replyTo; store the channel but do not render it). Update docs/video2-reaudit.md:1260-1270 and the row at 1532.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Still unbuilt: the Comment ▾ menu lists Email as disabled with a reason (task-mentions 17/17 on lane 1), there is no route that sends a composed email, and send() has no cc/bcc while comments have no channel. Evidence: `docs/triage-2026-10-05.md`.
-
 ### `commit-log/log-3943965-1` — feature, not counted (triage, 5 October; was: open, medium)
 
 **Credit meter, Credits tab, usage-trend chart and the metered 'uses have expired' paywall are all unbuilt; the data for them already exists**
@@ -11035,16 +11083,6 @@ The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the fi
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). No product defect: the list Gantt's zoom, today line (drawn only when today is in range) and drag all work. What remains is an unbuilt toolbar and critical path on the timeline (feature), a one-or-two-Gantts and export-format choice (decision), and missing zoom and critical-path checks. The 'drag unchecked' claim is stale. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/timeline-press-moves-dates`. Evidence: `docs/triage-2026-10-05.md`.
 
-### `ledger-rows/row-1252` — feature, not counted (triage, 5 October; was: open, large)
-
-**Composer posts as Email — absent (Email mode listed but disabled)**
-
-*Evidence:* reaudit.md:1252-1269 (M); resume.md:247-249 and 253-257. email.service.ts:584-603: the private send() takes {to, subject, html, attachments} with no replyTo or cc. comments.ts has no channel column. The mode menu exists with Email disabled (task-detail-sheet.tsx:7242-7258). The inbound half exists: the email-to-task address (tasks.controller GET /tasks/:id/email-address).
-
-*To close:* Add replyTo (the task's inbound address) and cc to send(), a channel column on task_comments that the thread renders, and a route that sends a composed body. Then enable the Email mode (it also closes row-730's first remainder).
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Sending a comment as email is unbuilt. The Email mode is drawn disabled with a reason, and there is no channel column, no cc and no send route; send() has had replyTo since resume-8. Evidence: `docs/triage-2026-10-05.md`.
-
 ### `ledger-rows/row-2294` — feature, not counted (triage, 5 October; was: open, large)
 
 **The AI acts inside a connected app — absent**
@@ -11064,16 +11102,6 @@ The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the fi
 *To close:* Merge 816 and 817 into one row. Build xlsx reading (ClickUp's spreadsheet import accepts XLS/XLSX). Basecamp and Confluence become API importers per ClickUp research. Confluence could target Docs through the existing doc importer.
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Rundesk still cannot import .xlsx files or import from Basecamp, Confluence or Slack. The two ledger rows (now video2-reaudit.md:836 and :837) still contradict each other. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/xlsx-read-as-text`. Evidence: `docs/triage-2026-10-05.md`.
-
-### `suite-hygiene/task-mentions-pins-unbuilt-email-mode` — feature, not counted (triage, 5 October; was: open, large)
-
-**task-mentions pins the unbuilt 'Comment ▾ → Email' mode as disabled; the ledger row's 'Create Task ▾' half is blocked for a reason the owner no longer accepts**
-
-*Evidence:* task-detail-sheet.tsx:7242-7258 hard-codes `data-testid="comment-mode-item-email" data-available="no" disabled`, with the reason from catalogs.ts:2717-2718 ('Rundesk cannot send a comment as email'). task-mentions.mjs:378-409 asserts `data-available === 'no'`, that a reason is present, and that clicking it does not change the mode, so the suite locks the unbuilt state in. Ledger docs/video2-reaudit.md:730 (row B*) records Email as deliberately disabled and 'Create Task ▾' as 'Blocked on the reference … no frame in the video ever opens that chevron', a reason the owner's policy no longer accepts. I did not research ClickUp's behaviour in this session; the lens was suites.
-
-*To close:* Research how ClickUp's comment composer handles Email and the Create Task split-button menu, build both, then rewrite task-mentions:378-409 to drive the built mode. Re-mark row B* as unbuilt until then.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Only the Email mode remains, and it is unbuilt and duplicates s4-composer-email. The Create Task ▾ half is built (create-task-chevron 9/9 on lane 1), and task-mentions pinning the disabled Email row is accurate reporting, not a tooling defect. Evidence: `docs/triage-2026-10-05.md`.
 
 #### Settled by the owner: reverted or superseded, 5 October — 7
 

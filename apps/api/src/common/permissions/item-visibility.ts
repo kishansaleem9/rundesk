@@ -1,5 +1,5 @@
 import { WS_MANAGER_ROLES, isManagerRole } from './workspace-roles'
-import { and, or, eq, ne, inArray, type SQL } from 'drizzle-orm'
+import { and, or, eq, ne, inArray, isNull, isNotNull, notInArray, type SQL } from 'drizzle-orm'
 import { tasks, lists, folders, taskAssignees, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { guestTaskFilter } from './guest-reach'
@@ -53,8 +53,9 @@ export async function resolveIsManager(
  * API (which aliases the table).
  */
 export function taskVisibilityFilter(db: Db, actorId: string, isManager: boolean): SQL | undefined {
-  if (isManager) return undefined
+  if (isManager) return notInOthersPersonalList(db, actorId)
   return and(
+    notInOthersPersonalList(db, actorId),
     or(
       ne(tasks.visibility, 'private'),
       eq(tasks.createdById, actorId),
@@ -69,10 +70,27 @@ export function taskVisibilityFilter(db: Db, actorId: string, isManager: boolean
   )
 }
 
+/**
+ * A PERSONAL LIST IS ITS OWNER'S ALONE (`found-24-sep/planner-default-list-read-by-nothing`):
+ * ClickUp's is private to the person and hidden from "other Workspace members",
+ * so it is passed over by every read of anybody else — a manager's too, who
+ * otherwise sees every private list. In the filters below as in
+ * `canSeePrivateItem`, so no read that asks one of them can show it.
+ */
+export const personalListOpenTo = (actorId: string): SQL => or(isNull(lists.personalOf), eq(lists.personalOf, actorId)) as SQL
+
+/** Tasks in somebody else's Personal List, kept out: a subquery, as `tasks` may be aliased. */
+function notInOthersPersonalList(db: Db, actorId: string): SQL {
+  return notInArray(
+    tasks.listId,
+    db.select({ id: lists.id }).from(lists).where(and(isNotNull(lists.personalOf), ne(lists.personalOf, actorId))),
+  )
+}
+
 /** WHERE fragment keeping only lists the actor may see (unaliased `lists`). */
 export function listVisibilityFilter(actorId: string, isManager: boolean): SQL | undefined {
-  if (isManager) return undefined
-  return or(ne(lists.visibility, 'private'), eq(lists.createdById, actorId))
+  if (isManager) return personalListOpenTo(actorId)
+  return and(or(ne(lists.visibility, 'private'), eq(lists.createdById, actorId)), personalListOpenTo(actorId))
 }
 
 /** WHERE fragment keeping only folders the actor may see (unaliased `folders`). */
@@ -86,9 +104,11 @@ export function folderVisibilityFilter(actorId: string, isManager: boolean): SQL
  * fetched. `isAssignee` only matters for tasks.
  */
 export function canSeePrivateItem(
-  item: { visibility?: string | null; createdById?: string | null },
+  item: { visibility?: string | null; createdById?: string | null; personalOf?: string | null },
   actor: { userId: string; isManager: boolean; isAssignee?: boolean },
 ): boolean {
+  // Somebody's Personal List: theirs, and nobody else's, managers included.
+  if (item.personalOf) return item.personalOf === actor.userId
   if (item.visibility !== 'private') return true
   if (actor.isManager) return true
   if (item.createdById && item.createdById === actor.userId) return true
