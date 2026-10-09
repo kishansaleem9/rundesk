@@ -37,9 +37,22 @@ import {
   Lightbulb,
   ArrowLeft,
   GripVertical,
+  RefreshCcwDot,
+  Plus,
+  Trash2,
 } from 'lucide-react'
 import { PlannerAccountsPage } from './planner-accounts-page'
-import { api, ApiError } from '../lib/api'
+import { PlannerSyncPage } from './planner-sync-page'
+import { api, ApiError, refusalMessage } from '../lib/api'
+import {
+  plannerSectionsKey,
+  plannerSectionsQuery,
+  sectionIdOf,
+  sectionKey,
+  sectionLabel,
+  type OwnRailSection,
+  type OwnSectionKey,
+} from '../lib/planner-sections'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { PLANNER_SETTINGS_PAGES, type PlannerSettingsPage } from '../lib/planner-settings-pages'
 
@@ -49,8 +62,8 @@ import { PLANNER_SETTINGS_PAGES, type PlannerSettingsPage } from '../lib/planner
  * The frame's left nav has seven pages: Appearance · Accounts · Sidebar ·
  * Upcoming meeting · Time blocking · AI Notetaker · Automations.
  *
- * FIVE ARE HERE. Two are not, and both absences are recorded decisions rather
- * than gaps — which is a different thing, and has to stay a different thing.
+ * SIX ARE HERE. One is not, and its absence is a recorded decision rather
+ * than a gap — which is a different thing, and has to stay a different thing.
  *
  *   · **Accounts** IS HERE NOW, and the reasoning that kept it out was wrong.
  *     It said a page here "would be a read-only copy of one that already
@@ -71,8 +84,17 @@ import { PLANNER_SETTINGS_PAGES, type PlannerSettingsPage } from '../lib/planner
  *     nothing anywhere able to turn either off. The third switch, "Show in
  *     desktop", is a desktop NOTIFICATION, which a browser raises without a
  *     desktop app. Three switches, three readers.
+ *   · **Automations** IS HERE NOW (`ledger-rows/row-1962`). It was parked at
+ *     the client's own instruction: `[14:29]` "AUTOMATIONS aap build up kar
+ *     sakte ho", then `[14:32]`–`[14:38]` "yeh aap ko baad mein bataoongi" —
+ *     and the video ends without coming back to it. On 8 October the owner
+ *     said to close what was set aside as ClickUp works it, and frame `14:32`
+ *     draws ClickUp's page: "Sync ClickUp tasks to Google Calendar", "Pick a
+ *     list, folder, or space…", "+ Add sync". So it is that page
+ *     (`planner-sync-page.tsx`): a person's own syncs of a place to one of
+ *     their calendars, and nothing synced until they add one.
  *
- * AND TWO THAT STAY OUT, for reasons that are still true today:
+ * AND ONE THAT STAYS OUT, for a reason that is still true today:
  *
  *   · **AI Notetaker** needs a bot that joins the call and records it. The
  *     build-vs-buy decision on that bot sits with the client and has not been
@@ -81,17 +103,9 @@ import { PLANNER_SETTINGS_PAGES, type PlannerSettingsPage } from '../lib/planner
  *     not quietly become "built". (The older wording here — "gated by a
  *     feature flag, no per-calendar binding yet" — described a symptom rather
  *     than the decision, which is how a decision turns back into a to-do.)
- *   · **Automations** is parked at the client's own instruction. `[14:29]`
- *     "AUTOMATIONS aap build up kar sakte ho", then `[14:32]`–`[14:38]` "yeh
- *     aap ko baad mein bataoongi, end mein … main aap ko [samjhaoongi] ke
- *     automation kis tarah se work karta hai" — and the video ends without
- *     ever coming back to it, so the explanation was never given. The
- *     requirement has not been given yet; building a guess at it would be
- *     inventing scope, and hiding the nav entry would lose the fact that it
- *     was asked for.
  *
  * A settings nav with pages that do nothing is the facade this codebase has
- * spent two videos removing. Five real pages and two honest gaps.
+ * spent two videos removing. Six real pages and one honest gap.
  *
  * WEEK START AND TIMEZONE ARE NOT PLANNER SETTINGS. Frame `14:10` shows both
  * on the Appearance page, and they are account-wide columns on `users` that
@@ -182,6 +196,8 @@ const PAGE_META: Record<PageKey, { icon: typeof Palette; labelKey: TranslationKe
   // §V2-02e — the page whose recorded reason for being absent had gone stale.
   upcomingMeeting: { icon: Video, labelKey: 'plannerSettings.upcomingMeeting' },
   timeBlocking: { icon: CalendarClock, labelKey: 'plannerSettings.timeBlocking' },
+  // Frame `14:32` — which tasks go to which of a person's calendars (`ledger-rows/row-1962`).
+  automations: { icon: RefreshCcwDot, labelKey: 'plannerSettings.automations' },
 }
 const PAGES = PLANNER_SETTINGS_PAGES.map((key) => ({ key, ...PAGE_META[key] }))
 
@@ -276,16 +292,32 @@ export type RailSection = (typeof RAIL_SECTIONS)[number]
  * it is sent, so a stale or hand-written value must not draw an empty section
  * or the same one twice. A HIDDEN section has no place in the order, because
  * the rail has no place for it; shown again, it joins at the foot.
+ *
+ * `own` is the person's own sections in this workspace (`section:<id>`), which
+ * the order places among the five; one it does not name yet is drawn at the
+ * foot, and one of another workspace, or deleted, is passed over. A section of
+ * one's own is not hidden, only deleted — so it is always shown.
  */
-export function railSectionsShown(stored: readonly string[] | null | undefined): RailSection[] {
-  if (!Array.isArray(stored)) return [...RAIL_SECTIONS]
-  const shown: RailSection[] = []
-  for (const name of stored) {
-    const section = RAIL_SECTIONS.find((s) => s === name)
-    if (section && !shown.includes(section)) shown.push(section)
+export function railSectionsShown(
+  stored: readonly string[] | null | undefined,
+  own: readonly { id: string }[] = [],
+): RailKey[] {
+  const ownKeys = own.map((s) => sectionKey(s.id))
+  const shown: RailKey[] = []
+  if (!Array.isArray(stored)) shown.push(...RAIL_SECTIONS)
+  else {
+    for (const name of stored) {
+      const section = RAIL_SECTIONS.find((s) => s === name) ?? ownKeys.find((k) => k === name)
+      if (section && !shown.includes(section)) shown.push(section)
+    }
   }
+  // A section of one's own that no order names yet — a new one — is at the foot of the rail.
+  for (const key of ownKeys) if (!shown.includes(key)) shown.push(key)
   return shown
 }
+
+/** A place in the rail: one of the five, or a section of one's own (`ledger-rows/row-835`). */
+export type RailKey = RailSection | OwnSectionKey
 
 const RAIL_LABEL: Record<string, TranslationKey> = {
   priorities: 'planner.priorities',
@@ -394,12 +426,46 @@ export function PlannerSettingsDialog({
    * the same cache, so it moves with the row. A save the server refuses puts
    * the order back and says so.
    */
-  const railShown = railSectionsShown(settings?.railSections)
+  /*
+   * `ledger-rows/row-835` — the person's own sections, which the order places
+   * among the five and "+ Add a new section" makes.
+   */
+  const ownSections = useQuery({ ...plannerSectionsQuery(workspaceId), enabled: open })
+  const own: OwnRailSection[] = ownSections.data ?? []
+  const railShown = railSectionsShown(settings?.railSections, own)
   const railHidden = RAIL_SECTIONS.filter((key) => !railShown.includes(key))
+  const railLabel = (key: RailKey) => {
+    const id = sectionIdOf(key)
+    const mine = id ? own.find((s) => s.id === id) : undefined
+    return mine ? sectionLabel(mine) : t(RAIL_LABEL[key])
+  }
   const [railSaid, setRailSaid] = useState('')
+  const [newSection, setNewSection] = useState<{ name: string; emoji: string } | null>(null)
+  const addSection = useMutation({
+    mutationFn: (body: { name: string; emoji: string | null }) =>
+      api<OwnRailSection>(`/planner/${workspaceId}/sections`, { method: 'POST', body }),
+    onSuccess: (made) => {
+      setNewSection(null)
+      qc.setQueryData<OwnRailSection[]>(plannerSectionsKey(workspaceId), (old) => [...(old ?? []), made])
+      void qc.invalidateQueries({ queryKey: plannerSectionsKey(workspaceId) })
+      setRailSaid(t('plannerSections.added', { name: sectionLabel(made) }))
+    },
+    onError: (err) => toast.error(refusalMessage(err, t('plannerSections.addSectionFailed'))),
+  })
+  const deleteSection = useMutation({
+    mutationFn: (id: string) => api(`/planner/${workspaceId}/sections/${id}`, { method: 'DELETE' }),
+    onSuccess: (_done, id) => {
+      const gone = own.find((s) => s.id === id)
+      qc.setQueryData<OwnRailSection[]>(plannerSectionsKey(workspaceId), (old) => (old ?? []).filter((s) => s.id !== id))
+      void qc.invalidateQueries({ queryKey: plannerSectionsKey(workspaceId) })
+      void qc.invalidateQueries({ queryKey: ['planner-settings', workspaceId] })
+      if (gone) toast.success(t('plannerSections.deleted', { name: sectionLabel(gone) }))
+    },
+    onError: (err) => toast.error(refusalMessage(err, t('plannerSections.deleteFailed'))),
+  })
   const saveRail = useMutation({
     mutationKey: ['planner-rail', workspaceId],
-    mutationFn: (railSections: RailSection[]) =>
+    mutationFn: (railSections: RailKey[]) =>
       api(`/planner/${workspaceId}/settings`, { method: 'PATCH', body: { railSections } }),
     onMutate: async (railSections) => {
       await qc.cancelQueries({ queryKey: ['planner-settings', workspaceId] })
@@ -425,7 +491,7 @@ export function PlannerSettingsDialog({
     const next = arrayMove(railShown, from, to)
     saveRail.mutate(next)
     setRailSaid(t('plannerSettings.railMoved', {
-      name: t(RAIL_LABEL[railShown[from]]),
+      name: railLabel(railShown[from]),
       position: to + 1,
       count: next.length,
     }))
@@ -435,7 +501,7 @@ export function PlannerSettingsDialog({
   const railSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
   const onRailDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) return
-    moveRail(railShown.indexOf(active.id as RailSection), railShown.indexOf(over.id as RailSection))
+    moveRail(railShown.indexOf(active.id as RailKey), railShown.indexOf(over.id as RailKey))
   }
 
   return (
@@ -728,6 +794,10 @@ export function PlannerSettingsDialog({
               </div>
             )}
 
+            {pane === null && page === 'automations' && (
+              <PlannerSyncPage workspaceId={workspaceId} onGoToAccounts={() => setPage('accounts')} />
+            )}
+
             {/*
               Frames `14:13`–`14:16` — **Sidebar sections**: a box and a grip
               on each of the five, and the row itself is what the pointer
@@ -739,8 +809,13 @@ export function PlannerSettingsDialog({
               drop saves `railSections` in its new order and the rail follows
               it. A row whose box is cleared leaves the rail and sinks under
               the shown ones, because a hidden section has no place in the
-              rail to keep; ticked again, it joins at the foot. `+ Add a new
-              section` is not drawn: no frame says what a new section holds.
+              rail to keep; ticked again, it joins at the foot.
+
+              `+ Add a new section` (`ledger-rows/row-835`): no frame says
+              what one holds, so it holds what ClickUp's own sidebar sections
+              do — a name, an optional emoji, and tasks put in by hand on the
+              rail. It joins the order at its foot, is dragged like the five,
+              and is deleted rather than hidden; its tasks stay as they were.
             */}
             {pane === null && page === 'sidebar' && (
               <div className="space-y-2" data-testid="planner-settings-sidebar">
@@ -756,15 +831,20 @@ export function PlannerSettingsDialog({
                 >
                   <SortableContext items={railShown} strategy={verticalListSortingStrategy}>
                     <ul className="space-y-1.5" data-testid="planner-rail-list">
-                      {railShown.map((key, index) => (
-                        <RailRow
-                          key={key}
-                          section={key}
-                          label={t(RAIL_LABEL[key])}
-                          onHide={() => saveRail.mutate(railShown.filter((s) => s !== key))}
-                          onStep={(step) => moveRail(index, index + step)}
-                        />
-                      ))}
+                      {railShown.map((key, index) => {
+                        const ownId = sectionIdOf(key)
+                        return (
+                          <RailRow
+                            key={key}
+                            section={key}
+                            label={railLabel(key)}
+                            onHide={ownId ? undefined : () => saveRail.mutate(railShown.filter((s) => s !== key))}
+                            onDelete={ownId ? () => deleteSection.mutate(ownId) : undefined}
+                            deleting={ownId !== null && deleteSection.isPending && deleteSection.variables === ownId}
+                            onStep={(step) => moveRail(index, index + step)}
+                          />
+                        )
+                      })}
                       {railHidden.map((key) => (
                         <li
                           key={key}
@@ -787,6 +867,60 @@ export function PlannerSettingsDialog({
                     </ul>
                   </SortableContext>
                 </DndContext>
+                {newSection === null ? (
+                  <button
+                    type="button"
+                    data-testid="planner-rail-add-section"
+                    onClick={() => setNewSection({ name: '', emoji: '' })}
+                    className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-[12px] text-muted-foreground hover:text-foreground"
+                  >
+                    <Plus className="h-3.5 w-3.5" aria-hidden />
+                    {t('plannerSections.addSection')}
+                  </button>
+                ) : (
+                  <form
+                    data-testid="planner-rail-new-section"
+                    className="flex items-center gap-1.5"
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      const name = newSection.name.trim()
+                      if (!name) return
+                      addSection.mutate({ name, emoji: newSection.emoji.trim() || null })
+                    }}
+                  >
+                    <input
+                      value={newSection.emoji}
+                      onChange={(e) => setNewSection({ ...newSection, emoji: e.target.value })}
+                      placeholder={t('plannerSections.emojiPlaceholder')}
+                      aria-label={t('plannerSections.emojiPlaceholder')}
+                      data-testid="planner-rail-new-emoji"
+                      maxLength={8}
+                      className="h-8 w-14 rounded-md border border-border bg-background px-2 text-center text-[13px]"
+                    />
+                    <input
+                      autoFocus
+                      value={newSection.name}
+                      onChange={(e) => setNewSection({ ...newSection, name: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          e.stopPropagation()
+                          setNewSection(null)
+                        }
+                      }}
+                      placeholder={t('plannerSections.namePlaceholder')}
+                      aria-label={t('plannerSections.namePlaceholder')}
+                      data-testid="planner-rail-new-name"
+                      maxLength={60}
+                      className="h-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-[13px]"
+                    />
+                    <Button type="submit" size="sm" data-testid="planner-rail-new-save" disabled={!newSection.name.trim() || addSection.isPending}>
+                      {t('plannerSections.create')}
+                    </Button>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setNewSection(null)}>
+                      {t('common.cancel')}
+                    </Button>
+                  </form>
+                )}
                 {/* The move, said: a drag or an arrow key changes the order
                     silently otherwise. */}
                 <p className="sr-only" aria-live="polite" data-testid="planner-rail-said">{railSaid}</p>
@@ -1108,11 +1242,16 @@ function RailRow({
   section,
   label,
   onHide,
+  onDelete,
+  deleting = false,
   onStep,
 }: {
-  section: RailSection
+  section: RailKey
   label: string
-  onHide: () => void
+  /** One of the five: its box hides it. A section of one's own has none — it is deleted, not hidden. */
+  onHide?: () => void
+  onDelete?: () => void
+  deleting?: boolean
   onStep: (step: -1 | 1) => void
 }) {
   const { t } = useTranslation()
@@ -1136,15 +1275,32 @@ function RailRow({
           stopped: dnd-kit stops the click's propagation after a drag, not the
           label's default action. So the name is the drag's, and the box is
           the box's. */}
-      <Checkbox
-        checked
-        aria-label={label}
-        data-testid={`planner-rail-${section}`}
-        onCheckedChange={(next) => {
-          if (next !== true) onHide()
-        }}
-      />
+      {onHide && (
+        <Checkbox
+          checked
+          aria-label={label}
+          data-testid={`planner-rail-${section}`}
+          onCheckedChange={(next) => {
+            if (next !== true) onHide()
+          }}
+        />
+      )}
       <span className="min-w-0 flex-1 truncate">{label}</span>
+      {onDelete && (
+        <button
+          type="button"
+          data-testid={`planner-rail-section-delete-${sectionIdOf(section)}`}
+          aria-label={t('plannerSections.delete', { name: label })}
+          title={t('plannerSections.delete', { name: label })}
+          disabled={deleting}
+          // Not the start of a drag: the row is picked up by the pointer.
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={onDelete}
+          className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-red-500"
+        >
+          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+        </button>
+      )}
       <button
         type="button"
         data-testid={`planner-rail-handle-${section}`}

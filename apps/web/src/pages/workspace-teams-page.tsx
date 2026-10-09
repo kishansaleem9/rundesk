@@ -20,10 +20,11 @@
  * for the mutations (`groups.manage` for a group's). The gate was the web route
  * and nothing else.
  *
- * ANALYTICS IS DELIBERATELY ABSENT. The frame lists it; nothing exists behind
- * it, and she never opens it, so there is no way to know what a team's
- * analytics are meant to say. A fourth nav item opening a page somebody has to
- * guess the purpose of is the facade this whole audit has been removing.
+ * ANALYTICS IS CLICKUP'S (formerly Pulse), built 8 October
+ * (`ledger-rows/section3-team-analytics`): she never opens it, so what it says
+ * is ClickUp's — each member's status, activity, task views and most-viewed
+ * tasks, the Lineup and a roll-up by team, over a period — a ClickApp an owner
+ * or admin turns on (`TeamsAnalytics`).
  *
  * READ-ONLY, ON PURPOSE. Creating and editing teams stays in settings where the
  * permissions already live. This is the place you come to LOOK, which is what
@@ -49,7 +50,8 @@ import {
   Label,
   cn,
 } from '@rundesk/ui'
-import { Users, User, Network, Pencil, Plus, Search, ArrowLeft, ArrowRight } from 'lucide-react'
+import { Users, User, Network, Pencil, Plus, Search, ArrowLeft, ArrowRight, BarChart3 } from 'lucide-react'
+import { TeamsAnalytics } from '../components/teams-analytics'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import { useAuthStore } from '../store/auth'
@@ -90,7 +92,7 @@ type MemberRow = {
   managerId?: string | null
 }
 
-type TabId = 'teams' | 'people' | 'chart'
+type TabId = 'teams' | 'people' | 'chart' | 'analytics'
 
 /**
  * §V2-12 / frame `21:00` — one person, their job title, and the work they have
@@ -246,6 +248,7 @@ export function TeamsPage() {
             { id: 'teams', labelKey: 'teams.tabAll', icon: Users },
             { id: 'people', labelKey: 'teams.tabPeople', icon: User },
             { id: 'chart', labelKey: 'teams.tabChart', icon: Network },
+            { id: 'analytics', labelKey: 'teams.tabAnalytics', icon: BarChart3 },
           ] as const
         ).map((x) => (
           <button
@@ -289,7 +292,7 @@ export function TeamsPage() {
 
       <div className="min-h-0 flex-1 space-y-4 overflow-auto p-6">
         {/* A search box over nothing is furniture; the empty state below is the page. */}
-        {tab !== 'chart' && !(tab === 'teams' && !loading && groups.length === 0) && (
+        {tab !== 'chart' && tab !== 'analytics' && !(tab === 'teams' && !loading && groups.length === 0) && (
           <Input
             data-testid="teams-search"
             value={search}
@@ -299,7 +302,10 @@ export function TeamsPage() {
           />
         )}
 
-        {loading ? (
+        {tab === 'analytics' && workspaceId ? (
+          // Its own reads, search and period: nothing it shows waits on the teams or the members.
+          <TeamsAnalytics workspaceId={workspaceId} />
+        ) : loading ? (
           /* §2.9a — the shape of what is coming, never the word. */
           <div className="space-y-2" aria-busy="true" aria-live="polite">
             {[0, 1, 2].map((i) => (
@@ -318,11 +324,9 @@ export function TeamsPage() {
                * there is now something to show.
                *
                * The two explainer cards are the frame's two, in its order. They
-               * describe what is already behind the tabs — an overview of every
-               * team, and browsing / managing the members — and deliberately do
-               * NOT mention the frame's fourth nav item, Analytics, which has
-               * nothing behind it and is guarded against by
-               * test/e2e/teams-destination.mjs.
+               * describe what is behind the first tabs — an overview of every
+               * team, and browsing / managing the members; the frame's cards say
+               * nothing of Analytics, and nor do these.
                */
               <div
                 className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center"

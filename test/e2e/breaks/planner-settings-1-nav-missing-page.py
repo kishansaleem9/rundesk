@@ -4,7 +4,11 @@
 # Re-aimed 25 September: the nav is drawn from `PLANNER_SETTINGS_PAGES`, which the
 # planner's address reads too, so the page is dropped from the nav alone.
 #
-# Reddens: planner-settings: "the nav offers exactly the five pages that do something"
+# Re-aimed 8 October: Automations is a page now (`ledger-rows/row-1962`), so the nav counts six.
+# Reddens: planner-settings: "the nav offers exactly the six pages that do something"
+#   or "and in the frame's own order, Appearance → Accounts → Sidebar → Upcoming meeting → Time blocking → Automations"
+#
+# Re-aimed 8 October: the last 1 of these are knock-ons of the same edit, measured on lane 2 — checks that stand on what the first ones lost.
 import io
 p = '/home/user/rundesk/apps/web/src/components/planner-settings-dialog.tsx'
 s = io.open(p, encoding='utf-8').read()

@@ -16,6 +16,7 @@ import { PermissionsGuard, RequirePermissions } from '../custom-roles/permission
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { CalendarSyncService, type CalendarProvider } from './calendar-sync.service'
 import { CalendarAccountsService } from './calendar-accounts.service'
+import { CalendarSyncRulesService } from './calendar-sync-rules.service'
 
 /**
  * Authenticated controller: iCal token mint/revoke + manual pull triggers.
@@ -28,6 +29,7 @@ export class CalendarSyncController {
   constructor(
     private readonly sync: CalendarSyncService,
     private readonly accounts: CalendarAccountsService,
+    private readonly rules: CalendarSyncRulesService,
   ) {}
 
   /**
@@ -73,6 +75,56 @@ export class CalendarSyncController {
     @Param('accountId') accountId: string,
   ) {
     return this.accounts.remove(user.id, workspaceId, accountId)
+  }
+
+  /*
+   * ClickUp's "Sync tasks to calendar" (`ledger-rows/row-1962`): a person's own
+   * syncs, each a place they may open and one of their own calendars. Scoped
+   * to the caller as the accounts are — a sync names somebody's calendar, and a
+   * colleague's are not theirs to read, add to or remove.
+   */
+  @Get('rules')
+  listRules(
+    @CurrentUser() user: { id: string },
+    @Param('workspaceId') workspaceId: string,
+  ) {
+    return this.rules.listRules(workspaceId, user.id)
+  }
+
+  /** The places the caller may sync: the spaces, folders, projects and lists they may open, in the sidebar's order. */
+  @Get('places')
+  places(
+    @CurrentUser() user: { id: string },
+    @Param('workspaceId') workspaceId: string,
+  ) {
+    return this.rules.places(workspaceId, user.id)
+  }
+
+  @Post('rules')
+  addRule(
+    @CurrentUser() user: { id: string },
+    @Param('workspaceId') workspaceId: string,
+    @Body() body: { scopeType?: unknown; scopeId?: unknown; accountId?: unknown; assignedOnly?: unknown },
+  ) {
+    return this.rules.addRule(workspaceId, user.id, body ?? {})
+  }
+
+  /** The planner's Sync now (frame `14:36`): the caller's syncs written through again, into their own calendars. */
+  @Post('sync-now')
+  syncNow(
+    @CurrentUser() user: { id: string },
+    @Param('workspaceId') workspaceId: string,
+  ) {
+    return this.rules.syncNow(workspaceId, user.id)
+  }
+
+  @Delete('rules/:ruleId')
+  removeRule(
+    @CurrentUser() user: { id: string },
+    @Param('workspaceId') workspaceId: string,
+    @Param('ruleId') ruleId: string,
+  ) {
+    return this.rules.removeRule(workspaceId, user.id, ruleId)
   }
 
   @Get('ical-token')

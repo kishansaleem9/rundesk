@@ -2,8 +2,8 @@ import { Fragment, Suspense, lazy, useEffect, useMemo, useRef, useState } from '
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, cn, toast } from '@rundesk/ui'
-import { CalendarDays, ChevronLeft, ChevronRight, Flag, Search, Settings2 } from 'lucide-react'
-import { api, ApiError } from '../lib/api'
+import { CalendarDays, ChevronLeft, ChevronRight, Flag, RefreshCw, Search, Settings2 } from 'lucide-react'
+import { api, ApiError, refusalMessage } from '../lib/api'
 import { calendarAccountsQuery } from '../lib/calendar-accounts'
 import { useCalendarConnect } from '../hooks/use-calendar-connect'
 import { useTranslation } from '../lib/i18n'
@@ -17,6 +17,8 @@ import {
   type PlannerGridSize,
 } from '../components/planner-settings-dialog'
 import { usePriorities, usePriorityActions, addedByOther } from '../lib/use-priorities'
+import { plannerSectionsQuery, sectionIdOf } from '../lib/planner-sections'
+import { PlannerOwnSection } from '../components/planner-own-section'
 import { exactTime, relativeTime } from '../lib/relative-time'
 import {
   plannerRange,
@@ -734,6 +736,29 @@ export function PlannerPage() {
     enabled: !!workspaceId && accountCalendarOn,
   })
   const events = accountCalendarOn ? calendarEvents?.events ?? [] : []
+  /*
+   * SYNC NOW, frame `14:36`'s circular arrows beside the gear
+   * (`ledger-rows/row-1904`): this person's syncs written through again into
+   * their own calendars — an event deleted there written again, one changed
+   * there put back as the task says (`POST …/calendar-sync/sync-now`) — and the
+   * calendars' events read again, so what was added there is drawn.
+   */
+  const syncNow = useMutation({
+    mutationFn: () =>
+      api<{ tasks: number; written: number; removed: number; unchanged: number; failed: number }>(
+        `/workspaces/${workspaceId}/calendar-sync/sync-now`,
+        { method: 'POST' },
+      ),
+    onSuccess: async (done) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['planner-events', workspaceId] }),
+        qc.invalidateQueries({ queryKey: ['planner-blocks', workspaceId] }),
+      ])
+      if (done.failed > 0) toast.warning(t('planner.syncedWithFailures', { count: done.failed }))
+      else toast.success(t('planner.synced'))
+    },
+    onError: (err) => toast.error(refusalMessage(err, t('planner.syncFailed'))),
+  })
   const accountName = (accountId: string, fallback: string) =>
     calendarGroups.flatMap((g) => g.calendars).find((c) => c.accountId === accountId)?.label ?? fallback
   /*
@@ -1093,7 +1118,9 @@ export function PlannerPage() {
    * The rail now draws `railSectionsShown` in its order — the same function the
    * Sidebar page lists its rows by.
    */
-  const railShown = railSectionsShown(settings?.railSections)
+  // The person's own sections (`ledger-rows/row-835`), which the order places among the five.
+  const ownSections = useQuery({ ...plannerSectionsQuery(workspaceId), enabled: !!workspaceId })
+  const railShown = railSectionsShown(settings?.railSections, ownSections.data ?? [])
   const blockLabel = (b: Block) => (b.taskId && b.label ? `${prefix} ${b.label}` : b.label ?? '')
 
   /*
@@ -1696,6 +1723,22 @@ export function PlannerPage() {
         </section>
         )}
 
+        {sectionIdOf(key) && (() => {
+          const own = (ownSections.data ?? []).find((s) => s.id === sectionIdOf(key))
+          return own ? (
+            <PlannerOwnSection
+              workspaceId={workspaceId}
+              section={own}
+              onPickUp={(task, e) => {
+                // As Backlog's rows: dropped on the grid, it blocks time for the task.
+                e.preventDefault()
+                setDragging({ taskId: task.id, title: task.title })
+                setGhost({ x: e.clientX, y: e.clientY })
+              }}
+            />
+          ) : null
+        })()}
+
         {key === 'backlog' && (
         <section data-testid="planner-backlog" data-rail-section="backlog">
           <h2 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -1961,6 +2004,18 @@ export function PlannerPage() {
               </>
             )}
           </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-[12px]"
+            data-testid="planner-sync-now"
+            aria-label={t('planner.syncNow')}
+            title={t('planner.syncNow')}
+            disabled={syncNow.isPending}
+            onClick={() => syncNow.mutate()}
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5', syncNow.isPending && 'animate-spin')} />
+          </Button>
           <Button
             size="sm"
             variant="outline"

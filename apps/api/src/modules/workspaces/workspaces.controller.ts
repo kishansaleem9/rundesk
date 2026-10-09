@@ -285,6 +285,30 @@ export class WorkspacesController {
   }
 
   /*
+   * What a person may do where they only view — time estimates, time tracking,
+   * tags, creating views — set by an owner or admin, as ClickUp's Manage
+   * people page sets them (`found-25-sep/view-only-individual-permissions`):
+   * `members.role.change`, an admin's by default, and the rank rule.
+   */
+  @Patch(':workspaceId/members/:userId/view-only-permissions')
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('members.role.change')
+  async updateMemberViewOnlyPermissions(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+    @Body() body: unknown,
+    @CurrentUser() user: any,
+    @Ip() ip: string,
+  ) {
+    return this.workspacesService.updateMemberViewOnlyPermissions(workspaceId, userId, body, {
+      id: user.id,
+      email: user.email,
+      ip,
+      role: user.role,
+    })
+  }
+
+  /*
    * A member's weekly capacity. Their own is theirs to set — ClickUp:
    * "Workspace members can set capacity for themselves, while Admins, Workspace
    * owners, and managers can set capacity for themselves and others"

@@ -5,6 +5,7 @@ import { lists, projects, spaces, taskAssignees, tasks, users, workspaceMembers 
 import type { Db } from '@rundesk/db'
 import { READ_REFUSALS, readableTask, taskReadAnswer } from './read-access'
 import { assertSpaceLevel, resolveSpaceLevel, spaceLevelReaches, type WithinStep } from './space-default-permission'
+import { VIEW_ONLY_REFUSALS, viewOnlyMay, type ViewOnlyPermission } from './view-only'
 
 /*
  * MAY THIS PERSON CHANGE THIS TASK — the write rule, stated once for every
@@ -58,12 +59,15 @@ export type TaskWriteContext = {
  * @param opts.level — "comment" for a change of status or assignees, which an
  *   assignee may make at that level; "edit" otherwise; "full" — Full edit —
  *   to delete the task (`found-25-sep/full-edit-enforced-nowhere`).
+ * @param opts.orViewOnly — a change ClickUp lets a view-only person make when
+ *   their workspace allows it (a time estimate, a tag): at View, the person's
+ *   switch decides (`viewOnlyMay`, `found-25-sep/view-only-individual-permissions`).
  */
 export async function assertTaskWritable(
   db: Db,
   taskId: string,
   actorId: string,
-  opts: { allowArchived?: boolean; level?: 'comment' | 'edit' | 'full' | 'subtask' } = {},
+  opts: { allowArchived?: boolean; level?: 'comment' | 'edit' | 'full' | 'subtask'; orViewOnly?: Extract<ViewOnlyPermission, 'timeEstimates' | 'tags'> } = {},
 ): Promise<TaskWriteContext> {
   const [ctx] = await db
     .select({
@@ -147,12 +151,20 @@ export async function assertTaskWritable(
     .from(taskAssignees)
     .where(and(eq(taskAssignees.taskId, taskId), eq(taskAssignees.userId, actorId)))
     .limit(1)
-  await assertSpaceAllowsTaskWrite(db, ctx.spaceId, actorId, opts.level ?? 'edit', !!assignee, [
-    { type: 'task', id: taskId },
-    { type: 'list', id: ctx.listId },
-    { type: 'project', id: ctx.projectId },
-    ...(ctx.folderId ? [{ type: 'folder' as const, id: ctx.folderId }] : []),
-  ])
+  await assertSpaceAllowsTaskWrite(
+    db,
+    ctx.spaceId,
+    actorId,
+    opts.level ?? 'edit',
+    !!assignee,
+    [
+      { type: 'task', id: taskId },
+      { type: 'list', id: ctx.listId },
+      { type: 'project', id: ctx.projectId },
+      ...(ctx.folderId ? [{ type: 'folder' as const, id: ctx.folderId }] : []),
+    ],
+    opts.orViewOnly ? { workspaceId: ctx.workspaceId, permission: opts.orViewOnly } : undefined,
+  )
   return ctx
 }
 
@@ -179,6 +191,8 @@ async function assertSpaceAllowsTaskWrite(
   isAssignee: boolean,
   /** The task and the containers above it: a grant on any of them decides first (`WithinStep`). */
   within: WithinStep[],
+  /** A change a view-only person may make when their switch is on (`assertTaskWritable`'s `orViewOnly`). */
+  viewOnly?: { workspaceId: string; permission: ViewOnlyPermission },
 ) {
   const resolved = await resolveSpaceLevel(db, { spaceId, actorId, within })
   if (!resolved) return
@@ -204,7 +218,64 @@ async function assertSpaceAllowsTaskWrite(
     return
   }
   if (wanted === 'comment' && isAssignee && spaceLevelReaches(resolved.level, 'comment')) return
+  /*
+   * WHERE THEY ONLY VIEW, THEIR SWITCH DECIDES the changes ClickUp lets a
+   * view-only person make: a time estimate (on unless turned off) and a tag
+   * (off unless turned on) (`found-25-sep/view-only-individual-permissions`).
+   * At Comment the level's own rule stands, as it did: View is the level the
+   * switches are about.
+   */
+  if (viewOnly && wanted === 'edit' && resolved.level === 'view') {
+    if (await viewOnlyMay(db, viewOnly.workspaceId, actorId, viewOnly.permission)) return
+    throw new ForbiddenException(VIEW_ONLY_REFUSALS[viewOnly.permission])
+  }
   await assertSpaceLevel(db, { spaceId, actorId, required: 'edit', kind: 'tasks', within })
+}
+
+/**
+ * MAY THIS PERSON TRACK TIME ON THIS TASK — behind the time routes' read rule.
+ * Time is tracked by whoever may open the task, as ClickUp lets view-only
+ * members and guests by default; where the person only views, their workspace
+ * may turn it off for them (`found-25-sep/view-only-individual-permissions`),
+ * and then a timer or a logged entry is refused in those words. At Comment and
+ * above nothing changes.
+ */
+export async function assertMayTrackTime(db: Db, taskId: string, actorId: string): Promise<void> {
+  const [ctx] = await db
+    .select({
+      listId: tasks.listId,
+      workspaceId: spaces.workspaceId,
+      spaceId: spaces.id,
+      projectId: projects.id,
+      folderId: projects.folderId,
+    })
+    .from(tasks)
+    .innerJoin(lists, eq(lists.id, tasks.listId))
+    .innerJoin(projects, eq(projects.id, lists.projectId))
+    .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+    .where(eq(tasks.id, taskId))
+    .limit(1)
+  if (!ctx) throw new NotFoundException('Task not found')
+  const [membership] = await db
+    .select({ role: workspaceMembers.role })
+    .from(workspaceMembers)
+    .where(and(eq(workspaceMembers.workspaceId, ctx.workspaceId), eq(workspaceMembers.userId, actorId)))
+    .limit(1)
+  if (!membership) throw new ForbiddenException(READ_REFUSALS.notMember)
+  if (isManagerRole(membership.role)) return
+  const resolved = await resolveSpaceLevel(db, {
+    spaceId: ctx.spaceId,
+    actorId,
+    within: [
+      { type: 'task', id: taskId },
+      { type: 'list', id: ctx.listId },
+      { type: 'project', id: ctx.projectId },
+      ...(ctx.folderId ? [{ type: 'folder' as const, id: ctx.folderId }] : []),
+    ],
+  })
+  if (!resolved || resolved.level !== 'view') return
+  if (await viewOnlyMay(db, ctx.workspaceId, actorId, 'timeTracking')) return
+  throw new ForbiddenException(VIEW_ONLY_REFUSALS.timeTracking)
 }
 
 /**

@@ -21,9 +21,10 @@ export class TaskTimeEntriesController {
   // Time is tracked by whoever may read the task: the class's read rule, a
   // guest only where the task is shared with them. That is ClickUp's default
   // for view-only members and guests, whose time tracking an owner may turn off
-  // per person (`view-only-individual-permissions`, unbuilt). A guard here said
-  // guests could not, and read the ACCOUNT's role, which no guest of a
-  // workspace holds (`guest-guard-reads-the-account-role`).
+  // per person — the service asks that switch where they only view
+  // (`assertMayTrackTime`, `found-25-sep/view-only-individual-permissions`). A
+  // guard here said guests could not, and read the ACCOUNT's role, which no
+  // guest of a workspace holds (`guest-guard-reads-the-account-role`).
   @Post('start')
   start(
     @Param('taskId') taskId: string,

@@ -1,0 +1,291 @@
+#!/usr/bin/env node
+/*
+ * A STOCK PHOTO LIBRARY, IN UNSPLASH'S SHAPES (`commit-log/log-601eacc-1`,
+ * `ledger-rows/row-739`).
+ *
+ * A cover's Search tab searches a library of free stock photos — ClickUp's
+ * covers have "Search images", a large library of free stock photographs — and
+ * the API asks Unsplash's: its base address from UNSPLASH_API_URL, its key from
+ * UNSPLASH_ACCESS_KEY. No lane reaches Unsplash, so every lane points there,
+ * the way `s3-stub.mjs` is the store's, `model-stub.mjs` the model's and
+ * `calendar-stub.mjs` the calendars'.
+ *
+ * WHAT IT ANSWERS, in Unsplash's own shapes (unsplash.com/documentation):
+ *   GET /unsplash/search/photos?query=&page=&per_page=   { total, total_pages, results: [photo] }
+ *   GET /unsplash/photos/:id/download                    { url } — the download Unsplash asks
+ *                                                        an app to trigger when a photo is used
+ *   GET /unsplash/img/:id.svg                            the photograph itself (a drawn stand-in)
+ * Every call but the image's carries `Authorization: Client-ID <key>`, and a key
+ * that is not the lane's is refused 401 in Unsplash's words. A photo is
+ * `{ id, width, height, color, description, alt_description, urls: { raw, full,
+ * regular, small, thumb }, links: { html, download_location }, user: { name,
+ * username, links: { html } } }`.
+ *
+ * THE LIBRARY IS FIXED: the same photos on every lane and every run, so a suite
+ * can say how many "mountain" holds and what page two is. A query matches a
+ * photo whose description, alt text or tags hold every one of its words.
+ *
+ * AND IMAGES MADE TO ORDER, in OpenAI's shapes (`ledger-rows/row-870`): the API
+ * asks IMAGES_API_URL with IMAGES_API_KEY for a prompt's pictures —
+ *   POST /openai/v1/images/generations {model, prompt, n, size}   { created, data: [{ b64_json }] }
+ * with `Authorization: Bearer <key>`, a key that is not the lane's refused 401
+ * in OpenAI's words. Each picture is a PNG drawn here from the prompt and its
+ * place in the answer, so the same prompt draws the same pictures and two
+ * pictures of one answer differ.
+ *
+ * THE CONTROL SEAM, for suites and for `check-media-stub.mjs`:
+ *   GET  /__control/photos/downloads      the downloads triggered, in order
+ *   POST /__control/photos/fail {status, count}   the next `count` calls answer `status`
+ *   POST /__control/photos/reset          forget the downloads and any failure
+ *   GET  /__control/images/requests       the image requests made, in order
+ *   POST /__control/images/fail {status, count}   the next `count` image requests answer `status`
+ *   POST /__control/images/reset          forget them and any failure
+ *   GET  /__control/version               which source this process runs
+ *
+ * NOT FOR PRODUCTION. Binds loopback, and refuses to start without
+ * `RUNDESK_MEDIA_STUB=1`.
+ *
+ *   RUNDESK_MEDIA_STUB=1 node scripts/e2e-lanes/media-stub.mjs --port 9501
+ *
+ * Prints one line of JSON when listening, so callers wait on readiness rather
+ * than sleeping.
+ */
+import { createServer } from 'node:http'
+import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { deflateSync, crc32 } from 'node:zlib'
+
+if (process.env.RUNDESK_MEDIA_STUB !== '1') {
+  console.error('[media-stub] refusing to start without RUNDESK_MEDIA_STUB=1 — this is a test double')
+  process.exitCode = 1
+  process.exit()
+}
+
+const arg = (name, fallback) => {
+  const i = process.argv.indexOf(`--${name}`)
+  return i === -1 ? fallback : process.argv[i + 1]
+}
+const PORT = Number(arg('port', 9501))
+/** The keys every lane gives the API (`lane_media_env`, and CI's API step). */
+const KEY = arg('key', 'lane-photos')
+const IMAGES_KEY = arg('images-key', 'lane-images')
+// Which source this process runs: `lane-env.sh` restarts a stub whose file has moved.
+const SOURCE = createHash('sha1').update(readFileSync(new URL(import.meta.url))).digest('hex').slice(0, 12)
+const BASE = `http://127.0.0.1:${PORT}`
+
+// ── the library ──────────────────────────────────────────────────────────────
+
+const PEOPLE = [
+  ['Aiko Tanaka', 'aikotanaka'], ['Mateo Silva', 'mateosilva'], ['Noor Haddad', 'noorhaddad'],
+  ['Lena Fischer', 'lenafischer'], ['Kwame Mensah', 'kwamemensah'], ['Sofia Rossi', 'sofiarossi'],
+]
+const THEMES = [
+  { word: 'mountain', count: 30, colour: '#5b7083', scenes: ['ridge at dawn', 'lake under peaks', 'snow summit', 'valley mist', 'trail above clouds'], tags: ['mountain', 'landscape', 'nature'] },
+  { word: 'ocean', count: 8, colour: '#1f6f8b', scenes: ['waves at dusk', 'calm bay', 'surf break', 'reef from above'], tags: ['ocean', 'sea', 'water'] },
+  { word: 'city', count: 8, colour: '#3d3d5c', scenes: ['skyline at night', 'street crossing', 'rooftops in rain', 'bridge lights'], tags: ['city', 'urban', 'architecture'] },
+  { word: 'forest', count: 6, colour: '#2f5d3a', scenes: ['pines in fog', 'path through birches', 'mossy floor'], tags: ['forest', 'trees', 'nature'] },
+  { word: 'desk', count: 4, colour: '#8a6d4b', scenes: ['laptop and coffee', 'notebook and pen'], tags: ['desk', 'office', 'work'] },
+]
+/** Unsplash's ids are 11 characters of base64url; these are made from the theme and the number, so they stay put. */
+const idOf = (word, n) => createHash('sha1').update(`${word}:${n}`).digest('base64url').slice(0, 11)
+const LIBRARY = THEMES.flatMap((t) =>
+  Array.from({ length: t.count }, (_, i) => {
+    const [name, username] = PEOPLE[i % PEOPLE.length]
+    const scene = t.scenes[i % t.scenes.length]
+    return {
+      id: idOf(t.word, i),
+      width: 4000,
+      height: 2667,
+      color: t.colour,
+      description: `${t.word[0].toUpperCase()}${t.word.slice(1)} — ${scene} (${i + 1})`,
+      alt_description: `a ${t.word} ${scene}`,
+      tags: t.tags,
+      user: { name, username },
+    }
+  }),
+)
+const byId = new Map(LIBRARY.map((p) => [p.id, p]))
+
+const imageUrl = (id, w) => `${BASE}/unsplash/img/${id}.svg?w=${w}`
+/** A photo as Unsplash answers it. */
+const asUnsplash = (p) => ({
+  id: p.id,
+  created_at: '2024-01-01T00:00:00Z',
+  width: p.width,
+  height: p.height,
+  color: p.color,
+  description: p.description,
+  alt_description: p.alt_description,
+  urls: { raw: imageUrl(p.id, 4000), full: imageUrl(p.id, 4000), regular: imageUrl(p.id, 1080), small: imageUrl(p.id, 400), thumb: imageUrl(p.id, 200) },
+  links: { self: `${BASE}/unsplash/photos/${p.id}`, html: `https://unsplash.com/photos/${p.id}`, download: imageUrl(p.id, 4000), download_location: `${BASE}/unsplash/photos/${p.id}/download` },
+  user: { id: p.user.username, username: p.user.username, name: p.user.name, links: { html: `https://unsplash.com/@${p.user.username}` } },
+})
+const matches = (p, words) => {
+  const hay = `${p.description} ${p.alt_description} ${p.tags.join(' ')}`.toLowerCase()
+  return words.every((w) => hay.includes(w))
+}
+
+// ── images made to order ─────────────────────────────────────────────────────
+
+const pngChunk = (type, data) => {
+  const len = Buffer.alloc(4)
+  len.writeUInt32BE(data.length)
+  const body = Buffer.concat([Buffer.from(type, 'ascii'), data])
+  const crc = Buffer.alloc(4)
+  crc.writeUInt32BE(crc32(body) >>> 0)
+  return Buffer.concat([len, body, crc])
+}
+/** A 64×64 PNG: the prompt's colour, and a band in the colour of its place in the answer. */
+const pictureFor = (prompt, index) => {
+  const h = createHash('sha1').update(`${prompt}#${index}`).digest()
+  const [r, g, b] = [h[0], h[1], h[2]]
+  const W = 64
+  const raw = Buffer.alloc((W * 4 + 1) * W)
+  for (let y = 0; y < W; y++) {
+    raw[y * (W * 4 + 1)] = 0
+    for (let x = 0; x < W; x++) {
+      const o = y * (W * 4 + 1) + 1 + x * 4
+      const band = y >= 24 && y < 40
+      raw[o] = band ? 255 - r : r
+      raw[o + 1] = band ? 255 - g : g
+      raw[o + 2] = band ? 255 - b : b
+      raw[o + 3] = 255
+    }
+  }
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(W, 0)
+  ihdr.writeUInt32BE(W, 4)
+  ihdr[8] = 8 // bit depth
+  ihdr[9] = 6 // RGBA
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), pngChunk('IHDR', ihdr), pngChunk('IDAT', deflateSync(raw)), pngChunk('IEND', Buffer.alloc(0))])
+}
+
+// ── the seam ─────────────────────────────────────────────────────────────────
+
+const downloads = []
+let failure = null // { status, left }
+const imageRequests = []
+let imageFailure = null // { status, left }
+
+const json = (res, status, body) => {
+  const s = JSON.stringify(body)
+  res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(s) })
+  res.end(s)
+}
+const readBody = (req) =>
+  new Promise((resolve) => {
+    let raw = ''
+    req.on('data', (c) => (raw += c))
+    req.on('end', () => {
+      try { resolve(JSON.parse(raw || '{}')) } catch { resolve(null) }
+    })
+  })
+const escapeXml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c])
+
+const server = createServer(async (req, res) => {
+  const url = new URL(req.url ?? '/', BASE)
+  const path = url.pathname
+
+  if (path === '/__control/version' && req.method === 'GET') return json(res, 200, { source: SOURCE })
+  if (path === '/__control/photos/downloads' && req.method === 'GET') return json(res, 200, { downloads })
+  if (path === '/__control/photos/reset' && req.method === 'POST') {
+    downloads.length = 0
+    failure = null
+    return json(res, 200, { reset: true })
+  }
+  if (path === '/__control/images/requests' && req.method === 'GET') return json(res, 200, { requests: imageRequests })
+  if (path === '/__control/images/reset' && req.method === 'POST') {
+    imageRequests.length = 0
+    imageFailure = null
+    return json(res, 200, { reset: true })
+  }
+  if (path === '/__control/images/fail' && req.method === 'POST') {
+    const body = await readBody(req)
+    const status = Number(body?.status)
+    const count = Number(body?.count ?? 1)
+    if (!Number.isInteger(status) || status < 400 || status > 599 || !Number.isInteger(count) || count < 1) {
+      return json(res, 400, { error: 'status is 400–599 and count a whole number' })
+    }
+    imageFailure = { status, left: count }
+    return json(res, 200, { failing: imageFailure })
+  }
+  if (path === '/__control/photos/fail' && req.method === 'POST') {
+    const body = await readBody(req)
+    const status = Number(body?.status)
+    const count = Number(body?.count ?? 1)
+    if (!Number.isInteger(status) || status < 400 || status > 599 || !Number.isInteger(count) || count < 1) {
+      return json(res, 400, { error: 'status is 400–599 and count a whole number' })
+    }
+    failure = { status, left: count }
+    return json(res, 200, { failing: failure })
+  }
+
+  // The photograph itself: what an <img> on a cover or a result loads. No key, as Unsplash's image host asks none.
+  const img = /^\/unsplash\/img\/([A-Za-z0-9_-]+)\.svg$/.exec(path)
+  if (img && req.method === 'GET') {
+    const p = byId.get(img[1])
+    if (!p) return json(res, 404, { errors: ['Couldn\'t find Photo'] })
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800"><rect width="1200" height="800" fill="${p.color}"/><text x="600" y="420" font-family="sans-serif" font-size="48" fill="#fff" text-anchor="middle">${escapeXml(p.description)}</text></svg>`
+    res.writeHead(200, { 'content-type': 'image/svg+xml', 'content-length': Buffer.byteLength(svg), 'cache-control': 'public, max-age=3600' })
+    return res.end(svg)
+  }
+
+  if (path === '/openai/v1/images/generations' && req.method === 'POST') {
+    // OpenAI's refusal of a key it does not know.
+    if ((req.headers.authorization ?? '') !== `Bearer ${IMAGES_KEY}`) {
+      return json(res, 401, { error: { message: 'Incorrect API key provided.', type: 'invalid_request_error', code: 'invalid_api_key' } })
+    }
+    if (imageFailure) {
+      const { status } = imageFailure
+      imageFailure.left -= 1
+      if (imageFailure.left <= 0) imageFailure = null
+      return json(res, status, { error: { message: status === 429 ? 'Rate limit reached for images' : 'The server had an error processing your request', type: status === 429 ? 'rate_limit_error' : 'server_error' } })
+    }
+    const body = await readBody(req)
+    const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : ''
+    const n = body?.n === undefined ? 1 : Number(body.n)
+    if (!prompt) return json(res, 400, { error: { message: 'prompt is required', type: 'invalid_request_error' } })
+    if (!Number.isInteger(n) || n < 1 || n > 10) return json(res, 400, { error: { message: 'n must be between 1 and 10', type: 'invalid_request_error' } })
+    imageRequests.push({ model: body.model ?? null, prompt, n, size: body.size ?? null, at: new Date().toISOString() })
+    const data = Array.from({ length: n }, (_, i) => ({ b64_json: pictureFor(prompt, i).toString('base64') }))
+    return json(res, 200, { created: Math.floor(Date.now() / 1000), data })
+  }
+
+  if (!path.startsWith('/unsplash/')) return json(res, 404, { errors: ['Not found'] })
+
+  // Unsplash's refusal of a key it does not know.
+  const auth = req.headers.authorization ?? ''
+  if (auth !== `Client-ID ${KEY}`) return json(res, 401, { errors: ['OAuth error: The access token is invalid'] })
+
+  if (failure) {
+    const { status } = failure
+    failure.left -= 1
+    if (failure.left <= 0) failure = null
+    return json(res, status, { errors: [status === 403 ? 'Rate Limit Exceeded' : 'Something went wrong'] })
+  }
+
+  if (path === '/unsplash/search/photos' && req.method === 'GET') {
+    const query = (url.searchParams.get('query') ?? '').trim().toLowerCase()
+    if (!query) return json(res, 400, { errors: ['query is missing'] })
+    const page = Math.max(1, Number.parseInt(url.searchParams.get('page') ?? '1', 10) || 1)
+    const perPage = Math.min(30, Math.max(1, Number.parseInt(url.searchParams.get('per_page') ?? '10', 10) || 10))
+    const words = query.split(/\s+/).filter(Boolean)
+    const found = LIBRARY.filter((p) => matches(p, words))
+    const results = found.slice((page - 1) * perPage, page * perPage).map(asUnsplash)
+    return json(res, 200, { total: found.length, total_pages: Math.ceil(found.length / perPage), results })
+  }
+
+  const dl = /^\/unsplash\/photos\/([A-Za-z0-9_-]+)\/download$/.exec(path)
+  if (dl && req.method === 'GET') {
+    const p = byId.get(dl[1])
+    if (!p) return json(res, 404, { errors: ['Couldn\'t find Photo'] })
+    downloads.push({ id: p.id, at: new Date().toISOString() })
+    return json(res, 200, { url: imageUrl(p.id, 4000) })
+  }
+
+  return json(res, 404, { errors: ['Not found'] })
+})
+
+server.listen(PORT, '127.0.0.1', () => {
+  console.log(JSON.stringify({ ready: true, port: PORT, photos: LIBRARY.length, source: SOURCE }))
+})

@@ -28,10 +28,13 @@ import {
   ListTree,
   LayoutGrid,
   Brain,
+  ImagePlus,
 } from 'lucide-react'
 import { useNavigate } from '@tanstack/react-router'
 import { renderInlineMarkdown, renderMarkdownBlocks } from './markdown'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
+import { ImageGenerator } from './image-generator'
+import { saveFiles, uploadTaskFile } from '../lib/task-files'
 import { useAuthStore } from '../store/auth'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { viewLabelKey } from '../lib/space-views'
@@ -893,6 +896,28 @@ export function AiPanel({
   const [showMoreModels, setShowMoreModels] = useState(false)
   const [isStreaming, setIsStreaming] = useState(false)
   /*
+   * ClickUp's Ask button makes images too, through Brain's Generate image
+   * (its help centre, "Generate images with Brain AI"; `ledger-rows/row-870`).
+   * Its own service, not the chat's model: open whether a model answers or not.
+   * Opened from a task, the chosen pictures are added to the task's files;
+   * anywhere else they are saved to the computer.
+   */
+  const [imageOpen, setImageOpen] = useState(false)
+  const addImages = async (files: File[]) => {
+    if (!scope) {
+      saveFiles(files)
+      return
+    }
+    try {
+      for (const file of files) await uploadTaskFile(scope.id, file)
+      await qc.invalidateQueries({ queryKey: ['task', scope.id, 'attachments'] })
+      toast.success(t('imageGen.addedToTask', { count: files.length }))
+      setImageOpen(false)
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : t('imageGen.addToTaskFailed'))
+    }
+  }
+  /*
    * G13-10 [18:33–18:36] — what the server says it is reading, as it reads it.
    *
    * Transient by design: this is process, not content. Once the answer is on
@@ -1593,6 +1618,19 @@ export function AiPanel({
 
       {/* Input */}
       <div className="px-4 py-3 border-t border-border shrink-0">
+        {imageOpen && (
+          <div className="mb-2 rounded-lg border border-border bg-card p-2" data-testid="ai-image-panel" data-scope-id={scope?.id ?? ''}>
+            <p className="mb-1 flex items-center gap-1.5 text-[11px] font-medium">
+              <ImagePlus className="h-3.5 w-3.5 text-accent" aria-hidden />
+              {t('imageGen.title')}
+            </p>
+            <ImageGenerator
+              workspaceId={workspaceId}
+              addLabel={scope ? t('imageGen.addToTask') : t('imageGen.download')}
+              onAdd={(files) => void addImages(files)}
+            />
+          </div>
+        )}
         {!aiAvailable && (
           <p className="text-xs text-amber-600 mb-2 flex items-center gap-1">
             <Wand2 className="h-3.5 w-3.5" />
@@ -1923,6 +1961,17 @@ export function AiPanel({
               unsupported: t('ai.voiceUnsupported'),
             }}
           />
+          <Button
+            variant={imageOpen ? 'secondary' : 'outline'}
+            size="icon"
+            data-testid="ai-image-toggle"
+            aria-pressed={imageOpen}
+            title={t('imageGen.title')}
+            aria-label={t('imageGen.title')}
+            onClick={() => setImageOpen((open) => !open)}
+          >
+            <ImagePlus className="h-4 w-4" />
+          </Button>
           {isStreaming ? (
             <Button variant="outline" size="icon" onClick={stopStreaming} title={t('aiPanel.stop')}>
               <X className="h-4 w-4" />

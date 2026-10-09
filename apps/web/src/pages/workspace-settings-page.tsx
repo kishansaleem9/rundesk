@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Dialog, DialogContent, DialogHeader, DialogTitle, Input, Label, Switch, cn, toast } from '@rundesk/ui'
-import { Building2, Users, Plug, Shield, Tag, Trash2, Archive, RotateCcw, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Upload, CreditCard, ToggleRight, Layers, Sparkles, UserCog, Lock, Globe, Shapes, CalendarDays, Star, X, Megaphone, ScrollText } from 'lucide-react'
+import { Button, Card, Dialog, DialogContent, DialogHeader, DialogTitle, Input, Label, Popover, PopoverContent, PopoverTrigger, Switch, cn, toast } from '@rundesk/ui'
+import { Building2, Users, Plug, Shield, Tag, Trash2, Archive, RotateCcw, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Upload, CreditCard, ToggleRight, Layers, Sparkles, UserCog, Lock, Globe, Shapes, CalendarDays, Star, X, Megaphone, ScrollText, Eye } from 'lucide-react'
 import { api, ApiError, downloadFile, refusalMessage } from '../lib/api'
 import { applyBrandColor } from '../lib/branding'
 import { applyAccentColor } from '../components/app-topbar'
@@ -59,6 +59,75 @@ type Member = {
   // so the tree can be drawn without a second lookup per row.
   managerId?: string | null
   managerName?: string | null
+  // What they may do where they only view (`found-25-sep/view-only-individual-permissions`).
+  viewOnlyPermissions?: ViewOnlyPermissions
+}
+
+/**
+ * CLICKUP'S INDIVIDUAL PERMISSIONS FOR VIEW-ONLY USERS — what a member or a
+ * guest may do where they can only view: set time estimates and track time
+ * (on unless turned off), add or remove tags and create views (off unless
+ * turned on). An owner or admin sets them per person on the Manage people page
+ * (`found-25-sep/view-only-individual-permissions`); here, each member's or
+ * guest's row, to those who may change roles. A manager is never narrowed to
+ * View, so their row has none.
+ */
+type ViewOnlyPermissions = { timeEstimates: boolean; timeTracking: boolean; tags: boolean; createViews: boolean }
+const VIEW_ONLY_SWITCHES = [
+  { key: 'timeEstimates', labelKey: 'settings.viewOnly.timeEstimates', hintKey: 'settings.viewOnly.timeEstimatesHint' },
+  { key: 'timeTracking', labelKey: 'settings.viewOnly.timeTracking', hintKey: 'settings.viewOnly.timeTrackingHint' },
+  { key: 'tags', labelKey: 'settings.viewOnly.tags', hintKey: 'settings.viewOnly.tagsHint' },
+  { key: 'createViews', labelKey: 'settings.viewOnly.createViews', hintKey: 'settings.viewOnly.createViewsHint' },
+] as const
+
+function ViewOnlyPermissionsButton({
+  member,
+  pending,
+  onChange,
+}: {
+  member: Member & { viewOnlyPermissions: ViewOnlyPermissions }
+  pending: boolean
+  onChange: (change: Partial<ViewOnlyPermissions>) => void
+}) {
+  const { t } = useTranslation()
+  const on = VIEW_ONLY_SWITCHES.filter((s) => member.viewOnlyPermissions[s.key]).length
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          data-testid={`settings-member-view-only-${member.userId}`}
+          aria-label={t('settings.viewOnly.for', { name: member.displayName })}
+          title={t('settings.viewOnly.title')}
+          className="inline-flex items-center gap-1 rounded border border-border bg-card px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <Eye className="h-3.5 w-3.5" />
+          {t('settings.viewOnly.button', { on, of: VIEW_ONLY_SWITCHES.length })}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-80 p-3" data-testid="settings-member-view-only-panel">
+        <div className="text-sm font-medium">{t('settings.viewOnly.title')}</div>
+        <p className="mt-0.5 text-xs text-muted-foreground">{t('settings.viewOnly.hint', { name: member.displayName })}</p>
+        <div className="mt-3 space-y-2">
+          {VIEW_ONLY_SWITCHES.map((s) => (
+            <div key={s.key} className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-xs font-medium">{t(s.labelKey)}</div>
+                <p className="text-[11px] text-muted-foreground">{t(s.hintKey)}</p>
+              </div>
+              <Switch
+                data-testid={`settings-view-only-${s.key}`}
+                aria-label={t(s.labelKey)}
+                checked={member.viewOnlyPermissions[s.key]}
+                disabled={pending}
+                onCheckedChange={(value) => onChange({ [s.key]: value })}
+              />
+            </div>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
 }
 
 const ROLES = [
@@ -597,7 +666,12 @@ const CLICKAPPS: { flag: FlagKey; nameKey: TranslationKey; descKey: TranslationK
   { flag: FLAGS.AI_AUTOMATIONS, nameKey: 'nav.automations', descKey: 'settings.featDescAutomations' },
   { flag: FLAGS.VIEWS_DASHBOARD, nameKey: 'nav.dashboards', descKey: 'settings.featDescDashboards' },
   { flag: FLAGS.VIEWS_WORKLOAD, nameKey: 'nav.workload', descKey: 'settings.featDescWorkload' },
+  // ClickUp's Pulse ClickApp: the Teams hub's Analytics, off until turned on (`ledger-rows/section3-team-analytics`).
+  { flag: FLAGS.TEAMS_ANALYTICS, nameKey: 'teams.tabAnalytics', descKey: 'settings.featDescAnalytics' },
 ]
+
+/** ClickApps a workspace starts without, as ClickUp's Pulse is (`ledger-rows/section3-team-analytics`). */
+const OFF_UNTIL_TURNED_ON: FlagKey[] = [FLAGS.TEAMS_ANALYTICS]
 
 function FeaturesTab({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation()
@@ -627,8 +701,10 @@ function FeaturesTab({ workspaceId }: { workspaceId: string }) {
     onError: (err) => toast.error(err instanceof ApiError ? err.message : t('settings.featureSaveError')),
   })
 
-  // "On unless explicitly disabled" — matches the nav gate and backend defaults.
-  const isOn = (flag: FlagKey) => flags?.[flag] !== false
+  // "On unless explicitly disabled" — matches the nav gate and backend defaults —
+  // but for a ClickApp that is off until turned on, which the server reads as
+  // off unless a row says on (`isEnabled`): Analytics (`TEAMS_ANALYTICS`).
+  const isOn = (flag: FlagKey) => (OFF_UNTIL_TURNED_ON.includes(flag) ? flags?.[flag] === true : flags?.[flag] !== false)
 
   return (
     <div className="space-y-4">
@@ -1058,6 +1134,17 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['workspace-members', workspaceId] }),
   })
 
+  // A member's or guest's view-only permissions, as their route asks: `members.role.change` and the rank rule.
+  const updateViewOnly = useMutation({
+    mutationFn: ({ userId, change }: { userId: string; change: Partial<ViewOnlyPermissions> }) =>
+      api(`/workspaces/${workspaceId}/members/${userId}/view-only-permissions`, { method: 'PATCH', body: change }),
+    onSuccess: () => {
+      toast.success(t('settings.viewOnly.saved'))
+      qc.invalidateQueries({ queryKey: ['workspace-members', workspaceId] })
+    },
+    onError: (e) => toast.error(refusalMessage(e, t('settings.viewOnly.failed'))),
+  })
+
   return (
     <div className="space-y-6">
       {mayInvite && (
@@ -1259,6 +1346,13 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
                   </>
                 )
               })()}
+              {mayChangeRole && withinRank(own, m.role) && (m.role === 'member' || m.role === 'guest') && m.viewOnlyPermissions && (
+                <ViewOnlyPermissionsButton
+                  member={{ ...m, viewOnlyPermissions: m.viewOnlyPermissions }}
+                  pending={updateViewOnly.isPending && updateViewOnly.variables?.userId === m.userId}
+                  onChange={(change) => updateViewOnly.mutate({ userId: m.userId, change })}
+                />
+              )}
               {mayChangeRole && withinRank(own, m.role) ? (
                 <select
                   value={m.role}

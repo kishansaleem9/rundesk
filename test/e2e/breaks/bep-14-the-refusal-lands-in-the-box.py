@@ -7,17 +7,18 @@
 # the box but a draft somebody chose to Keep; this is the mirror defect — text
 # in the record for a feature that did not run.
 #
+# Re-aimed 9 October: the Run button sits under `aiMode !== 'image'` now, two spaces deeper, beside the panel's Generate image (`ledger-rows/row-870`).
 # Reddens: brain-entry-points: "and nothing reached the comment: the box is as it was and the task has no new comment — a draft goes in only by Keep"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
-a = """                    setAiError(
-                      err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('taskDetail.aiUnavailable'),
-                    )
+a = """                      setAiError(
+                        err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('taskDetail.aiUnavailable'),
+                      )
 """
-b = """                    setAiError(
-                      err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('taskDetail.aiUnavailable'),
-                    )
-                    setText((prev) => (prev.trim() ? prev : err instanceof Error ? err.message : prev))
+b = """                      setAiError(
+                        err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('taskDetail.aiUnavailable'),
+                      )
+                      setText((prev) => (prev.trim() ? prev : err instanceof Error ? err.message : prev))
 """
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

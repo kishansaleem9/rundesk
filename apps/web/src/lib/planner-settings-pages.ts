@@ -13,5 +13,7 @@ export const PLANNER_SETTINGS_PAGES = [
   'sidebar',
   'upcomingMeeting',
   'timeBlocking',
+  // Frame `14:32`, ClickUp's "Sync ClickUp tasks to Google Calendar" (`ledger-rows/row-1962`).
+  'automations',
 ] as const
 export type PlannerSettingsPage = (typeof PLANNER_SETTINGS_PAGES)[number]

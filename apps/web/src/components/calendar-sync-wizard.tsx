@@ -34,8 +34,10 @@ const CALENDAR_PROVIDERS: Array<{ id: 'gcal' | 'outlook'; label: string; brand: 
 
 /**
  * Real calendar-sync configuration panel. Replaces the previous cosmetic
- * wizard — exposes connection status, push/pull triggers, and the user's
- * personal iCal subscription URL.
+ * wizard — exposes connection status, the pull trigger, and the user's
+ * personal iCal subscription URL. Tasks go to a person's own calendars by the
+ * syncs they add in the Planner's settings (`planner-sync-page.tsx`,
+ * `ledger-rows/row-1962`); the workspace's connection takes none.
  */
 export function CalendarSyncWizard({
   open,
@@ -105,7 +107,7 @@ export function CalendarSyncWizard({
           {CALENDAR_PROVIDERS.map((p) => {
             const conn = calendarConnections.find((c) => c.provider === p.id)
             const isConnected = conn?.status === 'connected'
-            // Its owner has left the workspace: nothing is pulled from it or pushed to it, so it is not offered a sync.
+            // Its owner has left the workspace: nothing is pulled from it, so it is not offered a sync.
             const ownerLeft = isConnected && conn?.health === 'owner_left'
             return (
               <div

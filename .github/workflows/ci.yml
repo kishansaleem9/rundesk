@@ -625,6 +625,12 @@ jobs:
       - name: The calendar seam is really a seam, and each case bites
         run: node scripts/check-calendar-stub.mjs --mutate
 
+      # And for a cover's photo library (`commit-log/log-601eacc-1`): the
+      # product's own client against the stub every lane and the suites' job
+      # start, and each rule of the stub broken in turn.
+      - name: The photo library seam is really a seam, and each case bites
+        run: node scripts/check-media-stub.mjs --mutate
+
       # And the other direction from the ledger's own reconciliations: does a
       # line of the SPECIFICATION appear anywhere in the evidence? 115
       # timestamped frame observations, and asking found `03:15` — a cover
@@ -770,6 +776,9 @@ jobs:
       # the stub's control routes through `test/e2e/lib/calendar.mjs`, which
       # reads this; the lane formula (9400 + api - 3020) is 9391 here.
       E2E_CALENDAR_PORT: 9400
+      # And the photo library's (`commit-log/log-601eacc-1`): `test/e2e/lib/media.mjs`
+      # reads this, as `lib/calendar.mjs` reads the calendars' port.
+      E2E_MEDIA_PORT: 9500
 
     steps:
       - name: Checkout
@@ -888,6 +897,22 @@ jobs:
           done
           echo "The calendar stub never announced itself. Its output:"; cat /tmp/calendar.log; exit 1
 
+      # THE PHOTO LIBRARY EVERY LANE HAS (`commit-log/log-601eacc-1`,
+      # `ledger-rows/row-739`). A cover's Search tab asks Unsplash's library,
+      # at the address the API is given below, and every lane points it at
+      # `scripts/e2e-lanes/media-stub.mjs`: the same fixed photos everywhere.
+      - name: Start the photo library
+        timeout-minutes: 15
+        run: |
+          RUNDESK_MEDIA_STUB=1 nohup node scripts/e2e-lanes/media-stub.mjs \
+            --port "$E2E_MEDIA_PORT" > /tmp/media.log 2>&1 &
+          disown
+          for i in $(seq 1 50); do
+            if grep -q '"ready":true' /tmp/media.log; then echo "photo library up"; exit 0; fi
+            sleep 0.2
+          done
+          echo "The media stub never announced itself. Its output:"; cat /tmp/media.log; exit 1
+
       # Backgrounded and waited for: a suite that starts talking to an API that
       # is not up yet fails for a reason that has nothing to do with calls.
       - name: Start the API
@@ -926,6 +951,13 @@ jobs:
           MS_GRAPH_API_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/graph/v1.0
           GOOGLE_TOKEN_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/google/token
           MICROSOFT_TOKEN_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/microsoft/token
+          # The photo library started above — the two variables `lane_media_env`
+          # exports. Not a credential: the stub takes this one key.
+          UNSPLASH_API_URL: http://127.0.0.1:${{ env.E2E_MEDIA_PORT }}/unsplash
+          UNSPLASH_ACCESS_KEY: lane-photos
+          # And the AI's images (`ledger-rows/row-870`), from the same stub in OpenAI's shape.
+          IMAGES_API_URL: http://127.0.0.1:${{ env.E2E_MEDIA_PORT }}/openai/v1
+          IMAGES_API_KEY: lane-images
           # Integration keys that are not real — the six `lane_oauth_env`
           # exports. A grant's start refuses a provider with no keys, and the
           # suites that read a grant's state start Google, Microsoft and
@@ -1158,6 +1190,17 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # `commit-log/log-601eacc-1`, `ledger-rows/row-739` — the cover picker's
+      # Search tab: a library of free photos (Unsplash's; the stub above),
+      # a page at a time, each credited, and one chosen is the cover. What is
+      # said when nothing matches and when the library does not answer.
+      - name: A cover's Search tab finds free photos, and one chosen is the cover
+        timeout-minutes: 15
+        run: node test/e2e/cover-photo-search.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §V2-08 — merging one task into another. She never narrates it, so it
       # ranked last in the item; it is also the only one whose failure mode is
       # silent data loss, so the suite loads a task with one of everything and
@@ -1180,12 +1223,23 @@ jobs:
       # looking at your own organisation required admin rights. Run as the
       # seeded admin every check here would pass against the old code too.
       #
-      # It also fails if an Analytics tab appears. The frame lists one, nothing
-      # exists behind it, and she never opens it — so it would be a page whose
-      # purpose somebody has to guess.
+      # The frame's four destinations are there, Analytics the fourth: opened by
+      # the member while its ClickApp is off, it says so and offers no switch.
       - name: The Teams destination
         timeout-minutes: 15
         run: node test/e2e/teams-destination.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # The Teams hub's Analytics, as ClickUp's (formerly Pulse): each
+      # member's status, activity, task views and most-viewed tasks — named
+      # only where the reader may open them — their Lineup and a roll-up by
+      # team, over a period; a ClickApp off until turned on, open to everyone
+      # but guests or to owners and admins. Read back by SQL.
+      - name: The Teams hub's Analytics
+        timeout-minutes: 15
+        run: node test/e2e/teams-analytics.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
@@ -1404,6 +1458,18 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # Frame `14:14`'s "+ Add a new section" (`commit-log/log-716d25c-1`,
+      # `ledger-rows/row-835`), as ClickUp makes its own sidebar sections: a
+      # name and an emoji, tasks put in by hand — one section at a time —
+      # placed among the five, and deleted without touching its tasks. A
+      # section is its maker's, and holds only what they may open.
+      - name: A planner rail section of one's own holds the tasks put in it, where its maker places it
+        timeout-minutes: 15
+        run: node test/e2e/planner-rail-sections.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §V2-S15, frame `15:25` — Favorite and Archive in the task menu.
       #
       # Favorite existed as a star; the menu is where the frame reaches for it,
@@ -1612,6 +1678,19 @@ jobs:
       - name: A clip's link outlives every signature, and opens for whoever may watch
         timeout-minutes: 15
         run: node test/e2e/clip-links.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # `resume-defects/s4-clip-link`, `ledger-rows/row-1307` — that link,
+      # pasted into a chat message, a comment or a task's description, stayed
+      # a bare address. ClickUp embeds it where it is shared. Each is drawn as
+      # the clip — title, player, length — from what the link itself opens,
+      # so a members-only clip says so to anyone outside, and a deleted one
+      # says it is gone. Against the store above.
+      - name: A clip's link pasted in chat, a comment or a description is drawn as the clip
+        timeout-minutes: 15
+        run: node test/e2e/clip-link-embeds.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
@@ -1915,11 +1994,33 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # `ledger-rows/row-870` — the AI makes images from a comment box, a
+      # Chat message and the Ask AI dock (OpenAI's images API; the photo
+      # library's stub answers it here): the chosen pictures are posted as
+      # files, added to the dock's task or downloaded, each ask is a run on the
+      # Images generated tile, and the service's refusals are said.
+      - name: The AI makes images from a comment, a message and the Ask AI dock
+        timeout-minutes: 15
+        run: node test/e2e/ai-image-generation.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §P frame `19:05` — Status and My-runs filters. Both are asserted to reach
       # the SERVER: `userId` was accepted by the endpoint and sent by nothing.
       - name: AI activity filters
         timeout-minutes: 15
         run: node test/e2e/ai-activity-filters.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # The AI page's Generate task offers the chosen list's fields and no
+      # other (found-30-sep/ai-page-fields-checked-only-by-a-unit). No model
+      # answers here, so this run reads the refusal; a lane's stub reads the boxes.
+      - name: AI Generate offers the chosen list's fields
+        timeout-minutes: 15
+        run: node test/e2e/ai-generate-fields.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
@@ -2944,6 +3045,19 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # What a member or guest may do where they only view — set a time
+      # estimate, track time, add or remove tags, create views — is a switch
+      # an admin sets for each person on the People tab, at ClickUp's defaults
+      # (estimates and tracking on, tags and views off), and is asked only at
+      # View; the sheet and the list page offer what the switches allow. Read
+      # back by SQL.
+      - name: View-only permissions are set person by person
+        timeout-minutes: 15
+        run: node test/e2e/view-only-permissions.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # A hook adds tasks as its maker, so only somebody who may add tasks to
       # the list makes one (Full edit): refused at View, Comment and Edit, none
       # stored; made and delivered at Full edit; and the Email panel offers it
@@ -3050,14 +3164,37 @@ jobs:
           E2E_PASSWORD: Admin@123!
 
       # A task is pushed only into the calendar of somebody who may open it
-      # now: a connection made by a member refused the task's private space is
-      # not written to, nor one whose maker has left the workspace — a platform
+      # now: a sync made by a member refused the task's private space is not
+      # written to, nor one whose maker has left the workspace — a platform
       # admin's included — and the task's Google Meet and Zoom are not made in
       # such a person's account, the task sheet saying why. Staged without a
       # token, so nothing leaves the runner.
       - name: A task is pushed only into calendars whose owner may read it
         timeout-minutes: 15
         run: node test/e2e/calendar-push-reach.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # ClickUp's "Sync tasks to calendar" (`ledger-rows/row-1962`): a person's
+      # own syncs of a space, folder, project or list to one of their calendars
+      # decide where a task goes, and nothing syncs until one is added — made
+      # and removed on the planner's Automations page, its events written to the
+      # calendars started above and kept as the tasks change.
+      - name: A person's syncs decide which tasks go to their calendar
+        timeout-minutes: 15
+        run: node test/e2e/calendar-sync-rules.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # The planner's Sync now (`ledger-rows/row-1904`, frame 14:36): the
+      # presser's syncs written through again into their own calendars — an
+      # event deleted there written again, one changed there put back — and
+      # the calendars' events read again, against the calendars started above.
+      - name: The planner's Sync now writes the presser's syncs through again
+        timeout-minutes: 15
+        run: node test/e2e/planner-sync-now.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

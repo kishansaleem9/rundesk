@@ -12,6 +12,7 @@ import { NamedWorkspaceMemberGuard } from '../auth/guards/named-workspace-member
 import { RequirePlan } from '../plans/require-plan.decorator'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { HELP_TOPICS } from './knowledge'
+import { IMAGE_PROMPT_MAX, IMAGE_SIZES, IMAGES_PER_ASK, imageFileName, type ImageSize } from './image-generation'
 
 @ApiTags('ai')
 @ApiBearerAuth()
@@ -278,6 +279,36 @@ export class AiController {
     // return best-effort suggestions — the service never throws on AI failure.
     await this.ai.assertWorkspaceMember(body.workspaceId, user.id)
     return this.ai.suggestAutomations(body.workspaceId, { userId: user.id, workspaceId: body.workspaceId })
+  }
+
+  /**
+   * `ledger-rows/row-870` — pictures of a prompt, for a comment or a message
+   * (ClickUp's "Generate images with Brain AI": from the comment box or a Chat
+   * message, up to ten for a prompt; here up to four). They come back as data,
+   * and the composer attaches them the way it attaches any file.
+   */
+  @Post('images')
+  @ApiOperation({ summary: 'Pictures of a prompt (ledger-rows/row-870)' })
+  async images(
+    @CurrentUser() user: any,
+    @Body() body: { workspaceId?: string; prompt?: unknown; count?: unknown; size?: unknown },
+  ) {
+    const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
+    if (!prompt) throw new HttpException('Describe the image to make', HttpStatus.BAD_REQUEST)
+    if (prompt.length > IMAGE_PROMPT_MAX) throw new HttpException(`A description is ${IMAGE_PROMPT_MAX} characters at most`, HttpStatus.BAD_REQUEST)
+    const count = body.count === undefined ? 1 : Number(body.count)
+    if (!Number.isInteger(count) || count < 1 || count > IMAGES_PER_ASK) {
+      throw new HttpException(`Make from 1 to ${IMAGES_PER_ASK} images at a time`, HttpStatus.BAD_REQUEST)
+    }
+    const size = (body.size === undefined ? '1024x1024' : body.size) as ImageSize
+    if (!(IMAGE_SIZES as readonly unknown[]).includes(size)) {
+      throw new HttpException(`The size is one of ${IMAGE_SIZES.join(', ')}`, HttpStatus.BAD_REQUEST)
+    }
+    const made = await this.ai.makeImages(prompt, count, size, { userId: user.id, workspaceId: body.workspaceId })
+    return {
+      model: made.model,
+      images: made.images.map((im, i) => ({ fileName: imageFileName(prompt, i), mime: im.mime, dataUrl: `data:${im.mime};base64,${im.b64}` })),
+    }
   }
 
   /**

@@ -1,4 +1,4 @@
-import { Injectable, Inject, ForbiddenException, NotFoundException, BadRequestException, Logger } from '@nestjs/common'
+import { Injectable, Inject, ForbiddenException, NotFoundException, BadRequestException, Logger, Optional } from '@nestjs/common'
 import { Cron, CronExpression } from '@nestjs/schedule'
 import { and, eq, lt, isNotNull, sql } from 'drizzle-orm'
 import { spaces, folders, projects, lists, tasks, docs, users, workspaceMembers } from '@rundesk/db'
@@ -7,6 +7,7 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { isAdminRole } from '../../common/permissions/workspace-roles'
 import { SecurityService } from '../security/security.service'
 import { SearchService } from '../search/search.service'
+import { CalendarSyncService } from '../calendar-sync/calendar-sync.service'
 
 /** Item kinds the workspace Trash can hold. */
 export const TRASH_TYPES = ['space', 'folder', 'project', 'list', 'task', 'doc'] as const
@@ -40,6 +41,9 @@ export class TrashService {
     @Inject(DB_TOKEN) private db: Db,
     private security: SecurityService,
     private search: SearchService,
+    // A restored task goes back onto the calendars its place is synced to.
+    // Optional so a service built by hand in a unit test needs no fourth argument.
+    @Optional() private calendarSync?: CalendarSyncService,
   ) {}
 
   // ─── permissions ────────────────────────────────────────────────────────────
@@ -321,6 +325,8 @@ export class TrashService {
      * side, which this door bypasses.
      */
     if (type === 'task') void this.reindexTask(id).catch(() => undefined)
+    // …and binning took it off the calendars its place is synced to, so restoring puts it back on them.
+    if (type === 'task') void this.calendarSync?.pushTask(id).catch(() => undefined)
 
     await this.security.logAuditEvent({
       workspaceId, actorId: actor.id, action: 'trash.restored', resourceType: type, resourceId: id,

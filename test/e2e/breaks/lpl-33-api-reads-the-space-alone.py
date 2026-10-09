@@ -1,4 +1,6 @@
 # THE LIST'S ANSWER FOR EDIT AND COMMENT IS THE SPACE'S DEFAULT, NOT THE READER'S LEVEL.
+# Re-aimed 8 October: `privateViews` is worked out from the level before the answer (`view-only-individual-permissions`); the
+#   level keeps its type, or comparing it with 'view' does not compile (TS2367).
 # Reddens: list-page-levels: "the API says what the list’s routes would: nothing in the view-only space, comments in the comment-only one, changes, statuses and fields where the default is Edit, and adding too where it is Full edit"
 #   or "in a view-only space the list page offers the member nothing to change: no Add task, no add row, no done circle — a subtask’s neither — priority, due date or selection on a row, no Statuses and no Create field"
 #   or "in a comment-only space the member may complete the task assigned to them — and completing it saves — and nothing else: no done circle on the other, no priority, no Add task"
@@ -6,8 +8,8 @@
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 s = io.open(p, encoding='utf-8').read()
-a = "    const level = resolved?.level ?? 'admin'\n    return { add,"
-b = "    const level = resolved ? 'admin' : 'admin'\n    return { add,"
+a = "    const level = resolved?.level ?? 'admin'\n    const privateViews"
+b = "    const level = (resolved && process.env.CSR_NEVER === 'yes' ? resolved.level : null) ?? 'admin'\n    const privateViews"
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 s = s.replace(a, b)
 io.open(p, 'w', encoding='utf-8').write(s)

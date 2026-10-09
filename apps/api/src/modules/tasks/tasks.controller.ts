@@ -283,6 +283,17 @@ export class TasksController {
   }
 
   /**
+   * A task's sheet was opened: one view, for the Teams hub's Analytics, which
+   * counts task views as ClickUp's does (`ledger-rows/section3-team-analytics`).
+   * Behind the read rule, so nobody logs a view of a task they cannot open.
+   */
+  @Post(':taskId/viewed')
+  @UseGuards(ResourceMemberGuard)
+  async viewed(@Param('taskId') taskId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.tasks.logTaskView(taskId, user.id)
+  }
+
+  /**
    * What this person may do to this task, as the write routes would answer —
    * so the sheet offers only what they would accept
    * (`found-25-sep/task-sheet-offers-refused-edits`).

@@ -135,6 +135,9 @@ import { TaskEmailDialog } from './task-email-dialog'
 import { TaskMergeDialog } from './task-merge-dialog'
 import { presentationFor } from '../lib/composer-recording'
 import { MentionText } from './mention-text'
+import { ImageGenerator } from './image-generator'
+import { ClipEmbeds } from './clip-embed'
+import { clipTokensIn } from '../lib/clip-links'
 import { RecurringTaskDialog, type RecurrenceRule } from './recurring-task-dialog'
 import { MoveDialog } from './move-dialog'
 import { QuickCreateModal } from './quick-create-modal'
@@ -578,9 +581,16 @@ function isNotWired(err: unknown): boolean {
  */
 /** `full` is Full edit: deleting the task, and adding a subtask (`found-25-sep/full-edit-enforced-nowhere`). */
 /** `restore` is Unarchive, on an archived task (`found-28-sep/archived-tasks-unarchived-in-place`). */
-type TaskCaps = { edit: boolean; progress: boolean; comment: boolean; full: boolean; restore?: boolean }
-const CAPS_ALL: TaskCaps = { edit: true, progress: true, comment: true, full: true, restore: false }
-const CAPS_NONE: TaskCaps = { edit: false, progress: false, comment: false, full: false, restore: false }
+/*
+ * `estimate`, `tags` and `track` — its time estimate, its tags, and time
+ * tracked on it — are what Edit allows and, where the person only views, what
+ * their workspace lets them (`found-25-sep/view-only-individual-permissions`).
+ * An older server's answer has none: the estimate and tags then follow `edit`,
+ * and time is tracked as it was, by whoever may open the task.
+ */
+type TaskCaps = { edit: boolean; progress: boolean; comment: boolean; full: boolean; restore?: boolean; estimate?: boolean; tags?: boolean; track?: boolean }
+const CAPS_ALL: TaskCaps = { edit: true, progress: true, comment: true, full: true, restore: false, estimate: true, tags: true, track: true }
+const CAPS_NONE: TaskCaps = { edit: false, progress: false, comment: false, full: false, restore: false, estimate: false, tags: false, track: false }
 const TaskCapsContext = createContext<TaskCaps>(CAPS_ALL)
 const isTaskCaps = (x: unknown): x is TaskCaps =>
   !!x && typeof (x as TaskCaps).edit === 'boolean' && typeof (x as TaskCaps).progress === 'boolean' && typeof (x as TaskCaps).comment === 'boolean'
@@ -1195,6 +1205,16 @@ export function TaskDetailSheet({
     queryFn: () => api<TaskCaps>(`/tasks/${taskId}/capabilities`),
   })
   /*
+   * ONE VIEW OF THE TASK, for the Teams hub's Analytics, which counts task
+   * views as ClickUp's does (`ledger-rows/section3-team-analytics`): once each
+   * time the sheet opens on a task; the server takes a reload within five
+   * minutes as the same view. Nothing is said if it fails — it is a count.
+   */
+  useEffect(() => {
+    if (!enabled || !taskId) return
+    void api(`/tasks/${taskId}/viewed`, { method: 'POST' }).catch(() => undefined)
+  }, [enabled, taskId])
+  /*
    * The sheet waits for the answer with the task (below), so nothing is drawn
    * on a guess. A read that fails, or an answer that is not one, offers what
    * the sheet always did, and the routes refuse as they always have.
@@ -1635,6 +1655,7 @@ export function TaskDetailSheet({
               open={coverPickerOpen}
               onOpenChange={setCoverPickerOpen}
               taskId={taskId}
+              workspaceId={fallbackWorkspaceId}
               onPick={(choice) => updateCover.mutate(choice)}
             />
 
@@ -2216,6 +2237,7 @@ export function TaskDetailSheet({
                   taskId={detailQuery.data.id}
                   workspaceId={workspaceId}
                   labels={detailQuery.data.labels ?? []}
+                  mayChange={caps.tags ?? caps.edit}
                 />
               </div>
             </SheetHeader>
@@ -3353,6 +3375,13 @@ function OverviewPanel({
             <span className="text-muted-foreground italic">{t('taskDetail.addDescription')}</span>
           </button>
         )}
+        {/* The clips the description links to, drawn as the clips under it — outside the
+            area that opens the editor, so pressing play plays (`resume-defects/s4-clip-link`). */}
+        {!editingDescription && (
+          <div data-testid="description-clips">
+            <ClipEmbeds tokens={clipTokensIn(detail.description, window.location.origin)} />
+          </div>
+        )}
       </section>
 
       {/*
@@ -3682,7 +3711,7 @@ function OverviewPanel({
         <Field label={t('taskDetail.fieldEstimate')} empty={emptyFields.timeEstimate}>
           <EstimateInput
             seconds={detail.timeEstimate ?? null}
-            pending={patchTask.isPending || !caps.edit}
+            pending={patchTask.isPending || !(caps.estimate ?? caps.edit)}
             onCommit={(secs) => {
               if (secs !== (detail.timeEstimate ?? null)) patchTask.mutate({ timeEstimate: secs })
             }}
@@ -6754,7 +6783,7 @@ function CommentsPanel({
    */
   const [aiOpen, setAiOpen] = useState(false)
   const [aiPrompt, setAiPrompt] = useState('')
-  const [aiMode, setAiMode] = useState<'improve' | 'shorten' | 'expand' | 'format' | 'summarize' | 'reply'>('expand')
+  const [aiMode, setAiMode] = useState<'improve' | 'shorten' | 'expand' | 'format' | 'summarize' | 'reply' | 'image'>('expand')
   const [aiDraft, setAiDraft] = useState<string | null>(null)
   const [aiBusy, setAiBusy] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
@@ -7247,6 +7276,8 @@ function CommentsPanel({
                   the `hasBlockMarkdown` note in MentionText.
                 */}
                 <MentionText markdown text={c.body} namesById={namesById} className="mt-1 text-sm" />
+                {/* A clip's link in the comment, drawn as the clip (`resume-defects/s4-clip-link`). */}
+                <ClipEmbeds tokens={clipTokensIn(c.body, window.location.origin)} />
                 <CommentAttachments files={c.attachments} commentId={c.id} />
                 <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                   {c.assignee?.displayName && (
@@ -7383,6 +7414,7 @@ function CommentsPanel({
                           </span>
                         </div>
                         <MentionText markdown text={reply.body} namesById={namesById} className="mt-1 text-sm" />
+                        <ClipEmbeds tokens={clipTokensIn(reply.body, window.location.origin)} />
                         <CommentAttachments files={reply.attachments} commentId={reply.id} />
                         <div className="mt-2 flex gap-2">
                           <button
@@ -7879,22 +7911,24 @@ function CommentsPanel({
               <Sparkles className="h-3.5 w-3.5 text-accent" aria-hidden />
               {t('taskDetail.aiComposerTitle')}
             </div>
-            <Textarea
-              ref={aiPromptRef}
-              rows={2}
-              value={aiPrompt}
-              onChange={(e) => setAiPrompt(e.target.value)}
-              disabled={aiMode === 'summarize'}
-              placeholder={
-                aiMode === 'summarize'
-                  ? t('taskDetail.aiSummarizePlaceholder')
-                  : aiMode === 'reply'
-                    ? t('taskDetail.aiReplyPlaceholder')
-                    : t('taskDetail.aiComposerPlaceholder')
-              }
-              data-testid="comment-ai-prompt"
-              className="text-xs"
-            />
+            {aiMode !== 'image' && (
+              <Textarea
+                ref={aiPromptRef}
+                rows={2}
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                disabled={aiMode === 'summarize'}
+                placeholder={
+                  aiMode === 'summarize'
+                    ? t('taskDetail.aiSummarizePlaceholder')
+                    : aiMode === 'reply'
+                      ? t('taskDetail.aiReplyPlaceholder')
+                      : t('taskDetail.aiComposerPlaceholder')
+                }
+                data-testid="comment-ai-prompt"
+                className="text-xs"
+              />
+            )}
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               <select
                 value={aiMode}
@@ -7918,55 +7952,60 @@ function CommentsPanel({
                     `POST /ai/comment-reply` drafts it from the task and its
                     thread, and what is typed here says what it should say. */}
                 <option value="reply">{t('taskDetail.aiModeReply')}</option>
+                {/* ClickUp's AI also makes images from the comment box (`ledger-rows/row-870`):
+                    `POST /ai/images`, and the chosen ones join the comment as files. */}
+                <option value="image">{t('taskDetail.aiModeImage')}</option>
               </select>
-              <Button
-                size="sm"
-                data-testid="comment-ai-run"
-                disabled={(aiMode !== 'summarize' && aiMode !== 'reply' && !aiPrompt.trim()) || aiBusy}
-                onClick={async () => {
-                  setAiBusy(true)
-                  setAiError(null)
-                  setAiDraft(null)
-                  try {
-                    const drafted =
-                      aiMode === 'summarize'
-                        ? (
-                            await api<{ summary: string }>('/ai/summarize', {
-                              method: 'POST',
-                              body: { taskId, type: 'task', workspaceId },
-                            })
-                          )?.summary
-                        : aiMode === 'reply'
+              {aiMode !== 'image' && (
+                <Button
+                  size="sm"
+                  data-testid="comment-ai-run"
+                  disabled={(aiMode !== 'summarize' && aiMode !== 'reply' && !aiPrompt.trim()) || aiBusy}
+                  onClick={async () => {
+                    setAiBusy(true)
+                    setAiError(null)
+                    setAiDraft(null)
+                    try {
+                      const drafted =
+                        aiMode === 'summarize'
                           ? (
-                              await api<{ reply: string }>('/ai/comment-reply', {
+                              await api<{ summary: string }>('/ai/summarize', {
                                 method: 'POST',
-                                body: { taskId, workspaceId, instruction: aiPrompt.trim() || undefined },
+                                body: { taskId, type: 'task', workspaceId },
                               })
-                            )?.reply
-                          : (
-                            await api<{ improved: string }>('/ai/writing/improve', {
-                              method: 'POST',
-                              body: { text: aiPrompt.trim(), mode: aiMode, workspaceId },
-                            })
-                          )?.improved
-                    const improved = (drafted ?? '').trim()
-                    if (!improved) throw new Error(t('taskDetail.aiComposerEmpty'))
-                    setAiDraft(improved)
-                  } catch (err) {
-                    // The server's own words. "AI features are not configured"
-                    // is a different answer from "the model returned nothing",
-                    // and one of them is somebody's to fix.
-                    setAiError(
-                      err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('taskDetail.aiUnavailable'),
-                    )
-                  } finally {
-                    setAiBusy(false)
-                  }
-                }}
-              >
-                {aiBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
-                {t('taskDetail.aiComposerRun')}
-              </Button>
+                            )?.summary
+                          : aiMode === 'reply'
+                            ? (
+                                await api<{ reply: string }>('/ai/comment-reply', {
+                                  method: 'POST',
+                                  body: { taskId, workspaceId, instruction: aiPrompt.trim() || undefined },
+                                })
+                              )?.reply
+                            : (
+                              await api<{ improved: string }>('/ai/writing/improve', {
+                                method: 'POST',
+                                body: { text: aiPrompt.trim(), mode: aiMode, workspaceId },
+                              })
+                            )?.improved
+                      const improved = (drafted ?? '').trim()
+                      if (!improved) throw new Error(t('taskDetail.aiComposerEmpty'))
+                      setAiDraft(improved)
+                    } catch (err) {
+                      // The server's own words. "AI features are not configured"
+                      // is a different answer from "the model returned nothing",
+                      // and one of them is somebody's to fix.
+                      setAiError(
+                        err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('taskDetail.aiUnavailable'),
+                      )
+                    } finally {
+                      setAiBusy(false)
+                    }
+                  }}
+                >
+                  {aiBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                  {t('taskDetail.aiComposerRun')}
+                </Button>
+              )}
               <button
                 type="button"
                 data-testid="comment-ai-close"
@@ -7981,6 +8020,19 @@ function CommentsPanel({
                 {t('taskDetail.aiComposerClose')}
               </button>
             </div>
+            {aiMode === 'image' && (
+              <div className="mt-1.5">
+                <ImageGenerator
+                  workspaceId={workspaceId}
+                  addLabel={t('imageGen.addToComment')}
+                  onAdd={(files) => {
+                    setCommentFiles((prev) => [...prev, ...files])
+                    setAiOpen(false)
+                    commentTextRef.current?.focus()
+                  }}
+                />
+              </div>
+            )}
             {aiError && (
               <p data-testid="comment-ai-error" className="mt-1.5 text-[11px] text-rose-500">
                 {aiError}
@@ -8773,6 +8825,10 @@ function ActivityPanel({ taskId, listId }: { taskId: string; listId?: string | n
 function TimePanel({ taskId, estimate, defaultBillable = false }: { taskId: string; estimate?: number | null; defaultBillable?: boolean }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  // Where they only view, their workspace may have turned time tracking off for
+  // them (`found-25-sep/view-only-individual-permissions`): the timer and the
+  // manual entry are then not offered, and the panel says why.
+  const mayTrack = useTaskCaps().track !== false
   const [manualStart, setManualStart] = useState('')
   const [manualEnd, setManualEnd] = useState('')
   const [manualDescription, setManualDescription] = useState('')
@@ -8815,6 +8871,8 @@ function TimePanel({ taskId, estimate, defaultBillable = false }: { taskId: stri
       setStartDescription('')
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'time'] })
     },
+    // A refusal said, in the server's words: it went nowhere.
+    onError: (err) => toast.error(refusalMessage(err, t('taskDetail.couldNotStartTimer'))),
   })
 
   const stop = useMutation({
@@ -8867,6 +8925,7 @@ function TimePanel({ taskId, estimate, defaultBillable = false }: { taskId: stri
       setQuickMinutes('')
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'time'] })
     },
+    onError: (err) => toast.error(refusalMessage(err, t('taskDetail.couldNotAddManual'))),
   })
 
   const entries = entriesQuery.data ?? []
@@ -8906,6 +8965,10 @@ function TimePanel({ taskId, estimate, defaultBillable = false }: { taskId: stri
           <Button size="sm" variant="destructive" onClick={() => stop.mutate(running.id)}>
             {t('taskDetail.stop')}
           </Button>
+        ) : !mayTrack ? (
+          <span className="max-w-[300px] text-right text-xs text-muted-foreground" data-testid="task-time-tracking-off">
+            {t('taskDetail.timeTrackingOff')}
+          </span>
         ) : (
           <div className="flex items-center gap-2">
             <Input
@@ -8977,7 +9040,8 @@ function TimePanel({ taskId, estimate, defaultBillable = false }: { taskId: stri
           ))}
         </ul>
       )}
-      <div className="rounded-md border border-border p-3 space-y-2">
+      {mayTrack && (
+      <div className="rounded-md border border-border p-3 space-y-2" data-testid="task-time-manual">
         <div className="text-xs uppercase tracking-wide text-muted-foreground">{t('taskDetail.addManualEntry')}</div>
         <div className="flex items-end gap-2">
           <div className="flex-1">
@@ -9045,6 +9109,7 @@ function TimePanel({ taskId, estimate, defaultBillable = false }: { taskId: stri
           </Button>
         </div>
       </div>
+      )}
     </div>
   )
 }
@@ -10309,6 +10374,7 @@ function CommentThreadPanel({
           <span className="text-xs text-muted-foreground">{new Date(root.createdAt).toLocaleString()}</span>
         </div>
         <MentionText markdown text={root.body} namesById={namesById} className="mt-1 text-sm" />
+        <ClipEmbeds tokens={clipTokensIn(root.body, window.location.origin)} />
         <CommentAttachments files={root.attachments} commentId={root.id} />
         {/* The frame carries the comment's reactions INSIDE the thread. Reading
             them on the list and answering them here would be two places for one
@@ -10353,6 +10419,7 @@ function CommentThreadPanel({
                 </span>
               </div>
               <MentionText markdown text={r.body} namesById={namesById} className="mt-1 text-sm" />
+              <ClipEmbeds tokens={clipTokensIn(r.body, window.location.origin)} />
               <CommentAttachments files={r.attachments} commentId={r.id} />
             </li>
           ))}

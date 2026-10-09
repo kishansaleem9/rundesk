@@ -17,11 +17,15 @@
 # saving rather than about the chip.
 #
 # RE-AIMED 6 October: the chip is left out for a view that saves itself (`found-6-oct/autosave-switch-saves-nothing`).
+# Re-aimed 8 October: a reader who may not add a shared view adds one of their own where that is allowed (`view-only-individual-permissions`), so the list page asks `mayAddView`.
 # Reddens: list-save-view: "a view you have not touched offers nothing to save"
+#   or "and the chip goes once there is nothing left to save"
+#
+# Re-aimed 8 October: the last 1 of these are knock-ons of the same edit, measured on lane 2 — checks that stand on what the first ones lost.
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
-a = '            {viewDirty && !autosaves && (selectedSavedViewId ? !!selectedSavedView && viewOffersOf(selectedSavedView).change : listAccess.views) && (\n              <button\n                type="button"\n                data-testid="list-save-view"'
-b = '            {(selectedSavedViewId ? !!selectedSavedView && viewOffersOf(selectedSavedView).change : listAccess.views) && (\n              <button\n                type="button"\n                data-testid="list-save-view"'
+a = '            {viewDirty && !autosaves && (selectedSavedViewId ? !!selectedSavedView && viewOffersOf(selectedSavedView).change : mayAddView) && (\n              <button\n                type="button"\n                data-testid="list-save-view"'
+b = '            {(selectedSavedViewId ? !!selectedSavedView && viewOffersOf(selectedSavedView).change : mayAddView) && (\n              <button\n                type="button"\n                data-testid="list-save-view"'
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

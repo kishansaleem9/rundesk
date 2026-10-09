@@ -10,18 +10,21 @@
  * check here is a BEFORE/AFTER on the calendar itself — turn the setting on,
  * reload, and look at the grid. None of them assert that the switch moved.
  *
- * FIVE PAGES, NOT SEVEN — it was three until §V2-14, four until §V2-02e.
+ * SIX PAGES, NOT SEVEN — it was three until §V2-14, four until §V2-02e, five
+ * until the owner's word of 8 October.
  *
- * AI Notetaker and Automations are still deliberately absent, and both are
- * RECORDED DECISIONS rather than gaps: the notetaker needs a meeting bot the
- * client has not decided whether to build or buy, and Automations is parked at
- * the client's own instruction (`[14:32]` "yeh aap ko baad mein bataoongi, end
- * mein" — and the video ends without coming back).
+ * AI Notetaker is still deliberately absent, a RECORDED DECISION rather than a
+ * gap: it needs a meeting bot the client has not decided whether to build or
+ * buy. AUTOMATIONS IS HERE NOW (`ledger-rows/row-1962`): parked at the client's
+ * own instruction (`[14:32]` "yeh aap ko baad mein bataoongi, end mein" — and
+ * the video ends without coming back), it was closed on 8 October as ClickUp
+ * works it, ClickUp's "Sync tasks to calendar"; `calendar-sync-rules.mjs`
+ * checks what it does.
  *
- * TWO PAGES HAVE MOVED OFF THAT LIST, AND FOR THE SAME REASON BOTH TIMES: the
- * recorded reason had gone stale, which the process doc lists as its own defect
- * class because a stale reason suppresses exactly the investigation that would
- * find the bug.
+ * TWO PAGES MOVED OFF THAT LIST BEFORE IT, AND FOR THE SAME REASON BOTH TIMES:
+ * the recorded reason had gone stale, which the process doc lists as its own
+ * defect class because a stale reason suppresses exactly the investigation that
+ * would find the bug.
  *
  *   · ACCOUNTS was excluded because a page here "would be a read-only copy" of
  *     the workspace integration. The workspace connection was one for
@@ -230,10 +233,10 @@ try {
     .locator('[data-testid^="planner-settings-nav-"]')
     .evaluateAll((els) => els.map((el) => el.getAttribute('data-testid')))
   chk(
-    navIds.length === 5,
-    'the nav offers exactly the five pages that do something',
-    `the nav had ${navIds.length} pages — the frame shows seven, and two of them are recorded ` +
-      'decisions rather than gaps (AI Notetaker needs a meeting bot; Automations is parked at `[14:32]`)',
+    navIds.length === 6,
+    'the nav offers exactly the six pages that do something',
+    `the nav had ${navIds.length} pages — the frame shows seven, and one of them is a recorded ` +
+      'decision rather than a gap (AI Notetaker needs a meeting bot)',
   )
   /*
    * THE ORDER, not just the count. The frame lists them top to bottom and a
@@ -248,8 +251,9 @@ try {
         'planner-settings-nav-sidebar',
         'planner-settings-nav-upcomingMeeting',
         'planner-settings-nav-timeBlocking',
+        'planner-settings-nav-automations',
       ]),
-    "and in the frame's own order, Appearance → Accounts → Sidebar → Upcoming meeting → Time blocking",
+    "and in the frame's own order, Appearance → Accounts → Sidebar → Upcoming meeting → Time blocking → Automations",
     `the nav read ${JSON.stringify(navIds)}`,
   )
 

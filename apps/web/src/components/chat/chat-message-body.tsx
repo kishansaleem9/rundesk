@@ -7,6 +7,8 @@ import { api } from '../../lib/api'
 import { useTranslation } from '../../lib/i18n'
 import { parseMentionSegments } from '../../lib/mentions'
 import { hasBlockMarkdown, renderInlineMarkdown, renderMarkdownBlocks } from '../markdown'
+import { ClipEmbeds } from '../clip-embed'
+import { clipTokenOf, clipTokensIn } from '../../lib/clip-links'
 
 /** An @-mention chip. Shared by the inline and block rendering paths. */
 function mentionChip(label: string, key: string): ReactNode {
@@ -138,6 +140,7 @@ function extractExternalLinks(text: string): string[] {
     if (/^www\./i.test(url)) url = `https://${url}`
     if (!/^https?:\/\//i.test(url)) continue
     if (TASK_URL_TEST_RE.test(url)) continue // rendered as a task card already
+    if (typeof window !== 'undefined' && clipTokenOf(url, window.location.origin)) continue // drawn as the clip
     if (seen.has(url)) continue
     seen.add(url)
     out.push(url)
@@ -339,6 +342,15 @@ export function ChatMessageBody({
     () => (linkPreviews ? extractExternalLinks(text) : []),
     [text, linkPreviews],
   )
+  /*
+   * A CLIP'S LINK IS DRAWN AS THE CLIP — "Clip links auto-embed in Chat for
+   * instant viewing" (ClickUp; `resume-defects/s4-clip-link`). Off where the
+   * previews are, in the edit history.
+   */
+  const clipTokens = useMemo(
+    () => (linkPreviews && typeof window !== 'undefined' ? clipTokensIn(text, window.location.origin) : []),
+    [text, linkPreviews],
+  )
 
   const body = hasBlockMarkdown(text) ? (
     <div className={cn('break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0', className)}>
@@ -348,7 +360,7 @@ export function ChatMessageBody({
     <span className={cn('whitespace-pre-wrap break-words', className)}>{inline(text, 't')}</span>
   )
 
-  if (taskLinks.length === 0 && externalLinks.length === 0) return body
+  if (taskLinks.length === 0 && externalLinks.length === 0 && clipTokens.length === 0) return body
 
   return (
     <>
@@ -359,6 +371,7 @@ export function ChatMessageBody({
       {externalLinks.map((link) => (
         <ChatLinkPreview key={link} url={link} />
       ))}
+      <ClipEmbeds tokens={clipTokens} />
     </>
   )
 }

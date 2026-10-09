@@ -1,13 +1,19 @@
 # ANYBODY WHO READS THE LIST MAKES A VIEW EVERYBODY SHARES: making one asks no level, as it did.
+# Re-aimed 8 October: a view of one's own asks the person's switch where they only view (`view-only-individual-permissions`); that is kept, and only the shared view's level goes.
 # Reddens: view-writes-by-level: "neither makes a view everybody shares: one said protected, or not said, is refused in the level’s words (403) and nothing is saved"
 #   or "a member at Comment is refused the same, in its words (403), and where the default is Edit a member makes, renames and defaults the list’s shared views"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/views/views.service.ts'
 a = """    if (visibility !== 'private') {
       await this.assertSharedViewLevel(data.listId, actor, { kind: 'shared view', act: 'adding a' })
+    } else {
+      await this.assertMayMakeOwnView(data.listId, actor)
     }
 """
-b = ''
+b = """    if (visibility === 'private') {
+      await this.assertMayMakeOwnView(data.listId, actor)
+    }
+"""
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

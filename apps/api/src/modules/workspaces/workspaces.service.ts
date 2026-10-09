@@ -12,6 +12,7 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { resolveIsManager } from '../../common/permissions/item-visibility'
 import { taskReadFilterFor } from '../../common/permissions/viewer-scope'
 import { taskRestorable } from '../../common/permissions/task-restore'
+import { VIEW_ONLY_PERMISSIONS, readViewOnlyChange, viewOnlyPermissionsOf } from '../../common/permissions/view-only'
 import { R2Service } from '../../common/storage/r2.service'
 import { sameEmail, storedAsTypedFirst } from '../../common/sql/same-email'
 import { CreateWorkspaceDto } from './dto/create-workspace.dto'
@@ -834,6 +835,11 @@ export class WorkspacesService {
         statusText: users.statusText,
         statusExpiresAt: users.statusExpiresAt,
         organizationId: workspaces.organizationId,
+        // What they may do where they only view (`found-25-sep/view-only-individual-permissions`).
+        viewOnlyTimeEstimates: workspaceMembers.viewOnlyTimeEstimates,
+        viewOnlyTimeTracking: workspaceMembers.viewOnlyTimeTracking,
+        viewOnlyTags: workspaceMembers.viewOnlyTags,
+        viewOnlyCreateViews: workspaceMembers.viewOnlyCreateViews,
       })
       .from(workspaceMembers)
       .innerJoin(users, eq(users.id, workspaceMembers.userId))
@@ -877,10 +883,11 @@ export class WorkspacesService {
     // comes from the rows we already have rather than a second join.
     const nameByUser = new Map(rows.map((row) => [row.userId, row.displayName || row.email]))
 
-    return rows.map(({ organizationId: _organizationId, ...row }) => {
+    return rows.map(({ organizationId: _organizationId, viewOnlyTimeEstimates, viewOnlyTimeTracking, viewOnlyTags, viewOnlyCreateViews, ...row }) => {
       const invite = inviteByUser.get(row.userId)
       return {
         ...row,
+        viewOnlyPermissions: viewOnlyPermissionsOf({ viewOnlyTimeEstimates, viewOnlyTimeTracking, viewOnlyTags, viewOnlyCreateViews }),
         managerName: row.managerId ? nameByUser.get(row.managerId) ?? null : null,
         invitedAt: invite?.invitedAt ?? null,
         invitedByName: invite?.invitedByName ?? null,
@@ -1076,6 +1083,55 @@ export class WorkspacesService {
       metadata: { from: previous?.role ?? null, to: role },
     })
     return { ok: true }
+  }
+
+  /**
+   * WHAT A PERSON MAY DO WHERE THEY ONLY VIEW — ClickUp's individual
+   * permissions for view-only members and guests: time estimates, time
+   * tracking, tags and creating views, each on or off for the person, set by an
+   * owner or admin on the Manage people page
+   * (`found-25-sep/view-only-individual-permissions`). The route asks
+   * `members.role.change`, an admin's by default; the rank rule is the role
+   * change's: nobody sets them for somebody above their own role.
+   */
+  async updateMemberViewOnlyPermissions(
+    workspaceId: string,
+    userId: string,
+    raw: unknown,
+    actor?: AuditActor,
+  ) {
+    const change = readViewOnlyChange(raw)
+    if (!change.ok) throw new BadRequestException(change.reason)
+    const previous = await this.getMembership(workspaceId, userId)
+    if (!previous) throw new NotFoundException('Member not found')
+    await this.assertWithinRank(workspaceId, actor, [previous.role], 'change the view-only permissions of somebody who is')
+    const [row] = await this.db
+      .update(workspaceMembers)
+      .set(change.set)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+      .returning({
+        viewOnlyTimeEstimates: workspaceMembers.viewOnlyTimeEstimates,
+        viewOnlyTimeTracking: workspaceMembers.viewOnlyTimeTracking,
+        viewOnlyTags: workspaceMembers.viewOnlyTags,
+        viewOnlyCreateViews: workspaceMembers.viewOnlyCreateViews,
+      })
+    const viewOnlyPermissions = viewOnlyPermissionsOf(row)
+    const before = viewOnlyPermissionsOf(previous)
+    const changed = VIEW_ONLY_PERMISSIONS.filter((key) => before[key] !== viewOnlyPermissions[key])
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId: actor?.id,
+      actorEmail: actor?.email,
+      ipAddress: actor?.ip,
+      action: 'member.view_only_permissions_updated',
+      resourceType: 'user',
+      resourceId: userId,
+      description: changed.length
+        ? `View-only permissions changed: ${changed.map((key) => `${key} ${viewOnlyPermissions[key] ? 'on' : 'off'}`).join(', ')}`
+        : 'View-only permissions saved unchanged',
+      metadata: { ...viewOnlyPermissions },
+    })
+    return { ok: true, viewOnlyPermissions }
   }
 
   async updateMemberCapacity(

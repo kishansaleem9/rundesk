@@ -6,18 +6,19 @@
 # is the same refusal either way, so only the request body can tell the two
 # apart; that is where the check looks.
 #
+# Re-aimed 9 October: the Run button sits under `aiMode !== 'image'` now, two spaces deeper, beside the panel's Generate image (`ledger-rows/row-870`).
 # Reddens: brain-entry-points: "asked to Summarize this task, the panel sends this task’s id to /ai/summarize — the task is what it drafts from, not a typed instruction"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """
-                            await api<{ summary: string }>('/ai/summarize', {
-                              method: 'POST',
-                              body: { taskId, type: 'task', workspaceId },
+                              await api<{ summary: string }>('/ai/summarize', {
+                                method: 'POST',
+                                body: { taskId, type: 'task', workspaceId },
 """
 b = """
-                            await api<{ summary: string }>('/ai/summarize', {
-                              method: 'POST',
-                              body: { type: 'task', workspaceId },
+                              await api<{ summary: string }>('/ai/summarize', {
+                                method: 'POST',
+                                body: { type: 'task', workspaceId },
 """
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

@@ -1,22 +1,18 @@
-# Check 14 (the recorded decision) — the dead Search tab comes back.
+# Check 14 — the picker's tabs out of ClickUp's order: Search put first.
 #
-# Put a Search tab in the strip. It has no provider behind it because there is
-# no provider anywhere in this repo — that is the whole content of the comment
-# in `cover-image-picker.tsx` — so it is the "Photos" box over six gradients,
-# rebuilt with a better name. The suite has to be the thing that asks whether a
-# Search tab can search, because the screenshot cannot tell the difference.
+# Re-aimed 8 October: this put a Search tab back over nothing, while the check
+# held its absence. The tab is the photo library's now (`commit-log/log-601eacc-1`),
+# and the check asks for ClickUp's five in its order — Gallery, Upload, Link,
+# Search, Attachments — so the break moves Search to the front.
 #
-# Reddens: task-cover: "the Search tab stays absent, and the comment that says why has been re-checked"
+# Reddens: task-cover: "the picker has ClickUp’s five tabs in its order — Gallery, Upload, Link, Search, Attachments — Search the photo library’s"
 import io
 p = '/home/user/rundesk/apps/web/src/components/cover-image-picker.tsx'
 s = io.open(p, encoding='utf-8').read()
-a = """              <TabsTrigger value="attachments" data-testid="cover-tab-attachments">
-"""
-assert s.count(a) == 1, s.count(a)
-io.open(p, 'w', encoding='utf-8').write(
-    s.replace(
-        a,
-        '              <TabsTrigger value="search" data-testid="cover-tab-search">Search</TabsTrigger>\n' + a,
-    )
-)
-print('BROKE check 14: a Search tab is back in the picker with nothing behind it')
+search = "              <TabsTrigger value=\"search\" data-testid=\"cover-tab-search\">{t('coverImage.tab.search')}</TabsTrigger>\n"
+gallery = "              <TabsTrigger value=\"gallery\" data-testid=\"cover-tab-gallery\">{t('coverImage.tab.gallery')}</TabsTrigger>\n"
+for a in (search, gallery):
+    assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
+s = s.replace(search, '').replace(gallery, search + gallery)
+io.open(p, 'w', encoding='utf-8').write(s)
+print('BROKE check 14: the Search tab comes first, before Gallery')

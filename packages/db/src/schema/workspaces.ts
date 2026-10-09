@@ -100,6 +100,13 @@ export const workspaces = pgTable('workspaces', {
   aiMinutesSavedPerRun: integer('ai_minutes_saved_per_run').notNull().default(6),
   /** In cents, so a rate never rounds through a float on its way to a total. */
   aiHourlyRateCents:    integer('ai_hourly_rate_cents').notNull().default(5000),
+  /**
+   * WHO MAY OPEN THE TEAMS HUB'S ANALYTICS — ClickUp's two choices: everyone
+   * but guests (`members`), or the workspace's owners and admins (`admins`),
+   * set on the Analytics page by those who turn the ClickApp on
+   * (`ledger-rows/section3-team-analytics`). Guests never.
+   */
+  analyticsAudience: text('analytics_audience').notNull().default('members'),
   createdAt:      timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:      timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
@@ -107,6 +114,8 @@ export const workspaces = pgTable('workspaces', {
   // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
   check('workspaces_ai_minutes_saved_sane', sql`${t.aiMinutesSavedPerRun} >= 0 AND ${t.aiMinutesSavedPerRun} <= 480`),
   check('workspaces_ai_hourly_rate_sane', sql`${t.aiHourlyRateCents} >= 0 AND ${t.aiHourlyRateCents} <= 10000000`),
+  // Made by 0177.
+  check('workspaces_analytics_audience_known', sql`${t.analyticsAudience} in ('members', 'admins')`),
 ])
 
 /** Company-wide days off. Excluded from working days everywhere workDays is. */
@@ -136,6 +145,18 @@ export const workspaceMembers = pgTable(
     // which surfaces them as unassigned in the tree rather than dropping them.
     managerId:            uuid('manager_id').references(() => users.id, { onDelete: 'set null' }),
     joinedAt:             timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+    /*
+     * WHAT THIS PERSON MAY DO WHERE THEY ONLY VIEW — ClickUp's four individual
+     * permissions for view-only members and guests, set per person by an owner
+     * or admin: time estimates and time tracking on, adding or removing tags and
+     * creating views off (help centre, "Manage individual permissions for view
+     * only users"; `found-25-sep/view-only-individual-permissions`). Asked only
+     * where the person's level on the location is View (`viewOnlyMay`).
+     */
+    viewOnlyTimeEstimates: boolean('view_only_time_estimates').notNull().default(true),
+    viewOnlyTimeTracking:  boolean('view_only_time_tracking').notNull().default(true),
+    viewOnlyTags:          boolean('view_only_tags').notNull().default(false),
+    viewOnlyCreateViews:   boolean('view_only_create_views').notNull().default(false),
   },
   (t) => ({
     uniqueWorkspaceUser: unique('uq_workspace_members_workspace_user').on(t.workspaceId, t.userId),

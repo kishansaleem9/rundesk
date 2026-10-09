@@ -619,6 +619,49 @@ lane_calendar_up () {
   return 1
 }
 
+# ── THE LANE'S PHOTO LIBRARY ────────────────────────────────────────────────
+#
+#   lane_media_up  <k>   start lane k's media stub, wait for it to say ready
+#   lane_media_env <k>   export the variables that point the API at it
+#
+# A COVER'S SEARCH TAB SEARCHES A STOCK PHOTO LIBRARY (`commit-log/log-601eacc-1`):
+# Unsplash's, at UNSPLASH_API_URL with UNSPLASH_ACCESS_KEY. And the AI's images
+# (`ledger-rows/row-870`) are made by OpenAI's images API, at IMAGES_API_URL with
+# IMAGES_API_KEY, which the same stub answers. No lane reaches
+# Unsplash, so every lane points it at `media-stub.mjs`, whose library is the
+# same fixed set of photos everywhere. On for every lane, as the calendars are:
+# without it the tab says photo search is not set up, a different page.
+#
+# Lane k gets port 95<k>, beside the calendars on 94<k>.
+lane_media_port () { echo $((9500 + $1)); }
+
+lane_media_env () {
+  export UNSPLASH_API_URL="http://127.0.0.1:$(lane_media_port "$1")/unsplash"
+  export UNSPLASH_ACCESS_KEY="lane-photos"
+  # And images made to order (`ledger-rows/row-870`): OpenAI's images shape, from the same stub.
+  export IMAGES_API_URL="http://127.0.0.1:$(lane_media_port "$1")/openai/v1"
+  export IMAGES_API_KEY="lane-images"
+}
+
+lane_media_up () {
+  local k="$1" port log
+  port="$(lane_media_port "$k")"
+  log="/tmp/claude-0/media-v$k.log"
+  if grep -q '"ready":true' "$log" 2>/dev/null && stub_is_current "$port" "$LANE_ENV_DIR/media-stub.mjs"; then
+    return 0
+  fi
+  stub_down "$port" "$LANE_ENV_DIR/media-stub.mjs"
+  : > "$log"
+  RUNDESK_MEDIA_STUB=1 nohup node "$LANE_ENV_DIR/media-stub.mjs" --port "$port" >> "$log" 2>&1 &
+  for _ in $(seq 1 50); do
+    grep -q '"ready":true' "$log" 2>/dev/null && return 0
+    sleep 0.2
+  done
+  echo "lane $k: the media stub never announced itself on $port" >&2
+  tail -3 "$log" 2>/dev/null >&2
+  return 1
+}
+
 # ── STOP A LANE'S API, AND WAIT UNTIL IT HAS GONE ──────────────────────────
 #
 # `lane_api_down <port>`. Every script that starts a lane's API has to stop the

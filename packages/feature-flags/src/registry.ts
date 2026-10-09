@@ -77,6 +77,8 @@ export const FLAGS = {
   TIME_TRACKING_TIMESHEETS: 'time_tracking.timesheets',
   TIME_TRACKING_APPROVAL: 'time_tracking.approval',
 
+  // The Teams hub's Analytics (ClickUp's Pulse ClickApp): off until an owner or admin turns it on.
+  TEAMS_ANALYTICS: 'teams.analytics',
   // Reporting
   REPORTING: 'reporting',
   REPORTING_PRODUCTIVITY: 'reporting.productivity',

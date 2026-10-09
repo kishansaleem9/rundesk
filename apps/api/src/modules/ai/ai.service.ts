@@ -18,6 +18,7 @@ import { aiAnswerFeedback, aiModelPreferences, aiUsage, meetings, workspaces, wo
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { FOLLOW_UP_INSTRUCTION, createFollowUpSplitter } from './follow-ups'
+import { generateImages, imagesConfig, ImagesFailed, type ImageSize, type MadeImage } from './image-generation'
 import { summariseValue, validateBenchmark } from './ai-value'
 import { formatStandupFallback, type StandupData } from '../people/standup'
 import { DEFAULT_TIER, isSelectableTier, modelForTier, type ModelTier } from './model-tiers'
@@ -1009,6 +1010,36 @@ export class AiService {
         await this.recordFailure(feature, 'rate-limited', ctx, 'rate_limited', message)
         throw new HttpException(message, HttpStatus.TOO_MANY_REQUESTS)
       }
+    }
+  }
+
+  /**
+   * PICTURES OF A PROMPT (`ledger-rows/row-870`, `image-generation.ts`): counted
+   * against the hour's AI allowance like any run, and written down as one run of
+   * `image.generate` — the "Images generated" tile — whether it worked or not.
+   * The image service's refusals are said: its rate limit as too many requests,
+   * a prompt it would not draw in its own words, anything else as a service
+   * that did not answer.
+   */
+  async makeImages(prompt: string, count: number, size: ImageSize, ctx: AiCtx): Promise<{ images: MadeImage[]; model: string }> {
+    const cfg = imagesConfig()
+    if (!cfg) {
+      const message = 'Image generation is not set up on this server'
+      await this.recordFailure('image.generate', 'none', ctx, 'not_configured', message)
+      throw new HttpException(message, HttpStatus.SERVICE_UNAVAILABLE)
+    }
+    await this.assertWithinRateLimit(ctx, new Date(), 'image.generate')
+    try {
+      const images = await generateImages(cfg, prompt, count, size)
+      void this.recordUsage('image.generate', cfg.model, ctx, 0, 0)
+      return { images, model: cfg.model }
+    } catch (err) {
+      const status = err instanceof ImagesFailed ? err.status : 0
+      const said = err instanceof Error ? err.message : 'Image generation failed'
+      await this.recordFailure('image.generate', cfg.model, ctx, 'provider_error', said)
+      if (status === 429) throw new HttpException('The image service has had too many requests for now — try again in a while', HttpStatus.TOO_MANY_REQUESTS)
+      if (status === 400) throw new HttpException(`The image service would not make that: ${said}`, HttpStatus.BAD_REQUEST)
+      throw new HttpException('The image service did not answer — try again', HttpStatus.BAD_GATEWAY)
     }
   }
 

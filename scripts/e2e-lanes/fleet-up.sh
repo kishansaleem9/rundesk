@@ -80,6 +80,7 @@ for k in "${LANES[@]}"; do
   lane_has_search "$k" && stub_down "$(lane_search_port "$k")" "$LANE_ENV_DIR/meili-stub.mjs"
   lane_search_up "$k"
   lane_calendar_up "$k"
+  lane_media_up "$k"
   (
     cd "$R/apps/api"
     export PORT="$PORT"
@@ -93,6 +94,7 @@ for k in "${LANES[@]}"; do
     lane_model_env "$k"
     lane_search_env "$k"
     lane_calendar_env "$k"
+    lane_media_env "$k"
     lane_oauth_env "$k"
     lane_proxy_env "$k"
     nohup node --require "$TSX/dist/preflight.cjs" \

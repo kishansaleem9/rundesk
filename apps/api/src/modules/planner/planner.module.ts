@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common'
 import { PlannerService } from './planner.service'
+import { PlannerSectionsService } from './planner-sections.service'
 import { PlannerController } from './planner.controller'
 import { PeopleModule } from '../people/people.module'
 import { CalendarSyncModule } from '../calendar-sync/calendar-sync.module'
@@ -15,7 +16,7 @@ import { CalendarSyncModule } from '../calendar-sync/calendar-sync.module'
  */
 @Module({
   imports: [PeopleModule, CalendarSyncModule],
-  providers: [PlannerService],
+  providers: [PlannerService, PlannerSectionsService],
   controllers: [PlannerController],
   exports: [PlannerService],
 })

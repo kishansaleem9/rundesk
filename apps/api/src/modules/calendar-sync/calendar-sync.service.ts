@@ -12,20 +12,24 @@ import {
   userIcalTokens,
   workspaceIntegrationConnections,
   taskAssignees,
-  users,
   workspaceMembers,
 } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
 import { readableTask, type ReadActor } from '../../common/permissions/read-access'
+import { CalendarSyncRulesService, type SyncOutcome } from './calendar-sync-rules.service'
+import { calendarOwnerMayRead } from './calendar-owner'
 
 /**
- * Bidirectional calendar sync for Google Calendar + Outlook.
+ * Calendar sync for Google Calendar + Outlook.
  *
- * Outbound: when a task with a dueDate is created/updated, we upsert an
- * event on each of the workspace's connected calendars whose owner may read
- * the task now (`ownerMayRead`). Archiving / clearing the dueDate deletes the
- * event.
+ * Outbound: a task goes to the calendars its place is synced to — a person's
+ * own syncs, ClickUp's "Sync tasks to calendar" (`CalendarSyncRulesService`,
+ * `ledger-rows/row-1962`), each asking whether its owner may open the task now.
+ * Nothing syncs until somebody adds a sync. The workspace's connected calendars
+ * take no task: every dated task of the workspace was written into every one of
+ * them, with no table saying where and no switch to stop it. Archiving a task,
+ * or clearing its dates, takes its events off.
  *
  * Inbound: `pullEvents` fetches recent events from the calendar and either
  * updates the linked task or creates a new task in the workspace's designated
@@ -80,81 +84,46 @@ const SYNC_TARGET_CALENDAR = 'primary'
 
 @Injectable()
 export class CalendarSyncService {
-  constructor(@Inject(DB_TOKEN) private readonly db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private readonly db: Db,
+    private readonly rules: CalendarSyncRulesService,
+  ) {}
 
   // ─── outbound: rundesk -> calendar ────────────────────────────────────────
 
   /**
-   * Push a single task to every connected calendar in its workspace whose
-   * owner may read it now (`ownerMayRead`).
-   * Best-effort: failures are swallowed so a flaky calendar API doesn't
+   * Push a single task to the calendars its place is synced to, each asking
+   * whether its owner may open the task now (`CalendarSyncRulesService`).
+   * Best-effort: the callers swallow failures so a flaky calendar API doesn't
    * fail the user's task update.
+   *
+   * ONLY INTO THE CALENDAR OF SOMEBODY WHO MAY READ THE TASK NOW
+   * (`found-5-oct/calendar-push-ignores-who-may-read`): every connection of the
+   * workspace was written to, whoever had made it, and went on being written to
+   * after they had left. A sync asks the task read rule of its owner at every
+   * push, and stops when they leave, as the iCal feed does (`resolveIcalToken`).
    */
-  async pushTask(taskId: string, expectedWorkspaceId?: string): Promise<{ pushed: CalendarProvider[]; skipped: string[] }> {
-    const ctx = await this.resolveTaskContext(taskId)
-    if (!ctx) return { pushed: [], skipped: ['task-not-found'] }
-    // When called from an HTTP route, ensure the task actually belongs to the
-    // caller's workspace (the route only proves membership of :workspaceId).
-    if (expectedWorkspaceId && ctx.task.workspaceId !== expectedWorkspaceId) {
-      return { pushed: [], skipped: ['task-not-in-workspace'] }
-    }
-
-    const pushed: CalendarProvider[] = []
-    const skipped: string[] = []
-
-    if (!ctx.task.dueDate || ctx.task.isArchived) {
-      await this.deleteEverywhere(taskId)
-      skipped.push('no-due-date-or-archived')
-      return { pushed, skipped }
-    }
-
-    for (const conn of ctx.connections) {
-      /*
-       * ONLY INTO THE CALENDAR OF SOMEBODY WHO MAY READ THE TASK NOW
-       * (`found-5-oct/calendar-push-ignores-who-may-read`). Every connection of
-       * the workspace was written to, whoever had made it: a member granted
-       * `integrations.manage` connected the workspace's Google Calendar, and the
-       * title and description of a task in a private space they are refused
-       * (403) were sent to it, and went on being sent after they were removed
-       * from the workspace. A connection is its owner's own account, so it takes
-       * what its owner may open — the task read rule, asked now, at every push —
-       * and it stops when its owner leaves, as the iCal feed does
-       * (`resolveIcalToken`). Nothing about it is deleted: the connection is
-       * there to see and to disconnect.
-       */
-      if (!(await this.ownerMayRead(conn, ctx.task))) continue
-      try {
-        if (conn.provider === 'gcal') {
-          await this.upsertGoogleEvent(conn, ctx.task)
-          pushed.push('gcal')
-        } else if (conn.provider === 'outlook') {
-          await this.upsertOutlookEvent(conn, ctx.task)
-          pushed.push('outlook')
-        }
-      } catch (err) {
-        skipped.push(`${conn.provider}:${(err as Error).message}`)
-      }
-    }
-    return { pushed, skipped }
+  async pushTask(taskId: string): Promise<SyncOutcome> {
+    return this.rules.syncTask(taskId)
   }
 
   /**
-   * The route's push, by somebody who may read the task: it writes the task's
-   * title and description into the workspace's calendars whose owner may read
-   * it now (`ownerMayRead`), or deletes its events there. Membership of the
-   * workspace was all it asked, and a member refused a private space pushed a
-   * task there (`found-25-sep/task-rows-changed-by-id-anywhere`).
+   * The route's push, by somebody who may read the task: what the task's syncs
+   * would write, written now. Membership of the workspace was all it asked,
+   * and a member refused a private space pushed a task there
+   * (`found-25-sep/task-rows-changed-by-id-anywhere`).
    */
-  async pushTaskAs(taskId: string, workspaceId: string, actor: ReadActor) {
+  async pushTaskAs(taskId: string, workspaceId: string, actor: ReadActor): Promise<SyncOutcome> {
     if (!(await readableTask(this.db, workspaceId, taskId, actor))) throw new NotFoundException('Task not found')
-    return this.pushTask(taskId, workspaceId)
+    return this.rules.syncTask(taskId)
   }
 
   /**
-   * Remove this task's event from every connected calendar — called when
-   * the task is archived/deleted or the dueDate is cleared.
+   * Take this task off every calendar — called when the task is archived or
+   * deleted: its syncs' events, and the events of the links a pull made.
    */
   async deleteEverywhere(taskId: string): Promise<void> {
+    await this.rules.syncTask(taskId).catch(() => undefined)
     const links = await this.db
       .select()
       .from(taskCalendarLinks)
@@ -479,60 +448,6 @@ export class CalendarSyncService {
 
   // ─── google calendar HTTP layer ───────────────────────────────────────────
 
-  private async upsertGoogleEvent(conn: ConnectionRow, task: TaskForSync): Promise<void> {
-    const token = await this.ensureFreshToken(conn)
-    const [existingLink] = await this.db
-      .select()
-      .from(taskCalendarLinks)
-      .where(
-        and(
-          eq(taskCalendarLinks.taskId, task.id),
-          eq(taskCalendarLinks.provider, 'gcal'),
-          eq(taskCalendarLinks.userId, conn.connectedById!),
-        ),
-      )
-      .limit(1)
-
-    const body = JSON.stringify({
-      summary: task.title,
-      description: task.description ?? undefined,
-      start: { dateTime: (task.startDate ?? task.dueDate!).toISOString() },
-      end:   { dateTime: task.dueDate!.toISOString() },
-      // Embedding the task id makes the round-trip back identifiable.
-      extendedProperties: { private: { rundeskTaskId: task.id } },
-    })
-
-    const url = existingLink
-      ? `https://www.googleapis.com/calendar/v3/calendars/${SYNC_TARGET_CALENDAR}/events/${existingLink.externalEventId}`
-      : `https://www.googleapis.com/calendar/v3/calendars/${SYNC_TARGET_CALENDAR}/events`
-
-    const res = await fetch(url, {
-      method: existingLink ? 'PUT' : 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body,
-    })
-    if (!res.ok) {
-      throw new Error(`Google Calendar ${existingLink ? 'PUT' : 'POST'} ${res.status}: ${await res.text()}`)
-    }
-    const event = (await res.json()) as { id: string; etag?: string }
-    if (existingLink) {
-      await this.db
-        .update(taskCalendarLinks)
-        .set({ etag: event.etag ?? null, lastSyncedAt: new Date(), updatedAt: new Date() })
-        .where(eq(taskCalendarLinks.id, existingLink.id))
-    } else {
-      await this.db.insert(taskCalendarLinks).values({
-        taskId: task.id,
-        userId: conn.connectedById!,
-        workspaceId: conn.workspaceId,
-        provider: 'gcal',
-        externalCalendarId: SYNC_TARGET_CALENDAR,
-        externalEventId: event.id,
-        etag: event.etag ?? null,
-      })
-    }
-  }
-
   private async deleteGoogleEvent(conn: ConnectionRow, calendarId: string, eventId: string): Promise<void> {
     const token = await this.ensureFreshToken(conn)
     const res = await fetch(
@@ -582,67 +497,6 @@ export class CalendarSyncService {
   }
 
   // ─── outlook (microsoft graph) HTTP layer ─────────────────────────────────
-
-  private async upsertOutlookEvent(conn: ConnectionRow, task: TaskForSync): Promise<void> {
-    const token = await this.ensureFreshToken(conn)
-    const [existingLink] = await this.db
-      .select()
-      .from(taskCalendarLinks)
-      .where(
-        and(
-          eq(taskCalendarLinks.taskId, task.id),
-          eq(taskCalendarLinks.provider, 'outlook'),
-          eq(taskCalendarLinks.userId, conn.connectedById!),
-        ),
-      )
-      .limit(1)
-
-    const body = JSON.stringify({
-      subject: task.title,
-      body: { contentType: 'text', content: task.description ?? '' },
-      start: { dateTime: (task.startDate ?? task.dueDate!).toISOString(), timeZone: 'UTC' },
-      end:   { dateTime: task.dueDate!.toISOString(), timeZone: 'UTC' },
-      singleValueExtendedProperties: [
-        {
-          // Microsoft Graph's flavour of custom metadata. The GUID identifies
-          // our extension; the value lets us round-trip the task id.
-          id: 'String {6e7f5f3a-1234-5678-9abc-def012345678} Name rundeskTaskId',
-          value: task.id,
-        },
-      ],
-    })
-
-    const url = existingLink
-      ? `https://graph.microsoft.com/v1.0/me/events/${existingLink.externalEventId}`
-      : `https://graph.microsoft.com/v1.0/me/events`
-
-    const res = await fetch(url, {
-      method: existingLink ? 'PATCH' : 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body,
-    })
-    if (!res.ok) {
-      throw new Error(`Outlook ${existingLink ? 'PATCH' : 'POST'} ${res.status}: ${await res.text()}`)
-    }
-    const event = (await res.json()) as { id: string; '@odata.etag'?: string }
-    const etag = event['@odata.etag'] ?? null
-    if (existingLink) {
-      await this.db
-        .update(taskCalendarLinks)
-        .set({ etag, lastSyncedAt: new Date(), updatedAt: new Date() })
-        .where(eq(taskCalendarLinks.id, existingLink.id))
-    } else {
-      await this.db.insert(taskCalendarLinks).values({
-        taskId: task.id,
-        userId: conn.connectedById!,
-        workspaceId: conn.workspaceId,
-        provider: 'outlook',
-        externalCalendarId: 'me',
-        externalEventId: event.id,
-        etag,
-      })
-    }
-  }
 
   private async deleteOutlookEvent(conn: ConnectionRow, eventId: string): Promise<void> {
     const token = await this.ensureFreshToken(conn)
@@ -761,30 +615,6 @@ export class CalendarSyncService {
 
   // ─── lookups ──────────────────────────────────────────────────────────────
 
-  private async resolveTaskContext(
-    taskId: string,
-  ): Promise<{ task: TaskForSync; connections: ConnectionRow[] } | null> {
-    const [row] = await this.db
-      .select({
-        id: tasks.id,
-        title: tasks.title,
-        description: tasks.description,
-        startDate: tasks.startDate,
-        dueDate: tasks.dueDate,
-        isArchived: tasks.isArchived,
-        workspaceId: spaces.workspaceId,
-      })
-      .from(tasks)
-      .innerJoin(lists, eq(lists.id, tasks.listId))
-      .innerJoin(projects, eq(projects.id, lists.projectId))
-      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(eq(tasks.id, taskId))
-      .limit(1)
-    if (!row) return null
-    const connections = await this.loadConnectionsByIds([row.workspaceId])
-    return { task: row, connections }
-  }
-
   /**
    * Whether this connection's owner may open this task now: still a member of
    * the task's workspace — the iCal feed's rule, asked of a platform admin too
@@ -795,16 +625,7 @@ export class CalendarSyncService {
    * the connection it is made in (`TasksService.createTaskMeeting`).
    */
   async ownerMayRead(conn: { connectedById: string | null }, task: { id: string; workspaceId: string }): Promise<boolean> {
-    const ownerId = conn.connectedById
-    if (!ownerId) return false
-    const [member] = await this.db
-      .select({ userId: workspaceMembers.userId })
-      .from(workspaceMembers)
-      .where(and(eq(workspaceMembers.workspaceId, task.workspaceId), eq(workspaceMembers.userId, ownerId)))
-      .limit(1)
-    if (!member) return false
-    const [account] = await this.db.select({ role: users.role }).from(users).where(eq(users.id, ownerId)).limit(1)
-    return (await readableTask(this.db, task.workspaceId, task.id, { id: ownerId, role: account?.role })) !== null
+    return calendarOwnerMayRead(this.db, conn.connectedById, task)
   }
 
   /**
@@ -854,16 +675,6 @@ export class CalendarSyncService {
     }
     return toConnectionRow(row)
   }
-}
-
-type TaskForSync = {
-  id: string
-  title: string
-  description: string | null
-  startDate: Date | null
-  dueDate: Date | null
-  isArchived: boolean
-  workspaceId: string
 }
 
 function toConnectionRow(r: {

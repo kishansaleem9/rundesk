@@ -75,7 +75,8 @@ function mover(target: Record<string, unknown>, accountRole = 'member', workspac
     { notify: mock.fn(async () => undefined) } as any,
     {} as any,
     { configured: false } as any,
-    { deleteEverywhere: mock.fn(async () => undefined) } as any,
+    // A move pushes the task to the calendars its new place is synced to (`ledger-rows/row-1962`).
+    { deleteEverywhere: mock.fn(async () => undefined), pushTask: mock.fn(async () => undefined) } as any,
     { logAuditEvent: mock.fn(async () => undefined) } as any,
   ) as any
   // The task's own write rule passes: it is the mover's own task.

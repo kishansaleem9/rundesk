@@ -37,12 +37,16 @@ export interface CalendarEvent {
   link: string | null
 }
 
-/** What is written for a planner block: a title and a span, timed or all-day. */
+/**
+ * What is written for a planner block: a title and a span, timed or all-day;
+ * and for a synced task, its description and the way back to it as well.
+ */
 export interface EventToWrite {
   title: string
   start: Date
   end: Date
   allDay: boolean
+  description?: string
 }
 
 export function calendarBases(): { google: string; graph: string } {
@@ -59,9 +63,9 @@ export class CalendarRefused extends Error {
   }
 }
 
-/** Any other failure the provider answered with. */
+/** Any other failure the provider answered with; `status` says which, so an event gone (404, 410) can be written again. */
 export class CalendarFailed extends Error {
-  constructor(provider: CalendarProvider, status: number) {
+  constructor(provider: CalendarProvider, readonly status: number) {
     super(`${provider} answered ${status}`)
   }
 }
@@ -207,6 +211,7 @@ export async function readGraph(
 export function googleBody(e: EventToWrite) {
   return {
     summary: e.title,
+    ...(e.description !== undefined ? { description: e.description } : {}),
     start: e.allDay ? { date: dayOf(e.start.toISOString()) } : { dateTime: e.start.toISOString() },
     end: e.allDay ? { date: dayOf(e.end.toISOString()) } : { dateTime: e.end.toISOString() },
   }
@@ -217,6 +222,7 @@ export function graphBody(e: EventToWrite) {
   const at = (d: Date) => (e.allDay ? `${dayOf(d.toISOString())}T00:00:00` : d.toISOString().replace(/Z$/, ''))
   return {
     subject: e.title,
+    ...(e.description !== undefined ? { body: { contentType: 'text', content: e.description } } : {}),
     isAllDay: e.allDay,
     start: { dateTime: at(e.start), timeZone: 'UTC' },
     end: { dateTime: at(e.end), timeZone: 'UTC' },

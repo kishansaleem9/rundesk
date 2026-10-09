@@ -16,6 +16,7 @@ import {
 import { Upload, Image as ImageIcon, Link2, Paperclip, Loader2, Pipette } from 'lucide-react'
 import { useTranslation } from '../lib/i18n'
 import { api } from '../lib/api'
+import { CoverPhotoSearch } from './cover-photo-search'
 
 /**
  * §V2-09 — the cover picker, from frame `03:10`.
@@ -23,37 +24,14 @@ import { api } from '../lib/api'
  * ClickUp's tabs are Gallery | Upload | Link | Search | Attachments, with a
  * Remove on the right. Four of those five are here and all four work.
  *
- * SEARCH IS DELIBERATELY ABSENT. It searches a stock photo library, and Rundesk
- * has no image provider configured. What stood here before was a "Photos" tab
- * with a search box that did nothing and six entries labelled "Mountains",
- * "Ocean", "City" that were CSS gradients — so a person searching for a
- * mountain got a blue-to-orange gradient and no way to tell why. An "AI" tab
- * did the same: a prompt box, a Generate button wired to nothing, and three
- * gradients underneath. Upload was a dashed rectangle with no file input at
- * all.
- *
- * Three of four tabs were decoration. A tab that cannot do the thing it is
- * named after is worse than a missing tab, because the missing one is honest.
- * They are gone; if a photo provider is ever configured, Search comes back as a
- * tab that searches.
- *
- * RE-CHECKED 20 Sep 2026, because a reason for an absence is the one kind of
- * comment that suppresses the investigation that would find the bug, and this
- * audit has already closed two rows that a stale reason had been holding shut.
- * The reason still holds, and here is the whole of what decides it:
- *
- *     grep -rniE "unsplash|pexels|pixabay|stock ?photo|imageProvider" \
- *       apps packages docs .env .env.example
- *     → one hit: this comment.
- *
- * `.env.example` has storage credentials (`R2_*`) and no image-search
- * credential of any kind; `modules/search/sources.ts` lists every source search
- * can be scoped to — `rundesk`, `google-drive`, `gmail`, `sharepoint` — and
- * none of them returns photographs to put on a cover. So a Search tab built
- * today would be a search box over nothing: the exact "Photos" tab this file
- * deleted, rebuilt. It stays a DECISION (an absence with a reason), not a gap,
- * until somebody configures a provider — and the grep above is how the next
- * person checks that in one command instead of trusting this paragraph.
+ * SEARCH IS THE LIBRARY'S (`commit-log/log-601eacc-1`, `ledger-rows/row-739`).
+ * It searches a stock photo library, and for a long time there was none: what
+ * stood here once was a "Photos" tab whose search did nothing over six CSS
+ * gradients labelled "Mountains", "Ocean", "City", so it was taken out and the
+ * tab stayed absent until a library was configured. It is Unsplash's now
+ * (`cover-photo-search.tsx`, UNSPLASH_ACCESS_KEY), the lanes and CI ask
+ * `media-stub.mjs`, and a server with no key says photo search is not set up
+ * there rather than drawing a box that finds nothing.
  *
  * The Gallery's **Custom** swatch is a different matter and is built below: it
  * needs no provider, only a colour.
@@ -122,16 +100,19 @@ export function CoverImagePicker({
   open,
   onOpenChange,
   taskId,
+  workspaceId,
   onPick,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   /** Needed for Upload (where to presign) and Attachments (what to list). */
   taskId: string
+  /** Search asks the workspace's photo library. */
+  workspaceId?: string
   onPick?: (choice: CoverChoice) => void
 }) {
   const { t } = useTranslation()
-  const [tab, setTab] = useState<'gallery' | 'upload' | 'link' | 'attachments'>('gallery')
+  const [tab, setTab] = useState<'gallery' | 'upload' | 'link' | 'search' | 'attachments'>('gallery')
   const [linkValue, setLinkValue] = useState('')
   const [linkError, setLinkError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -230,6 +211,7 @@ export function CoverImagePicker({
               <TabsTrigger value="gallery" data-testid="cover-tab-gallery">{t('coverImage.tab.gallery')}</TabsTrigger>
               <TabsTrigger value="upload" data-testid="cover-tab-upload">{t('coverImage.tab.upload')}</TabsTrigger>
               <TabsTrigger value="link" data-testid="cover-tab-link">{t('coverImage.tab.link')}</TabsTrigger>
+              <TabsTrigger value="search" data-testid="cover-tab-search">{t('coverImage.tab.search')}</TabsTrigger>
               <TabsTrigger value="attachments" data-testid="cover-tab-attachments">
                 {t('coverImage.tab.attachments')}
               </TabsTrigger>
@@ -348,6 +330,13 @@ export function CoverImagePicker({
                   {t('coverImage.useLink')}
                 </Button>
               </div>
+            </TabsContent>
+
+            <TabsContent value="search">
+              {/* Mounted while its tab is open, so a closed dialog forgets the last search. */}
+              {open && tab === 'search' && (
+                <CoverPhotoSearch workspaceId={workspaceId} onChoose={(photo) => commit({ kind: 'link', url: photo.url })} />
+              )}
             </TabsContent>
 
             <TabsContent value="attachments">

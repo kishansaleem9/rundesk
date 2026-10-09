@@ -37,16 +37,15 @@
  * frame's category names and counted in runs, and no string anywhere renames
  * one to the other.
  *
- * ── THREE CATEGORIES RUNDESK CANNOT FILL, SAID OUT LOUD ────────────────────
+ * ── TWO CATEGORIES RUNDESK CANNOT FILL, SAID OUT LOUD ──────────────────────
  *
- * `images`, `externalActions` and `externalSearches` have no contributing
- * feature and no code path that could produce one: there is no image
- * generation in `apps/api`, and every tool in `COMMAND_TOOLS` acts on this
+ * `externalActions` and `externalSearches` have no contributing feature and
+ * no code path that could produce one: every tool in `COMMAND_TOOLS` acts on this
  * product's own rows — §V2-S16 added `create_list` / `create_folder` to it and
  * neither reaches a connected app, so the reason below is re-checked rather
  * than assumed and still holds. A tile that can only ever render 0 is
  * indistinguishable from a true zero on screen — this audit's "confident zero"
- * — so those three carry `supported: false` and the surface prints the reason
+ * — so those two carry `supported: false` and the surface prints the reason
  * instead of a number. A count of zero is a fact about your workspace; "not
  * available" is a fact about the product, and they must not look the same.
  */
@@ -73,7 +72,6 @@ export type AiCategory = (typeof AI_CATEGORIES)[number]
  * three of them.
  */
 export const UNSUPPORTED_CATEGORIES: Readonly<Record<string, string>> = {
-  images: 'aiValue.reasonNoImageGeneration',
   externalActions: 'aiValue.reasonNoConnectedAppActions',
   externalSearches: 'aiValue.reasonNoConnectedAppSearch',
 }
@@ -121,6 +119,9 @@ export const FEATURE_CATEGORY: Readonly<Record<string, AiCategory>> = {
   'task.deadline':          'tasks',
   'workload.balance':       'tasks',
   'automation.suggest':     'tasks',
+
+  // Images generated — `image-generation.ts` (`ledger-rows/row-870`)
+  'image.generate':         'images',
 
   // Docs created or updated
   'writing.improve':        'docs',

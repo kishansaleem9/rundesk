@@ -56,7 +56,7 @@ function buildDb(opts: {
 
 describe('CalendarSyncService.mintIcalToken', () => {
   it('mints an unguessable scim_-style token prefixed with ical_', async () => {
-    const svc = new CalendarSyncService(buildDb())
+    const svc = new CalendarSyncService(buildDb(), {} as any)
     const result = await svc.mintIcalToken('u-1', 'ws-1')
     assert.ok(result.token.startsWith('ical_'), `token "${result.token}" missing ical_ prefix`)
     assert.ok(result.token.length >= 30, 'token should have enough entropy')
@@ -64,7 +64,7 @@ describe('CalendarSyncService.mintIcalToken', () => {
   })
 
   it('generates unique tokens across calls', async () => {
-    const svc = new CalendarSyncService(buildDb())
+    const svc = new CalendarSyncService(buildDb(), {} as any)
     const a = await svc.mintIcalToken('u-1', 'ws-1')
     const b = await svc.mintIcalToken('u-1', 'ws-1')
     assert.notEqual(a.token, b.token)
@@ -73,7 +73,7 @@ describe('CalendarSyncService.mintIcalToken', () => {
 
 describe('CalendarSyncService.resolveIcalToken', () => {
   it('returns null for unknown tokens', async () => {
-    const svc = new CalendarSyncService(buildDb())
+    const svc = new CalendarSyncService(buildDb(), {} as any)
     const result = await svc.resolveIcalToken('ical_unknown')
     assert.equal(result, null)
   })
@@ -89,6 +89,7 @@ describe('CalendarSyncService.resolveIcalToken', () => {
           revokedAt: null,
         },
       }),
+      {} as any,
     )
     const result = await svc.resolveIcalToken('ical_abc')
     assert.deepEqual(result, { userId: 'u-1', workspaceId: 'ws-1' })
@@ -105,6 +106,7 @@ describe('CalendarSyncService.resolveIcalToken', () => {
           revokedAt: new Date(),
         },
       }),
+      {} as any,
     )
     const result = await svc.resolveIcalToken('ical_abc')
     assert.equal(result, null)
@@ -113,7 +115,7 @@ describe('CalendarSyncService.resolveIcalToken', () => {
 
 describe('CalendarSyncService.buildIcalFeed', () => {
   it('returns a valid VCALENDAR scaffold even when there are no tasks', async () => {
-    const svc = new CalendarSyncService(buildDb({ tasksForFeed: [] }))
+    const svc = new CalendarSyncService(buildDb({ tasksForFeed: [] }), {} as any)
     const ics = await svc.buildIcalFeed('u-1', 'ws-1')
     assert.match(ics, /^BEGIN:VCALENDAR/)
     assert.match(ics, /END:VCALENDAR$/)
@@ -139,6 +141,7 @@ describe('CalendarSyncService.buildIcalFeed', () => {
           },
         ],
       }),
+      {} as any,
     )
     const ics = await svc.buildIcalFeed('u-1', 'ws-1')
     assert.match(ics, /BEGIN:VEVENT[\s\S]+END:VEVENT/)
@@ -163,7 +166,7 @@ describe('CalendarSyncService.buildIcalFeed', () => {
       status: 'todo',
       listId: 'list-1',
     }
-    const svc = new CalendarSyncService(buildDb({ tasksForFeed: [dup, dup, dup] }))
+    const svc = new CalendarSyncService(buildDb({ tasksForFeed: [dup, dup, dup] }), {} as any)
     const ics = await svc.buildIcalFeed('u-1', 'ws-1')
     const matches = ics.match(/BEGIN:VEVENT/g) ?? []
     assert.equal(matches.length, 1)
@@ -171,34 +174,23 @@ describe('CalendarSyncService.buildIcalFeed', () => {
 })
 
 /*
- * A PUSH WRITES A TASK ONLY INTO THE CALENDAR OF SOMEBODY WHO MAY READ IT NOW
- * (`found-5-oct/calendar-push-ignores-who-may-read`). Every connection of the
- * workspace was written to, whoever had made it — a member refused the task's
- * private space, and one removed from the workspace. The provider is stood in
- * for (no lane may reach it); what is asked is which connections are written to.
+ * THE PUSH IS THE SYNCS' (`ledger-rows/row-1962`): a task goes to the calendars
+ * its place is synced to, and the workspace's connected calendars take none —
+ * every dated task of a workspace was written into every one of them, with no
+ * table saying where and no switch to stop it. Which calendars a sync writes
+ * to, and whose, is `calendar-sync-rules.service.test.ts`.
  */
-describe('CalendarSyncService.pushTask — whose calendar', () => {
-  const TASK = {
-    id: 't-1', title: 'Private plan', description: 'the secret', startDate: null,
-    dueDate: new Date(Date.now() + 86_400_000), isArchived: false, workspaceId: 'ws-1',
-  }
-  const conn = (provider: string, connectedById: string | null) => ({
-    id: `c-${provider}`, workspaceId: 'ws-1', provider, accessToken: null, refreshToken: null,
-    tokenExpiresAt: null, externalAccountEmail: null, metadata: {}, connectedById,
-  })
-
-  it('writes into the connection whose owner may read the task, and not into the one whose owner may not', async () => {
-    const svc = new CalendarSyncService({} as any)
-    mock.method(svc as any, 'resolveTaskContext', async () => ({ task: TASK, connections: [conn('gcal', 'keeper'), conn('outlook', 'admin')] }))
-    mock.method(svc as any, 'ownerMayRead', async (c: { connectedById: string }) => c.connectedById === 'admin')
-    const google = mock.method(svc as any, 'upsertGoogleEvent', async () => undefined)
-    const outlook = mock.method(svc as any, 'upsertOutlookEvent', async () => undefined)
-
+describe('CalendarSyncService.pushTask — the syncs decide', () => {
+  it('asks the syncs, and writes nothing into the workspace’s connections', async () => {
+    const outcome = { written: ['acc-1'], unchanged: [], removed: [], skipped: [] }
+    const rules = { syncTask: mock.fn(async () => outcome) }
+    const db = { select: mock.fn(() => { throw new Error('the push read the workspace’s connections') }) }
+    const svc = new CalendarSyncService(db as any, rules as any)
     const res = await svc.pushTask('t-1')
-
-    assert.equal(google.mock.callCount(), 0, 'nothing is sent to the calendar of an owner who may not read the task')
-    assert.equal(outlook.mock.callCount(), 1, 'and the reader’s calendar still gets it')
-    assert.deepEqual(res, { pushed: ['outlook'], skipped: [] })
+    assert.equal(rules.syncTask.mock.callCount(), 1)
+    assert.deepEqual(rules.syncTask.mock.calls[0].arguments, ['t-1'])
+    assert.equal(db.select.mock.callCount(), 0, 'no connection of the workspace is read, so none is written to')
+    assert.deepEqual(res, outcome)
   })
 })
 
@@ -224,7 +216,7 @@ describe('CalendarSyncService.ownerMayRead', () => {
     listCreatedById: 'admin', projectId: 'p-1', projectVisibility: 'public', spaceId: 's-1', spaceVisibility: 'private',
   }
   const ask = (db: any, connectedById: string | null) =>
-    (new CalendarSyncService(db) as any).ownerMayRead({ connectedById }, TASK) as Promise<boolean>
+    (new CalendarSyncService(db, {} as any) as any).ownerMayRead({ connectedById }, TASK) as Promise<boolean>
 
   it('is no for a member refused the task’s private space', async () => {
     // Their membership, their account, the read rule's row, their workspace role, no seat in the space.
@@ -274,7 +266,7 @@ describe('CalendarSyncService.pullEvents', () => {
       }),
       insert: () => ({ values: () => ({ returning: async () => [{ id: 'new-task', createdById: 'admin' }] }) }),
     } as any
-    const svc = new CalendarSyncService(db)
+    const svc = new CalendarSyncService(db, {} as any)
     mock.method(svc as any, 'requireConnection', async () => ({ id: 'conn', workspaceId: WS, provider: 'gcal', metadata: { inboxListId: 'inbox' }, connectedById: 'admin' }))
     // Its owner is in the workspace (`ownerIsMember`, below).
     mock.method(svc as any, 'ownerIsMember', async () => true)
@@ -305,7 +297,7 @@ describe('CalendarSyncService.pullEvents — whose calendar it still is', () => 
       for (const v of ['from', 'where', 'limit', 'innerJoin', 'leftJoin', 'orderBy']) p[v] = () => p
       return p
     }
-    const svc = new CalendarSyncService({ select: () => node(queue.shift() ?? []) } as any)
+    const svc = new CalendarSyncService({ select: () => node(queue.shift() ?? []) } as any, {} as any)
     mock.method(svc as any, 'requireConnection', async () => ({ id: 'conn', workspaceId: WS, provider: 'gcal', metadata: { inboxListId: 'inbox' }, connectedById }))
     const read = mock.method(svc as any, 'listGoogleEvents', async () => [])
     return { svc, read }

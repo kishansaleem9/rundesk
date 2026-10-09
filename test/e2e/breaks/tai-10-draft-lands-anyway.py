@@ -1,16 +1,17 @@
 # WRITING WITHOUT KEEP. A failed ask drops the instruction into the comment
 # box, so the box is changed by a run that produced nothing -- the chat
 # composer's first version, which rewrote your draft the moment you pressed.
+# Re-aimed 9 October: the Run button sits under `aiMode !== 'image'` now, two spaces deeper, beside the panel's Generate image (`ledger-rows/row-870`).
 # Reddens: task-ai-bar: "and a failed ask leaves the comment box exactly as it was — nothing is written without Keep"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
-a = """                    setAiError(
-                      err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('taskDetail.aiUnavailable'),
-                    )"""
-b = """                    setText(aiPrompt.trim())
-                    setAiError(
-                      err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('taskDetail.aiUnavailable'),
-                    )"""
+a = """                      setAiError(
+                        err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('taskDetail.aiUnavailable'),
+                      )"""
+b = """                      setText(aiPrompt.trim())
+                      setAiError(
+                        err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('taskDetail.aiUnavailable'),
+                      )"""
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

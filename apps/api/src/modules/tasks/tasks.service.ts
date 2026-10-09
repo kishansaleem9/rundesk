@@ -1,9 +1,10 @@
 import { Injectable, Inject, Optional, NotFoundException, BadRequestException, ForbiddenException, ConflictException, HttpException } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
-import { eq, and, or, asc, desc, ilike, inArray, isNull, isNotNull, notInArray, sql, type SQL } from 'drizzle-orm'
+import { eq, and, or, asc, desc, gte, ilike, inArray, isNull, isNotNull, notInArray, sql, type SQL } from 'drizzle-orm'
 import {
   taskTypes,
+  taskViewEvents,
   tasks,
   taskAssignees,
   taskWatchers,
@@ -110,7 +111,8 @@ import { CalendarSyncService } from '../calendar-sync/calendar-sync.service'
 import { SecurityService } from '../security/security.service'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
 import { assertSpaceLevel, resolveSpaceLevel, spaceLevelReaches } from '../../common/permissions/space-default-permission'
-import { assertTaskNotInBin, assertTaskWritable, taskCommentAllowed } from '../../common/permissions/task-write'
+import { assertMayTrackTime, assertTaskNotInBin, assertTaskWritable, taskCommentAllowed } from '../../common/permissions/task-write'
+import { viewOnlyMay } from '../../common/permissions/view-only'
 import { assertManagerTaskScope, taskRestorable } from '../../common/permissions/task-restore'
 import { assertCanCreateTaskIn, canCreateTaskIn, ListInTrashException, mayRestoreList, HOLDER_TRASH_COLUMNS, nearestHolderInTrash } from '../../common/permissions/task-create'
 import { assertMayShapeStatuses } from '../../common/permissions/status-access'
@@ -277,10 +279,10 @@ export class TasksService {
   ) {}
 
   /**
-   * Best-effort push of a task into the connected calendars of its workspace
-   * whose owner may read it now (`CalendarSyncService.ownerMayRead`).
-   * Swallowed errors keep task writes fast; failures surface via the
-   * connection's status field on the next sync poll.
+   * Best-effort push of a task into the calendars its place is synced to —
+   * each person's own syncs, ClickUp's "Sync tasks to calendar", asking whether
+   * its owner may open the task now (`CalendarSyncRulesService`). Swallowed
+   * errors keep task writes fast; a calendar that refuses costs only its event.
    */
   private fireCalendarPush(taskId: string): void {
     void this.calendarSync.pushTask(taskId).catch(() => undefined)
@@ -686,7 +688,7 @@ export class TasksService {
   private async assertTaskWriteAccess(
     taskId: string,
     actorId: string,
-    opts: { allowArchived?: boolean; level?: 'comment' | 'edit' | 'full' | 'subtask' } = {},
+    opts: { allowArchived?: boolean; level?: 'comment' | 'edit' | 'full' | 'subtask'; orViewOnly?: 'timeEstimates' | 'tags' } = {},
   ) {
     return assertTaskWritable(this.db, taskId, actorId, opts)
   }
@@ -2252,8 +2254,8 @@ export class TasksService {
       })
     }
 
-    // Push to connected calendars if the task has a due date.
-    if (task.dueDate) this.fireCalendarPush(task.id)
+    // To the calendars its place is synced to, when it has a date to be on one.
+    if (task.dueDate || task.startDate) this.fireCalendarPush(task.id)
 
     // Announced here rather than beside the insert above, so the task is fully
     // hydrated, indexed and on the realtime channel before anyone is told to go
@@ -4000,7 +4002,12 @@ export class TasksService {
     // A change of status — with the position a board drag carries — is what a
     // "comment" space lets an assignee make; anything else needs "edit".
     const statusOnly = Object.keys(patch).every((k) => k === 'status' || k === 'position')
-    const access = await this.assertTaskWriteAccess(taskId, actorId, { level: statusOnly ? 'comment' : 'edit' })
+    // A time estimate alone is what ClickUp lets a view-only person set, where their switch allows it (`viewOnlyMay`).
+    const estimateOnly = Object.keys(patch).length > 0 && Object.keys(patch).every((k) => k === 'timeEstimate')
+    const access = await this.assertTaskWriteAccess(taskId, actorId, {
+      level: statusOnly ? 'comment' : 'edit',
+      ...(estimateOnly ? { orViewOnly: 'timeEstimates' as const } : {}),
+    })
 
     /*
      * §V2-09 — the cover fields are spread into the update unchecked, so they
@@ -4256,14 +4263,18 @@ export class TasksService {
         listId: after.listId,
       })
 
-      // Sync to connected calendars when any field that drives an event
-      // surface (date / archive / title / description) changed.
+      // Sync to the calendars when any field that drives an event changed —
+      // its dates and whether they carry a time, its name and description,
+      // archiving — or its list, which decides which syncs hold it.
       const calendarRelevant =
         'dueDate' in patch ||
         'startDate' in patch ||
+        'dueDateHasTime' in patch ||
+        'startDateHasTime' in patch ||
         'isArchived' in patch ||
         'title' in patch ||
-        'description' in patch
+        'description' in patch ||
+        'listId' in patch
       if (calendarRelevant) this.fireCalendarPush(taskId)
 
       return hydrated
@@ -4366,6 +4377,17 @@ export class TasksService {
       throw new BadRequestException('patch did not include any supported bulk operation')
     }
 
+    // Tags alone are what a view-only person may change where the workspace
+    // lets them (`found-25-sep/view-only-individual-permissions`); addLabel
+    // and removeLabel ask that themselves.
+    const tagsOnly =
+      Object.keys(fieldPatch).length === 0 &&
+      !moveListId &&
+      assigneeIdsAdd.length === 0 &&
+      assigneeIdsRemove.length === 0 &&
+      dependenciesAdd.length === 0 &&
+      dependenciesRemove.length === 0
+
     const updated = []
     const failed: Array<{ taskId: string; reason: string }> = []
     for (const taskId of uniqueTaskIds) {
@@ -4374,7 +4396,7 @@ export class TasksService {
         if (Object.keys(fieldPatch).length > 0) {
           next = await this.updateTask(taskId, actorId, fieldPatch)
         } else {
-          await this.assertTaskWriteAccess(taskId, actorId)
+          await this.assertTaskWriteAccess(taskId, actorId, tagsOnly ? { orViewOnly: 'tags' } : {})
         }
         for (const userId of assigneeIdsAdd) {
           await this.addAssignee(taskId, userId, actorId)
@@ -4730,6 +4752,8 @@ export class TasksService {
     // otherwise a restored task would look fine everywhere except search,
     // where it would be permanently unfindable.
     void this.indexTaskInSearch(taskId)
+    // And back on the calendars its place is synced to, which archiving took it off.
+    this.fireCalendarPush(taskId)
     return row
   }
 
@@ -4839,6 +4863,8 @@ export class TasksService {
     })
     this.realtime.emitToList(before.listId,  { type: 'task.moved', listId: before.listId,  taskId, toListId: targetListId })
     this.realtime.emitToList(targetListId,   { type: 'task.moved', listId: targetListId,   taskId, toListId: targetListId })
+    // Its list decides which syncs hold it: off the calendars of the place it left, onto those of the one it joined.
+    this.fireCalendarPush(taskId)
     return this.getTask(taskId, { id: actorId })
   }
 
@@ -4853,6 +4879,8 @@ export class TasksService {
     await this.logActivity({ taskId, actorId, action: 'assigned', meta: { userId } })
 
     await this.announceAssignment({ taskId, assigneeId: userId, actorId })
+    // A sync of only the tasks assigned to its owner takes it now.
+    this.fireCalendarPush(taskId)
 
     return this.getTask(taskId, { id: actorId })
   }
@@ -5029,12 +5057,42 @@ export class TasksService {
     // §G10-6 — outside the `userId !== actorId` guard above: taking YOURSELF
     // off a task is still news to whoever is watching it.
     void this.notifyWatchersOfAssigneeChange({ taskId, actorId, subjectId: userId, added: false })
+    // …and a sync of only its owner's tasks gives it up.
+    this.fireCalendarPush(taskId)
     return this.getTask(taskId, { id: actorId })
+  }
+
+  /**
+   * ONE VIEW OF A TASK, for the Teams hub's Analytics (`taskViewEvents`): at
+   * most one a person a task in five minutes, so a reload or a second tab is
+   * the same view. A task in the bin, or none at all, logs nothing.
+   */
+  async logTaskView(taskId: string, userId: string) {
+    const [task] = await this.db
+      .select({ workspaceId: spaces.workspaceId, isArchived: tasks.isArchived })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    if (!task) throw new NotFoundException('Task not found')
+    if (task.isArchived) return { logged: false }
+    const since = new Date(Date.now() - 5 * 60_000)
+    const [recent] = await this.db
+      .select({ id: taskViewEvents.id })
+      .from(taskViewEvents)
+      .where(and(eq(taskViewEvents.taskId, taskId), eq(taskViewEvents.userId, userId), gte(taskViewEvents.viewedAt, since)))
+      .limit(1)
+    if (recent) return { logged: false }
+    await this.db.insert(taskViewEvents).values({ workspaceId: task.workspaceId, taskId, userId })
+    return { logged: true }
   }
 
   // --- Labels --------------------------------------------------------------
   async addLabel(taskId: string, labelId: string, actorId: string) {
-    const access = await this.assertTaskWriteAccess(taskId, actorId)
+    // At View, the person's tags switch decides, as ClickUp's does (`viewOnlyMay`).
+    const access = await this.assertTaskWriteAccess(taskId, actorId, { orViewOnly: 'tags' })
     // A label is the workspace's own, and `getTask` hands back its name and
     // colour with the task — so another workspace's label id put that tenant's
     // label on this task, and on the screen of everybody who opens it.
@@ -5046,7 +5104,7 @@ export class TasksService {
   }
 
   async removeLabel(taskId: string, labelId: string, actorId: string) {
-    await this.assertTaskWriteAccess(taskId, actorId)
+    await this.assertTaskWriteAccess(taskId, actorId, { orViewOnly: 'tags' })
     await this.db
       .delete(taskLabelAssignments)
       .where(and(eq(taskLabelAssignments.taskId, taskId), eq(taskLabelAssignments.labelId, labelId)))
@@ -5936,7 +5994,10 @@ export class TasksService {
    *              (`assertMayDefineFields`);
    *   views    — a new shared view, as the views routes ask (`SHARED_VIEW_LEVEL`,
    *              `views/view-write.ts`): + View and Save as view. A view that
-   *              exists says what may be done to it itself (`ViewsService.listByList`).
+   *              exists says what may be done to it itself (`ViewsService.listByList`);
+   *   privateViews — a new view of their own, which anybody who reads the list
+   *              makes unless they only view it and their workspace has not
+   *              let them create views (`found-25-sep/view-only-individual-permissions`).
    *
    * A task's own share can say more than its list does; the sheet asks the
    * task for that (`taskCapabilities`).
@@ -5970,7 +6031,16 @@ export class TasksService {
     // acting across workspaces), as every rule reads it.
     // `views`: the views service lets a super-admin past the level, so this does too.
     const level = resolved?.level ?? 'admin'
-    return { add, edit: spaceLevelReaches(level, 'edit'), comment: spaceLevelReaches(level, 'comment'), statuses, fields, views: actor.role === 'super_admin' || spaceLevelReaches(level, SHARED_VIEW_LEVEL) }
+    const privateViews = actor.role === 'super_admin' || level !== 'view' || (await viewOnlyMay(this.db, home.workspaceId, actor.id, 'createViews'))
+    return {
+      add,
+      edit: spaceLevelReaches(level, 'edit'),
+      comment: spaceLevelReaches(level, 'comment'),
+      statuses,
+      fields,
+      views: actor.role === 'super_admin' || spaceLevelReaches(level, SHARED_VIEW_LEVEL),
+      privateViews,
+    }
   }
 
   /**
@@ -5984,7 +6054,10 @@ export class TasksService {
    *              an assignee passes in a comment-only space;
    *   comment  — a comment, as the comment route asks;
    *   full     — Full edit: deleting it, and adding a subtask to it (the
-   *              write rule at "full"; `found-25-sep/full-edit-enforced-nowhere`).
+   *              write rule at "full"; `found-25-sep/full-edit-enforced-nowhere`);
+   *   estimate, tags, track — its time estimate, its tags, and time tracked on
+   *              it: what Edit allows, and where the person only views, what
+   *              their workspace lets them (`found-25-sep/view-only-individual-permissions`).
    *
    * A refusal is an answer (false); anything else is thrown.
    */
@@ -6007,14 +6080,17 @@ export class TasksService {
       .from(tasks)
       .where(eq(tasks.id, taskId))
       .limit(1)
-    const [edit, progress, comment, full, restore] = await Promise.all([
+    const [edit, progress, comment, full, restore, estimate, tags, track] = await Promise.all([
       allowed(this.assertTaskWriteAccess(taskId, actorId)),
       allowed(this.assertTaskWriteAccess(taskId, actorId, { level: 'comment' })),
       allowed(this.assertMayComment(taskId, actorId)),
       allowed(this.assertTaskWriteAccess(taskId, actorId, { level: 'full' })),
       row?.isArchived && !row.deletedAt ? taskRestorable(this.db, taskId, actorId) : Promise.resolve(false),
+      allowed(this.assertTaskWriteAccess(taskId, actorId, { orViewOnly: 'timeEstimates' })),
+      allowed(this.assertTaskWriteAccess(taskId, actorId, { orViewOnly: 'tags' })),
+      allowed(assertMayTrackTime(this.db, taskId, actorId)),
     ])
-    return { edit, progress, comment, full, restore }
+    return { edit, progress, comment, full, restore, estimate, tags, track }
   }
 
   async createComment(taskId: string, authorId: string, body: string, parentCommentId?: string, mentions?: Array<{ userId: string; offset: number; length: number }>, attachmentIds?: string[]) {
@@ -6895,6 +6971,9 @@ export class TasksService {
   }
 
   async startTimer(taskId: string, userId: string, description?: string, isBillable?: boolean) {
+    // Where they only view, their workspace may have turned time tracking off
+    // for them (`found-25-sep/view-only-individual-permissions`).
+    await assertMayTrackTime(this.db, taskId, userId)
     // If there's an already-running timer for this user, stop it first.
     const [running] = await this.db
       .select()
@@ -6940,6 +7019,7 @@ export class TasksService {
     description?: string
     isBillable?: boolean
   }) {
+    await assertMayTrackTime(this.db, data.taskId, data.userId)
     const durationSec = Math.max(0, Math.floor((data.endedAt.getTime() - data.startedAt.getTime()) / 1000))
     const [entry] = await this.db
       .insert(timeEntries)

@@ -202,28 +202,25 @@ try {
   )
 
   /*
-   * §V2-09 — THE RECORDED DECISION, kept honest.
+   * §V2-09 — THE FIFTH TAB, Search, now the photo library's
+   * (`commit-log/log-601eacc-1`, `ledger-rows/row-739`).
    *
-   * Frame `03:07` has five tabs and this picker has four. The fifth, Search,
-   * searches a stock photo library, and `cover-image-picker.tsx` says so in a
-   * comment that was RE-CHECKED rather than trusted: one grep across `apps`,
-   * `packages` and `.env*` for every provider name still finds nothing but the
-   * comment itself, and `modules/search/sources.ts` scopes search to rundesk /
-   * drive / gmail / sharepoint — none of which returns a photograph.
-   *
-   * So this is the absence, asserted as an absence: if a Search tab ever
-   * appears it is either backed by a provider (and this check is updated along
-   * with the comment) or it is the "Photos" box over nothing that this file
-   * deleted once already. Either way the suite should be the thing that asks.
+   * Frame `03:07` has five tabs, and this picker had four while no photo
+   * library was configured: a Search tab then would have been the "Photos" box
+   * over nothing this file once deleted, so this check held the absence. It is
+   * Unsplash's library now (`cover-photo-search.tsx`), which the lanes and CI
+   * reach through `media-stub.mjs`, and `cover-photo-search.mjs` measures what
+   * it finds and sets. What this checks is the strip: ClickUp's five, in its
+   * order, Search between Link and Attachments.
    */
+  const tabIds = sawTabs
+    ? await coverTabs.locator('[role="tab"]').evaluateAll((els) => els.map((el) => el.getAttribute('data-testid'))).catch(() => [])
+    : []
+  const FIVE_TABS = ['cover-tab-gallery', 'cover-tab-upload', 'cover-tab-link', 'cover-tab-search', 'cover-tab-attachments']
   chk(
-    sawTabs && !/search/i.test(tabsText),
-    'the Search tab stays absent, and the comment that says why has been re-checked',
-    sawTabs
-      ? `the picker now offers a Search tab (${JSON.stringify(tabsText.replace(/\s+/g, ' '))}) — ` +
-          'if it searches a real provider, update the decision in cover-image-picker.tsx; ' +
-          'if it does not, it is a search box over nothing'
-      : unseen,
+    sawTabs && JSON.stringify(tabIds) === JSON.stringify(FIVE_TABS),
+    'the picker has ClickUp’s five tabs in its order — Gallery, Upload, Link, Search, Attachments — Search the photo library’s',
+    sawTabs ? `the picker offers ${JSON.stringify(tabIds)}` : unseen,
   )
 
   // Setting a colour from the Gallery has to actually reach the task.

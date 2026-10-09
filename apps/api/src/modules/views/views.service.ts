@@ -5,6 +5,7 @@ import type { Db, SpaceDefaultPermission, ViewVisibility } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { isManagerRole } from '../../common/permissions/item-visibility'
 import { assertSpaceLevel, resolveSpaceLevel, spaceLevelReaches, type WithinStep } from '../../common/permissions/space-default-permission'
+import { VIEW_ONLY_REFUSALS, viewOnlyMay } from '../../common/permissions/view-only'
 import {
   SHARED_VIEW_DELETE_LEVEL, SHARED_VIEW_LEVEL, levelOnView, viewOffers, viewWriteBar,
   type ViewActor, type ViewWriteFacts,
@@ -44,9 +45,9 @@ export class ViewsService {
   constructor(@Inject(DB_TOKEN) private db: Db) {}
 
   /** The list's space, and the list with the containers above it, for the level its shared views ask. */
-  private async listPlace(listId: string): Promise<{ spaceId: string; within: WithinStep[] } | null> {
+  private async listPlace(listId: string): Promise<{ workspaceId: string; spaceId: string; within: WithinStep[] } | null> {
     const [row] = await this.db
-      .select({ spaceId: spaces.id, projectId: projects.id, folderId: projects.folderId })
+      .select({ workspaceId: spaces.workspaceId, spaceId: spaces.id, projectId: projects.id, folderId: projects.folderId })
       .from(lists)
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
@@ -54,6 +55,7 @@ export class ViewsService {
       .limit(1)
     if (!row) return null
     return {
+      workspaceId: row.workspaceId,
       spaceId: row.spaceId,
       within: [
         { type: 'list', id: listId },
@@ -92,6 +94,23 @@ export class ViewsService {
       within: on.viewId ? [{ type: 'view', id: on.viewId }, ...place.within] : place.within,
       ...(words.act ? { act: words.act } : {}),
     })
+  }
+
+  /**
+   * A VIEW OF ONE'S OWN WHERE ONE ONLY VIEWS — ClickUp's "Create views", off
+   * for view-only members and guests until an owner or admin turns it on for
+   * them (`found-25-sep/view-only-individual-permissions`). Anybody who read
+   * the list made a private view here. At Comment and above nothing changes; a
+   * shared view still asks the list's level (`assertSharedViewLevel`).
+   */
+  private async assertMayMakeOwnView(listId: string, actor: ViewActor) {
+    if (actor.role === 'super_admin') return
+    const place = await this.listPlace(listId)
+    if (!place) throw new NotFoundException('List not found')
+    const resolved = await resolveSpaceLevel(this.db, { spaceId: place.spaceId, actorId: actor.id, within: place.within })
+    if (!resolved || resolved.level !== 'view') return
+    if (await viewOnlyMay(this.db, place.workspaceId, actor.id, 'createViews')) return
+    throw new ForbiddenException(VIEW_ONLY_REFUSALS.createViews)
   }
 
   /**
@@ -220,7 +239,8 @@ export class ViewsService {
 
   /**
    * Make a view. A PRIVATE one is anybody's who reads the list: it is theirs
-   * alone. A SHARED one — "everyone" or "protected", and "everyone" when none
+   * alone — where they only view, if their workspace lets them create views
+   * (`assertMayMakeOwnView`). A SHARED one — "everyone" or "protected", and "everyone" when none
    * is said — goes into every reader's strip, so it asks the list's level, as
    * ClickUp's "create views" does (`view-write.ts`); a member of a view-only
    * space and a guest with a view share were given 201.
@@ -256,6 +276,8 @@ export class ViewsService {
     const visibility = data.visibility ?? 'everyone'
     if (visibility !== 'private') {
       await this.assertSharedViewLevel(data.listId, actor, { kind: 'shared view', act: 'adding a' })
+    } else {
+      await this.assertMayMakeOwnView(data.listId, actor)
     }
     return this.db.transaction(async (tx) => {
       await lockListViews(tx, data.listId)

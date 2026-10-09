@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { ForbiddenException } from '@nestjs/common'
-import { assertTaskWritable, taskCommentAllowed } from './task-write'
+import { assertMayTrackTime, assertTaskWritable, taskCommentAllowed } from './task-write'
+import { VIEW_ONLY_REFUSALS } from './view-only'
 
 /*
  * THE WRITE RULE ASKS THE READ RULE WITH THE ACCOUNT'S ROLE
@@ -104,5 +105,83 @@ describe('assertTaskWritable — adding a subtask', () => {
       () => assertTaskWritable(db, 't1', 'm', { level: 'subtask' }),
       (e: unknown) => e instanceof Error && /which does not allow adding subtasks to its tasks$/.test(e.message),
     )
+  })
+})
+
+/*
+ * WHERE THEY ONLY VIEW, THEIR SWITCH DECIDES (`found-25-sep/view-only-individual-permissions`).
+ * ClickUp lets a view-only member or guest set a time estimate and track time
+ * unless an owner or admin turns it off for them, and add or remove tags only
+ * where turned on. The selects for a change: the task, the membership, the
+ * account, the read rule's row, its workspace role and folder, no assignee,
+ * the space's level, then the person's switches.
+ */
+describe('assertTaskWritable — a view-only person’s switches', () => {
+  const OPEN = { ...IN_PRIVATE_LIST, listVisibility: 'public' }
+  const switches = (on: Partial<Record<'viewOnlyTimeEstimates' | 'viewOnlyTimeTracking' | 'viewOnlyTags' | 'viewOnlyCreateViews', boolean>>) => [
+    { viewOnlyTimeEstimates: true, viewOnlyTimeTracking: true, viewOnlyTags: false, viewOnlyCreateViews: false, ...on },
+  ]
+  const atView = (row: unknown[]) => makeDb([[CTX], [{ role: 'member' }], [{ role: 'member' }], [OPEN], [{ role: 'member' }], [], [], ...level('view'), row])
+
+  it('lets a person at View set a time estimate where their switch is on, as it is to begin with', async () => {
+    const db = atView(switches({}))
+    const ctx = await assertTaskWritable(db, 't1', 'm', { orViewOnly: 'timeEstimates' })
+    assert.equal(ctx.taskId, 't1')
+    assert.equal(db.left(), 0, 'and their switch was read')
+  })
+
+  it('refuses it, in the switch’s words, where it is off', async () => {
+    const db = atView(switches({ viewOnlyTimeEstimates: false }))
+    await assert.rejects(
+      () => assertTaskWritable(db, 't1', 'm', { orViewOnly: 'timeEstimates' }),
+      (e: unknown) => e instanceof ForbiddenException && e.message === VIEW_ONLY_REFUSALS.timeEstimates,
+    )
+  })
+
+  it('refuses a person at View a tag while their switch is off, as it is to begin with, and lets them once it is on', async () => {
+    await assert.rejects(
+      () => assertTaskWritable(atView(switches({})), 't1', 'm', { orViewOnly: 'tags' }),
+      (e: unknown) => e instanceof ForbiddenException && e.message === VIEW_ONLY_REFUSALS.tags,
+    )
+    const ctx = await assertTaskWritable(atView(switches({ viewOnlyTags: true })), 't1', 'm', { orViewOnly: 'tags' })
+    assert.equal(ctx.taskId, 't1')
+  })
+
+  it('asks no switch for any other change: at View a title is refused whatever the switches say', async () => {
+    const db = makeDb([[CTX], [{ role: 'member' }], [{ role: 'member' }], [OPEN], [{ role: 'member' }], [], [], ...level('view'), ...level('view')])
+    await assert.rejects(() => assertTaskWritable(db, 't1', 'm'), /View only/)
+  })
+
+  it('asks no switch at Comment: the level’s own rule refuses a tag there, as it did', async () => {
+    const db = makeDb([[CTX], [{ role: 'member' }], [{ role: 'member' }], [OPEN], [{ role: 'member' }], [], [], ...level('comment'), ...level('comment')])
+    await assert.rejects(() => assertTaskWritable(db, 't1', 'm', { orViewOnly: 'tags' }), /default permission is "Comment", which does not allow changing its tasks/)
+  })
+})
+
+describe('assertMayTrackTime — a view-only person’s time tracking', () => {
+  const TRACKED = { listId: 'l1', workspaceId: 'w1', spaceId: 's1', projectId: 'p1', folderId: null }
+  const row = (viewOnlyTimeTracking: boolean) => [{ viewOnlyTimeEstimates: true, viewOnlyTimeTracking, viewOnlyTags: false, viewOnlyCreateViews: false }]
+
+  it('lets a person at View track time while their switch is on, as it is to begin with', async () => {
+    const db = makeDb([[TRACKED], [{ role: 'member' }], ...level('view'), row(true)])
+    await assertMayTrackTime(db, 't1', 'm')
+    assert.equal(db.left(), 0, 'and their switch was read')
+  })
+
+  it('refuses them, in the switch’s words, once it is off', async () => {
+    const db = makeDb([[TRACKED], [{ role: 'member' }], ...level('view'), row(false)])
+    await assert.rejects(
+      () => assertMayTrackTime(db, 't1', 'm'),
+      (e: unknown) => e instanceof ForbiddenException && e.message === VIEW_ONLY_REFUSALS.timeTracking,
+    )
+  })
+
+  it('asks no switch of a person at Comment or above, nor of a manager', async () => {
+    const commenter = makeDb([[TRACKED], [{ role: 'member' }], ...level('comment'), row(false)])
+    await assertMayTrackTime(commenter, 't1', 'm')
+    assert.equal(commenter.left(), 1, 'the switch was not read')
+    const admin = makeDb([[TRACKED], [{ role: 'workspace_admin' }], row(false)])
+    await assertMayTrackTime(admin, 't1', 'a')
+    assert.equal(admin.left(), 1, 'nor was the level')
   })
 })

@@ -1,6 +1,6 @@
 import { Injectable, Inject, BadRequestException, NotFoundException, ForbiddenException, HttpException } from '@nestjs/common'
 import { and, asc, eq, gte, inArray, lt } from 'drizzle-orm'
-import { taskTimeBlocks, tasks, users, lists, projects, spaces, workspaces } from '@rundesk/db'
+import { taskTimeBlocks, tasks, users, lists, projects, spaces, workspaces, plannerRailSections } from '@rundesk/db'
 import type { Db, PlannerSettings } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { readableTaskIds } from '../../common/permissions/read-access'
@@ -9,6 +9,7 @@ import { isUuid } from '../../common/validation/uuid'
 import { PeopleService } from '../people/people.service'
 import { CalendarAccountsService } from '../calendar-sync/calendar-accounts.service'
 import { CalendarRefused } from '../calendar-sync/calendar-events'
+import { mergeRailOrder, sectionIdOf } from './planner-sections.service'
 
 /**
  * §V2-02 — the Planner.
@@ -381,6 +382,16 @@ export class PlannerService {
    * settings page for creating it. The page reads and writes the real columns
    * through here.
    */
+  /** Of these section ids, the ones that are this person's, each with its workspace. */
+  private async sectionWorkspaces(userId: string, ids: string[]): Promise<Map<string, string>> {
+    if (ids.length === 0) return new Map()
+    const rows = await this.db
+      .select({ id: plannerRailSections.id, workspaceId: plannerRailSections.workspaceId })
+      .from(plannerRailSections)
+      .where(and(eq(plannerRailSections.userId, userId), inArray(plannerRailSections.id, ids)))
+    return new Map(rows.map((r) => [r.id, r.workspaceId]))
+  }
+
   async getSettings(
     userId: string,
     workspaceId?: string,
@@ -435,6 +446,7 @@ export class PlannerService {
   async updateSettings(
     userId: string,
     patch: PlannerSettings & { weekStart?: string; timezone?: string },
+    workspaceId?: string,
   ) {
     if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) {
       throw new BadRequestException('Planner settings must be an object')
@@ -527,15 +539,30 @@ export class PlannerService {
      * The rail's order. The web passes over a name that is no section and a
      * repeat, but a stored order is what the rail is drawn in, and one reader
      * forgiving a bad value is not a rule: the sections, each at most once.
+     *
+     * AND THE PERSON'S OWN SECTIONS (`section:<id>`, `ledger-rows/row-835`),
+     * each one theirs — another's id is refused, not stored. Saved from one
+     * workspace, the order keeps the sections of the person's other workspaces
+     * where they stood (`mergeRailOrder`): the page sends only what it draws.
      */
+    let railOrder: string[] | undefined
     if (patch.railSections !== undefined) {
       const value: unknown = patch.railSections
-      if (!Array.isArray(value) || value.some((v) => !(RAIL_SECTIONS as readonly unknown[]).includes(v))) {
-        throw new BadRequestException(`The rail's sections are ${RAIL_SECTIONS.join(', ')}`)
+      if (
+        !Array.isArray(value) ||
+        value.some((v) => !(RAIL_SECTIONS as readonly unknown[]).includes(v) && !sectionIdOf(v))
+      ) {
+        throw new BadRequestException(`The rail's sections are ${RAIL_SECTIONS.join(', ')}, and sections of your own`)
       }
       if (new Set(value).size !== value.length) {
         throw new BadRequestException('The rail names a section twice')
       }
+      const named = (value as string[]).map(sectionIdOf).filter((id): id is string => id !== null)
+      const ownedIn = await this.sectionWorkspaces(userId, named)
+      if (named.some((id) => !ownedIn.has(id))) {
+        throw new BadRequestException('The rail names a section that is not yours')
+      }
+      railOrder = value as string[]
     }
     /* The fourth value is `list`, and the web dialog's own copy of this union
      * was missing it for as long as the controller has accepted it. */
@@ -588,6 +615,16 @@ export class PlannerService {
     }
     const { weekStart: currentWeek, timezone: currentZone, ...currentPlanner } = await this.getSettings(userId)
     const nextPlanner = { ...currentPlanner, ...plannerOnly }
+    if (railOrder && workspaceId && Array.isArray(currentPlanner.railSections)) {
+      const stored = currentPlanner.railSections
+      const storedIds = stored.map(sectionIdOf).filter((id): id is string => id !== null)
+      const workspaceOf = await this.sectionWorkspaces(userId, storedIds)
+      nextPlanner.railSections = mergeRailOrder(stored, railOrder, (key) => {
+        const id = sectionIdOf(key)
+        const home = id ? workspaceOf.get(id) : undefined
+        return home !== undefined && home !== workspaceId
+      })
+    }
     await this.db
       .update(users)
       .set({

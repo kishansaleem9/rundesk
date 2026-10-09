@@ -807,7 +807,10 @@ export class ProjectTemplatesService implements OnModuleInit {
       .select()
       .from(lists)
       .where(and(eq(lists.projectId, dto.projectId), listVisibilityFilter(actor.id, isManager), ...(onlyList ? [eq(lists.id, onlyList)] : [])))
-      .orderBy(asc(lists.position))
+      // In the folder's own order, as the sidebar draws it: lists made without a
+      // reorder share a position, and by `position` alone they came back in
+      // whatever order the table held them (`found-8-oct/folder-template-lists-in-any-order`).
+      .orderBy(asc(lists.position), asc(lists.createdAt), asc(lists.id))
     if (onlyList && projectLists.length === 0) throw new NotFoundException('List not found in this project')
 
     const payload: TemplatePayload = { lists: [] }
@@ -816,7 +819,7 @@ export class ProjectTemplatesService implements OnModuleInit {
         .select()
         .from(tasks)
         .where(and(eq(tasks.listId, list.id), eq(tasks.isArchived, false), taskVisibilityFilter(this.db, actor.id, isManager)))
-        .orderBy(asc(tasks.position))
+        .orderBy(asc(tasks.position), asc(tasks.createdAt), asc(tasks.id))
       payload.lists.push({
         name: list.name,
         position: list.position,

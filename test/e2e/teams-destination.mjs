@@ -13,10 +13,12 @@
  * removing that wall, which means the check that matters is driven as somebody
  * who is NOT an admin. Run as the seeded admin it would pass no matter what.
  *
- * The second thing is the absence: **Analytics must not appear.** The frame
- * lists it, nothing exists behind it, and she never opens it — so a tab there
- * would be a page whose purpose somebody has to guess. This suite fails if one
- * shows up.
+ * The second thing is the frame's fourth destination, Analytics. She never
+ * opens it; it was left out as a page whose purpose nobody knew, and this suite
+ * asserted its absence. It is built now as ClickUp's (formerly Pulse; 8
+ * October, `ledger-rows/section3-team-analytics`), a ClickApp off until an
+ * owner or admin turns it on: here, a member who opens it while it is off is
+ * told so and offered no switch. `teams-analytics` measures what it says.
  *
  *   node test/e2e/teams-destination.mjs --api 3011 --dist apps/web/dist
  */
@@ -210,16 +212,15 @@ try {
   )
 
   /*
-   * THE ABSENCE. The frame lists Analytics; nothing exists behind it. A tab
-   * there would open a page whose purpose somebody has to guess, which is the
-   * facade this audit has spent two videos removing.
+   * THE FRAME'S FOUR. Analytics was the absent fourth (`ledger-rows/section3-team-analytics`);
+   * it is ClickUp's now, a ClickApp this workspace has not turned on.
    */
-  console.log('\n▶ and nothing that only pretends to work')
+  console.log('\n▶ the frame’s four destinations, Analytics among them')
   const tabs = await page.locator('[data-testid^="teams-tab-"]').count()
   chk(
-    tabs === 3,
-    'there are exactly the three destinations that have something behind them',
-    `there are ${tabs} tabs — the frame's Analytics has no data behind it and she never opens it`,
+    tabs === 4,
+    'there are the frame’s four destinations: All Teams, All People, Org chart and Analytics',
+    `there are ${tabs} tabs`,
   )
   // Guarded for the same reason as My Teams above: a bare read here would spend
   // thirty seconds and throw rather than name what was missing.
@@ -233,10 +234,14 @@ try {
     'the Teams page is still on screen to be read',
     'the page went away between the tab count and reading it',
   )
+  // Opened by the member while its ClickApp is off: said, with no switch for somebody who may not turn it on.
+  await page.getByTestId('teams-tab-analytics').click({ timeout: 10_000 }).catch(() => {})
+  const off = await waitUntil(() => page.getByTestId('teams-analytics-off').isVisible().catch(() => false), { timeoutMs: 15_000 })
+  const offered = await page.getByTestId('teams-analytics-turn-on').count().catch(() => -1)
   chk(
-    !/analytics/i.test(bodyText),
-    'and Analytics is not among them',
-    'an Analytics tab appeared — nothing exists to put on it',
+    off && offered === 0,
+    'and Analytics, opened by a member while its ClickApp is off, says so and offers them no switch',
+    `the off state ${off ? 'shown' : 'not shown'}; ${offered} Turn on button(s)`,
   )
 
   // ── Membership shows up where it should ──────────────────────────────────

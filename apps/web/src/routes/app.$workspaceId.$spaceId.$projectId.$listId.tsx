@@ -759,16 +759,20 @@ const ListStatusesContext = createContext<ListStatus[]>([])
  *   fields   — Create field;
  *   views    — + View and Save as view: a new view everybody shares
  *              (`found-5-oct/readers-change-shared-views`). A saved view says
- *              itself what may be done to it (`SavedViewOffers`).
+ *              itself what may be done to it (`SavedViewOffers`);
+ *   privateViews — the same, for a view of their own where they may not add a
+ *              shared one: refused where they only view and their workspace
+ *              has not let them create views (`found-25-sep/view-only-individual-permissions`).
+ *              An older server's answer has none, and offers what it did.
  */
-type ListCaps = { add: boolean; edit: boolean; comment: boolean; statuses: boolean; fields: boolean; views: boolean }
+type ListCaps = { add: boolean; edit: boolean; comment: boolean; statuses: boolean; fields: boolean; views: boolean; privateViews?: boolean }
 type ListAccess = ListCaps & {
   /** A row's edits, by its task's own answer where the list gives one, else the list's (`TaskItem.mayEdit`). */
   mayEditTask: (task: { mayEdit?: boolean }) => boolean
   mayProgress: (task: { mayEdit?: boolean; assignees?: Array<{ userId: string }> }) => boolean
 }
-const LIST_CAPS_ALL: ListCaps = { add: true, edit: true, comment: true, statuses: true, fields: true, views: true }
-const LIST_CAPS_NONE: ListCaps = { add: false, edit: false, comment: false, statuses: false, fields: false, views: false }
+const LIST_CAPS_ALL: ListCaps = { add: true, edit: true, comment: true, statuses: true, fields: true, views: true, privateViews: true }
+const LIST_CAPS_NONE: ListCaps = { add: false, edit: false, comment: false, statuses: false, fields: false, views: false, privateViews: false }
 const isListCaps = (x: unknown): x is ListCaps =>
   !!x && (['add', 'edit', 'comment', 'statuses', 'fields', 'views'] as const).every((k) => typeof (x as ListCaps)[k] === 'boolean')
 
@@ -1856,7 +1860,7 @@ function ListDetail() {
         (task.mayEdit ?? listCaps.edit) || (listCaps.comment && (task.assignees ?? []).some((a) => a.userId === currentUserId)),
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [listCaps.add, listCaps.edit, listCaps.comment, listCaps.statuses, listCaps.fields, listCaps.views, currentUserId],
+    [listCaps.add, listCaps.edit, listCaps.comment, listCaps.statuses, listCaps.fields, listCaps.views, listCaps.privateViews, currentUserId],
   )
   const { data: allProjectFields = [] } = useQuery({
     queryKey: ['project-fields', workspaceId, projectId],
@@ -2483,13 +2487,24 @@ function ListDetail() {
     }
   }
 
+  /*
+   * A new view is shared where this reader may add one, and their own where
+   * they may only make one of their own (`ListCaps.privateViews`): sent as a
+   * shared one, it was refused for the level.
+   */
+  const mayAddView = listAccess.views || listAccess.privateViews === true
   const createSavedView = () =>
     sayingViewRefusal(async () => {
       const name = window.prompt(t('list.viewNamePrompt'))?.trim()
       if (!name) return
       const created = await api<{ id: string }>(`/lists/${listId}/views`, {
         method: 'POST',
-        body: JSON.stringify({ name, type: activeView, config: currentViewConfig() }),
+        body: JSON.stringify({
+          name,
+          type: activeView,
+          config: currentViewConfig(),
+          ...(listAccess.views ? {} : { visibility: 'private' }),
+        }),
       })
       await refreshSavedViews()
       setSelectedSavedViewId(created.id)
@@ -3009,8 +3024,9 @@ function ListDetail() {
             tabs={viewTabs}
             trailing={
               // A new view is shared with every reader of the list, so it is
-              // offered where the list's level allows one (`ListCaps.views`).
-              listAccess.views ? (
+              // offered where the list's level allows one (`ListCaps.views`),
+              // or made their own where only that is allowed (`privateViews`).
+              mayAddView ? (
                 <button
                   type="button"
                   onClick={() => void createSavedView()}
@@ -3034,7 +3050,7 @@ function ListDetail() {
               Either only where this reader may: the view's own answer, or the
               list's for a new one (`found-5-oct/readers-change-shared-views`).
             */}
-            {viewDirty && !autosaves && (selectedSavedViewId ? !!selectedSavedView && viewOffersOf(selectedSavedView).change : listAccess.views) && (
+            {viewDirty && !autosaves && (selectedSavedViewId ? !!selectedSavedView && viewOffersOf(selectedSavedView).change : mayAddView) && (
               <button
                 type="button"
                 data-testid="list-save-view"

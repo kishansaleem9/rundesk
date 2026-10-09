@@ -20,10 +20,10 @@
  *      That is the single most dangerous regression 0150 could cause and it is
  *      checked here, twice.
  *
- *   3. THREE TILES SAY "NOT AVAILABLE" INSTEAD OF "0". Nothing in this product
- *      generates an image or reaches a connected app. A tile that can only ever
- *      render 0 is indistinguishable on screen from a workspace that genuinely
- *      did none — the "confident zero" — so those three print the reason, and
+ *   3. TWO TILES SAY "NOT AVAILABLE" INSTEAD OF "0". Nothing in this product
+ *      reaches a connected app. A tile that can only ever render 0 is
+ *      indistinguishable on screen from a workspace that genuinely did none —
+ *      the "confident zero" — so those two print the reason, and
  *      the reasons must differ from each other, because a missing i18n key
  *      falls back to a sibling's string and "a reason is present" would pass on
  *      exactly that bug.
@@ -54,7 +54,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure. */
-const EXPECTED_CHECKS = 29
+const EXPECTED_CHECKS = 30
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -75,7 +75,8 @@ const ORDER = [
   'tasks', 'docs', 'images', 'comments',
   'summaries', 'assets', 'externalActions', 'externalSearches',
 ]
-const UNSUPPORTED = ['images', 'externalActions', 'externalSearches']
+// Images generated is filled since image generation (`ledger-rows/row-870`): `image.generate` runs.
+const UNSUPPORTED = ['externalActions', 'externalSearches']
 
 /** Tags every row this run appends, so it can take exactly those away again. */
 const TAG = `e2e-cat-${Date.now()}`
@@ -139,7 +140,7 @@ try {
   const unsupported = cats.filter((c) => !c.supported).map((c) => c.category).sort()
   chk(
     unsupported.join(',') === [...UNSUPPORTED].sort().join(','),
-    'three are marked as something this product cannot do',
+    'two are marked as something this product cannot do — the connected apps’ — and Images generated, which image generation fills, is not',
     `the unsupported ones were ${unsupported.join(', ') || '(none)'}`,
   )
   chk(
@@ -149,9 +150,9 @@ try {
     `reason keys were ${JSON.stringify(cats.map((c) => [c.category, c.reasonKey ?? null]))}`,
   )
   chk(
-    new Set(cats.filter((c) => !c.supported).map((c) => c.reasonKey)).size === 3,
+    new Set(cats.filter((c) => !c.supported).map((c) => c.reasonKey)).size === 2,
     'with a DIFFERENT reason each — one shared reason explains nothing',
-    `the three reasons were ${JSON.stringify(cats.filter((c) => !c.supported).map((c) => c.reasonKey))}`,
+    `the two reasons were ${JSON.stringify(cats.filter((c) => !c.supported).map((c) => c.reasonKey))}`,
   )
 
   console.log('\n▶ seeded runs land in the right bucket, and only there')
@@ -185,6 +186,7 @@ try {
   await seed('task.generate', 3)
   await seed('command', 2)
   await seed('chat.title', 4)
+  await seed('image.generate', 2)
   await seed(UNKNOWN_FEATURE, 1)
 
   const after = await value()
@@ -210,23 +212,28 @@ try {
     `docs moved ${delta('docs')}, summaries ${delta('summaries')}, assets ${delta('assets')}`,
   )
   chk(
+    delta('images') === 2,
+    'and two `image.generate` runs land in Images generated',
+    `the Images tile moved by ${delta('images')}, not 2`,
+  )
+  chk(
     UNSUPPORTED.every((c) => delta(c) === 0),
-    'the three unfillable tiles stay unfilled',
+    'the two unfillable tiles stay unfilled',
     `unsupported tiles moved by ${UNSUPPORTED.map((c) => `${c}=${delta(c)}`).join(' ')}`,
   )
   /*
-   * NINE, NOT TEN. Ten rows were inserted and one of them has no category; if
-   * the roll-up quietly folded it into a plausible neighbour the sum would be
-   * ten and every individual tile would still look right.
+   * ELEVEN, NOT TWELVE. Twelve rows were inserted and one of them has no
+   * category; if the roll-up quietly folded it into a plausible neighbour the
+   * sum would be twelve and every individual tile would still look right.
    */
   chk(
-    ORDER.reduce((n, c) => n + delta(c), 0) === 9,
-    'nine of the ten seeded runs are in a tile — the tenth has no category',
-    `the tiles moved by ${ORDER.reduce((n, c) => n + delta(c), 0)} in total, not 9`,
+    ORDER.reduce((n, c) => n + delta(c), 0) === 11,
+    'eleven of the twelve seeded runs are in a tile — the twelfth has no category',
+    `the tiles moved by ${ORDER.reduce((n, c) => n + delta(c), 0)} in total, not 11`,
   )
   chk(
     (after.data?.uncategorisedFeatures ?? []).includes(UNKNOWN_FEATURE),
-    'and the tenth is REPORTED rather than dropped',
+    'and the twelfth is REPORTED rather than dropped',
     `uncategorisedFeatures came back ${JSON.stringify(after.data?.uncategorisedFeatures)} — ` +
       'a run that happened and appears nowhere is a confident zero',
   )
@@ -259,9 +266,9 @@ try {
     `runs went ${runsBeforeFailures} → ${afterFailures.data?.runs} on five failed runs`,
   )
   chk(
-    (afterFailures.data?.runs ?? 0) - baselineRuns === 10,
-    'while the ten succeeded runs are all counted, mapped or not',
-    `runs moved by ${(afterFailures.data?.runs ?? 0) - baselineRuns} against ten seeded successes`,
+    (afterFailures.data?.runs ?? 0) - baselineRuns === 12,
+    'while the twelve succeeded runs are all counted, mapped or not',
+    `runs moved by ${(afterFailures.data?.runs ?? 0) - baselineRuns} against twelve seeded successes`,
   )
 
   // ── On screen ────────────────────────────────────────────────────────────
@@ -356,8 +363,8 @@ try {
   console.log('\n▶ "not available" is not the same answer as zero')
   const unavailableTiles = page.locator('[data-testid^="ai-value-category-"][data-supported="false"]')
   chk(
-    (await unavailableTiles.count()) === 3,
-    'three tiles admit the product cannot fill them',
+    (await unavailableTiles.count()) === 2,
+    'two tiles admit the product cannot fill them',
     `${await unavailableTiles.count()} tiles were marked unavailable`,
   )
   const reasons = []
@@ -371,9 +378,9 @@ try {
     )
   }
   chk(
-    reasons.every((r) => r.length > 0) && new Set(reasons).size === 3,
+    reasons.every((r) => r.length > 0) && new Set(reasons).size === 2,
     'each with its own sentence, not one shared fallback',
-    `the three reasons read ${JSON.stringify(reasons)}`,
+    `the two reasons read ${JSON.stringify(reasons)}`,
   )
   /*
    * Hoisted out of the check so its marker is on a line of its own, and read only
@@ -382,12 +389,12 @@ try {
    * (`found-29-sep/innertext-reads-hidden-leaves`).
    */
   const unavailable = await page.locator('[data-testid^="ai-value-category-unavailable-"]').count()
-  const imagesTile = unavailable === 3 ? await page.getByTestId('ai-value-category-images').innerText().catch(() => '0') : '0' // text-read: absence — no digit anywhere on the tile
+  const searchesTile = unavailable === 2 ? await page.getByTestId('ai-value-category-externalSearches').innerText().catch(() => '0') : '0' // text-read: absence — no digit anywhere on the tile
   chk(
-    unavailable === 3 && !/\d/.test(imagesTile),
+    unavailable === 2 && !/\d/.test(searchesTile),
     'and none of them prints a number a person could mistake for a count',
-    `the Images tile reads ${JSON.stringify(
-      (await page.getByTestId('ai-value-category-images').innerText().catch(() => '<no tile>')).replace(
+    `the External app searches tile reads ${JSON.stringify(
+      (await page.getByTestId('ai-value-category-externalSearches').innerText().catch(() => '<no tile>')).replace(
         /\s+/g,
         ' ',
       ),

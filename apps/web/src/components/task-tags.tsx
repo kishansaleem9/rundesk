@@ -54,6 +54,7 @@ export function TaskTags({
   labels,
   onChanged,
   compact = false,
+  mayChange = true,
 }: {
   taskId: string
   workspaceId?: string
@@ -62,6 +63,13 @@ export function TaskTags({
   onChanged?: () => void
   /** Render only the add control, for rows too tight for the chips. */
   compact?: boolean
+  /**
+   * Whether this person may add or remove its tags — what Edit allows, and
+   * where they only view, what their workspace lets them
+   * (`found-25-sep/view-only-individual-permissions`). Without it the chips are
+   * shown, not offered.
+   */
+  mayChange?: boolean
 }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -156,6 +164,7 @@ export function TaskTags({
             style={{ backgroundColor: l.color }}
           >
             {l.name}
+            {mayChange && (
             <button
               type="button"
               title={t('tags.remove')}
@@ -167,9 +176,11 @@ export function TaskTags({
             >
               <X className="h-3 w-3" />
             </button>
+            )}
           </Badge>
         ))}
 
+      {mayChange && (
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button
@@ -262,6 +273,7 @@ export function TaskTags({
           </p>
         </PopoverContent>
       </Popover>
+      )}
 
       {compact && labels.length > 0 && (
         <span className="text-[11px] text-muted-foreground">{labels.length}</span>

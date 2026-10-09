@@ -77,7 +77,7 @@ describe('§V2-11 AI action categories', () => {
     // the other direction.
     assert.deepEqual(
       Object.keys(UNSUPPORTED_CATEGORIES).sort(),
-      ['externalActions', 'externalSearches', 'images'],
+      ['externalActions', 'externalSearches'],
     )
     for (const category of Object.keys(UNSUPPORTED_CATEGORIES)) {
       const contributors = Object.entries(FEATURE_CATEGORY).filter(([, c]) => c === category)

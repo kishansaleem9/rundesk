@@ -948,12 +948,23 @@ try {
   const sbSpace = (await api('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} sidebar space` } })).data?.id
   const sbProject = sbSpace ? (await api('/projects', { method: 'POST', body: { spaceId: sbSpace, name: `${TAG} sidebar folder` } })).data?.id : null
   const SB_LISTS = [`${TAG} first list`, `${TAG} second list`]
-  const sbLists = []
-  for (const name of SB_LISTS) {
+  /*
+   * THE SECOND LIST IS MADE FIRST, and the first is then dated a minute before
+   * it (`found-8-oct/folder-template-lists-in-any-order`). Both share a
+   * position, as two lists made without a reorder do, so the folder's order is
+   * by when each was made — first, second, as the sidebar draws them — while
+   * the table holds them the other way round. A read by position alone came
+   * back in the table's order, which CI's fresh database showed in the
+   * rehearsal of 4d37f9a once; made so, it shows it every time.
+   */
+  const sbLists = [null, null]
+  for (const i of [1, 0]) {
+    const name = SB_LISTS[i]
     const list = sbProject ? (await api('/lists', { method: 'POST', body: { projectId: sbProject, name } })).data?.id : null
     if (list) await api('/tasks', { method: 'POST', body: { listId: list, title: `${name} task` } })
-    sbLists.push(list)
+    sbLists[i] = list
   }
+  if (sql && sbLists[0]) await sql`update lists set created_at = created_at - interval '1 minute' where id = ${sbLists[0]}`
   const templateRow = async (name) => {
     const [row] = sql ? await sql`select id, target_type, payload, tags from project_templates where workspace_id = ${WS} and name = ${name}`.catch(() => []) : []
     if (row?.id && !created.includes(row.id)) {

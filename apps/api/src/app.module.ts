@@ -25,6 +25,8 @@ import { LabelsModule } from './modules/labels/labels.module'
 import { DocsModule } from './modules/docs/docs.module'
 import { ChatModule } from './modules/chat/chat.module'
 import { GoalsModule } from './modules/goals/goals.module'
+import { TeamAnalyticsModule } from './modules/team-analytics/team-analytics.module'
+import { CoverPhotosModule } from './modules/cover-photos/cover-photos.module'
 import { FavoritesModule } from './modules/favorites/favorites.module'
 import { RemindersModule } from './modules/reminders/reminders.module'
 import { PresenceModule } from './modules/presence/presence.module'
@@ -115,6 +117,8 @@ import { TenantDatabasesModule } from './modules/tenant-databases/tenant-databas
     DocsModule,
     ChatModule,
     GoalsModule,
+    TeamAnalyticsModule,
+    CoverPhotosModule,
     FavoritesModule,
     RemindersModule,
     PresenceModule,

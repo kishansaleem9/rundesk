@@ -23,7 +23,9 @@
  * must have Edit or Full edit permissions to the List, Subfolder, Folder, or
  * Space where the view is created" ("Views feature availability and limits");
  * creating views is off by default for view-only users and guests ("Manage
- * individual permissions for view only users"); "Guests with Full access to a
+ * individual permissions for view only users"), and a reader here makes a view
+ * of their own where they only view once it is turned on for them, which
+ * sections 3 and 4 do; "Guests with Full access to a
  * Folder, Subfolder, or List can delete views in it" ("Delete a view"); a
  * person given Full edit on a view "can save changes, protect and unprotect,
  * share, and delete the view", Limited "can only view, duplicate, and favorite
@@ -174,6 +176,22 @@ try {
     `member ${JSON.stringify(makes.member)}; guest ${JSON.stringify(makes.guest)}; the views ${after2 === after1 ? 'unchanged' : `changed: ${after2}`}`,
   )
 
+  /*
+   * A VIEW OF ONE'S OWN, WHERE ONE ONLY VIEWS, IS CLICKUP'S "CREATE VIEWS":
+   * off for a view-only member or guest until an admin turns it on for them
+   * (`found-25-sep/view-only-individual-permissions`, `view-only-permissions.mjs`
+   * measures it). On for the member and the guest through sections 3 and 4,
+   * which are about what such a view is; off again before the page, which is
+   * about what a view-only reader is offered.
+   */
+  const createViews = async (on) => {
+    for (const p of [member, guest]) {
+      const r = await A(`/workspaces/${WS}/members/${p.id}/view-only-permissions`, { method: 'PATCH', body: { createViews: on } })
+      if (r.status !== 200) throw new Error(`could not turn Create views ${on ? 'on' : 'off'} for ${p.email}: ${said(r)}`)
+    }
+  }
+  await createViews(true)
+
   // ══ 3. A READER'S PRIVATE VIEW STAYS THEIRS ══════════════════════════════
   console.log('\n▶ a reader’s own private view')
   const own = {}
@@ -212,6 +230,7 @@ try {
     'on an empty list a reader’s private view does not take the list’s default, and the admin’s first view, shared, does',
     `the member's ${said(first)} default ${first.data?.isDefault}; the admin's ${said(adminFirst)} default ${adminFirst.data?.isDefault}; the list's defaults ${JSON.stringify(defaults)}`,
   )
+  await createViews(false)
 
   // ══ 5. COMMENT, AND EDIT ═════════════════════════════════════════════════
   console.log('\n▶ a member where the default is Comment, and where it is Edit')

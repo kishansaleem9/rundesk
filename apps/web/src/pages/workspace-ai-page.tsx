@@ -203,6 +203,7 @@ export function AiPage() {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
+            data-testid={`ai-tab-${tab.id}`}
             className={cn(
               'flex items-center gap-1.5 py-3 px-4 text-sm font-medium border-b-2 transition-colors whitespace-nowrap',
               activeTab === tab.id
@@ -862,6 +863,7 @@ function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
           <select
             className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
             value={targetListId}
+            data-testid="ai-generate-list"
             onChange={(e) => {
               setTargetListId(e.target.value)
               setFieldValues({})
@@ -886,14 +888,15 @@ function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
               if (e.key === 'Enter' && prompt.trim()) generate.mutate()
             }}
             className="flex-1"
+            data-testid="ai-generate-prompt"
           />
-          <Button onClick={() => generate.mutate()} disabled={!prompt.trim() || generate.isPending}>
+          <Button onClick={() => generate.mutate()} disabled={!prompt.trim() || generate.isPending} data-testid="ai-generate-submit">
             {generate.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
           </Button>
         </div>
 
         {result && (
-          <Card className="p-4 space-y-4">
+          <Card className="p-4 space-y-4" data-testid="ai-generate-result">
             <div className="flex items-center justify-between">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{t('ai.editBeforeSave')}</p>
               {result.estimatedHours ? (
@@ -963,7 +966,7 @@ function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
               <div className="space-y-2">
                 <label className="text-xs font-medium text-muted-foreground">{t('ai.customFields')}</label>
                 {fields.map((def) => (
-                  <div key={def.id} className="space-y-1">
+                  <div key={def.id} className="space-y-1" data-testid={`ai-generate-field-${def.id}`}>
                     <div className="text-[11px] text-muted-foreground">
                       {def.name}
                       {def.isRequired && <span className="text-destructive"> *</span>}
@@ -979,7 +982,7 @@ function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
             )}
 
             <div className="flex items-center gap-2 pt-1">
-              <Button size="sm" onClick={saveTask} disabled={saving || saved || !targetListId}>
+              <Button size="sm" onClick={saveTask} disabled={saving || saved || !targetListId} data-testid="ai-generate-save">
                 {saved ? (
                   <>
                     <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-emerald-500" /> {t('ai.saved')}
@@ -999,7 +1002,7 @@ function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
                 <span className="text-xs text-amber-700 dark:text-amber-300">{t('ai.selectListToEnable')}</span>
               )}
             </div>
-            {saveError && <p className="text-xs text-destructive">{saveError}</p>}
+            {saveError && <p className="text-xs text-destructive" data-testid="ai-generate-save-error">{saveError}</p>}
           </Card>
         )}
       </div>

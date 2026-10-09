@@ -13,8 +13,11 @@
  *
  * A connection is its owner's own account: it takes what its owner may open,
  * by the task read rule, asked at every push, and it stops when its owner
- * leaves, as the iCal feed does. Which lists push at all is the unbuilt
- * Automations feature (`ledger-rows/row-1962`), not this.
+ * leaves, as the iCal feed does. Which places push at all is a person's own
+ * syncs now (`ledger-rows/row-1962`, `calendar-sync-rules`): the workspace's
+ * connections take no task, and a push goes to the calendars of the syncs of
+ * the task's place — so the push checks here stage a sync for the keeper and
+ * one for the admin, and the same rule is asked of each sync's owner.
  *
  * And the task's own Google Meet and Zoom buttons, which make a meeting in the
  * same connected account under the task's title: found by the review, the
@@ -26,12 +29,14 @@
  * are): a super_admin's connection takes a workspace's tasks while they are in
  * it, and none once they are removed.
  *
- * NOTHING LEAVES THE MACHINE. Each connection is staged by SQL WITHOUT a token,
- * so a push that chooses one stops at "No access token" before any request is
- * made: which connections a push chose is read from what it says it skipped.
- * The member's is the workspace's Google Calendar and Zoom, the admin's its
- * Outlook. A meeting whose connection's owner may open the task stops at
- * "Connect … first", for want of the token, also before any request.
+ * NOTHING LEAVES THE MACHINE. Each connection and each person's calendar is
+ * staged by SQL WITHOUT a token, so a push that chooses a calendar stops there
+ * ("refused") before any request is made: which calendars a push chose is read
+ * from what it says it skipped. The member's are the workspace's Google
+ * Calendar and Zoom and a Google calendar of their own, the admin's the
+ * workspace's Outlook and an Outlook calendar of their own. A meeting whose
+ * connection's owner may open the task stops at "Connect … first", for want of
+ * the token, also before any request.
  *
  *   node test/e2e/calendar-push-reach.mjs --api 3021 --dist apps/web/dist
  */
@@ -144,17 +149,40 @@ try {
             values (${WS}, 'gcal', 'connected', ${sql.array([])}, null, ${sql.json({})}, ${keeper.id}),
                    (${WS}, 'outlook', 'connected', ${sql.array([])}, null, ${sql.json({})}, ${admin.id}),
                    (${WS}, 'zoom', 'connected', ${sql.array([])}, null, ${sql.json({})}, ${keeper.id})`
+  /*
+   * And each person's own calendar, synced to both spaces — what decides where
+   * a task goes now (`ledger-rows/row-1962`). By SQL, as the connections are:
+   * the keeper's sync of the private space is one they could not make now (the
+   * places they may sync are those they may open), as if made before the space
+   * was closed to them.
+   */
+  const [keeperCal] = await sql`insert into user_calendar_accounts (user_id, workspace_id, provider, external_account_id, external_account_email, access_token, is_default, status)
+            values (${keeper.id}, ${WS}, 'gcal', ${`${TAG}-keeper-cal`}, ${`${TAG}-keeper@calendar.test`}, null, true, 'connected') returning id::text as id`
+  const [adminCal] = await sql`insert into user_calendar_accounts (user_id, workspace_id, provider, external_account_id, external_account_email, access_token, is_default, status)
+            values (${admin.id}, ${WS}, 'outlook', ${`${TAG}-admin-cal`}, ${`${TAG}-admin@calendar.test`}, null, true, 'connected') returning id::text as id`
+  const spaceOf = async (taskId) => (await sql`select p.space_id::text as id from tasks t join lists l on l.id = t.list_id join projects p on p.id = l.project_id where t.id = ${taskId}`)[0].id
+  const [privateSpace, openSpace] = [await spaceOf(PRIVATE), await spaceOf(OPEN)]
+  for (const [userId, accountId] of [[keeper.id, keeperCal.id], [admin.id, adminCal.id]]) {
+    for (const spaceId of [privateSpace, openSpace]) {
+      await sql`insert into calendar_sync_rules (workspace_id, user_id, account_id, scope_type, scope_id) values (${WS}, ${userId}, ${accountId}, 'space', ${spaceId})`
+    }
+  }
+  const CALENDARS = { [keeperCal.id]: 'keeper', [adminCal.id]: 'admin' }
   const push = (task) => A(`/workspaces/${WS}/calendar-sync/tasks/${task}/push`, { method: 'POST' })
-  /** Which calendars a push reached for: each one it chose stops at its missing token. */
-  const triedBy = (res) => ['gcal', 'outlook'].filter((p) => (res.data?.skipped ?? []).includes(`${p}:No access token for ${p}`))
+  /** Whose calendars a push reached for: each one it chose stops at its missing token ("refused"). */
+  const triedBy = (res) => (res.data?.skipped ?? [])
+    .map((s) => /^([0-9a-f-]{36}):refused$/.exec(s)?.[1])
+    .filter((id) => id && CALENDARS[id])
+    .map((id) => CALENDARS[id])
+    .sort()
   const tried = (res) => `${res.status} tried ${JSON.stringify(triedBy(res))} (${JSON.stringify(res.data ?? res.error?.message ?? null)})`
 
   // ══ 1. A TASK ITS CONNECTION'S OWNER MAY NOT OPEN ════════════════════════
   console.log('\n▶ the admin pushes a dated task of a private space the keeper is refused')
   const privatePush = await push(PRIVATE)
   chk(
-    privatePush.status === 201 && JSON.stringify(triedBy(privatePush)) === JSON.stringify(['outlook']),
-    'a dated task in a private space goes only to the calendar of somebody who may open it: the admin’s Outlook is tried, the keeper’s Google Calendar — the keeper is refused the task — is not',
+    privatePush.status === 201 && JSON.stringify(triedBy(privatePush)) === JSON.stringify(['admin']),
+    'a dated task in a private space goes only to the calendar of somebody who may open it: the admin’s sync of the space is tried, the keeper’s — the keeper is refused the task — is not',
     tried(privatePush),
   )
 
@@ -162,8 +190,8 @@ try {
   console.log('\n▶ the admin pushes a dated task of an open space, which the keeper may open')
   const openPush = await push(OPEN)
   chk(
-    openPush.status === 201 && JSON.stringify(triedBy(openPush)) === JSON.stringify(['gcal', 'outlook']),
-    'a dated task both may open goes to both calendars: the keeper’s Google Calendar and the admin’s Outlook are each tried',
+    openPush.status === 201 && JSON.stringify(triedBy(openPush)) === JSON.stringify(['admin', 'keeper']),
+    'a dated task both may open goes to both calendars: the keeper’s sync and the admin’s are each tried',
     tried(openPush),
   )
 
@@ -205,11 +233,12 @@ try {
   const [{ n: stillMember }] = await sql`select count(*)::int as n from workspace_members where workspace_id = ${WS} and user_id = ${keeper.id}`
   const afterPush = await push(OPEN)
   const [kept] = await sql`select status, connected_by_id = ${keeper.id} as by_keeper from workspace_integration_connections where workspace_id = ${WS} and provider = 'gcal'`
+  const [{ n: keeperSyncs }] = await sql`select count(*)::int as n from calendar_sync_rules where user_id = ${keeper.id} and workspace_id = ${WS}`
   chk(
-    removed.ok && stillMember === 0 && afterPush.status === 201 && JSON.stringify(triedBy(afterPush)) === JSON.stringify(['outlook'])
-      && kept?.status === 'connected' && kept?.by_keeper === true,
-    'once the keeper has left the workspace their calendar takes nothing from it — the open task goes to the admin’s Outlook alone — and their connection is kept, not deleted, for an admin to see and remove',
-    `removed ${said(removed)} (${stillMember} member rows left); then ${tried(afterPush)}; the connection ${JSON.stringify(kept ?? null)}`,
+    removed.ok && stillMember === 0 && afterPush.status === 201 && JSON.stringify(triedBy(afterPush)) === JSON.stringify(['admin'])
+      && kept?.status === 'connected' && kept?.by_keeper === true && keeperSyncs === 2,
+    'once the keeper has left the workspace their calendar takes nothing from it — the open task goes to the admin’s calendar alone — and their connection and syncs are kept, not deleted, for an admin to see and remove',
+    `removed ${said(removed)} (${stillMember} member rows left); then ${tried(afterPush)}; the connection ${JSON.stringify(kept ?? null)}; ${keeperSyncs} sync(s) of theirs left`,
   )
 
   // The meeting buttons again, on the open task, now the keeper has left.
@@ -267,22 +296,26 @@ try {
   if (!joined.ok) throw new Error(`could not add the platform admin: ${said(joined)}`)
   const [roles] = await sql`select u.role as account, m.role as workspace from users u join workspace_members m on m.user_id = u.id and m.workspace_id = ${WS2} where u.id = ${admin.id}`
   if (roles?.account !== 'super_admin' || roles?.workspace !== 'member') throw new Error(`the admin account should be a super_admin and a plain member there: ${JSON.stringify(roles)}`)
-  const OWNERS = (await placeIn(O, WS2, 'owner open')).id
-  await sql`insert into workspace_integration_connections (workspace_id, provider, status, scopes, access_token, metadata, connected_by_id)
-            values (${WS2}, 'gcal', 'connected', ${sql.array([])}, null, ${sql.json({})}, ${admin.id})`
+  const ownersPlace = await placeIn(O, WS2, 'owner open')
+  const OWNERS = ownersPlace.id
+  // The platform admin's own calendar in the owner's workspace, synced to the owner's open space.
+  const [adminCal2] = await sql`insert into user_calendar_accounts (user_id, workspace_id, provider, external_account_id, external_account_email, access_token, is_default, status)
+            values (${admin.id}, ${WS2}, 'gcal', ${`${TAG}-admin-cal-2`}, ${`${TAG}-admin-2@calendar.test`}, null, true, 'connected') returning id::text as id`
+  CALENDARS[adminCal2.id] = 'admin'
+  await sql`insert into calendar_sync_rules (workspace_id, user_id, account_id, scope_type, scope_id) values (${WS2}, ${admin.id}, ${adminCal2.id}, 'space', ${await spaceOf(OWNERS)})`
   const ownerPush = (task) => O(`/workspaces/${WS2}/calendar-sync/tasks/${task}/push`, { method: 'POST' })
   const whileIn = await ownerPush(OWNERS)
   const left = await O(`/workspaces/${WS2}/members/${admin.id}`, { method: 'DELETE' })
   const [{ n: adminRows }] = await sql`select count(*)::int as n from workspace_members where workspace_id = ${WS2} and user_id = ${admin.id}`
   const whenGone = await ownerPush(OWNERS)
-  const [keptAdmin] = await sql`select status, connected_by_id = ${admin.id} as by_admin from workspace_integration_connections where workspace_id = ${WS2} and provider = 'gcal'`
+  const [{ n: adminSyncs }] = await sql`select count(*)::int as n from calendar_sync_rules where user_id = ${admin.id} and workspace_id = ${WS2}`
   chk(
-    whileIn.status === 201 && JSON.stringify(triedBy(whileIn)) === JSON.stringify(['gcal'])
+    whileIn.status === 201 && JSON.stringify(triedBy(whileIn)) === JSON.stringify(['admin'])
       && left.ok && adminRows === 0
       && whenGone.status === 201 && JSON.stringify(triedBy(whenGone)) === JSON.stringify([])
-      && keptAdmin?.status === 'connected' && keptAdmin?.by_admin === true,
-    'a platform admin’s calendar takes a workspace’s task while they are a member of it, and nothing once they have been removed — the read rule would let them in wherever they are, so the membership is asked of them too — and their connection is kept',
-    `while a member ${tried(whileIn)}; removed ${said(left)} (${adminRows} member rows left); then ${tried(whenGone)}; the connection ${JSON.stringify(keptAdmin ?? null)}`,
+      && adminSyncs === 1,
+    'a platform admin’s calendar takes a workspace’s task while they are a member of it, and nothing once they have been removed — the read rule would let them in wherever they are, so the membership is asked of them too — and their sync is kept',
+    `while a member ${tried(whileIn)}; removed ${said(left)} (${adminRows} member rows left); then ${tried(whenGone)}; ${adminSyncs} sync(s) of theirs left`,
   )
 
   /*

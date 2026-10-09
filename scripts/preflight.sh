@@ -89,6 +89,7 @@ step "bail stops the file and loses nothing" node scripts/check-bail.mjs --mutat
 step "and the model seam is really a seam" node scripts/check-model-stub.mjs --mutate
 step "and the search seam is really a seam" node scripts/check-meili-stub.mjs --mutate
 step "and the calendar seam is really a seam" node scripts/check-calendar-stub.mjs --mutate
+step "and the photo library seam is really a seam" node scripts/check-media-stub.mjs --mutate
 step "the chain helper holds its contract" node scripts/check-chain-helper.mjs --mutate
 step "a wait gives up at its deadline" node scripts/check-wait-helper.mjs --mutate
 step "a mutant run ends with all it started" node scripts/check-run-mutant.mjs --mutate

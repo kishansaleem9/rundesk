@@ -2,6 +2,7 @@ import { useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } fr
 import { AtSign, Bold, Code, FileText, Italic, Link2, Loader2, Paperclip, Send, Smile, Sparkles, X } from 'lucide-react'
 import { Button, Popover, PopoverContent, PopoverTrigger, Textarea, cn, toast } from '@rundesk/ui'
 import { api, ApiError } from '../../lib/api'
+import { ImageGenerator } from '../image-generator'
 import { useTranslation, type TranslationKey } from '../../lib/i18n'
 import { formatMentionsPlain } from '../../lib/mentions'
 import type { ChatAttachment, ChatMessage } from './chat-types'
@@ -475,6 +476,7 @@ function ComposerBox({
             <PopoverTrigger asChild>
               <button
                 type="button"
+                data-testid="chat-ai-open"
                 title={t('chat.askAi')}
                 aria-label={t('chat.askAi')}
                 disabled={disabled || improving}
@@ -502,6 +504,22 @@ function ComposerBox({
                   </Button>
                 ))}
               </div>
+              {/* ClickUp's AI makes images from a Chat message field too (`ledger-rows/row-870`):
+                  the chosen ones are attached to the message as files. */}
+              {onFilesSelected && workspaceId && (
+                <div className="border-t border-border/60 pt-2" data-testid="chat-ai-image">
+                  <p className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t('imageGen.title')}</p>
+                  <ImageGenerator
+                    workspaceId={workspaceId}
+                    addLabel={t('imageGen.addToMessage')}
+                    onAdd={(files) => {
+                      onFilesSelected(files)
+                      setAiOpen(false)
+                      textareaRef.current?.focus()
+                    }}
+                  />
+                </div>
+              )}
               {aiDraft != null && (
                 <div className="space-y-2">
                   <div className="max-h-40 overflow-y-auto rounded border border-border bg-muted/40 p-2 text-[13px] whitespace-pre-wrap">

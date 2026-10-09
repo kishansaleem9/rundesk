@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { PlannerService } from './planner.service'
+import { PlannerSectionsService } from './planner-sections.service'
 import type { PlannerSettings } from '@rundesk/db'
 
 /**
@@ -20,7 +21,10 @@ import type { PlannerSettings } from '@rundesk/db'
 @Controller('planner/:workspaceId')
 @UseGuards(JwtAuthGuard, WorkspaceMemberGuard)
 export class PlannerController {
-  constructor(private planner: PlannerService) {}
+  constructor(
+    private planner: PlannerService,
+    private sections: PlannerSectionsService,
+  ) {}
 
   /** The grid's read: `[from, to)`, half-open so two weeks never double-count. */
   @Get('blocks')
@@ -118,8 +122,66 @@ export class PlannerController {
   @Patch('settings')
   updateSettings(
     @CurrentUser() user: any,
+    @Param('workspaceId') workspaceId: string,
     @Body() body: PlannerSettings & { weekStart?: string; timezone?: string },
   ) {
-    return this.planner.updateSettings(user.id, body)
+    return this.planner.updateSettings(user.id, body, workspaceId)
+  }
+
+  /*
+   * The rail's sections of one's own — "+ Add a new section" on the Sidebar
+   * page (`ledger-rows/row-835`). Every one is the caller's, in this workspace.
+   */
+  @Get('sections')
+  listSections(@CurrentUser() user: any, @Param('workspaceId') workspaceId: string) {
+    return this.sections.list(workspaceId, user.id)
+  }
+
+  @Post('sections')
+  createSection(
+    @CurrentUser() user: any,
+    @Param('workspaceId') workspaceId: string,
+    @Body() body: { name?: unknown; emoji?: unknown },
+  ) {
+    return this.sections.create(workspaceId, user.id, body ?? {})
+  }
+
+  @Patch('sections/:sectionId')
+  updateSection(
+    @CurrentUser() user: any,
+    @Param('workspaceId') workspaceId: string,
+    @Param('sectionId') sectionId: string,
+    @Body() body: { name?: unknown; emoji?: unknown },
+  ) {
+    return this.sections.update(workspaceId, user.id, sectionId, body ?? {})
+  }
+
+  @Delete('sections/:sectionId')
+  removeSection(
+    @CurrentUser() user: any,
+    @Param('workspaceId') workspaceId: string,
+    @Param('sectionId') sectionId: string,
+  ) {
+    return this.sections.remove(workspaceId, user.id, sectionId)
+  }
+
+  @Post('sections/:sectionId/tasks')
+  addSectionTask(
+    @CurrentUser() user: any,
+    @Param('workspaceId') workspaceId: string,
+    @Param('sectionId') sectionId: string,
+    @Body() body: { taskId?: unknown },
+  ) {
+    return this.sections.addTask(workspaceId, user.id, sectionId, body?.taskId)
+  }
+
+  @Delete('sections/:sectionId/tasks/:taskId')
+  removeSectionTask(
+    @CurrentUser() user: any,
+    @Param('workspaceId') workspaceId: string,
+    @Param('sectionId') sectionId: string,
+    @Param('taskId') taskId: string,
+  ) {
+    return this.sections.removeTask(workspaceId, user.id, sectionId, taskId)
   }
 }

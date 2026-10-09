@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 534 items: 0 open · 0 partly fixed · 488 closed, and 46 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 7 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 535 items: 0 open · 0 partly fixed · 501 closed, and 34 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 9 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 73, each reproduced
+## Found by the triage, 5 October, and since — 74, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10318,7 +10318,15 @@ Checks: `check-ledger-ids-cases.mjs` 11 → 13: "a day's find of another month, 
 
 *Closed, 8 October.* The check reads both refusals as 403 and the private space's in the read's words, "This space or project is private", the task left archived. `archived-tasks-access` 7 of 7 on lane 1 after it. `ata-9-restore-skips-the-write-rule` quoted the check's old words; re-aimed at its new ones, it reddens it on lane 1 (6 of 7, the open, view-only and private tasks each restored).
 
-## Closed from the uncounted list, as ClickUp works them (8 October) — 11
+### `found-8-oct/folder-template-lists-in-any-order` — **closed** (visible bug, small; found by the CI rehearsal of `4d37f9a`) · reproduced 8 October
+
+**A folder saved as a template takes its lists in whatever order the table holds them**
+
+*Evidence, 8 October:* the rehearsal of `4d37f9a` (batch 19) failed one step of `postgres-harnesses`, "Template centre facets", 84 of 85: "and a folder’s ⋯ saves it as a Folder template, with both its lists and their tasks" read the saved template's lists second list first. The save read a folder's lists, and each list's tasks, by `position` alone, and lists made without a reorder share a position — the suite makes two in one folder — so two that share one came back however Postgres held them, where the sidebar draws them by when they were made. The lanes' tables held them in the order made, so it passed there; CI's fresh database did not.
+
+*Closed, 8 October.* The save reads a folder's lists by `position`, then when they were made, then id — the sidebar's order — and each list's tasks the same way (`project-templates.service.ts`). The suite now makes the folder's second list first and dates the first a minute earlier, so the table's order is not the order made: `template-center` 84 of 85 before the fix with that fixture (the lists second first), 85 of 85 after, on lane 1. Patch `template-center-42` (the lists by position alone) reddens the check, 84 of 85 on lane 1.
+
+## Closed from the uncounted list, as ClickUp works them (8 October) — 23
 
 On the owner's word of 8 October ("close all of these properly … close them as they work on clickup"), the
 items the triage set aside as features and decisions are closed one by one: as ClickUp works each where its
@@ -10559,15 +10567,7 @@ Checks (`clip-created-card` 26 → 27): "and the card's Copy link copies the com
 - Patches `ccc-10` (the link names no comment) and `ccc-11` (no Copy link) redden it, 26 of 27 each.
 - `cfo-3-comment-draws-files-by-name`, whose line this moved (a comment's files are drawn after the clip's note), re-aimed and shown failing its own again on lane 2, task-attachments 33 of 34.
 
-## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
-
-Moved here by the triage of 5 October, at the owner's request: these are not open defects and are not in the
-counts. Each says what it is in its heading, with the status it had before. Their full evidence is in
-`docs/triage-2026-10-05.md`.
-
-#### Features and ClickUp gaps — 30
-
-### `found-30-sep/ai-page-fields-checked-only-by-a-unit` — feature, not counted (triage, 5 October; was: open (test tooling, small; found closing `found-30-sep/field-route-takes-another-projects-field`))
+### `found-30-sep/ai-page-fields-checked-only-by-a-unit` — **closed** (test tooling, small; found closing `found-30-sep/field-route-takes-another-projects-field`; was not counted, a feature) · reproduced 8 October
 
 **The AI page's field boxes are checked by no suite**
 
@@ -10579,7 +10579,16 @@ counts. Each says what it is in its heading, with the status it had before. Thei
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The AI page's Generate task correctly offers and writes only the chosen list's fields; what is missing is a suite check, so this is unbuilt coverage and not an open defect. Evidence: `docs/triage-2026-10-05.md`.
 
-### `found-25-sep/view-only-individual-permissions` — feature, not counted (triage, 5 October; was: open, feature, medium (found closing `guest-guard-reads-the-account-role`))
+*Closed, 8 October* (lane 6 before, lane 7 after, each with the model stub and without one), on the owner's word of 8 October. `ai-generate-fields` drives the AI page's Generate task the whole way, on a project of the run's own: a field for all of it, one scoped to the list chosen and one scoped to the other list. Where a model answers (the lane's stub, staged to suggest a value for all three), the page offers a box for the first two, filled, and none for the third; the model is asked about those two only; and Save writes the two values and none for the third, refusing nothing (read by SQL). Where none answers (CI), Generate says AI is not configured, the route refuses the ask 503, and nothing is offered or saved. Four checks either way. The page's controls carry test ids for it (`ai-tab-…`, `ai-generate-list`, `-prompt`, `-submit`, `-result`, `-field-…`, `-save`, `-save-error`); the suite runs in CI after "AI activity filters".
+
+Measured:
+- Before (batch 19's build, lane 6): without a model 3 of 4, with one 1 of 4 — the page had no handle to reach Generate by, so nothing was asked and nothing offered.
+- After (lane 7): 4 of 4 with the model stub, and 4 of 4 without one.
+
+Checks (`ai-generate-fields`, 4): "the fixture is made: …"; with a model "Generate offers a box for the project’s field and the chosen list’s, each filled with the model’s suggestion, and none for the field scoped to the other list", "and the model is asked about those two fields only: …", "and saving makes the task in the chosen list holding those two values, …"; without one "Generate says AI is not configured, and draws no answer to fill", "and the route refuses the ask, 503, …", "and nothing is saved into the chosen list, and no field box is drawn (read by SQL)".
+- Patches `ai-generate-fields-1` (every field of the project offered; only where a model answers) and `-2` (a refusal not said; only where none does) redden them: 1 of 4 on lane 5, with the model stub, and 3 of 4 on lane 2, without one.
+
+### `found-25-sep/view-only-individual-permissions` — **closed** (parity, medium; found closing `guest-guard-reads-the-account-role`; was not counted, a feature) · reproduced 8 October
 
 **ClickUp's four individual permissions for view-only members and guests are not built**
 
@@ -10599,6 +10608,235 @@ Here:
 - Build the four switches per person, with ClickUp's defaults, on the member's row of the workspace's people settings.
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The four per-person switches are unbuilt. Measured defaults: time tracking matches ClickUp and tags match ClickUp. Time estimates are refused where ClickUp allows them. View-only members and guests can create shared views, which ClickUp's default does not allow. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/readers-change-shared-views`. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October* (lane 7), on the owner's word of 8 October. ClickUp (help centre, "Manage individual permissions for view only users", through search excerpts, 8 October): four switches govern view-only members and guests alike — time estimates and time tracking, on by default; adding or removing tags and creating views, off by default — and an owner or admin sets each per person on the Manage people page. Built so:
+- each workspace member carries the four, at ClickUp's defaults (migration `0176_view_only_permissions`); the People list answers them (`viewOnlyPermissions`), and `PATCH /workspaces/:id/members/:userId/view-only-permissions` sets any of them, asking `members.role.change` (an admin's by default) and the role change's rank rule; a name that is no switch, a value that is not true or false, or nothing at all is refused 400 in words, and each change is in the audit log ("View-only permissions changed: timeTracking off, …");
+- a switch is asked only where the person's level on the task or list is View (`viewOnlyMay`); at Comment and above the level's own rule decides, as before, and a manager is never narrowed;
+- a time estimate alone (`PATCH /tasks/:id`), a tag put on or taken off (one at a time, or tags alone in the bulk editor), a timer or a logged entry (`assertMayTrackTime`) and a private view (`ViewsService.create`) each ask their switch there, and are refused 403 in its words ("You can only view here, and your workspace has not allowed you to …"); a view everybody shares still asks the list's level;
+- the task's capabilities carry `estimate`, `tags` and `track`, and the list's `privateViews`: the sheet offers the estimate, the tags and the timer and manual entry only as they allow, saying where time tracking is off, and the list page's + View makes a view of one's own where only that is allowed;
+- the People tab offers each member's and guest's four switches, as a popover on their row, to those who may change roles (none on a manager's row). Four locales.
+`view-writes-by-level` turns Create views on for its view-only member and guest while it measures their own views, and off again for its page.
+
+Measured on lane 7 with `view-only-permissions`, a workspace of the run's own (a member, a guest, a manager; a View only space with its list shared with the guest at View, and a Comment space):
+- Before (batch 19's build, lane 6): 2 of 13 — no switches stored and no route to set one (404); at View an estimate refused for the level (403), a timer and a logged entry made, a tag refused for the level, and a view of one's own made (201) by both.
+- After: 13 of 13.
+
+Checks (`view-only-permissions`, 13): "the People list answers each member’s and guest’s view-only permissions at ClickUp’s defaults — …", "the member, who only views, sets a time estimate and tracks time — …" and the guest's, "an admin turns the member’s time estimates and time tracking off and tags and views on: …", "then the member is refused a time estimate, a timer and a logged entry in the switches’ words (403), …", "the API says what each may do there, by their own switches: …", "a switch is asked only where the person only views: at Comment …", "only those who may change roles set them: …", "the member’s sheet offers no Start timer and no manual entry, …", "the member’s list page offers + View, and pressing it makes a view of their own (private), …", "the People tab offers the admin each member’s and guest’s view-only permissions and a manager’s none, …", "and the member’s sheet follows: …", "and a timer the member starts from it runs, read back by SQL". Unit: `assertTaskWritable`'s and `assertMayTrackTime`'s switches at View and not at Comment (`task-write.test.ts`), and `readViewOnlyChange` (`view-only.test.ts`).
+- Patches `vop-1` to `vop-11` (the API) and `vop-w1` to `vop-w5` (the web) redden their checks: 9, 10, 10, 10, 10, 12, 8, 8, 9, 11 and 9 of 13 on lane 1, and 12, 12, 12, 12 and 10 of 13 on lane 2; re-aimed for the new lines: `vwl-2`, `vwl-6`, `vwl-8`, `vwl-10`, `list-save-view-1`, `tsc-1` and `lpl-33`, each reddening its check again: 18, 18, 19 and 19 of 20, 5 of 7, 1 of 5 and 7 of 10 (`csr-1`, `csr-13` and `lpl-33` rewritten where the compile refused a literal).
+
+### `ledger-rows/section3-team-analytics` — **closed** (feature, medium; was not counted, a feature) · reproduced 8 October
+
+**§3 'Team analytics' is held only because 'she never opens it', and a suite enforces its absence**
+
+*Evidence:* reaudit.md:892-893: 'the frames list the tab, nothing is behind it, she never opens it. Guarded against by teams-destination.mjs'. teams-destination.mjs:16, :212-235 asserts Analytics must NOT appear. workspace-teams-page.tsx:22-24 and :218-224 give tabs teams/people/chart only. Under the new policy this is an unbuilt feature, and building it will redden teams-destination.mjs by design. Parts that exist: reports workload and activity endpoints, and the time-entries and people modules.
+
+*To close:* Research ClickUp Teams Hub Analytics and build it over the existing reports aggregators. Replace the absence check in teams-destination.mjs with a check of the new tab. Record the row in §2 so it is counted.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The Teams hub has All Teams, All People and Org Chart but no Analytics tab, and teams-destination asserts that absence; the tab is unbuilt. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October* (lane 7), on the owner's word of 8 October. ClickUp's Teams hub has Analytics (formerly Pulse; help centre "View analytics for your organization" and its feedback board, through search excerpts, 8 October): each member's online status and activity, the tasks they viewed — task views are logged — and their most-viewed tasks, a roll-up by team, and the Lineup, a task landing in somebody's priority queue; a period moved by arrows; a name searched; a ClickApp an owner or admin turns on, open to everyone but guests or to owners and admins only, set on the page; never to guests. Built so:
+- the Teams hub's fourth tab, Analytics (`TeamsAnalytics`): a row a member — never a guest — with their status, last activity, activity, task views, Lineup and three most-viewed tasks, and a card a team summing its members'; arrows and a 1, 7 or 30 day period; a name search; for those who may manage ClickApps, the audience and Turn off;
+- a ClickApp, `teams.analytics`, off until turned on, in Settings › ClickApps or from the tab, by those who hold `workspace.clickapps.manage`; while it is off the tab says so, and offers the switch only to them;
+- `GET /workspaces/:id/analytics?from=&to=` (the last seven days unless said; a period ending before it begins, or past 92 days, refused 400 in words): a guest refused 403, a member refused 403 where the audience is owners and admins ("Analytics is open to this workspace's owners and admins only"); `PATCH …/analytics/settings` sets the audience (migration `0177_team_analytics`);
+- task views are logged when a task's sheet opens (`POST /tasks/:id/viewed`, behind the read rule; one a person a task in five minutes, `task_view_events`); activity is the person's entries in the tasks' activity log; the Lineup is the tasks put on their Personal Priorities in the period;
+- a person's most-viewed tasks are named only where the READER may open them (`taskReadFilterFor`): a view of a private task is counted for whoever reads, and named to those who may open it.
+`teams-destination` asserted Analytics' absence; it now finds the frame's four tabs, and Analytics, opened by a member while it is off, saying so with no switch.
+
+Measured on lane 7 with `teams-analytics`, a workspace of the run's own (the admin, two members in a team, a guest; an open list of two tasks and a private list with one):
+- Before (batch 20's build): 0 of 12 — `GET …/analytics` 404, the ClickApp unknown (400), no task view kept anywhere; `teams-destination` 12 of 14, three tabs.
+- After: 12 of 12; `teams-destination` 14 of 14.
+
+Checks (`teams-analytics`, 12): "Analytics is off until turned on: …", "a task opened twice in five minutes is one view, …", "turned on, it answers a member each person’s task views, their activity and their Lineup in the period, …", "it lists the workspace’s members and not its guest", "a person’s most-viewed tasks are named only where the reader may open them: …", "and the team rolls its two members up: …", "a view counts in its own period: …", "set to owners and admins only — …", "opening a task’s sheet logs one view of it, read by SQL", "the Analytics tab draws a row a member — not the guest — …", "the arrows move the period — …", "the admin’s audience is saved from the page and a member opening Analytics then reads why not; …"; `teams-destination` "there are the frame’s four destinations: …" (was: exactly three) and "and Analytics, opened by a member while its ClickApp is off, says so and offers them no switch" (was: Analytics is not among them). Unit: `readAnalyticsRange` (`team-analytics.service.test.ts`).
+- Patches `tan-1` to `tan-10` (the API) and `tan-w1` to `tan-w5` (the web) redden their checks: 11, 10, 10, 11, 9, 9, 10, 11, 11 and 11 of 12 on lane 1, and 9, 11, 11, 11 and 11 of 12 on lane 2; `td-2` re-aimed to a dead fifth tab, 13 of 14.
+
+### `ledger-rows/row-1962` — **closed** (feature, medium; was not counted, a feature) · reproduced 8 October
+
+**Calendar Automations (which tasks sync, to which calendar) — held by §3 parking, which is a 'walkthrough never explains' reason**
+
+*Evidence:* reaudit.md:1962-1991 (P, 'contested' against §3). planner-settings-dialog.tsx:66-73 parks Automations because 'the explanation was never given'. Yet frame 14:32 draws the page: the 'Sync ClickUp tasks to Google Calendar' card, the empty state 'Pick a list, folder, or space…' and '+ Add sync'. calendar-sync.service.ts:71-101: pushTask sends every due-dated, non-archived task to every connection, with no scope table and no off switch.
+
+*To close:* Research ClickUp's Calendar Automations. Add a sync-rule table (scope = list/folder/space, target calendar), make pushTask read it, and add the Automations settings page. The default becomes 'nothing is syncing', as the frame shows.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Calendar Automations is not built: there is no sync-rule storage and no settings page, and on lane 4 every task with a due date is pushed to every calendar connection in its workspace, whatever list it is in. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/calendar-push-ignores-who-may-read`. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October* (lane 7), on the owner's word of 8 October. ClickUp's help centre ("Google Calendar integration", through search excerpts, 8 October): "Sync tasks to calendar" draws tasks from a Space, Folder, Subfolder or List into a calendar of one's own — tasks cannot be synced to a shared calendar, and nobody else in a workspace reaches a person's calendar through the integration — all the tasks there or only those assigned to you; a task needs a start or a due date to be on the calendar, a date with no time is a day's event, a due date alone begins an hour before it, and the sync runs one way. Frame `14:32` draws the planner's Automations page: "Sync ClickUp tasks to Google Calendar", "Pick a list, folder, or space…", "+ Add sync". Built so:
+- a person's syncs (`calendar_sync_rules`, migration `0178_calendar_sync_rules`): a space, folder, project or list they may open, one of their own connected calendars (`user_calendar_accounts`), and all the tasks there or only theirs. `GET`/`POST /workspaces/:id/calendar-sync/rules`, `DELETE …/rules/:ruleId`, and `GET …/places`: the spaces, folders, projects and lists they may open, in the sidebar's order, which the page offers and a new sync is checked against. A place they may not open is refused 403, saying so; one that is not there is 404; a colleague's calendar is not found; the same place twice to one calendar is 409; and each person is shown their own syncs alone;
+- the push (`CalendarSyncRulesService.syncTask`, behind `CalendarSyncService.pushTask`): a task goes to the calendar of every sync of its list, project, folder or space whose owner may open it now — the read rule and the membership, asked at every push (`calendar-owner.ts`, the one statement of it, which a task's Google Meet and Zoom still ask) — and, where the sync takes only its owner's tasks, to whom it is assigned. Its event is the task's name, its description as text with the way back to the task, at ClickUp's times; the event it became (`calendar_sync_events`) is changed rather than written twice, and nothing is written when nothing it shows has changed. It comes off when the task is archived, its dates are cleared, it is moved out, unassigned from a sync of only its owner's, no longer its owner's to open — their access gone, or they have left — or the sync is removed. A new sync writes the tasks already there; one calendar's writes go one at a time;
+- every task write that changes an event pushes it: a task made with a start or due date; a change of its name, description, dates or their times, of whether it is archived, or of its list; a move; an assignment either way; a restore, from Archived or from the Trash;
+- NOTHING SYNCS UNTIL A SYNC IS ADDED. The workspace's connected calendars take no task: every dated task of the workspace was written into every one of them, with no table saying where and no switch to stop it. The App Center's calendar panel says where tasks are synced now (four locales);
+- the planner's settings have the Automations page (`planner-sync-page.tsx`, `/calendar?settings=automations`): the syncs, each naming its place, its calendar and which tasks, with Remove; + Add sync, with the place, the calendar and All tasks or Only tasks assigned to me; and with no calendar connected, the way to Accounts. Four locales.
+
+Measured on lane 7:
+- Before (batch 21's build): `calendar-sync-rules` 0 of 12 — the routes answered 404, and the push wrote to the workspace's connected Google Calendar ("gcal:No access token for gcal") — `calendar-push-reach` 0 of 10 (its pushes stage syncs now, and there was no table for them), `planner-settings` 18 of 20 (the nav's six pages, and their order).
+- After: 12 of 12, 10 of 10 and 20 of 20; beside them, all passing: connected-calendars 11, calendar-accounts 37, calendar-pull-access 3, meetings-connect-calendar 6, personal-calendar-connect 6, planner-blocks 19, people-calendar-access 8, planner-upcoming-meeting 8, rail-reorder 13, planner-onboarding 12, trash-rules 4.
+
+Checks (`calendar-sync-rules`, 12): "nothing syncs until a sync is added: …", "the member adds a sync of a folder on the Automations page — …", "the tasks already in the folder are written to that calendar once the sync is made: …", "a task made there afterwards with a due day and no time is that day’s event", "renaming a task and moving its due time changes its event — …", "a task in a place no sync holds is not written; …", "a task whose due date is cleared comes off the calendar, and so does an archived one", "a sync of only the tasks assigned to its owner takes a task once they are assigned it, and gives it up when they are not", "a sync takes only what its owner may open: …", "a place the member may not open is refused, saying so — …", "removing the sync on the page takes its events off the calendar, …", "once the member has left the workspace their sync writes nothing more — …". `calendar-push-reach`'s four push checks stage a sync for the keeper and one for the admin and ask the same rule of each; `planner-settings` "the nav offers exactly the six pages that do something", and their order with Automations last. Unit: `calendar-sync-rules.service.test.ts`, 15 (when an event is, what it shows, which calendars a task goes to); `calendar-sync.service.test.ts`'s push test asks the syncs.
+- Patches `csr-1` to `csr-15` (the API), `csr-w1` to `csr-w5` (the web) and the unit claims `csr-16` and `csr-17` redden their checks: 10, 10, 11, 10, 11, 11, 11, 7, 11, 10, 10, 10, 10, 11 and 11 of 12 on lane 1, and 2, 3, 6, 10 and 11 of 12 on lane 2; the unit claims redden their tests; `cpr-1`, `cpr-2`, `cpr-3` and `cpr-7` re-aimed at `calendar-owner.ts` and at the push checks' new words, 6, 7, 6 and 9 of 10; `planner-settings-1` at the nav's six, 18 of 20.
+
+### `ledger-rows/row-1904` — **closed** (feature, medium; was not counted, a feature) · reproduced 8 October
+
+**Planner 'Sync now' — absent, and the service header claims a scheduler that does not exist**
+
+*Evidence:* reaudit.md:1904-1927 (M). No RefreshCw, sync or pullEvents in workspace-planner-page.tsx. pullEvents' only caller is calendar-sync.controller.ts:108. There is no @Cron or @Interval in the calendar-sync module. calendar-sync.service.ts:25 says 'a manual or scheduled pullEvents call'.
+
+*To close:* Add a sync button in the planner header that calls pullEvents for the user's connections, and either add a scheduled pull or correct the comment.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The planner still has no 'Sync now' control and nothing schedules a pull. The stale comment that claimed a scheduler has already been corrected. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October* (lane 7), on the owner's word of 8 October. Frame `14:36` draws the planner's top-right cluster with a circular-arrows refresh beside the ⚙, and the planner had none: an event added in a calendar after the week was drawn stayed off it, and a synced task's event deleted or changed in the calendar stayed so until the task itself changed. ClickUp's calendar reads its connected calendars and writes the tasks synced to them, and its 2025 calendar has a resync control (through search excerpts; its help centre does not name it). Built on `ledger-rows/row-1962`'s syncs:
+- the planner's header has **Sync now** (`planner-sync-now`, beside the ⚙, four locales): it reads the person's calendars' events again, so what was added there is drawn, and `POST /workspaces/:id/calendar-sync/sync-now` writes their syncs through again into their own calendars and no one else's — every task their syncs hold and every task with an event in their calendars, each event written whether or not it looks changed, so an event deleted there is written again and one changed there is put back as the task says, and what no sync holds any more comes off. It answers how many tasks it went through and what it wrote, and the page says so, naming any the calendar refused.
+- the scheduler the service's header once claimed: that comment was corrected before the triage, and none is needed for the planner, which reads a person's calendars each time it draws the week and on Sync now. The App Center's pull into an inbox list is pressed there, by those who manage integrations, as before.
+
+Measured on lane 7:
+- Before (batch 22's build): `planner-sync-now` 0 of 5 — no button; an event added after the week was drawn was not drawn; a deleted or renamed event stayed so; a task never pushed was not written.
+- After: 5 of 5; `calendar-sync-rules` 12 of 12 and `calendar-push-reach` 10 of 10 beside it.
+
+Checks (`planner-sync-now`, 5): "the planner’s header has Sync now beside its settings, as frame 14:36 draws its circular arrows beside the ⚙", "an event added to the member’s calendar after the planner drew the week is drawn once Sync now is pressed", "Sync now writes a synced task’s event again where it was deleted from the member’s calendar, and puts back as the task says one the calendar changed", "and it writes a task the sync holds that was never pushed — made by an import, not through the product", "Sync now writes only the presser’s calendars: …". Unit: `calendar-sync-rules.service.test.ts` "Sync now writes only the calendars it is given, each event whether or not it looks changed".
+- Patches `psn-1` to `psn-3` (the API), `psn-w1` and `psn-w2` (the web) and the unit claim `psn-4` redden their checks: 3, 4 and 3 of 5 on lane 1, and 1 and 4 of 5 on lane 2; the unit claim reddens its test.
+
+### `resume-defects/s4-clip-link` — **closed** (feature, large; was not counted, a feature) · reproduced 8 October
+
+**Section 4: 'A pasted clip link renders as the clip' is still unbuilt. There is no clips table, no per-clip route and no paste handling**
+
+*Evidence:* No clips table: I grepped packages/db/src/schema for a pgTable named with 'clip', and packages/db/src/migrations for CREATE TABLE with clip, and found nothing. A clip is a storage object. clips.service.ts:21-23 builds the prefix `workspaces/<id>/clips/`, :37 builds the key, and :50-80 lists the clips by listing storage objects, using the storage key as `id` and title and duration from object metadata. The routes are only the library /app/$workspaceId/clips (routeTree.gen.ts:419-423, 591); there is no per-clip route. For paste handling, the comment composer has no onPaste or unfurl: grep of apps/web/src finds unfurl only in chat (chat-message-body.tsx:124-169, 315-328), which unfurls task URLs and OG metadata, not clips. Copy link signs the storage object (clip-publish.ts:111-117), so a pasted link carries no clip identity and no title. The ledger entry is docs/video2-reaudit.md:1307-1330 (status M), with the row at 1532. ClickUp research: clip URLs are stable, unguessable public links (see resume-7).
+
+*To close:* The order is forced. First, a `clips` table (id, workspace_id, storage_key unique, title, duration_seconds, created_by, share_token, created_at), backfilled from the existing storage prefix, with list() reading the table. Second, a stable app route that resolves a token to a freshly signed playback URL, shared with resume-7. Third, paste handling in the comment composer (and chat) that recognises the route, stores a clip reference on the comment rather than a bare URL, and renders the existing comment-video card (task-detail-sheet.tsx:5732-5770) with its processing state. Checks: paste a copied clip link and assert the card shows the clip's title and plays; paste a foreign URL and assert it stays a link. Break patches: the route ignores the token; the paste handler falls back to plain text.
+
+
+*Update, 30 September:* the per-clip route this row says is missing now exists, from `resume-defects/resume-7`. `/clips/<token>` and `GET /public/clips/:token` give a clip's title, length, a playable URL and who it opens for, and that is what a pasted link would read to render the clip. What is still missing is the paste itself, turning a clip link into the clip in a description, a comment or a doc, and the clips table that `clip_links` would join or be absorbed into.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Still unbuilt: a pasted /clips/<token> link stays a bare URL in the composer, is stored as plain text, and renders as plain text with no player and no title, although the per-clip route and public endpoint now exist. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/comment-links-not-links`. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October* (lane 7), on the owner's word of 8 October, with `ledger-rows/row-1307`. ClickUp embeds a clip's link where it is shared: "Clip links auto-embed in Chat for instant viewing", and a clip embedded in a task's description plays there (its help centre, through search excerpts). The pieces this item waited on are built: a clip's stable link and its identity are `clip_links` (`resume-defects/resume-7`), a token per clip that `/clips/<token>` and `GET /public/clips/:token` resolve, signing the clip again on every view, which is the identity a `clips` table was to give. What was left was the paste. Built so:
+- `clip-links.ts` reads the clips a piece of text links to: this site's own `/clips/<token>` (an absolute address on this origin, or the path alone), a token of the shape `ClipsService` makes (24 random bytes, base64url) and nothing else, each once, in order, at most three; the same path on another site is somebody else's page and stays a link;
+- `ClipEmbed` draws each under the text as the clip — its title, a player and its length, and the link to its own page — from what the link itself opens (`GET /public/clips/:token`), so it opens for exactly whom the link opens: anyone where its workspace allows public links, its members where it does not. A clip the reader may not watch, or a deleted one, is said in words (four locales), not drawn as a player that fails; a signature that lapses under an open card is asked for again once;
+- under a chat message (not in the edit history), a task's comment, a reply and a thread's root and replies, and a task's description — drawn outside the area that opens the description's editor, so pressing play plays.
+
+Measured on lane 7 with `clip-link-embeds`, two workspaces of the run's own (one as every workspace starts, one keeping its links to its members) and three clips uploaded as the app uploads one (presign, then a PUT to the lane's store):
+- Before (batch 23's bundle): 1 of 6 — the link drawn as a bare address everywhere; only "the same path on another site stays a link" passed.
+- After: 6 of 6.
+
+Checks (`clip-link-embeds`, 6): "a clip’s link posted in a chat channel is drawn as the clip under the message: its title, its length, and a player whose address plays from the store", "and the same link in a task’s comment is drawn as the clip under the comment", "the same path on another site stays a link and is drawn as no clip, nor is an address of another shape", "and in a task’s description, drawn under it — pressing its player plays it and opens no editor", "a clip its link does not open for the reader — one its workspace keeps to its members, read by somebody who is not one — is said, not drawn as a player, while the open workspace’s clip plays for them", "a deleted clip’s link is said to be unavailable, not drawn as a player that fails". Unit: `clip-links.test.ts`, 3.
+- Patches `cme-w1` to `cme-w9` (the web) and the unit claims `cme-10` to `cme-12` redden their checks: 3, 5, 5, 5, 5, 5, 4, 5 and 4 of 6 on lane 7; the unit claims redden their tests.
+
+### `ledger-rows/row-1307` — **closed** (feature, large; was not counted, a feature) · reproduced 8 October
+
+**A pasted clip link renders as a player — absent**
+
+*Evidence:* reaudit.md:1307-1322 (M); resume.md:258-262. There is no onPaste or unfurl handling in task-detail-sheet.tsx. clips.controller.ts:10-37 has only GET list, POST presign and POST share. There is no clips table in packages/db/src/schema, so a link carries no clip identity. resume §3.7: Copy link expires in 24h and says nothing.
+
+*To close:* Add a clips record plus a stable app route first, then paste detection that renders the clip card/player in comments.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). A pasted clip link posts as plain text with no player. The stable /clips/<token> link the item needed first now exists; detecting the pasted link and drawing a player are what remain. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October*, with `resume-defects/s4-clip-link`, which says how: a clip's link pasted into a chat message, a comment or a task's description is drawn under it as the clip — its title, a player and its length — for exactly whom the link opens, and said in words where it does not open, or the clip is gone. `clip-link-embeds` 1 of 6 before, 6 of 6 after (lane 7).
+
+### `commit-log/log-716d25c-1` — **closed** (feature, medium; was not counted, a decision) · reproduced 8 October
+
+**'+ Add a new section' in Calendar settings › Sidebar is not built**
+
+*Evidence:* Commits 716d25c and 41f0ec5, and ledger row 835: 'blocked rather than pending ... what a NEW section would contain is a decision no frame makes'. git grep for 'add a new section', 'newSection' and 'customSection' in apps/web/src finds no such control. The rail sections are the fixed list in planner-settings-dialog.tsx.
+
+*To close:* Research how ClickUp's Planner or Calendar sidebar custom sections work: their name and the rule for what falls into them. Build storage for them, show them in the rail, and add checks.
+
+*Researched, 29 September* (help centre, through search excerpts). Not settled:
+- The help centre documents the Planner sidebar's categories as fixed: Priorities, Assigned to me, Today & overdue, and Backlog. Backlog alone is configured (a List and filters). "Meet with" is a people search. Categories collapse and expand, and the whole sidebar hides. Planner settings have no Sidebar page ("Appearance, Accounts, Upcoming meetings, Time blocking, and AI Notetaker").
+- The "+ Add a new section" the frame shows has no documented counterpart for the Planner or Calendar. The nearest is ClickUp 4.0's Home Sidebar custom sections: made with + › Section, named with an optional emoji, filled by hand (spaces, lists, tasks, docs, channels), each item in one section at a time, reordered in Customize › Sections, deleted without deleting what they hold.
+- The Planner's help pages are moving under "Calendar" names, so the docs may lag the app. What a new Calendar section would hold stays a decision for the owner: hand-picked tasks, as the Home Sidebar does, or a filter, as Backlog does.
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). '+ Add a new section' is not built. The Sidebar page offers the five fixed sections with show, hide and reorder. It cannot be built until the owner decides what a new section holds: hand-picked tasks or a filter. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October* (lane 7), on the owner's word of 8 October, with `ledger-rows/row-835`. No frame says what a new section holds, and ClickUp's Planner and Calendar pages do not either (its help centre, through search excerpts, 8 October: the Planner's sidebar categories are fixed). ClickUp's own custom sections are the Home Sidebar's: made with + › Section, a name and an optional emoji; items put in through the section's + and a search, or from an item's menu; each item in one section at a time; dragged among the sidebar's sections in Customize › Sections; and deleted without deleting what they hold. Built so, for the planner's rail:
+- a person's own sections, in one workspace (`planner_rail_sections`, migration `0179_planner_rail_sections`): `GET`/`POST /planner/:ws/sections`, `PATCH`/`DELETE …/sections/:id`, and `POST`/`DELETE …/sections/:id/tasks[/:taskId]`. A section is its maker's: every route asks for the caller's own in the workspace named, and a colleague's is not found (404). A name is 1 to 60 characters, an emoji one emoji or none; twenty sections a workspace, a hundred tasks a section;
+- a task goes in only when its putter may open it — refused as the read is refused, 403 with the reason, and 404 from another workspace — and not archived nor in the trash, saying which; put in another of their sections, it moves (`planner_rail_section_tasks`, one row a person a task); the rail lists only what they may still open, not archived nor in the trash;
+- the Sidebar page's "+ Add a new section" (an emoji and a name), its rows dragged among the five like them, and deleted rather than hidden (Trash); a new one joins at the foot of the rail. `railSections` names them as `section:<id>`, each the person's own — another's refused 400 — and an order saved from one workspace keeps the other workspaces' sections where they stood (`mergeRailOrder`); deleting one takes it out of the order and leaves its tasks as they were;
+- the rail draws each under its emoji and name: its tasks, each picked up and dropped on the grid as Backlog's are to block time for it, a ✕ to take one out, and a + that searches the tasks the person may open (`useTaskSearch`). Four locales.
+
+Measured with `planner-rail-sections`, a newcomer's rail in two workspaces of the run's own, a colleague, and a private list the newcomer is not in:
+- Before (lane 6, the main tree): 0 of 11 — no "+ Add a new section", and every route 404.
+- After (lane 7): 11 of 11; `rail-reorder` 13, `planner-settings` 20, `planner-rail` 10 and `planner-grid` 23, all passing.
+
+Checks (`planner-rail-sections`, 11): "“+ Add a new section” makes a section with its name and emoji: …", "its + finds a task by its title and puts it in: …", "a task is in one of a person’s sections at a time: …", "dragged above Priorities on the Sidebar page, it is first in the rail, and the order is kept", "an order saved from the other workspace keeps this one’s section where it stood, …", "a section is its maker’s: …", "a task goes in only when its putter may open it — …", "an archived task drops off its section, and one in the trash is not put in, saying so", "a name past 60 characters, a blank one, and words for an emoji are refused, and nothing is made", "a task in one’s own section is picked up and dropped on the grid as Backlog’s are, …", "deleting a section takes it off the rail and out of the order, …". Unit: `planner-sections.service.test.ts`, 3.
+- Patches `prs-1` to `prs-10` (the API), `prs-w1` to `prs-w7` (the web) and the unit claims `prs-11` to `prs-13` redden their checks: 7, 10, 8, 10, 10, 10, 10, 10, 10 and 10 of 11, and 3, 10, 5, 10, 9, 10 and 10 of 11, on lane 7; the unit claims redden their tests.
+
+### `ledger-rows/row-835` — **closed** (feature, medium; was not counted, a decision) · reproduced 8 October
+
+**Planner sidebar '+ Add a new section' — absent, held only because no frame says what a new section contains**
+
+*Evidence:* reaudit.md:835 (P): 'blocked rather than pending … what no frame supplies is what a NEW section would contain'. planner-settings-dialog.tsx:233-246 fixes RAIL_SECTIONS at five; :618-630 renders show/hide/reorder over them and has no add control. Parts that exist: the `railSections` planner setting, and saved-filter storage in packages/db/src/schema/list-filter-presets.ts and saved-searches.ts.
+
+*To close:* Research how ClickUp's planner sidebar 'Add a new section' works (custom section contents and rule). Store custom sections next to railSections and render them in the planner rail.
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). The planner rail has five fixed sections and no add control; the server refuses any other name. What a custom section would hold is still the owner's choice, and the gap is also open as commit-log/log-716d25c-1. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October*, with `commit-log/log-716d25c-1`, which says how: the planner's Sidebar page has "+ Add a new section", and a section of one's own holds the tasks put in it, as ClickUp's Home Sidebar sections do — placed among the five, one section at a time, deleted without touching its tasks, and its maker's alone. `planner-rail-sections` 0 of 11 before, 11 of 11 after.
+
+### `commit-log/log-601eacc-1` — **closed** (feature, medium; was not counted, a feature) · reproduced 8 October
+
+**The cover picker's Search tab is still absent because no photo provider is configured**
+
+*Evidence:* Commits 601eacc, 39863ff, 2ae54b4 and 716d25c keep the tab absent. cover-image-picker.tsx:23-53 says 'SEARCH IS DELIBERATELY ABSENT ... if a photo provider is ever configured'. Ledger row 739 is P. 'No credential configured' is the same kind of reason that went stale twice in this window: storage, fixed by s3-stub, and the model, fixed by model-stub.
+
+*To close:* Research ClickUp's cover Search (it searches a stock-photo library). Add a provider behind an environment variable, give the lanes a stub for it the way s3-stub works, and build a Search tab that really searches, with checks and break patches.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The cover picker has no Search tab, and no photo provider, environment variable or lane stub exists; task-cover on lane 6 passes 42/42, asserting that the tab is absent. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October* (lane 8), on the owner's word of 8 October, with `ledger-rows/row-739`. ClickUp's covers have "Search images", a large library of free stock photos, beside Gallery, Upload and Link (its help centre, through search excerpts, 8 October; it does not name the library). The library here is Unsplash's: the API asks it at UNSPLASH_API_URL with UNSPLASH_ACCESS_KEY, and a server with no key says photo search is not set up there (503) rather than drawing a box that finds nothing. Built so:
+- `photo-library.ts`, the client: a page of photos for some words (landscape first, as a cover is), each with its renditions, its photographer and its page; Unsplash's terms kept — a photo shown from the address Unsplash gives, never copied; the photographer and Unsplash credited with links carrying the app's referral; and a photo put to use reported at its download endpoint;
+- `GET /workspaces/:ws/cover-photos?q=&page=` and `POST …/cover-photos/:photoId/use`, for the workspace's members (`WorkspaceMemberGuard`; an outsider is told the workspace is not there): a blank search, one past a hundred characters, a page past fifty and a photo id of another shape refused 400; the library's rate limit said as too many searches (429), any other failure as a library that did not answer (502);
+- the cover picker's fifth tab, Search, between Link and Attachments, ClickUp's order (`cover-photo-search.tsx`): a search per pause in the typing, twenty-four photos a page and "More photos", each credited "Photo by … on Unsplash" with both as links, and one chosen is the cover's link; no photos, a library that failed and one not set up are each said. Four locales;
+- the lanes and CI ask `scripts/e2e-lanes/media-stub.mjs`, Unsplash's shapes over a fixed library (lane k on 95k, CI's 9500): the key checked, pages, words, the download counted, and a failure staged by the suite. `check-media-stub.mjs` drives the product's own client against it, 11 cases, and each of its 8 mutations of the stub reddens one (preflight, and CI's verify job).
+`task-cover` held the tab's absence; it now asks for ClickUp's five tabs in its order.
+
+Measured with `cover-photo-search`, a workspace and a task of the run's own:
+- Before (lane 2, the main tree, with the stub started on its port): 0 of 8 — no Search tab, and the route 404.
+- After (lane 8): 8 of 8, and 8 of 8 on lane 5 once in the main tree, where `task-cover` passes 42 of 42 with its five tabs and `loading-states` 26 of 26.
+
+Checks (`cover-photo-search`, 8): "the cover picker has a Search tab, which asks what to search Unsplash’s library of free photos for", "“mountain” draws the library’s first page of mountain photos — …", "“More photos” adds the second page — …", "choosing one makes it the task’s cover — …", "words no photo holds say there are no photos for them, and draw none", "a library that fails is said to have not answered, and its rate limit as too many searches — never an empty grid", "and the next search, the library answering again, draws its photos", "the library is searched for the workspace’s own members; …". Unit: `cover-photos.controller.test.ts`, 4.
+- Patches `cph-1` to `cph-7` (the API), `cph-w1` to `cph-w6` (the web) and the unit claims `cph-8` to `cph-10` redden their checks: 1, 7, 6, 7, 7, 7 and 7 of 8, and 1, 7, 6, 7, 7 and 7 of 8, on lane 8; the unit claims redden their tests.
+
+### `ledger-rows/row-739` — **closed** (feature, medium; was not counted, a decision) · reproduced 8 October
+
+**Cover 'Search' tab — absent; the reason (no image provider) still holds**
+
+*Evidence:* reaudit.md:739 (P). cover-image-picker.tsx:20-58 records the decision and the grep. Re-running `grep -rliE "unsplash|pexels|pixabay|imageProvider" apps packages .env.example` finds only cover-image-picker.tsx. The frame does draw the tab, so this is not a 'no frame' block: it needs an external provider.
+
+*To close:* Research which photo provider ClickUp's Search tab uses (believed to be Unsplash; the research lens should confirm) and add a server-side proxy with a key. Add a harness stub like s3-stub.mjs/model-stub.mjs so it can be measured. Needs the owner's decision to take a key.
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). The cover picker has 4 of ClickUp's 5 tabs; Search is missing. It is waiting on the owner to choose a photo provider and take a key. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October*, with `commit-log/log-601eacc-1`, which says how: the cover picker's Search tab searches Unsplash's library of free photos (the lanes' and CI's stub of it), each credited, and one chosen is the cover; with no key it says photo search is not set up. `cover-photo-search` 0 of 8 before, 8 of 8 after.
+
+### `ledger-rows/row-870` — **closed** (feature, large; was not counted, a decision) · reproduced 8 October
+
+**Image generation — absent; needs an image-capable provider**
+
+*Evidence:* reaudit.md:870 (M). A grep for generateImage|image generation|dall-e|imagen|gpt-image in apps/api/src and apps/web/src finds only comments (ai-value-panel.tsx:29). ai-categories.ts:42-45 records images as having no code path. The only model client is Anthropic, which outputs no images.
+
+*To close:* Needs the owner's choice of image provider plus a harness stub. After that, a tool in COMMAND_TOOLS and the 'images' category becomes countable.
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Image generation is unbuilt and is waiting on the owner to choose an image provider. Until then the AI value report shows images as unsupported. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 8 October* (lane 9), on the owner's word of 8 October, which is the choice of provider this waited on. ClickUp's AI makes images in three places (its help centre, "Generate images with Brain AI", through search excerpts, 8 October): the AI button of a task's comment box, the AI button of a Chat or DM message field, and the Ask button at the top of the workspace, through Brain's Generate image — up to ten for a prompt; the pictures are kept, varied or asked again. Built so:
+- a provider of its own beside the chat's model, which makes no images: OpenAI's images API, the shape most image services answer, at IMAGES_API_URL (OpenAI's own unless one is given) with IMAGES_API_KEY, else OPENAI_API_KEY, and IMAGES_MODEL (`gpt-image-1` unless one is given) — its own variables, so the embeddings' OPENAI settings are never pointed at an images stub (`image-generation.ts`). With no key, image generation is not set up, and every place that offers it says so (503);
+- `POST /ai/images` (one to four pictures for a prompt, three sizes), refused to a guest as every AI route is, and a blank prompt, five pictures or a size of another shape 400; counted against the hour's AI allowance, and each ask one run of `image.generate`, failed or not — the AI value report's Images generated tile, which said "not available", counts them (`ai-categories.ts`). The service's rate limit is said as too many requests (429), a prompt it would not draw in its words (400), anything else as a service that did not answer (502);
+- `ImageGenerator`: a description, how many, Generate, and the pictures, each chosen or not. In the comment AI panel ("Generate image", beside Summarize and the rest), the chosen ones join the comment as files; in the chat composer's AI popover, the message; in the Ask AI dock (its Generate image, beside the mic, whether a model answers the chat or not), opened by Brain² on a task, the task's files (`lib/task-files.ts`), and opened anywhere else they are downloaded. Four locales;
+- the lanes and CI ask `media-stub.mjs`, which answers the images API with PNGs drawn from the prompt, its key checked and a failure staged by the suite; `check-media-stub.mjs` drives the product's own client against it (16 cases, each of 13 mutations reddening one).
+
+Measured:
+- Before (batch 26's build, lane 8, the stub started on a port of its own): `ai-image-generation` 0 of 7 — no Generate image anywhere, `POST /ai/images` 404, the Images tile "not available" (`aiValue.reasonNoImageGeneration`); `ai-action-categories`, asking for two unfillable tiles and two image runs in Images, 24 of 30.
+- After (lane 9): 7 of 7, then with the dock 9 of 9 (7 of 9 before it, the two dock checks failing); `ai-action-categories` 30 of 30; beside them, all passing: ai-value 23, ai-activity-filters 34, comment-plus-menu 19, brain-entry-points 20, task-ai-bar 19, ai-answer-rendering 52, chat-message-actions 73.
+
+Checks (`ai-image-generation`, 9): "the comment box’s AI makes the pictures asked for — two, as the image service drew them for that description — each shown and chosen", "only the one left chosen is posted on the comment — the first picture, as a PNG of its very bytes, named after its description", "the chat composer’s AI makes a picture too: added, it is attached to the message, and sent with it", "each ask is one run of `image.generate`, and the AI value report counts it under Images generated, a tile it now fills", "a guest is refused as on every AI route, and five pictures, a blank description and a size the service does not draw are refused 400", "the service’s rate limit is said as too many requests (429), its failure as a service that did not answer (502), and each is written down as a failed run", "and the composer says the service did not answer, in its words, and draws no picture", "the Ask AI dock makes pictures too: opened by Brain² on a task, the one made is added to the task’s files, its very bytes", "and opened on no task, its Download saves the picture made — …". `ai-action-categories`: "two are marked as something this product cannot do — the connected apps’ — and Images generated, which image generation fills, is not" (was: three), "and two `image.generate` runs land in Images generated", and the seeds' counts twelve where they were ten. Unit: `image-generation.test.ts`, 4.
+- Patches `aig-1` to `aig-8` (the API) and `aig-w1` to `aig-w8` (the web) redden their checks on lane 9 — `aig-1` five, the others one or two, past the first only checks that stand on what it broke — and the unit claims `aig-9` to `aig-11` their tests; `ac-4` (the seeds now twelve) and `ac-5` (renamed `ac-5-images-look-unsupported`: Images said to be unfillable) re-aimed, 27 and 26 of 30.
+
+## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
+
+Moved here by the triage of 5 October, at the owner's request: these are not open defects and are not in the
+counts. Each says what it is in its heading, with the status it had before. Their full evidence is in
+`docs/triage-2026-10-05.md`.
+
+#### Features and ClickUp gaps — 22
 
 ### `found-24-sep/planner-default-list-read-by-nothing` — feature, not counted (triage, 5 October; was: partly-fixed, small (dead control; found fixing the block prefix))
 
@@ -10732,19 +10970,6 @@ The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the fi
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The rotating placeholder is built. The composer '+' and generated slide decks are unbuilt features, and the credit meter waits on the owner's Credits decision. None of it is a defect. Evidence: `docs/triage-2026-10-05.md`.
 
-### `resume-defects/s4-clip-link` — feature, not counted (triage, 5 October; was: open, large)
-
-**Section 4: 'A pasted clip link renders as the clip' is still unbuilt. There is no clips table, no per-clip route and no paste handling**
-
-*Evidence:* No clips table: I grepped packages/db/src/schema for a pgTable named with 'clip', and packages/db/src/migrations for CREATE TABLE with clip, and found nothing. A clip is a storage object. clips.service.ts:21-23 builds the prefix `workspaces/<id>/clips/`, :37 builds the key, and :50-80 lists the clips by listing storage objects, using the storage key as `id` and title and duration from object metadata. The routes are only the library /app/$workspaceId/clips (routeTree.gen.ts:419-423, 591); there is no per-clip route. For paste handling, the comment composer has no onPaste or unfurl: grep of apps/web/src finds unfurl only in chat (chat-message-body.tsx:124-169, 315-328), which unfurls task URLs and OG metadata, not clips. Copy link signs the storage object (clip-publish.ts:111-117), so a pasted link carries no clip identity and no title. The ledger entry is docs/video2-reaudit.md:1307-1330 (status M), with the row at 1532. ClickUp research: clip URLs are stable, unguessable public links (see resume-7).
-
-*To close:* The order is forced. First, a `clips` table (id, workspace_id, storage_key unique, title, duration_seconds, created_by, share_token, created_at), backfilled from the existing storage prefix, with list() reading the table. Second, a stable app route that resolves a token to a freshly signed playback URL, shared with resume-7. Third, paste handling in the comment composer (and chat) that recognises the route, stores a clip reference on the comment rather than a bare URL, and renders the existing comment-video card (task-detail-sheet.tsx:5732-5770) with its processing state. Checks: paste a copied clip link and assert the card shows the clip's title and plays; paste a foreign URL and assert it stays a link. Break patches: the route ignores the token; the paste handler falls back to plain text.
-
-
-*Update, 30 September:* the per-clip route this row says is missing now exists, from `resume-defects/resume-7`. `/clips/<token>` and `GET /public/clips/:token` give a clip's title, length, a playable URL and who it opens for, and that is what a pasted link would read to render the clip. What is still missing is the paste itself, turning a clip link into the clip in a description, a comment or a doc, and the clips table that `clip_links` would join or be absorbed into.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Still unbuilt: a pasted /clips/<token> link stays a bare URL in the composer, is stored as plain text, and renders as plain text with no player and no title, although the per-clip route and public endpoint now exist. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/comment-links-not-links`. Evidence: `docs/triage-2026-10-05.md`.
-
 ### `resume-defects/s4-composer-email` — feature, not counted (triage, 5 October; was: open, large)
 
 **Section 4: 'The composer posts as Email' is still unbuilt. The mode menu now exists with Email disabled, a suite locks that state in, and the ledger's 'today' text is stale**
@@ -10765,26 +10990,6 @@ The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the fi
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The credit meter, Credits tab, dollar usage-trend chart and metered paywall do not exist. ai_usage and GET /ai/usage serve only totals and per-user, per-model and per-feature splits. Whether to have credits at all still waits on the owner's §3 decision. Evidence: `docs/triage-2026-10-05.md`.
 
-### `commit-log/log-601eacc-1` — feature, not counted (triage, 5 October; was: open, medium)
-
-**The cover picker's Search tab is still absent because no photo provider is configured**
-
-*Evidence:* Commits 601eacc, 39863ff, 2ae54b4 and 716d25c keep the tab absent. cover-image-picker.tsx:23-53 says 'SEARCH IS DELIBERATELY ABSENT ... if a photo provider is ever configured'. Ledger row 739 is P. 'No credential configured' is the same kind of reason that went stale twice in this window: storage, fixed by s3-stub, and the model, fixed by model-stub.
-
-*To close:* Research ClickUp's cover Search (it searches a stock-photo library). Add a provider behind an environment variable, give the lanes a stub for it the way s3-stub works, and build a Search tab that really searches, with checks and break patches.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The cover picker has no Search tab, and no photo provider, environment variable or lane stub exists; task-cover on lane 6 passes 42/42, asserting that the tab is absent. Evidence: `docs/triage-2026-10-05.md`.
-
-### `ledger-rows/row-1962` — feature, not counted (triage, 5 October; was: open, medium)
-
-**Calendar Automations (which tasks sync, to which calendar) — held by §3 parking, which is a 'walkthrough never explains' reason**
-
-*Evidence:* reaudit.md:1962-1991 (P, 'contested' against §3). planner-settings-dialog.tsx:66-73 parks Automations because 'the explanation was never given'. Yet frame 14:32 draws the page: the 'Sync ClickUp tasks to Google Calendar' card, the empty state 'Pick a list, folder, or space…' and '+ Add sync'. calendar-sync.service.ts:71-101: pushTask sends every due-dated, non-archived task to every connection, with no scope table and no off switch.
-
-*To close:* Research ClickUp's Calendar Automations. Add a sync-rule table (scope = list/folder/space, target calendar), make pushTask read it, and add the Automations settings page. The default becomes 'nothing is syncing', as the frame shows.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Calendar Automations is not built: there is no sync-rule storage and no settings page, and on lane 4 every task with a due date is pushed to every calendar connection in its workspace, whatever list it is in. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/calendar-push-ignores-who-may-read`. Evidence: `docs/triage-2026-10-05.md`.
-
 ### `ledger-rows/row-745` — feature, not counted (triage, 5 October; was: open, medium)
 
 **@ picker Brain section and Agents — still absent**
@@ -10804,16 +11009,6 @@ The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the fi
 *To close:* Research ClickUp's limited-uses model for Free-plan features (the allowance and whether it resets). Add a per-workspace per-feature use counter incremented by the guard's allowed path, and render 09:30's state (preview, sentence, one Contact admin button) when the counter is exhausted.
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). There is no metered paywall: a Free workspace is refused a paid feature from the first use, with no use counter and no 'uses have expired' state. Evidence: `docs/triage-2026-10-05.md`.
-
-### `ledger-rows/section3-team-analytics` — feature, not counted (triage, 5 October; was: open, medium)
-
-**§3 'Team analytics' is held only because 'she never opens it', and a suite enforces its absence**
-
-*Evidence:* reaudit.md:892-893: 'the frames list the tab, nothing is behind it, she never opens it. Guarded against by teams-destination.mjs'. teams-destination.mjs:16, :212-235 asserts Analytics must NOT appear. workspace-teams-page.tsx:22-24 and :218-224 give tabs teams/people/chart only. Under the new policy this is an unbuilt feature, and building it will redden teams-destination.mjs by design. Parts that exist: reports workload and activity endpoints, and the time-entries and people modules.
-
-*To close:* Research ClickUp Teams Hub Analytics and build it over the existing reports aggregators. Replace the absence check in teams-destination.mjs with a check of the new tab. Record the row in §2 so it is counted.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The Teams hub has All Teams, All People and Org Chart but no Analytics tab, and teams-destination asserts that absence; the tab is unbuilt. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `harness/ai-rows-blocked-on-empty-key` — feature, not counted (triage, 5 October; was: partly-fixed, large)
 
@@ -10850,16 +11045,6 @@ The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the fi
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Sending a comment as email is unbuilt. The Email mode is drawn disabled with a reason, and there is no channel column, no cc and no send route; send() has had replyTo since resume-8. Evidence: `docs/triage-2026-10-05.md`.
 
-### `ledger-rows/row-1307` — feature, not counted (triage, 5 October; was: open, large)
-
-**A pasted clip link renders as a player — absent**
-
-*Evidence:* reaudit.md:1307-1322 (M); resume.md:258-262. There is no onPaste or unfurl handling in task-detail-sheet.tsx. clips.controller.ts:10-37 has only GET list, POST presign and POST share. There is no clips table in packages/db/src/schema, so a link carries no clip identity. resume §3.7: Copy link expires in 24h and says nothing.
-
-*To close:* Add a clips record plus a stable app route first, then paste detection that renders the clip card/player in comments.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). A pasted clip link posts as plain text with no player. The stable /clips/<token> link the item needed first now exists; detecting the pasted link and drawing a player are what remain. Evidence: `docs/triage-2026-10-05.md`.
-
 ### `ledger-rows/row-2294` — feature, not counted (triage, 5 October; was: open, large)
 
 **The AI acts inside a connected app — absent**
@@ -10889,16 +11074,6 @@ The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the fi
 *To close:* Research how ClickUp's comment composer handles Email and the Create Task split-button menu, build both, then rewrite task-mentions:378-409 to drive the built mode. Re-mark row B* as unbuilt until then.
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Only the Email mode remains, and it is unbuilt and duplicates s4-composer-email. The Create Task ▾ half is built (create-task-chevron 9/9 on lane 1), and task-mentions pinning the disabled Email row is accurate reporting, not a tooling defect. Evidence: `docs/triage-2026-10-05.md`.
-
-### `ledger-rows/row-1904` — feature, not counted (triage, 5 October; was: open, medium)
-
-**Planner 'Sync now' — absent, and the service header claims a scheduler that does not exist**
-
-*Evidence:* reaudit.md:1904-1927 (M). No RefreshCw, sync or pullEvents in workspace-planner-page.tsx. pullEvents' only caller is calendar-sync.controller.ts:108. There is no @Cron or @Interval in the calendar-sync module. calendar-sync.service.ts:25 says 'a manual or scheduled pullEvents call'.
-
-*To close:* Add a sync button in the planner header that calls pullEvents for the user's connections, and either add a scheduled pull or correct the comment.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The planner still has no 'Sync now' control and nothing schedules a pull. The stale comment that claimed a scheduler has already been corrected. Evidence: `docs/triage-2026-10-05.md`.
 
 #### Settled by the owner: reverted or superseded, 5 October — 7
 
@@ -11362,7 +11537,7 @@ reason (`found-30-sep/private-task-reads-say-403`, reverted). This item asked to
 so it no longer describes a defect, and it is not counted. The 400 "Doc belongs to a
 different workspace" could still be reviewed as a tenant-boundary matter of its own.
 
-#### Decisions for the owner — 7
+#### Decisions for the owner — 3
 
 ### `ledger-rows/row-869` — decision, not counted (triage, 5 October; was: open, large)
 
@@ -11373,51 +11548,6 @@ different workspace" could still be reviewed as a tenant-boundary matter of its 
 *To close:* Build the dollar trend chart now: a per-day series from ai_usage. Take the credit unit, allowance and 'Add credits' flow from ClickUp research, and get the owner to reconsider the §3 decision. 'My Agent Performance' waits for Super Agents (row-852).
 
 *Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Credits (the tab, credit table, limit line and Add credits) wait on the owner's §3 decision. The dollar usage-trend chart is an unbuilt feature that can be built now, and My Agent Performance waits for Super Agents. None of it is a defect. Evidence: `docs/triage-2026-10-05.md`.
-
-### `commit-log/log-716d25c-1` — decision, not counted (triage, 5 October; was: open, medium)
-
-**'+ Add a new section' in Calendar settings › Sidebar is not built**
-
-*Evidence:* Commits 716d25c and 41f0ec5, and ledger row 835: 'blocked rather than pending ... what a NEW section would contain is a decision no frame makes'. git grep for 'add a new section', 'newSection' and 'customSection' in apps/web/src finds no such control. The rail sections are the fixed list in planner-settings-dialog.tsx.
-
-*To close:* Research how ClickUp's Planner or Calendar sidebar custom sections work: their name and the rule for what falls into them. Build storage for them, show them in the rail, and add checks.
-
-*Researched, 29 September* (help centre, through search excerpts). Not settled:
-- The help centre documents the Planner sidebar's categories as fixed: Priorities, Assigned to me, Today & overdue, and Backlog. Backlog alone is configured (a List and filters). "Meet with" is a people search. Categories collapse and expand, and the whole sidebar hides. Planner settings have no Sidebar page ("Appearance, Accounts, Upcoming meetings, Time blocking, and AI Notetaker").
-- The "+ Add a new section" the frame shows has no documented counterpart for the Planner or Calendar. The nearest is ClickUp 4.0's Home Sidebar custom sections: made with + › Section, named with an optional emoji, filled by hand (spaces, lists, tasks, docs, channels), each item in one section at a time, reordered in Customize › Sections, deleted without deleting what they hold.
-- The Planner's help pages are moving under "Calendar" names, so the docs may lag the app. What a new Calendar section would hold stays a decision for the owner: hand-picked tasks, as the Home Sidebar does, or a filter, as Backlog does.
-
-*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). '+ Add a new section' is not built. The Sidebar page offers the five fixed sections with show, hide and reorder. It cannot be built until the owner decides what a new section holds: hand-picked tasks or a filter. Evidence: `docs/triage-2026-10-05.md`.
-
-### `ledger-rows/row-835` — decision, not counted (triage, 5 October; was: open, medium)
-
-**Planner sidebar '+ Add a new section' — absent, held only because no frame says what a new section contains**
-
-*Evidence:* reaudit.md:835 (P): 'blocked rather than pending … what no frame supplies is what a NEW section would contain'. planner-settings-dialog.tsx:233-246 fixes RAIL_SECTIONS at five; :618-630 renders show/hide/reorder over them and has no add control. Parts that exist: the `railSections` planner setting, and saved-filter storage in packages/db/src/schema/list-filter-presets.ts and saved-searches.ts.
-
-*To close:* Research how ClickUp's planner sidebar 'Add a new section' works (custom section contents and rule). Store custom sections next to railSections and render them in the planner rail.
-
-*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). The planner rail has five fixed sections and no add control; the server refuses any other name. What a custom section would hold is still the owner's choice, and the gap is also open as commit-log/log-716d25c-1. Evidence: `docs/triage-2026-10-05.md`.
-
-### `ledger-rows/row-870` — decision, not counted (triage, 5 October; was: open, large)
-
-**Image generation — absent; needs an image-capable provider**
-
-*Evidence:* reaudit.md:870 (M). A grep for generateImage|image generation|dall-e|imagen|gpt-image in apps/api/src and apps/web/src finds only comments (ai-value-panel.tsx:29). ai-categories.ts:42-45 records images as having no code path. The only model client is Anthropic, which outputs no images.
-
-*To close:* Needs the owner's choice of image provider plus a harness stub. After that, a tool in COMMAND_TOOLS and the 'images' category becomes countable.
-
-*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Image generation is unbuilt and is waiting on the owner to choose an image provider. Until then the AI value report shows images as unsupported. Evidence: `docs/triage-2026-10-05.md`.
-
-### `ledger-rows/row-739` — decision, not counted (triage, 5 October; was: open, medium)
-
-**Cover 'Search' tab — absent; the reason (no image provider) still holds**
-
-*Evidence:* reaudit.md:739 (P). cover-image-picker.tsx:20-58 records the decision and the grep. Re-running `grep -rliE "unsplash|pexels|pixabay|imageProvider" apps packages .env.example` finds only cover-image-picker.tsx. The frame does draw the tab, so this is not a 'no frame' block: it needs an external provider.
-
-*To close:* Research which photo provider ClickUp's Search tab uses (believed to be Unsplash; the research lens should confirm) and add a server-side proxy with a key. Add a harness stub like s3-stub.mjs/model-stub.mjs so it can be measured. Needs the owner's decision to take a key.
-
-*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). The cover picker has 4 of ClickUp's 5 tabs; Search is missing. It is waiting on the owner to choose a photo provider and take a key. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `commit-log/log-6f62af6-1` — decision, not counted (triage, 5 October; was: partly-fixed, small)
 
