@@ -149,6 +149,7 @@ import {
 import { clipTokensIn } from '../lib/clip-links'
 import { RecurringTaskDialog, type RecurrenceRule } from './recurring-task-dialog'
 import { MoveDialog } from './move-dialog'
+import { TaskListsRow, useTaskLists } from './task-lists-row'
 import { QuickCreateModal } from './quick-create-modal'
 import { Markdown } from './markdown'
 import { formatMentionsPlain } from '../lib/mentions'
@@ -256,6 +257,9 @@ const ACTIVITY_ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
   // §V2-08 — merging leaves an entry on both tasks.
   merged_in: 'taskDetail.activity.mergedIn',
   merged_away: 'taskDetail.activity.mergedAway',
+  // `commit-log/log-713a611-1` — Tasks in Multiple Lists.
+  list_added: 'taskDetail.activity.listAdded',
+  list_removed: 'taskDetail.activity.listRemoved',
 }
 /** Custom-field type identifiers → display labels (the raw type stays canonical). */
 const FIELD_TYPE_LABEL_KEYS: Record<string, TranslationKey> = {
@@ -1123,6 +1127,8 @@ export function TaskDetailSheet({
   const [mergeOpen, setMergeOpen] = useState(false)
   const [watchersOpen, setWatchersOpen] = useState(false)
   const [moveOpen, setMoveOpen] = useState(false)
+  // `commit-log/log-713a611-1` — Add to › Another List, and + beside its lists.
+  const [addListOpen, setAddListOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
   /*
    * §V2-S04 frame `03:40` — the activity feed as a rail rather than a tab.
@@ -1186,6 +1192,7 @@ export function TaskDetailSheet({
     queryKey: ['task', taskId],
     queryFn: () => api<TaskDetail>(`/tasks/${taskId}`),
   })
+  const taskListsQuery = useTaskLists(detailQuery.data?.id)
 
   /*
    * `ledger-rows/row-743` — the shell's AI dock, which the header's Brain²
@@ -2120,9 +2127,11 @@ export function TaskDetailSheet({
                         `ledger-rows/row-845` — ClickUp's "+ Add to". From its
                         help centre: "click Add to, and select Personal
                         Priorities. You can then search or select a user". Its
-                        other entry, "Add to another List", needs a task to live
-                        in two lists, which is `commit-log/log-713a611-1`, and is
-                        not offered until it can be done.
+                        other entry, "Another List", puts the task in a second
+                        list (`commit-log/log-713a611-1`). It is drawn even when
+                        it cannot be used, greyed, with the server's reason under
+                        it: the ClickApp is off, the reader is a guest, or the
+                        task is a subtask.
                       */}
                       <DropdownMenuSub>
                         <DropdownMenuSubTrigger data-testid="task-menu-add-to">
@@ -2140,6 +2149,23 @@ export function TaskDetailSheet({
                           Priorities heading inside Add to.
                         */}
                         <DropdownMenuSubContent className="max-h-80 w-60 overflow-y-auto">
+                          <DropdownMenuItem
+                            data-testid="task-menu-add-to-list"
+                            disabled={!taskListsQuery.data?.canChange}
+                            onSelect={() => setAddListOpen(true)}
+                          >
+                            <ListPlus className="mr-2 h-4 w-4" />
+                            {t('taskDetail.addToList')}
+                          </DropdownMenuItem>
+                          {taskListsQuery.data && !taskListsQuery.data.canChange && taskListsQuery.data.reason && (
+                            <p
+                              data-testid="task-menu-add-to-list-reason"
+                              className="px-2 pb-1 text-[11px] leading-snug text-muted-foreground"
+                            >
+                              {taskListsQuery.data.reason}
+                            </p>
+                          )}
+                          <DropdownMenuSeparator />
                           <DropdownMenuLabel data-testid="task-menu-add-to-priorities" className="text-[11px] text-muted-foreground">
                             {t('planner.personalPriorities')}
                           </DropdownMenuLabel>
@@ -2252,6 +2278,14 @@ export function TaskDetailSheet({
                   mayChange={caps.tags ?? caps.edit}
                 />
               </div>
+              {workspaceId && (
+                <TaskListsRow
+                  taskId={detailQuery.data.id}
+                  workspaceId={workspaceId}
+                  data={taskListsQuery.data}
+                  onAdd={() => setAddListOpen(true)}
+                />
+              )}
             </SheetHeader>
 
             {/* Tab strip */}
@@ -2407,7 +2441,20 @@ export function TaskDetailSheet({
             kind="task"
             itemId={detailQuery.data.id}
             itemName={detailQuery.data.title}
-            onMoved={() => { void qc.invalidateQueries({ queryKey: ['task', taskId] }); void qc.invalidateQueries({ queryKey: ['tasks'] }) }}
+            onMoved={() => { void qc.invalidateQueries({ queryKey: ['task', taskId] }); void qc.invalidateQueries({ queryKey: ['tasks'] }); void qc.invalidateQueries({ queryKey: ['task-lists', taskId] }) }}
+          />
+        )}
+        {detailQuery.data && workspaceId && (
+          <MoveDialog
+            mode="add"
+            open={addListOpen}
+            onOpenChange={setAddListOpen}
+            workspaceId={workspaceId}
+            kind="task"
+            itemId={detailQuery.data.id}
+            itemName={detailQuery.data.title}
+            excludeListIds={[detailQuery.data.listId, ...(taskListsQuery.data?.lists ?? []).map((l) => l.id)]}
+            onMoved={() => { void qc.invalidateQueries({ queryKey: ['task-lists', taskId] }); void qc.invalidateQueries({ queryKey: ['tasks'] }) }}
           />
         )}
         <Dialog open={watchersOpen} onOpenChange={setWatchersOpen}>

@@ -248,6 +248,12 @@ type TaskItem = {
   coverUrl?: string | null
   coverColor?: string | null
   coverOffsetY?: number | null
+  /**
+   * `commit-log/log-713a611-1` — a task added to this list from another: its
+   * home list, which its row names, as ClickUp marks a task that lives
+   * elsewhere. Absent for a task whose home this list is.
+   */
+  addedFrom?: { id: string; name: string } | null
 }
 
 /**
@@ -4638,6 +4644,16 @@ function TaskRow({
             >
               <MapPin className="h-2.5 w-2.5" aria-hidden />
               <span className="max-w-[16rem] truncate">{notes.location.get(task.id)}</span>
+            </span>
+          )}
+          {task.addedFrom && (
+            <span
+              data-testid={`task-row-home-list-${task.id}`}
+              title={t('list.homeListChip', { name: task.addedFrom.name })}
+              className="inline-flex shrink-0 items-center gap-1 rounded border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+            >
+              <Layers className="h-2.5 w-2.5" aria-hidden />
+              <span className="max-w-[16rem] truncate">{t('list.homeListChip', { name: task.addedFrom.name })}</span>
             </span>
           )}
           {hasSubtasks && (

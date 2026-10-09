@@ -670,10 +670,12 @@ const CLICKAPPS: { flag: FlagKey; nameKey: TranslationKey; descKey: TranslationK
   { flag: FLAGS.TEAMS_ANALYTICS, nameKey: 'teams.tabAnalytics', descKey: 'settings.featDescAnalytics' },
   // ClickUp's Email ClickApp: a task's comment box sends email, off until turned on (`resume-defects/s4-composer-email`).
   { flag: FLAGS.TASK_EMAIL, nameKey: 'settings.featTaskEmail', descKey: 'settings.featDescTaskEmail' },
+  // `commit-log/log-713a611-1` — ClickUp's Tasks in Multiple Lists, off until an owner or admin turns it on.
+  { flag: FLAGS.TASKS_IN_MULTIPLE_LISTS, nameKey: 'settings.featTasksInMultipleLists', descKey: 'settings.featDescTasksInMultipleLists' },
 ]
 
 /** ClickApps a workspace starts without, as ClickUp's Pulse and Email are (`ledger-rows/section3-team-analytics`, `resume-defects/s4-composer-email`). */
-const OFF_UNTIL_TURNED_ON: FlagKey[] = [FLAGS.TEAMS_ANALYTICS, FLAGS.TASK_EMAIL]
+const OFF_UNTIL_TURNED_ON: FlagKey[] = [FLAGS.TEAMS_ANALYTICS, FLAGS.TASK_EMAIL, FLAGS.TASKS_IN_MULTIPLE_LISTS]
 
 function FeaturesTab({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation()
@@ -705,7 +707,7 @@ function FeaturesTab({ workspaceId }: { workspaceId: string }) {
 
   // "On unless explicitly disabled" — matches the nav gate and backend defaults —
   // but for a ClickApp that is off until turned on, which the server reads as
-  // off unless a row says on (`isEnabled`): Analytics (`TEAMS_ANALYTICS`) and Email (`TASK_EMAIL`).
+  // off unless a row says on (`isEnabled`): Analytics (`TEAMS_ANALYTICS`), Email (`TASK_EMAIL`) and Tasks in Multiple Lists.
   const isOn = (flag: FlagKey) => (OFF_UNTIL_TURNED_ON.includes(flag) ? flags?.[flag] === true : flags?.[flag] !== false)
 
   return (

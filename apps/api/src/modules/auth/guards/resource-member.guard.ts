@@ -17,6 +17,7 @@ import {
 } from '../../../common/permissions/container-access.guard-helper'
 import { canSeePrivateItem, isManagerRole } from '../../../common/permissions/item-visibility'
 import { guestMayRead } from '../../../common/permissions/guest-reach'
+import { readsThroughAddedList } from '../../../common/permissions/read-access'
 import { isUuid } from '../../../common/validation/uuid'
 
 // Per-item (list/task) privacy resolved alongside the container chain so the
@@ -74,6 +75,8 @@ export class ResourceMemberGuard implements CanActivate {
       .limit(1)
     if (!member) throw new ForbiddenException('You are not a member of this workspace')
 
+    // What the resource's place says, refused in the words of the first that refuses.
+    let refusal: string | null = null
     // Private-container enforcement: a workspace member still needs container
     // membership to reach a private space/project. Public containers pass.
     if (container) {
@@ -81,29 +84,41 @@ export class ResourceMemberGuard implements CanActivate {
         userId: user.id,
         workspaceRole: member.role as string,
       })
-      if (!ok) throw new ForbiddenException('This space or project is private')
+      if (!ok) refusal = 'This space or project is private'
     }
 
     // A guest reads what is shared with them, and sees the containers on the
     // way to it (`guest-reach.ts`): nothing else in the workspace is theirs.
-    if (member.role === 'guest' && resolved.guestTarget) {
+    if (!refusal && member.role === 'guest' && resolved.guestTarget) {
       const { kind, id } = resolved.guestTarget
-      if (!(await guestMayRead(this.db, user.id, kind, id))) throw new ForbiddenException('This is not shared with you')
+      if (!(await guestMayRead(this.db, user.id, kind, id))) refusal = 'This is not shared with you'
     }
 
     // Per-item privacy (§2): a private list, or a private/foreign task, is only
     // reachable by its creator, a task assignee, or a workspace manager/admin.
+    const isManager = isManagerRole(member.role as string)
+    if (
+      !refusal &&
+      item?.listVisibility !== undefined &&
+      !canSeePrivateItem(
+        { visibility: item.listVisibility, createdById: item.listCreatedById, personalOf: item.listPersonalOf },
+        { userId: user.id, isManager },
+      )
+    ) {
+      refusal = 'This list is private'
+    }
+
+    // A task is also where it was added (`readsThroughAddedList`): read there by whoever may read that list.
+    if (
+      refusal &&
+      resolved.guestTarget?.kind === 'task' &&
+      (await readsThroughAddedList(this.db, workspaceId, resolved.guestTarget.id, { id: user.id, role: member.role as string }))
+    ) {
+      refusal = null
+    }
+    if (refusal) throw new ForbiddenException(refusal)
+
     if (item) {
-      const isManager = isManagerRole(member.role as string)
-      if (
-        item.listVisibility !== undefined &&
-        !canSeePrivateItem(
-          { visibility: item.listVisibility, createdById: item.listCreatedById, personalOf: item.listPersonalOf },
-          { userId: user.id, isManager },
-        )
-      ) {
-        throw new ForbiddenException('This list is private')
-      }
       if (
         item.taskVisibility !== undefined &&
         !canSeePrivateItem(

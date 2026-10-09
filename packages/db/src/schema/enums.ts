@@ -80,6 +80,9 @@ export const activityActionEnum = pgEnum('activity_action', [
   // archived page with no explanation.
   'merged_in',
   'merged_away',
+  // `commit-log/log-713a611-1` — a task added to another list, or taken out of one (Tasks in Multiple Lists).
+  'list_added',
+  'list_removed',
 ])
 
 export const dependencyTypeEnum = pgEnum('dependency_type', [

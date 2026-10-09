@@ -1,6 +1,6 @@
 import { Injectable, Inject, ForbiddenException, BadRequestException } from '@nestjs/common'
-import { and, eq, gte, isNull, or, sql } from 'drizzle-orm'
-import { featureFlagRequests, featureFlags, workspaceMembers } from '@rundesk/db'
+import { and, eq, gte, inArray, isNull, or, sql } from 'drizzle-orm'
+import { featureFlagRequests, featureFlags, lists, projects, spaces, taskLists, workspaceMembers } from '@rundesk/db'
 import { DEFAULT_ENABLED_FLAGS, FLAGS } from '@rundesk/feature-flags'
 import type { FlagKey, FlagResolutionContext, ResolvedFlags } from '@rundesk/feature-flags'
 import type { Db } from '@rundesk/db'
@@ -243,6 +243,25 @@ export class FeatureFlagsService {
         await tx.insert(featureFlags).values({
           flagKey, scope, scopeId, workspaceId: workspaceId ?? undefined, enabled, updatedBy,
         })
+      }
+      /*
+       * TASKS IN MULTIPLE LISTS, TURNED OFF, takes every task out of the lists it
+       * was added to, as ClickUp's does — "this cannot be undone"
+       * (`commit-log/log-713a611-1`). Left in place, the workspace's lists would
+       * go on drawing tasks the ClickApp no longer puts there.
+       */
+      if (!enabled && scope === 'workspace' && workspaceId && flagKey === FLAGS.TASKS_IN_MULTIPLE_LISTS) {
+        await tx.delete(taskLists).where(
+          inArray(
+            taskLists.listId,
+            tx
+              .select({ id: lists.id })
+              .from(lists)
+              .innerJoin(projects, eq(projects.id, lists.projectId))
+              .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+              .where(eq(spaces.workspaceId, workspaceId)),
+          ),
+        )
       }
     })
     this.invalidateForFlagChange(scope, scopeId, workspaceId)

@@ -16,6 +16,7 @@ import {
   taskDependencies,
   taskComments,
   taskCommentEmails,
+  taskLists,
   taskDescriptionRevisions,
   taskTimeBlocks,
   reminders,
@@ -97,7 +98,7 @@ import {
 } from '../../common/permissions/item-visibility'
 import { PUBLIC_USER_COLUMNS, PUBLIC_USER_WITH } from '../../common/permissions/public-user'
 import { canReadDoc, hiddenDocIds } from '../../common/permissions/doc-access'
-import { READ_REFUSALS, readableTask, readableTaskIds } from '../../common/permissions/read-access'
+import { READ_REFUSALS, readableTask, readableTaskIds, readsThroughAddedList } from '../../common/permissions/read-access'
 import { listVisibilityFilter } from '../../common/permissions/item-visibility'
 import { safeFetch } from '../../common/http/safe-fetch'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
@@ -181,6 +182,9 @@ type ActivityAction =
   // who opens the old task sees it archived with no explanation.
   | 'merged_in'
   | 'merged_away'
+  // `commit-log/log-713a611-1` — added to another list, or taken out of one.
+  | 'list_added'
+  | 'list_removed'
 
 type DependencyType = 'blocks' | 'blocked_by' | 'related_to'
 
@@ -675,6 +679,11 @@ export class TasksService {
     return entry
   }
 
+  /** The task's activity, written for this module's other services (a task added to a list, `TaskListsService`). */
+  async logTaskActivity(params: { taskId: string; actorId?: string | null; action: ActivityAction; meta?: Record<string, unknown> }) {
+    return this.logActivity(params)
+  }
+
   /** A task in the bin is not an editable task (`assertTaskNotInBin`, where the reason is written). */
   private assertNotInBin(isArchived: boolean | null | undefined) {
     assertTaskNotInBin(isArchived)
@@ -762,11 +771,33 @@ export class TasksService {
       .where(eq(tasks.id, taskId))
       .limit(1)
     if (!ctx) throw new NotFoundException('Task not found')
-    const access = await this.assertContainerReadAccess(ctx, actorId)
+    /*
+     * WHERE IT LIVES, OR WHERE IT WAS ADDED (`commit-log/log-713a611-1`). Its
+     * home list's container, a guest's reach and the home list's own privacy
+     * are asked first; one that refuses is let go when the reader may read a
+     * list the task was added to (`readsThroughAddedList`), as ClickUp shows a
+     * task in each of its lists to that list's people. A private task is asked
+     * after, wherever the task is.
+     */
+    let throughAdded: boolean | null = null
+    const addedLetsIn = async () => (throughAdded ??= await readsThroughAddedList(this.db, ctx.workspaceId, taskId, { id: actorId }))
+    let access: Awaited<ReturnType<typeof this.assertContainerReadAccess<typeof ctx>>>
+    try {
+      access = await this.assertContainerReadAccess(ctx, actorId)
+    } catch (err) {
+      if (!(err instanceof ForbiddenException) || !(await addedLetsIn())) throw err
+      const [member] = await this.db
+        .select({ role: workspaceMembers.role })
+        .from(workspaceMembers)
+        .where(and(eq(workspaceMembers.workspaceId, ctx.workspaceId), eq(workspaceMembers.userId, actorId)))
+        .limit(1)
+      access = { ...ctx, workspaceRole: (member?.role ?? 'member') as string, superAdmin: false }
+    }
     // A super_admin opens every private list and task, as the read rule lets them (below).
     if (access.superAdmin) return access
+    const isManager = isManagerRole(access.workspaceRole)
     // A guest reads only the tasks in their reach (`guest-reach.ts`), assigned or not.
-    if (access.workspaceRole === 'guest' && !(await guestMayRead(this.db, actorId, 'task', taskId))) {
+    if (access.workspaceRole === 'guest' && !(await guestMayRead(this.db, actorId, 'task', taskId)) && !(await addedLetsIn())) {
       throw new ForbiddenException('This task is not shared with you')
     }
     /*
@@ -777,29 +808,29 @@ export class TasksService {
      * a parent, a dependency, a follower, a saved comment — said yes for a
      * private one the task's own GET refuses.
      */
-    if (ctx.listVisibility === 'private' || ctx.taskVisibility === 'private') {
-      const isManager = isManagerRole(access.workspaceRole)
-      if (!canSeePrivateItem({ visibility: ctx.listVisibility, createdById: ctx.listCreatedById, personalOf: ctx.listPersonalOf }, { userId: actorId, isManager })) {
-        throw new ForbiddenException('This list is private')
-      }
-      if (ctx.taskVisibility === 'private') {
-        // `asAssignee`: the question is whether they could see it ONCE
-        // assigned — see assertPersonCanSeeTask.
-        const [assigned] = opts.asAssignee
-          ? [{ userId: actorId }]
-          : await this.db
-              .select({ userId: taskAssignees.userId })
-              .from(taskAssignees)
-              .where(and(eq(taskAssignees.taskId, taskId), eq(taskAssignees.userId, actorId)))
-              .limit(1)
-        if (
-          !canSeePrivateItem(
-            { visibility: ctx.taskVisibility, createdById: ctx.createdById },
-            { userId: actorId, isManager, isAssignee: Boolean(assigned) },
-          )
-        ) {
-          throw new ForbiddenException('This task is private')
-        }
+    if (
+      !canSeePrivateItem({ visibility: ctx.listVisibility, createdById: ctx.listCreatedById, personalOf: ctx.listPersonalOf }, { userId: actorId, isManager }) &&
+      !(await addedLetsIn())
+    ) {
+      throw new ForbiddenException('This list is private')
+    }
+    if (ctx.taskVisibility === 'private') {
+      // `asAssignee`: the question is whether they could see it ONCE
+      // assigned — see assertPersonCanSeeTask.
+      const [assigned] = opts.asAssignee
+        ? [{ userId: actorId }]
+        : await this.db
+            .select({ userId: taskAssignees.userId })
+            .from(taskAssignees)
+            .where(and(eq(taskAssignees.taskId, taskId), eq(taskAssignees.userId, actorId)))
+            .limit(1)
+      if (
+        !canSeePrivateItem(
+          { visibility: ctx.taskVisibility, createdById: ctx.createdById },
+          { userId: actorId, isManager, isAssignee: Boolean(assigned) },
+        )
+      ) {
+        throw new ForbiddenException('This task is private')
       }
     }
     return access
@@ -2808,7 +2839,13 @@ export class TasksService {
     const visFilter = await this.taskVisibilityFilterForList(listId, actor)
     const rows = await this.db.query.tasks.findMany({
       where: and(
-        eq(tasks.listId, listId),
+        /*
+         * THE LIST'S OWN TASKS, AND THE ONES ADDED TO IT (`commit-log/log-713a611-1`):
+         * ClickUp's Tasks in Multiple Lists draws a task in every list it is in,
+         * the same task — so this list's views (list, board, table, calendar,
+         * all from this read) draw them as its own, and say where each lives.
+         */
+        or(eq(tasks.listId, listId), inArray(tasks.id, this.db.select({ id: taskLists.taskId }).from(taskLists).where(eq(taskLists.listId, listId)))),
         includeSubtasks ? undefined : isNull(tasks.parentTaskId),
         /*
          * A bare `undefined` sat here and `includeArchived` was destructured
@@ -2970,17 +3007,57 @@ export class TasksService {
      * its reader at Edit, in a list they may only view, drew no date box and took
      * no drag, while `PATCH /tasks/:id` took the change.
      */
-    const mayEdit = actor && rows.length > 0 ? await this.listRowsEditable(listId, rows, actor.id) : null
+    const ownRows = rows.filter((r) => r.listId === listId)
+    const addedRows = rows.filter((r) => r.listId !== listId)
+    const mayEdit = actor && ownRows.length > 0 ? await this.listRowsEditable(listId, ownRows, actor.id) : null
+    // A task added here is changed by the rules of where it lives, as its own sheet asks them.
+    const mayEditAdded = actor && addedRows.length > 0 ? await this.rowsEditableWhereTheyLive(addedRows, actor.id) : null
+    // And says where that is: its home list, by the name its readers know it by.
+    const homeNames = addedRows.length
+      ? new Map(
+          (await this.db
+            .select({ id: lists.id, name: lists.name, personalOf: lists.personalOf })
+            .from(lists)
+            .where(inArray(lists.id, [...new Set(addedRows.map((r) => r.listId))]))
+          ).map((l) => [l.id, l.personalOf ? 'Personal List' : l.name]),
+        )
+      : null
 
-    return rows.map((r) => ({
-      ...r,
-      labels: byTask.get(r.id) ?? [],
-      openBlockerCount: openBlockerCount.get(r.id) ?? 0,
-      blocksOpenCount: blocksOpenCount.get(r.id) ?? 0,
-      blockedBy: [...(blockedBy.get(r.id) ?? [])],
-      coverUrl: coverUrlByTask.get(r.id) ?? null,
-      ...(mayEdit ? { mayEdit: mayEdit(r) } : {}),
-    }))
+    return rows.map((r) => {
+      const added = r.listId !== listId
+      const editable = added ? mayEditAdded : mayEdit
+      return {
+        ...r,
+        labels: byTask.get(r.id) ?? [],
+        openBlockerCount: openBlockerCount.get(r.id) ?? 0,
+        blocksOpenCount: blocksOpenCount.get(r.id) ?? 0,
+        blockedBy: [...(blockedBy.get(r.id) ?? [])],
+        coverUrl: coverUrlByTask.get(r.id) ?? null,
+        ...(editable ? { mayEdit: editable(r) } : {}),
+        ...(added ? { addedFrom: { id: r.listId, name: homeNames?.get(r.listId) ?? null } } : {}),
+      }
+    })
+  }
+
+  /** `timelineEditable` for rows of several lists: each row's own list, project, folder and space. */
+  private async rowsEditableWhereTheyLive(rows: Array<{ id: string; listId: string }>, actorId: string) {
+    const homes = await this.db
+      .select({ listId: lists.id, workspaceId: spaces.workspaceId, spaceId: spaces.id, projectId: projects.id, folderId: projects.folderId })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(inArray(lists.id, [...new Set(rows.map((r) => r.listId))]))
+    const at = new Map(homes.map((h) => [h.listId, h]))
+    const workspaceId = homes[0]?.workspaceId
+    if (!workspaceId) return null
+    return this.timelineEditable(
+      workspaceId,
+      rows.flatMap((r) => {
+        const h = at.get(r.listId)
+        return h ? [{ id: r.id, listId: r.listId, projectId: h.projectId, spaceId: h.spaceId, folderId: h.folderId }] : []
+      }),
+      actorId,
+    )
   }
 
   /** `timelineEditable` for one list's rows: the list's project, folder and space, read once. */
@@ -4867,10 +4944,14 @@ export class TasksService {
 
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
-    await this.db
-      .update(tasks)
-      .set({ listId: targetListId, position, updatedAt: new Date() })
-      .where(eq(tasks.id, taskId))
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(tasks)
+        .set({ listId: targetListId, position, updatedAt: new Date() })
+        .where(eq(tasks.id, taskId))
+      // Moved into a list it was added to: its home now, and no longer one it was added to (`commit-log/log-713a611-1`).
+      await tx.delete(taskLists).where(and(eq(taskLists.taskId, taskId), eq(taskLists.listId, targetListId)))
+    })
     await this.logActivity({
       taskId,
       actorId,

@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNull, or, type SQL } from 'drizzle-orm'
-import { goals, lists, projects, spaces, sprints, taskAssignees, tasks, workspaceMembers } from '@rundesk/db'
+import { goals, lists, projects, spaces, sprints, taskAssignees, taskLists, tasks, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { isUuid } from '../validation/uuid'
 import { checkContainerAccess, spaceVisibilityFilter, taskInReachFilter } from './container-access.guard-helper'
@@ -177,18 +177,22 @@ export async function taskReadAnswer(
   if (actor.role === 'super_admin') return { found }
   const role = await workspaceRole(db, workspaceId, actor.id)
   if (!role) return { refused: READ_REFUSALS.notMember }
-  const inContainer = await checkContainerAccess(
+  const isManager = isManagerRole(role)
+  // What its home list says: its container, a guest's reach, and the list's own privacy.
+  const homeRefusal = !(await checkContainerAccess(
     db,
     { spaceId: row.spaceId, spaceVisibility: row.spaceVisibility, projectId: row.projectId, projectVisibility: row.projectVisibility },
     { userId: actor.id, workspaceRole: role },
-  )
-  if (!inContainer) return { refused: READ_REFUSALS.privateContainer }
-  // A guest reads only the tasks in their reach (`guest-reach.ts`).
-  if (role === 'guest' && !(await guestMayRead(db, actor.id, 'task', row.taskId))) return { refused: READ_REFUSALS.notShared }
-  const isManager = isManagerRole(role)
-  if (!canSeePrivateItem({ visibility: row.listVisibility, createdById: row.listCreatedById, personalOf: row.listPersonalOf }, { userId: actor.id, isManager })) {
-    return { refused: READ_REFUSALS.privateList }
-  }
+  ))
+    ? READ_REFUSALS.privateContainer
+    // A guest reads only the tasks in their reach (`guest-reach.ts`).
+    : role === 'guest' && !(await guestMayRead(db, actor.id, 'task', row.taskId))
+      ? READ_REFUSALS.notShared
+      : !canSeePrivateItem({ visibility: row.listVisibility, createdById: row.listCreatedById, personalOf: row.listPersonalOf }, { userId: actor.id, isManager })
+        ? READ_REFUSALS.privateList
+        : null
+  // Read where it lives, or in a list it was added to (`readsThroughAddedList`).
+  if (homeRefusal && !(await readsThroughAddedList(db, workspaceId, taskId, actor))) return { refused: homeRefusal }
   if (row.taskVisibility === 'private' && !isManager && row.taskCreatedById !== actor.id && !opts.asAssignee) {
     const [assigned] = await db
       .select({ userId: taskAssignees.userId })
@@ -201,6 +205,24 @@ export async function taskReadAnswer(
     )) return { refused: READ_REFUSALS.privateTask }
   }
   return { found }
+}
+
+/**
+ * WHETHER `actor` READS THE TASK IN A LIST IT WAS ADDED TO (`commit-log/log-713a611-1`).
+ * ClickUp's Tasks in Multiple Lists: a task shows in each of its lists to
+ * whoever may see that list — "access rights don't travel with the task", so
+ * one added to a second list is read there by that list's people, though its
+ * home list's container, or its home list itself, is closed to them. Asked
+ * only where the home list refused: a private TASK stays its creator's, its
+ * assignees' and the managers' wherever it is (the callers ask that after).
+ */
+export async function readsThroughAddedList(db: Db, workspaceId: string, taskId: string, actor: ReadActor): Promise<boolean> {
+  if (!isUuid(taskId)) return false
+  const added = await db.select({ listId: taskLists.listId }).from(taskLists).where(eq(taskLists.taskId, taskId))
+  for (const { listId } of added) {
+    if (await readableList(db, workspaceId, listId, actor)) return true
+  }
+  return false
 }
 
 /**

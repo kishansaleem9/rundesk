@@ -48,6 +48,8 @@ export function MoveDialog({
   currentSpaceId,
   currentParentId,
   onMoved,
+  mode = 'move',
+  excludeListIds,
 }: {
   open: boolean
   onOpenChange: (next: boolean) => void
@@ -60,6 +62,13 @@ export function MoveDialog({
   /** Folder (for a project) or project (for a list) it currently sits in. */
   currentParentId?: string | null
   onMoved?: () => void
+  /**
+   * `add` — Add to › Another List (`commit-log/log-713a611-1`): the same picker,
+   * and the task goes into the list chosen as well as staying where it is.
+   */
+  mode?: 'move' | 'add'
+  /** Lists not offered: the task's own, home and added, when adding it to another. */
+  excludeListIds?: string[]
 }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -105,10 +114,14 @@ export function MoveDialog({
         }
       }
     }
-    if (kind === 'task') return out
+    if (kind === 'task') {
+      if (mode !== 'add' || !excludeListIds?.length) return out
+      const skip = new Set(excludeListIds)
+      return out.filter((r) => !(r.kind === 'list' && skip.has(r.id)))
+    }
     // A list can only land in a project, so bare spaces are not selectable there.
     return kind === 'list' ? out.filter((r) => r.kind === 'project' || sp2HasProjects(spaces, r)) : out
-  }, [targetsQuery.data, kind])
+  }, [targetsQuery.data, kind, mode, excludeListIds])
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase()
@@ -142,14 +155,17 @@ export function MoveDialog({
           body: dest.kind === 'folder' ? { spaceId: dest.spaceId, folderId: dest.id } : { spaceId: dest.id, folderId: null },
         })
       }
+      if (kind === 'task' && mode === 'add') {
+        return api(`/tasks/${itemId}/lists`, { method: 'POST', body: { listId: dest.id } })
+      }
       if (kind === 'task') {
         return api(`/tasks/${itemId}/move`, { method: 'POST', body: { listId: dest.id } })
       }
       return api(`/lists/${itemId}/move`, { method: 'POST', body: { projectId: dest.id } })
     },
     onSuccess: () => {
-      toast.success(t('move.moved'))
-      for (const key of ['spaces', 'space-tree', 'projects', 'folders', 'lists', 'move-targets']) {
+      toast.success(t(mode === 'add' ? 'move.addedToList' : 'move.moved'))
+      for (const key of ['spaces', 'space-tree', 'projects', 'folders', 'lists', 'move-targets', 'task-lists', 'tasks']) {
         qc.invalidateQueries({ queryKey: [key] })
       }
       onOpenChange(false)
@@ -173,7 +189,7 @@ export function MoveDialog({
   })
 
   const titleKey =
-    kind === 'folder' ? 'move.titleFolder' : kind === 'project' ? 'move.titleProject' : 'move.titleList'
+    mode === 'add' ? 'move.titleAddToList' : kind === 'folder' ? 'move.titleFolder' : kind === 'project' ? 'move.titleProject' : 'move.titleList'
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

@@ -3,6 +3,8 @@ import { TasksService } from './tasks.service'
 import { TasksController } from './tasks.controller'
 import { TaskCommentsController, SavedCommentsController } from './comments.controller'
 import { CommentEmailService } from './comment-email.service'
+import { TaskListsService } from './task-lists.service'
+import { TaskListsController } from './task-lists.controller'
 import { TaskChecklistsController } from './checklists.controller'
 import { ChecklistTemplatesController } from './checklist-templates.controller'
 import { ChecklistTemplatesService } from './checklist-templates.service'
@@ -45,7 +47,7 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
     // refused by the SERVER for a workspace whose plan does not include them.
     PlansModule,
   ],
-  providers: [TasksService, CommentEmailService, ChecklistTemplatesService, TaskTypesService, WorkspaceMemberGuard],
+  providers: [TasksService, CommentEmailService, TaskListsService, ChecklistTemplatesService, TaskTypesService, WorkspaceMemberGuard],
   controllers: [
     TasksController,
     TaskCommentsController,
@@ -60,6 +62,7 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
     TaskMeetingsController,
     TaskTimeEntriesController,
     TimeEntriesController,
+    TaskListsController,
   ],
   exports: [TasksService],
 })

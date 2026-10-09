@@ -81,6 +81,8 @@ export const FLAGS = {
   TEAMS_ANALYTICS: 'teams.analytics',
   // A task's comment box sends email (ClickUp's Email ClickApp): off until an owner or admin turns it on.
   TASK_EMAIL: 'tasks.email',
+  // A task in more lists than its home one (ClickUp's Tasks in Multiple Lists ClickApp): off until an owner or admin turns it on.
+  TASKS_IN_MULTIPLE_LISTS: 'tasks.multiple_lists',
   // Reporting
   REPORTING: 'reporting',
   REPORTING_PRODUCTIVITY: 'reporting.productivity',
