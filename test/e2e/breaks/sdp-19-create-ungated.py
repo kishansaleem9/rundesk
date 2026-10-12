@@ -9,6 +9,17 @@
 #   "and it says WHY, in the same words the rename refusal uses"
 #   "and no list was actually written — the refusal was not cosmetic"
 #   "and \"Comment\" refuses it too — the rung below `edit`, not only the bottom one"
+#   or "the member cannot move their own list into a project in the view-only space"
+#   or "nor into a private project they are not in, even in a space they may add to"
+#   or "while moving it into another project they may add to still works"
+#   or "nor their own project into the view-only space"
+#   or "while moving it into another space they may add to works"
+#   or "nor their own folder into the view-only space"
+#   or "while moving the folder into another space they may add to works"
+#   or "nor apply a template into the view-only space — nothing is created there"
+#   or "and a list template cannot be applied into a project in the view-only space either"
+#
+# Re-aimed 9 October: the last 9 of these are knock-ons of the same edit, measured on lane 9 — checks that stand on what the first ones lost.
 import io
 p = '/home/user/rundesk/apps/api/src/common/permissions/container-access.ts'
 a = "  await assertSpaceLevel(db, {\n    spaceId: params.spaceId,\n    actorId: params.actorId,\n    required: 'admin',\n    kind: params.kind,\n    within: params.within,\n    act: 'adding a',\n  })"

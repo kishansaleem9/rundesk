@@ -86,6 +86,36 @@ export class IntegrationConnectionsController {
     return this.svc.getOAuthStartUrl(workspaceId, user.id, provider)
   }
 
+  /*
+   * ONE PERSON'S OWN SEARCH SOURCE (`found-23-sep/connected-search-per-person`):
+   * ClickUp's personal Connected Search — Google Drive, Gmail or SharePoint,
+   * connected by anybody but a guest for themselves, searched by them alone.
+   * No key asked: it is the person's own account, as their calendar is.
+   */
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, WorkspaceMemberGuard)
+  @Post('workspaces/:workspaceId/search/connect/:provider')
+  @ApiOperation({ summary: "Create an OAuth authorization URL for one person's own search source" })
+  personalSearchStart(
+    @Param('workspaceId') workspaceId: string,
+    @Param('provider') provider: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.svc.getOAuthStartUrl(workspaceId, user.id, provider, { personal: true })
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, WorkspaceMemberGuard)
+  @Delete('workspaces/:workspaceId/search/connections/:provider')
+  @ApiOperation({ summary: "Disconnect one person's own search source" })
+  personalSearchDisconnect(
+    @Param('workspaceId') workspaceId: string,
+    @Param('provider') provider: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.svc.disconnectPersonalSearch(workspaceId, user.id, provider)
+  }
+
   /**
    * §V2-14 — a person connects their OWN calendar, from the planner (its
    * onboarding and its Accounts page). Asked of membership alone, guests
@@ -129,7 +159,7 @@ export class IntegrationConnectionsController {
       const result = await this.svc.handleOAuthCallback(provider, code, state, ip)
       return reply.redirect(
         result.personal
-          ? this.svc.getPersonalRedirect(result.workspaceId)
+          ? this.svc.getPersonalRedirect(result.workspaceId, undefined, result.provider)
           : this.svc.getSuccessRedirect(result.workspaceId, result.provider),
         302,
       )
@@ -149,7 +179,7 @@ export class IntegrationConnectionsController {
       // A personal grant's failure is said on the person's own Accounts page;
       // the workspace's calendar card is not theirs to write an error onto.
       if (ctx?.personal) {
-        return reply.redirect(this.svc.getPersonalRedirect(ctx.workspaceId, reason), 302)
+        return reply.redirect(this.svc.getPersonalRedirect(ctx.workspaceId, reason, ctx.provider), 302)
       }
       if (ctx) {
         await this.svc.recordFailure(ctx.workspaceId, ctx.provider, reason).catch(() => undefined)

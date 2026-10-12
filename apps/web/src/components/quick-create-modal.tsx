@@ -520,6 +520,8 @@ const CREATABLE_FIELD_TYPES: Array<{ value: string; labelKey: TranslationKey }> 
   // 0158 — three more of the frame's list; `formula` sits with the derived one.
   { value: 'tasks', labelKey: 'taskDetail.fieldType.tasks' },
   { value: 'signature', labelKey: 'taskDetail.fieldType.signature' },
+  // 0184 — ClickUp's Button: pressed on a task, it runs its automations (`ledger-rows/row-719`).
+  { value: 'button', labelKey: 'taskDetail.fieldType.button' },
   { value: 'progress_auto', labelKey: 'taskDetail.fieldType.progressAuto' },
   { value: 'formula', labelKey: 'taskDetail.fieldType.formula' },
 ]

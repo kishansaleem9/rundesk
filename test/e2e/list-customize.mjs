@@ -695,6 +695,15 @@ try {
    * hold; nothing else about the workspace, the list or the tasks changes.
    */
   await sql`update workspaces set plan = 'free' where id = ${ws}`
+  /*
+   * ITS FREE USES SPENT (`ledger-rows/row-788`). A plan without the board
+   * download has sixty free uses of it, as ClickUp's Free plan has of a paid
+   * view; this workspace has spent them, so the dialog below is the one that
+   * follows them. `ai-credits` asks the uses themselves.
+   */
+  await sql`insert into plan_feature_uses (workspace_id, feature, user_id, day)
+    select ${ws}, f, ${me}, current_date - n
+    from unnest(array['teamView', 'boardExport']::text[]) as f, generate_series(1, 60) as n`
   await openBoard()
 
   console.log('\n▶ frame `11:00` — and on a plan that does not, it names the tier')

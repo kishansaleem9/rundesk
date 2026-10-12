@@ -11,6 +11,10 @@
 # Re-anchored 23 September: `listSources` now tells each person whose account a
 # grant is (`heldBy`); the second half drops the scope test there. Same break.
 #
+# Re-aimed 12 October: Connected Search split the grant into the person's own
+# and the workspace's, each with its own scope test; the second half drops both,
+# so any live row counts again whoever holds it. Same break.
+#
 # Reddens: app-catalogue: "the SharePoint source names its own credential"
 #   or "a connected OneDrive no longer makes SharePoint say it is connected"
 #   or "and a SharePoint credential holding only Files.ReadWrite reports itself unconnected"
@@ -31,12 +35,15 @@ p1 = '/home/user/rundesk/apps/api/src/modules/search/sources.ts'
 s1 = io.open(p1, encoding='utf-8').read()
 assert s1.count(a1) == 1, f'anchor appears {s1.count(a1)} times in {p1}, expected exactly 1'
 
-a2 = '      if (!grant || !grantCoversSource(id, grant.scopes)) return { id, provider, connected: false, heldBy: null }\n'
-b2 = '      if (!grant) return { id, provider, connected: false, heldBy: null }\n'
+a2 = "      if (mine && grantCoversSource(id, mine.scopes)) return { id, provider, connected: true, heldBy: 'you' as const, canConnect: true }\n"
+b2 = "      if (mine) return { id, provider, connected: true, heldBy: 'you' as const, canConnect: true }\n"
+a3 = '      if (shared && grantCoversSource(id, shared.scopes)) {\n'
+b3 = '      if (shared) {\n'
 p2 = '/home/user/rundesk/apps/api/src/modules/search/search.service.ts'
 s2 = io.open(p2, encoding='utf-8').read()
 assert s2.count(a2) == 1, f'anchor appears {s2.count(a2)} times in {p2}, expected exactly 1'
+assert s2.count(a3) == 1, f'anchor appears {s2.count(a3)} times in {p2}, expected exactly 1'
 
 io.open(p1, 'w', encoding='utf-8').write(s1.replace(a1, b1))
-io.open(p2, 'w', encoding='utf-8').write(s2.replace(a2, b2))
+io.open(p2, 'w', encoding='utf-8').write(s2.replace(a2, b2).replace(a3, b3))
 print('sources.ts + search.service.ts: SharePoint borrows OneDrive and any live row counts.')

@@ -98,7 +98,8 @@ import {
 } from '../../common/permissions/item-visibility'
 import { PUBLIC_USER_COLUMNS, PUBLIC_USER_WITH } from '../../common/permissions/public-user'
 import { canReadDoc, hiddenDocIds } from '../../common/permissions/doc-access'
-import { READ_REFUSALS, readableTask, readableTaskIds, readsThroughAddedList } from '../../common/permissions/read-access'
+import { READ_REFUSALS, readableList, readableTask, readableTaskIds, readsThroughAddedList } from '../../common/permissions/read-access'
+import { emitTaskChange } from '../../common/events/task-changes'
 import { listVisibilityFilter } from '../../common/permissions/item-visibility'
 import { safeFetch } from '../../common/http/safe-fetch'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
@@ -313,6 +314,8 @@ export class TasksService {
       changedField?: string
     } = {},
   ) {
+    // Said in-process too: AI fields that fill and update themselves listen (`ledger-rows/row-719`).
+    if (triggerCtx.taskId) emitTaskChange({ type: eventType, workspaceId, taskId: triggerCtx.taskId, userId: triggerCtx.userId })
     try {
       await this.automations.fire(eventType, { workspaceId, ...triggerCtx })
     } catch (e) {
@@ -2558,9 +2561,15 @@ export class TasksService {
        * typed. Filtering here means the limit applies to what matched.
        */
       q?: string
+      /**
+       * One list's tasks: those whose home it is, and those added to it — what
+       * a Relationship limited to that list takes (`ledger-rows/row-719`).
+       */
+      listId?: string
     } = {},
   ) {
     const { includeAssignees = true, actorId, actorRole, assigneeId } = opts
+    const inList = opts.listId && isUuid(opts.listId) ? opts.listId : null
     const safeLimit = Math.min(Math.max(limit, 1), 1000)
     /*
      * WHO MAY SEE WHICH ROWS, IN SQL AND BEFORE THE LIMIT: a task's reach — its
@@ -2626,6 +2635,9 @@ export class TasksService {
             : undefined,
           like
             ? or(ilike(tasks.title, like), ilike(lists.name, like), ilike(projects.name, like))
+            : undefined,
+          inList
+            ? or(eq(tasks.listId, inList), sql`exists (select 1 from ${taskLists} where ${taskLists.taskId} = ${tasks.id} and ${taskLists.listId} = ${inList})`)
             : undefined,
           readable,
         ),
@@ -3012,7 +3024,9 @@ export class TasksService {
     const mayEdit = actor && ownRows.length > 0 ? await this.listRowsEditable(listId, ownRows, actor.id) : null
     // A task added here is changed by the rules of where it lives, as its own sheet asks them.
     const mayEditAdded = actor && addedRows.length > 0 ? await this.rowsEditableWhereTheyLive(addedRows, actor.id) : null
-    // And says where that is: its home list, by the name its readers know it by.
+    // And says where that is: its home list, by the name its readers know it by
+    // — and only to them. A reader who reaches the task through this list alone
+    // is not told the name of a private list it lives in.
     const homeNames = addedRows.length
       ? new Map(
           (await this.db
@@ -3022,6 +3036,27 @@ export class TasksService {
           ).map((l) => [l.id, l.personalOf ? 'Personal List' : l.name]),
         )
       : null
+    if (homeNames && actor) {
+      const workspaceId = await this.workspaceIdForList(listId)
+      for (const id of [...homeNames.keys()]) {
+        if (!workspaceId || !(await readableList(this.db, workspaceId, id, actor))) homeNames.set(id, null as unknown as string)
+      }
+    }
+    // And its status as its home list names it. A task keeps one status, its
+    // home list's, wherever it is added (ClickUp: the status of a task in
+    // several lists is its home list's), and this list may have no status of
+    // that key: the page draws a group for it from this.
+    const homeStatuses = addedRows.length
+      ? new Map(
+          await Promise.all(
+            [...new Set(addedRows.map((r) => r.listId))].map(async (id) => [id, await resolveEffectiveStatuses(this.db, id)] as const),
+          ),
+        )
+      : null
+    const homeStatusOf = (r: { listId: string; status: string }) => {
+      const s = homeStatuses?.get(r.listId)?.find((x) => x.key === r.status)
+      return s ? { key: s.key, name: s.name, color: s.color, category: s.category } : null
+    }
 
     return rows.map((r) => {
       const added = r.listId !== listId
@@ -3034,7 +3069,7 @@ export class TasksService {
         blockedBy: [...(blockedBy.get(r.id) ?? [])],
         coverUrl: coverUrlByTask.get(r.id) ?? null,
         ...(editable ? { mayEdit: editable(r) } : {}),
-        ...(added ? { addedFrom: { id: r.listId, name: homeNames?.get(r.listId) ?? null } } : {}),
+        ...(added ? { addedFrom: { id: r.listId, name: homeNames?.get(r.listId) ?? null }, homeStatus: homeStatusOf(r) } : {}),
       }
     })
   }
@@ -6294,6 +6329,7 @@ export class TasksService {
         if (!taskRow) return
         const ctx = await this.resolveWorkspaceForList(taskRow.listId)
         if (!ctx) return
+        emitTaskChange({ type: 'task.comment_added', workspaceId: ctx.workspaceId, taskId, userId: authorId })
         await this.automations.fire('task.comment_added', {
           workspaceId: ctx.workspaceId,
           taskId,

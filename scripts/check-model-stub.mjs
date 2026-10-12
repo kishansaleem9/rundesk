@@ -291,8 +291,11 @@ if (process.argv.includes('--mutate')) {
   let blind = 0
   const MUTATIONS = [
     ['the stub forgets every call it was made', 'seen.push({ model: body.model, system: body.system, messages: body.messages })', 'void body'],
-    ['it answers the fallback whatever the prompt said', "SCRIPTS.find((s) => s.when.test(system))?.text ?? 'A stubbed reply.'", "'A stubbed reply.'"],
-    ['a staged body LATCHES into the next call', "const text = staged?.text ?? SCRIPTS.find((s) => s.when.test(system))?.text ?? 'A stubbed reply.'\n  staged = null", "const text = staged?.text ?? SCRIPTS.find((s) => s.when.test(system))?.text ?? 'A stubbed reply.'"],
+    // A script's answer can be a function of the prompt now (an AI Dropdown names
+    // one of its own options, `ledger-rows/row-719`); both mutations are of the
+    // line that picks it, as they were of the line before it.
+    ['it answers the fallback whatever the prompt said', "(typeof scripted === 'function' ? scripted(system) : scripted) ?? 'A stubbed reply.'", "'A stubbed reply.'"],
+    ['a staged body LATCHES into the next call', "const text = staged?.text ?? (typeof scripted === 'function' ? scripted(system) : scripted) ?? 'A stubbed reply.'\n  staged = null", "const text = staged?.text ?? (typeof scripted === 'function' ? scripted(system) : scripted) ?? 'A stubbed reply.'"],
     ['an arranged error comes back as a 200 that says "error"', 'if (staged?.status && staged.status >= 400) {', 'if (false) {'],
     // The ORDER of the two lines, which is how the stub answered every arranged
     // failure as 400: clear the staging first and the status is gone before it

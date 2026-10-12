@@ -13,7 +13,8 @@ export type TaskListsAnswer = {
   canChange: boolean
   /** Why not, in the server's words, when they may not. */
   reason: string | null
-  lists: Array<{ id: string; name: string; projectId: string; spaceId: string; home: boolean }>
+  /** A list this reader may not open comes back unnamed (`name: null`): only ever the home one. */
+  lists: Array<{ id: string; name: string | null; projectId: string | null; spaceId: string | null; home: boolean }>
 }
 
 export function useTaskLists(taskId: string | null | undefined) {
@@ -64,13 +65,17 @@ export function TaskListsRow({
           data-home={l.home ? 'yes' : 'no'}
           className="inline-flex items-center gap-1 rounded border border-border/70 px-1.5 py-0.5"
         >
-          <Link
-            to="/app/$workspaceId/$spaceId/$projectId/$listId"
-            params={{ workspaceId, spaceId: l.spaceId, projectId: l.projectId, listId: l.id }}
-            className="max-w-[12rem] truncate hover:underline"
-          >
-            {l.name}
-          </Link>
+          {l.name !== null && l.spaceId && l.projectId ? (
+            <Link
+              to="/app/$workspaceId/$spaceId/$projectId/$listId"
+              params={{ workspaceId, spaceId: l.spaceId, projectId: l.projectId, listId: l.id }}
+              className="max-w-[12rem] truncate hover:underline"
+            >
+              {l.name}
+            </Link>
+          ) : (
+            <span className="max-w-[12rem] truncate text-muted-foreground">{t('taskDetail.listsHidden')}</span>
+          )}
           {l.home && <span className="text-[10px] text-muted-foreground">{t('taskDetail.listsHome')}</span>}
           {!l.home && data.canChange && (
             <button

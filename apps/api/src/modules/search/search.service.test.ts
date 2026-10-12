@@ -590,7 +590,7 @@ describe('§4 Google Drive in search', () => {
     workspace_integration_connections: [
       // Connected by u1, who is the searcher in every case but the one
       // that asks what somebody else sees.
-      { status: 'connected', accessToken: 'tok', scopes: [DRIVE_SEARCH_SCOPE], connectedById: 'u1' },
+      { provider: 'google-drive', status: 'connected', accessToken: 'tok', scopes: [DRIVE_SEARCH_SCOPE], connectedById: 'u1' },
     ],
     tasks: [],
     docs: [],
@@ -649,15 +649,37 @@ describe('§4 Google Drive in search', () => {
     assert.ok(q.includes('trashed = false'), `deleted files should stay deleted: ${q}`)
   })
 
-  it('searches the connected Drive for the person who connected it, and for nobody else', async () => {
-    // The grant is one person's own Drive. Every member used to search it.
+  it('searches the workspace’s Drive for every member, asking Drive only for what the organization may see', async () => {
+    // ClickUp's Workspace connection: every member finds the files shared with
+    // the whole organization — not the connector's private ones, nor for them.
     const { db } = makeDb(connected)
     const svc = drive(db, [{ id: 'F1', name: 'Q3 budget.xlsx', webViewLink: 'https://drive.google.com/file/d/F1/view' }])
     const theirs = await svc.search('w1', 'u2', 'budget', 10, { types: ['drive'] })
-    assert.equal(svc.seen.length, 0, 'searched u1’s Drive for u2')
-    assert.equal(theirs.filter((h) => h.entityType === 'drive').length, 0)
-    const own = await svc.search('w1', 'u1', 'budget', 10, { types: ['drive'] })
-    assert.equal(own.filter((h) => h.entityType === 'drive').length, 1, 'the connector lost their own Drive')
+    assert.equal(theirs.filter((h) => h.entityType === 'drive').length, 1, 'a member found nothing in the workspace’s Drive')
+    const q = decodeURIComponent(new URL(svc.seen[0]).searchParams.get('q') ?? '')
+    assert.match(q, /visibility = 'domainCanFind'/, `asked for the connector's private files too: ${q}`)
+    await svc.search('w1', 'u1', 'budget', 10, { types: ['drive'] })
+    assert.match(decodeURIComponent(new URL(svc.seen[1]).searchParams.get('q') ?? ''), /visibility = /, 'the connector searched their private files through the workspace')
+  })
+
+  it('searches a person’s own Drive for them alone, everything their account sees', async () => {
+    const { db } = makeDb({
+      ...connected,
+      user_search_connections: [{ userId: 'u2', provider: 'google-drive', status: 'connected', accessToken: 'own', scopes: [DRIVE_SEARCH_SCOPE] }],
+    })
+    const svc = drive(db, [{ id: 'F2', name: 'Mia budget.xlsx', webViewLink: 'https://drive.google.com/file/d/F2/view' }])
+    await svc.search('w1', 'u2', 'budget', 10, { types: ['drive'] })
+    assert.doesNotMatch(decodeURIComponent(new URL(svc.seen[0]).searchParams.get('q') ?? ''), /visibility = /, 'a person’s own Drive was narrowed to what is shared')
+    await svc.search('w1', 'u3', 'budget', 10, { types: ['drive'] })
+    assert.match(decodeURIComponent(new URL(svc.seen[1]).searchParams.get('q') ?? ''), /visibility = /, 'somebody else searched through u2’s own Drive')
+  })
+
+  it('searches nothing of anybody’s for a guest', async () => {
+    const { db } = makeDb({ ...connected, workspace_members: [{ role: 'guest' }] })
+    const svc = drive(db, [{ id: 'F1', name: 'Q3 budget.xlsx', webViewLink: 'https://drive.google.com/file/d/F1/view' }])
+    const res = await svc.search('w1', 'u9', 'budget', 10, { types: ['drive'] })
+    assert.equal(svc.seen.length, 0, 'searched a Drive for a guest')
+    assert.equal(res.filter((h) => h.entityType === 'drive').length, 0)
   })
 
   it('asks Drive for nothing when no Drive is linked', async () => {
@@ -670,7 +692,7 @@ describe('§4 Google Drive in search', () => {
 
   it('ignores a connection that is not connected', async () => {
     const { db } = makeDb({
-      workspace_integration_connections: [{ status: 'revoked', accessToken: 'tok', connectedById: 'u1' }],
+      workspace_integration_connections: [{ provider: 'google-drive', status: 'revoked', accessToken: 'tok', connectedById: 'u1' }],
       tasks: [],
       docs: [],
     })
@@ -693,7 +715,7 @@ describe('§4 Google Drive in search', () => {
      */
     const { db } = makeDb({
       workspace_integration_connections: [
-        { status: 'connected', accessToken: 'tok', scopes: ['https://www.googleapis.com/auth/drive.file'], connectedById: 'u1' },
+        { provider: 'google-drive', status: 'connected', accessToken: 'tok', scopes: ['https://www.googleapis.com/auth/drive.file'], connectedById: 'u1' },
       ],
       tasks: [],
       docs: [],
@@ -1035,14 +1057,24 @@ describe('§V2-11 Gmail and SharePoint in search', () => {
     assert.equal(res.filter((h) => h.entityType === 'gmail').length, 0)
   })
 
-  it('lists a source as the searcher’s own, somebody else’s, or not connected', async () => {
-    const { db } = makeDb(withGrant('gmail', [GMAIL_SCOPE]))
+  it('lists a source as the searcher’s own, the workspace’s, or not connected', async () => {
+    const { db } = makeDb({
+      workspace_integration_connections: [
+        { provider: 'gmail', status: 'connected', accessToken: 'tok', scopes: [GMAIL_SCOPE], connectedById: 'u1' },
+        { provider: 'google-drive', status: 'connected', accessToken: 'tok2', scopes: [DRIVE_SEARCH_SCOPE], connectedById: 'u1' },
+      ],
+      tasks: [],
+      docs: [],
+    })
     const svc = new SearchService(db as never, config)
     const mine = (await svc.listSources('w1', 'u1')).find((x) => x.id === 'gmail')
     const theirs = (await svc.listSources('w1', 'u2')).find((x) => x.id === 'gmail')
+    const shared = (await svc.listSources('w1', 'u2')).find((x) => x.id === 'google-drive')
     const none = (await svc.listSources('w1', 'u1')).find((x) => x.id === 'sharepoint')
     assert.deepEqual([mine?.connected, mine?.heldBy], [true, 'you'])
-    assert.deepEqual([theirs?.connected, theirs?.heldBy], [false, 'someone-else'])
+    // A mailbox is its own person's: the workspace's Gmail answers nobody else.
+    assert.deepEqual([theirs?.connected, theirs?.heldBy, theirs?.canConnect], [false, null, true])
+    assert.deepEqual([shared?.connected, shared?.heldBy], [true, 'workspace'])
     assert.deepEqual([none?.connected, none?.heldBy], [false, null])
   })
 

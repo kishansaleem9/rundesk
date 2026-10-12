@@ -17,6 +17,10 @@ import { DocsModule } from '../docs/docs.module'
 import { ListsModule } from '../lists/lists.module'
 import { FoldersModule } from '../folders/folders.module'
 import { CustomRolesModule } from '../custom-roles/custom-roles.module'
+import { CustomFieldsModule } from '../custom-fields/custom-fields.module'
+import { AiFieldsService } from './ai-fields.service'
+import { AiFieldsController } from './ai-fields.controller'
+import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 
 @Module({
   // NotificationsModule supplies NotificationsService for briefing + workload
@@ -47,8 +51,11 @@ import { CustomRolesModule } from '../custom-roles/custom-roles.module'
     ListsModule,
     FoldersModule,
     CustomRolesModule,
+    // An AI field's value is a custom field's (`ledger-rows/row-719`); the
+    // fields module imports nothing of this one, so there is no cycle.
+    CustomFieldsModule,
   ],
-  controllers: [AiController, KnowledgeController, ChatThreadsController],
+  controllers: [AiController, KnowledgeController, ChatThreadsController, AiFieldsController],
   // BriefingService owns the hourly @Cron that delivers daily briefings;
   // WorkloadAlertService owns the daily @Cron that alerts managers about
   // overloaded teammates (§7.12) — both must be provided here or their crons
@@ -56,7 +63,7 @@ import { CustomRolesModule } from '../custom-roles/custom-roles.module'
   // re-embeds each workspace into the §15.1 semantic store; EmbeddingService is
   // the pluggable embedder (env-gated real API + deterministic local default)
   // used by both the indexer and AiService's knowledge retrieval.
-  providers: [AiService, BriefingService, WorkloadAlertService, EmbeddingService, KnowledgeIndexerService, ChatThreadsService],
+  providers: [AiService, BriefingService, WorkloadAlertService, EmbeddingService, KnowledgeIndexerService, ChatThreadsService, AiFieldsService, WorkspaceMemberGuard],
   exports: [AiService],
 })
 export class AiModule {}

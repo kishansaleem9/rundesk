@@ -40,6 +40,13 @@ export const aiUsage = pgTable(
     errorCode:    text('error_code'),
     /** The sentence a person is shown. Truncated by the writer, not by the column. */
     errorMessage: text('error_message'),
+    /**
+     * WHAT THE CALL COST IN AI CREDITS (migration 0185; `commit-log/log-3943965-1`):
+     * its estimated cost at ClickUp's price of a credit, a tenth of a cent, and
+     * never nothing for a call that answered (`creditsFor`). Nothing for a
+     * failure: a call that never reached the model used no credits.
+     */
+    credits:      integer('credits').notNull().default(0),
     createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

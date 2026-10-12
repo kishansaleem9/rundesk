@@ -1,4 +1,5 @@
 import { Fragment, createContext, useContext, useMemo, useState, useRef, useEffect, type ReactNode } from 'react'
+import { AiCreditMeter } from './ai-credits'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Input, cn, toast } from '@rundesk/ui'
 import {
@@ -1888,6 +1889,8 @@ export function AiPanel({
             ))}
           </div>
         )}
+        {/* The month's AI credits, and the banner at 80% and at 100% (`commit-log/log-3943965-1`). */}
+        <AiCreditMeter workspaceId={workspaceId} />
         <div className="relative z-50 flex gap-2">
           <Input
             ref={inputRef}

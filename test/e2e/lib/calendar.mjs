@@ -46,3 +46,22 @@ export const failCalendar = (base, token, status, count = 1) =>
 
 /** Forget the token, its refresh tokens and everything it held. */
 export const forgetCalendar = (base, token) => post(base, '/__control/reset', { token })
+
+/**
+ * SEARCH'S THREE FEDERATED SOURCES, answered by the same stub
+ * (`found-23-sep/connected-search-per-person`): seed (replace) the account a
+ * token opens — Drive files `{id, name, visibility}`, Gmail messages
+ * `{id, subject, from, snippet, date}`, SharePoint files `{id, name, webUrl}`.
+ */
+export const seedSearchAccount = (base, { token, drive = [], gmail = [], sharepoint = [] }) =>
+  post(base, '/__control/search', { token, drive, gmail, sharepoint })
+
+/** What was asked of an account, query by query: `[{source, query}]`, or null. */
+export async function searchesAsked(base, token) {
+  const res = await fetch(`${base}/__control/search?token=${encodeURIComponent(token)}`)
+  return res.ok ? (await res.json()).asked : null
+}
+
+/** A consent's code: `POST /google/token` exchanges it once for this grant, and `/google/userinfo` names its account. */
+export const seedConsentCode = (base, { code, accessToken, refreshToken, email, sub, scopes = [] }) =>
+  post(base, '/__control/code', { code, accessToken, refreshToken, email, sub, scopes })

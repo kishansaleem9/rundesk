@@ -21,12 +21,14 @@
 #
 # Re-anchored 23 September: `listSources` now tells each person whose account a
 # grant is (`heldBy`), so the line this patched is two lines now. Same break.
+# Re-aimed 12 October: each source now also says whether it may be connected
+# (`canConnect`), so the line grew a field. Same break.
 #
 # Reddens: search-sources: "and Rundesk itself is always answerable"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/search/search.service.ts'
-a = "      if (provider === null) return { id, provider, connected: true, heldBy: null }"
-b = "      if (provider === null) return { id, provider, connected: false, heldBy: null }"
+a = "      if (provider === null) return { id, provider, connected: true, heldBy: null, canConnect: false }"
+b = "      if (provider === null) return { id, provider, connected: false, heldBy: null, canConnect: false }"
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

@@ -62,6 +62,8 @@ const TRIGGER_OPTIONS = [
   { value: 'task.comment_added', labelKey: 'automations.trigger.commentAdded' },
   { value: 'task.assignee_changed', labelKey: 'automations.trigger.assigneeChanged' },
   { value: 'task.overdue', labelKey: 'automations.trigger.overdue' },
+  // ClickUp's Button field (`ledger-rows/row-719`): the rule runs when that button is pressed on a task.
+  { value: 'button.clicked', labelKey: 'automations.trigger.buttonClicked' },
 ] as const
 
 const ACTION_OPTIONS = [
@@ -483,6 +485,14 @@ function AutomationBuilder({
   const [name, setName] = useState('')
   const [triggerType, setTriggerType] = useState('task.created')
   const [toStatus, setToStatus] = useState('')
+  /* The Button a "button is pressed" rule waits for (`ledger-rows/row-719`). */
+  const [buttonFieldId, setButtonFieldId] = useState('')
+  const buttonsQuery = useQuery({
+    queryKey: ['custom-field-buttons', workspaceId],
+    queryFn: () =>
+      api<Array<{ id: string; name: string; projectName: string }>>(`/workspaces/${workspaceId}/custom-fields/buttons`),
+    enabled: triggerType === 'button.clicked',
+  })
   const [actions, setActions] = useState<ActionDef[]>([
     { type: 'send_notification', params: { message: '' } },
   ])
@@ -502,7 +512,12 @@ function AutomationBuilder({
           name: name.trim() || t('automations.newAutomation'),
           trigger: {
             type: triggerType,
-            filters: toStatus ? { toStatus } : {},
+            filters:
+              triggerType === 'button.clicked'
+                ? { fieldId: buttonFieldId }
+                : toStatus
+                  ? { toStatus }
+                  : {},
           },
           actions,
         },
@@ -545,6 +560,7 @@ function AutomationBuilder({
               {t('automations.whenTrigger')}
             </label>
             <select
+              data-testid="automation-trigger-type"
               className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
               value={triggerType}
               onChange={(e) => setTriggerType(e.target.value)}
@@ -553,6 +569,26 @@ function AutomationBuilder({
                 <option key={opt.value} value={opt.value}>{t(opt.labelKey)}</option>
               ))}
             </select>
+            {triggerType === 'button.clicked' && (
+              <div className="mt-2">
+                <label className="text-xs text-muted-foreground mb-1 block">{t('automations.trigger.buttonField')}</label>
+                {buttonsQuery.data && buttonsQuery.data.length === 0 ? (
+                  <p className="text-xs text-muted-foreground" data-testid="automation-trigger-no-buttons">{t('automations.trigger.noButtons')}</p>
+                ) : (
+                  <select
+                    data-testid="automation-trigger-button-field"
+                    className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+                    value={buttonFieldId}
+                    onChange={(e) => setButtonFieldId(e.target.value)}
+                  >
+                    <option value="">—</option>
+                    {(buttonsQuery.data ?? []).map((b) => (
+                      <option key={b.id} value={b.id}>{b.projectName} · {b.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
             {triggerType === 'task.status_changed' && (
               <div className="mt-2">
                 <label className="text-xs text-muted-foreground mb-1 block">{t('automations.toStatus')}</label>
@@ -634,7 +670,8 @@ function AutomationBuilder({
 
           <div className="flex gap-2 pt-1">
             <Button
-              disabled={createMutation.isPending}
+              data-testid="automation-create-submit"
+              disabled={createMutation.isPending || (triggerType === 'button.clicked' && !buttonFieldId)}
               onClick={() => createMutation.mutate()}
             >
               {createMutation.isPending ? t('automations.creating') : t('automations.createAutomation')}

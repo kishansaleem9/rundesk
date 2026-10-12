@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-09.md`** (stopped for the weekend on 9 October; the 28 September handoff before it) — 536 items: 0 open · 0 partly fixed · 504 closed, and 32 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 9 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-12.md`** (12 October; the 9 October handoff before it) — 537 items: 0 open · 0 partly fixed · 515 closed, and 22 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 12 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 74, each reproduced
+## Found by the triage, 5 October, and since — 75, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10284,6 +10284,16 @@ Read, not reproduced (so not counted): why the runner refused the tasks. The sam
 
 Checks: `person-panel` 60 → 61: "the tasks the bucket checks look for are made: each one seeded, and assigned where it is asked to be". Patch `person-panel-6` (the create gate refuses every list) reddens it, 38 of 61.
 
+### `found-12-oct/person-panel-seeds-into-whatever-list-is-first` — **closed** (test tooling, small; found by CI's Postgres harnesses on `c13d42b`) · reproduced 12 October
+
+**`person-panel` seeds its tasks into "the first list of the first project of the first space", which on CI is nothing**
+
+*Evidence, 12 October:* CI's Postgres harnesses on `c13d42b` failed `person-panel` again, 38 passed, 23 failed — and this time, since `found-8-oct/person-panel-reads-a-refused-fixture-as-a-wrong-bucket`, it said why: every `POST /tasks` answered 404 "Resource not found" (read from the job's log). The suite took the admin's first workspace, its first space, that space's first project and its first list, and seeded into that. On CI it runs after two hundred other suites have made and left their spaces, and that path held no list: the list id was `undefined`, and the guard found no resource to authorize. On lane 1, an empty space planted as the admin's first (created in 2000): the same 38 passed, 23 failed, every fixture "404 Resource not found", line for line as on the runner.
+
+*Closed, 12 October.* The suite makes a space, a project and a list of its own in that workspace, and seeds into them; the space is registered as it is made (`apiAs`) and swept, with all it holds, when the run ends. With the empty space first on lane 1: 61 of 61, "removed what this run made: 1 projects row, 1 space, 1 notification".
+
+Checks: none new — the 23 that stood on the fixtures run again; `person-panel-6` (the create gate refuses every list) still reddens "the tasks the bucket checks look for are made: each one seeded, and assigned where it is asked to be".
+
 ### `found-8-oct/the-ledger-id-gate-reads-no-october-id` — **closed** (test tooling, small; found closing `found-8-oct/person-panel-reads-a-refused-fixture-as-a-wrong-bucket`) · reproduced 8 October
 
 **The ledger-id gate reads no October id, so one naming no item passes**
@@ -10326,7 +10336,7 @@ Checks: `check-ledger-ids-cases.mjs` 11 → 13: "a day's find of another month, 
 
 *Closed, 8 October.* The save reads a folder's lists by `position`, then when they were made, then id — the sidebar's order — and each list's tasks the same way (`project-templates.service.ts`). The suite now makes the folder's second list first and dates the first a minute earlier, so the table's order is not the order made: `template-center` 84 of 85 before the fix with that fixture (the lists second first), 85 of 85 after, on lane 1. Patch `template-center-42` (the lists by position alone) reddens the check, 84 of 85 on lane 1.
 
-## Closed from the uncounted list, as ClickUp works them (8 and 9 October) — 26
+## Closed from the uncounted list, as ClickUp works them (8 to 12 October) — 36
 
 On the owner's word of 8 October ("close all of these properly … close them as they work on clickup"), the
 items the triage set aside as features and decisions are closed one by one: as ClickUp works each where its
@@ -10830,6 +10840,200 @@ Measured:
 Checks (`ai-image-generation`, 9): "the comment box’s AI makes the pictures asked for — two, as the image service drew them for that description — each shown and chosen", "only the one left chosen is posted on the comment — the first picture, as a PNG of its very bytes, named after its description", "the chat composer’s AI makes a picture too: added, it is attached to the message, and sent with it", "each ask is one run of `image.generate`, and the AI value report counts it under Images generated, a tile it now fills", "a guest is refused as on every AI route, and five pictures, a blank description and a size the service does not draw are refused 400", "the service’s rate limit is said as too many requests (429), its failure as a service that did not answer (502), and each is written down as a failed run", "and the composer says the service did not answer, in its words, and draws no picture", "the Ask AI dock makes pictures too: opened by Brain² on a task, the one made is added to the task’s files, its very bytes", "and opened on no task, its Download saves the picture made — …". `ai-action-categories`: "two are marked as something this product cannot do — the connected apps’ — and Images generated, which image generation fills, is not" (was: three), "and two `image.generate` runs land in Images generated", and the seeds' counts twelve where they were ten. Unit: `image-generation.test.ts`, 4.
 - Patches `aig-1` to `aig-8` (the API) and `aig-w1` to `aig-w8` (the web) redden their checks on lane 9 — `aig-1` five, the others one or two, past the first only checks that stand on what it broke — and the unit claims `aig-9` to `aig-11` their tests; `ac-4` (the seeds now twelve) and `ac-5` (renamed `ac-5-images-look-unsupported`: Images said to be unfillable) re-aimed, 27 and 26 of 30.
 
+### `found-24-sep/planner-default-list-read-by-nothing` — **closed** (feature, small; was not counted, a feature) · reproduced 9 October
+
+**The planner's Time blocking "Default list" saves, and nothing reads it**
+
+*Evidence, read not run:* `planner-settings-dialog.tsx` draws a Default list picker (`planner-default-list`). Its comment calls it "the answer to the question video 1 left open: where a task made from a message, from /task, or by the AI should land". It writes `defaultListId` into the person's planner settings, and the server checks the list exists. A search of `apps/web/src` and `apps/api/src` finds no other reader. A task made from a chat message, from `/task` or by the AI lands wherever those flows put it, and the picker changes nothing. `planner-settings` checks only that the picker offers the workspace's lists.
+
+*The frame answers what it governs:* `14:20`, Time blocking, "**Default list for new tasks** — *Defaults to your personal list*" (`video2-frame-observations.md`). The gap audit reads it as the answer to video 1's open question: where a task made by `/task`, from a message, or by the AI lands. That is the person's Personal List unless they choose another.
+
+*To close:* have each of those flows read the setting when no list is named: `/task`, a message turned into a task, and the AI's task-making. Add a check per flow that the task lands in the chosen list, and in the personal list when none is chosen.
+
+*Partly fixed, 24 September.* A chosen list now decides where all three land. `defaultListFor` (tasks.service), which `/task` and the AI's "Create task from this" already asked, reads the person's chosen list first. It uses it when the list is in this workspace and they may add to it (`canCreateTaskIn`), and otherwise takes the oldest list they can add to, as before. The chat page chose the first list of the first project of the first space itself and always named it. It names none now, and `create-task` from a message asks `defaultListFor`, as `/task` does. Three strings for the page's own lookup went with it.
+
+The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the first four): `/task`, a message and an AI answer each landed in the oldest list with a list chosen, and the twin (none chosen: the oldest) passed. After, 6/6, with two more for the guards on the chosen list:
+- a list chosen in another workspace is not used here (a message's words would have crossed into the other workspace);
+- a member's chosen list in a private space they are not in is passed over, not refused.
+
+`pdl-1..4` (the choice ignored, the page picking the list, any workspace, no create rule), each compiled, 4 of 4 reddened on lane 2.
+
+*What is left:* the frame's default, "your personal list". This product's personal tasks are a separate table, not a list, so there is no personal list to default to. The empty choice was labelled "My personal list" over a behaviour that is the oldest list the person can add to. It says so now ("The first list I can add to", in the four locales). A personal list per person, as ClickUp has, is unbuilt. Regression on lane 1, 12/12: `planner-default-list`, `chat-message-actions`, `chat-history`, `replies-inline-thread`, `task-creation-access`, `lookup-read-access`, `ai-answer-rendering`, `planner-settings`, `task-mentions`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The dead-control defect does not reproduce, because all three flows now read the chosen Default list (7/7 on lane 4). What remains is ClickUp's per-person Personal List, which is unbuilt. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/default-list-files-into-an-archived-list`. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 9 October* (lane 9), as ClickUp works it. ClickUp (help centre, "Use Personal List", "Create and add tasks to your Personal List" and "My Tasks", through search excerpts, 9 October): "Your Personal List is the default location for new tasks" — a task made with no location lands there; it is under My Tasks in Home, "not part of the Workspace hierarchy", and a task moved into it takes its sharing, so only those with access see it. Built so:
+- everybody has a Personal List in each workspace they are a member of: a private list of theirs in the workspace's own hidden personal space (`spaces.is_personal`, `lists.personal_of`; migration 0181), made the first time it is asked for, the old card's to-dos (`personal_tasks`) moved in as its first tasks, the done ones done;
+- a task made with no list chosen — `/task`, a message made into a task, the AI's — lands there, unless the person chose a Default list (`defaultListFor`); Home's Personal List is its tasks, each opening as any task opens, with "Open as a list";
+- it is its owner's alone: nobody else reads its tasks or the list by id — the workspace's owner and admins neither — and search finds them for nobody else; deleted, its task is in its owner's Trash, named "Personal List", and nobody else's;
+- it is no place in the hierarchy: the sidebar's spaces, search, the calendar sync's places, the pickers of lists and getting started's counts leave its space out; nobody renames, moves or deletes it, and nothing but tasks is made in it (each refused in words, 403), and no form files into it (400);
+- the Move picker offers each person their own, and a task moved in takes its sharing; a guest has none (asked for, it is nothing; adding to it refused in words, 403).
+
+Measured: before (the main lanes, lane 2), `personal-list` threw at its first read ("column s.is_personal does not exist"), 1 of 13 run; `planner-default-list` 4 passed, 1 failed, 5 of 13 run; `task-creation-access` 3 passed, 1 failed, 4 of 9 run. After (lane 9): `personal-list` 13 of 13; `planner-default-list` 13 of 13; `task-creation-access` 9 of 9; `sidebar-sections` 25 of 25; the unit tests that changed 35 of 35. On the main tree's lanes, integrated: 13 of 13, 13 of 13 and 9 of 9.
+
+Checks (`personal-list`, 13): "the to-dos the old card kept are her Personal List’s first tasks — the done one done — in a private list of hers in the workspace’s personal space, and none is left in the old card (read by SQL)", "a task made with no list chosen — /task — lands in her Personal List, and Home lists it, the list counting her two open tasks", "it is hers alone: Max, the guest and the workspace’s owner are each refused its task and its list by id, and search finds it for none of them — it does for her", "nobody renames, moves or deletes it: Mia is refused each in words (403), the owner is refused too, its menus are told so, and it is as it was (read by SQL)", "and nothing but tasks is made in its place — a list, a folder, a doc each refused in words (403), and no form files into it (400) — and the owner does not rename the space it lives in (read by SQL)", "it is no place in the hierarchy: the sidebar’s spaces, search, the calendar sync’s places and the pickers of lists leave its space out, and getting started counts no space or project more once a Personal List is made", "the Move picker offers her her own Personal List — and Max not hers — and the shared task moved into it takes its sharing: Max read it before, and is refused it after", "a guest has none: asked for, it is nothing; Home’s card of it is empty; adding to it is refused in words (403); and none is made (read by SQL)", "deleted, it is in her Trash, where it is named “Personal List” — and not in the owner’s, who cannot find it there to delete it for good (404)", "Home’s Personal List draws her tasks — the old to-dos and the task moved in — and the sidebar draws the workspace’s space and no personal one", "a row opens its task, in her Personal List, as any task opens", "“Open as a list” opens her Personal List as a list, her tasks in it", "a to-do added on Home is a task of her Personal List, and ticking it closes the task (read by SQL)". `planner-default-list` re-aimed to 13: the empty choice is the Personal List, and a deleted choice is said to be in the trash; `task-creation-access`, `planner-default-list` and `sidebar-sections` re-aimed where they read the oldest list as the default.
+- Patches `pls-1` to `pls-17` (the API) and `pls-w1` to `pls-w3` (the web) redden their checks on lane 9 — re-run on 9 October on a runner that backs up every file a patch quotes (the first run left both of `pls-3`'s files patched and spoilt every run after it); `pls-1`, `pls-2`, `pls-4` and `pls-7` with knock-ons written under their claims; `pls-18` and `pls-19` their unit tests. Re-anchored and re-claimed where this moved them: `pdl-3`, `pdl-4`, `pdl-8` to `pdl-13`, `tcm-4`, `sdp-19` (its knock-ons written), `sra-8`, `task-delete-9`, `raf-8`, `tmt-1`, `tmt-3`, `wra-11` and `wra-12` — each reddens its claim.
+
+### `commit-log/log-713a611-1` — **closed** (feature, large; was not counted, a feature) · reproduced 12 October
+
+**'Add to ›' (one task in several lists) is blocked because it is ClickUp's feature rather than the video's**
+
+*Evidence:* Commit 713a611 and ledger row 845: 'The gloss ... a task in more than one list is ClickUp's real product, not anything in the video ... Blocked on the reference'. Under the new instruction, ClickUp's real product is the spec to build to. packages/db/src/schema/tasks.ts:17 has listId as a single notNull foreign key, and no task-to-list join table exists in the schema.
+
+*To close:* Research ClickUp's Tasks in Multiple Lists: the Add to submenu, the home list vs added lists, and how filters, views and moves treat a task in more than one list. Add a join table with readers in every list query, then a suite and break patches.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). A task still belongs to exactly one list. The Add to menu offers only Personal Priorities, and nothing exists for 'Add to another List': no join table and no route. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 12 October* (lane 10), as ClickUp works it. ClickUp (help centre, "Tasks in Multiple Lists" and its FAQ, and the feedback board, through search excerpts, 9 October): an owner or admin turns the ClickApp on, and turning it off takes every task out of the lists it was added to, for good; a task keeps its home list and is added to other lists from its ⋯ menu (Add to › Another List) or beside its location; it is the same task in each, its one status its home list's; "Remove task from this List" takes it out of an added list, never its home; moving it changes its home; guests neither add nor remove; and whoever may see one of a task's lists sees it there. Built so:
+- the ClickApp `tasks.multiple_lists`, off until an owner or admin turns it on in Settings → ClickApps; turned off, the workspace's placements are deleted, and turned on again none comes back;
+- a task's lists (`task_lists`, migration 0182; `GET`, `POST /tasks/:id/lists`, `DELETE /tasks/:id/lists/:listId`): added by whoever may change the task where it lives, into a list they may add tasks to; refused in words when the ClickApp is off, for a guest, for a subtask (it goes with its parent), out of its home list, into its home list, twice, and out of a list it is not in; the activity says when it was added to a list or taken out;
+- read through a list it was added to: whoever may open that list reads the task there and by id (`readsThroughAddedList`), a private task staying private — and changes it only if they may where it lives (the write rule reads it at home, `atHome`); a list it is in is named only to those who may open it, its home one too;
+- the task sheet names its lists under its title, the home one marked, each with a way in, × to take it out and + to add it; ⋯ → Add to › Another List opens the Move picker in an "add" mode, without the task's own lists, and is drawn greyed with the server's reason when it cannot be used;
+- a list draws the tasks added to it with a chip naming their home list ("Its home: …", or a list the reader cannot open), and a task whose home list's status this list does not have in a group — and a Board column — of that status, named as at home, offering no + Add Task there.
+
+Measured: before (lane 7, the tree before it, `da1792d`): `tasks-in-multiple-lists` 0 passed, 3 failed, 3 of 14 run — the routes 404, no ClickApp in Settings, and no `list_added` activity in the database. After (lane 10): 14 of 14 (9 of 14, then 13 of 14, on the way: a member reading a task through an added list could rename it, and a task in a status the added list did not have was drawn nowhere — both built here); on the main tree's lane 1, integrated, 14 of 14.
+
+Checks (`tasks-in-multiple-lists`, 14): "it is off until an owner or admin turns it on: the task’s lists say so, adding is refused in words (403) and nothing is kept, and the menu’s Add to › Another List is drawn greyed, saying why", "a member may not turn it on (refused), and Settings → ClickApps lists it, off; the owner switches it on, and it is kept for the workspace (read by SQL)", "Add to › Another List opens the picker without the task’s own list; the list chosen holds the task (read by SQL), its activity says so, the sheet names both lists, the home one marked, and the picker offers that list no more", "whoever may open one of its lists reads it there: Max, refused it before, reads it by id and in the team list after — its home still Mia’s list, which is not named to him", "it is one task: Mia renames it in her list and the team list reads the new name, one row of it (read by SQL) — and Max, who may change nothing in Mia’s list, may not change it from his", "a private task added to a list everybody may open stays private: Max is refused it by id and the team list does not draw it for him — it does for Mia", "a list the task was added to is named only to those who may open it: Olga’s own list is in her answer and not in Mia’s", "the team list draws the task with a chip saying it lives elsewhere — the list unnamed to Max — in a group of its home list’s status, named as at home, which the team list does not have, offering no + Add Task there", "and the Board draws a column for that status, the task on it", "its × takes it out of the team list: the row is gone (read by SQL), the activity says so, the sheet no longer names the list — and Max’s way to it goes with it", "each refusal in words: out of its home list (403), into it again (400), into a list twice (409), out of one it is not in (404), and a subtask on its own (400)", "a guest, though the task is shared with them to edit, is told guests do not, and refused (403); a member who may only read a task is refused in the write rule’s words; and nobody adds a task to a list they may not add tasks to (403) — none kept (read by SQL)", "moved into a list it was added to, that list is its home, and it is not in it twice (read by SQL)", "turning the ClickApp off takes every task of the workspace out of the lists it was added to, and turning it on again brings none back (read by SQL)".
+- Patches `tml-1` to `tml-13` (the API) and `tml-w1` to `tml-w8` (the web) redden their checks on lanes 10 and 9 — `tml-1`, `tml-10`, `tml-w3`, `tml-w4` and `tml-w6` with knock-ons written under their claims. `tml-8` reddens only when both the guard and the service skip a task's own privacy: either alone still refuses (re-claimed so). `tml-9`, which did not compile, was made to; `tml-w8` reddens since the add check asks the picker again after the add. Two races in the suite, read here first: the activity of an add or a removal was read the moment its row was there, and is waited for now.
+
+
+### `found-23-sep/connected-search-per-person` — **closed** (feature, medium; was not counted, a feature) · reproduced 12 October
+
+**Each member should search their OWN mail and files; today one person's connection is the workspace's only one**
+
+*Evidence:* `workspace_integration_connections` is unique on (workspace, provider), so a second member connecting Google replaces the first's grant — and since 23 September a grant answers only the person who connected it, so everyone else's Gmail, Drive and SharePoint tabs say "Connected with someone else's account". The frame (§V2-11 `19:07`, "meri Gmail pe jaa ke") is a person searching their own mailbox.
+
+*To close:* research ClickUp's Connected Search — which apps each person connects for themselves and which an admin connects for the workspace, and what a member sees of the latter — then store per-person grants beside the workspace one (the calendar accounts already do: `user_calendar_accounts`), connect from the person's own settings, and search with the searcher's own grant. A suite per source: two members, each finding only their own.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Connected search allows one grant per workspace and provider, and that grant answers only the person who connected it. Per-person Gmail, Drive and SharePoint grants are unbuilt. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 12 October* (lane 8), as ClickUp works it. ClickUp (help centre, "Connected Search", through search excerpts, 12 October): an app is connected two ways. A personal connection is anybody's but a guest's, made for themselves, and its results — their private files and mail too — are theirs alone; a Workspace connection is an owner's or admin's, and through it every member finds what the connected account shares with the whole organisation, and nothing private. Gmail is personal only. Guests do not use Connected Search. Built so:
+- one's own Google Drive, Gmail or SharePoint (`user_search_connections`, migration 0183): `POST /workspaces/:id/search/connect/:provider` starts the consent, its callback keeps the grant for that person alone — the workspace's connection untouched — and comes back to search; `DELETE …/search/connections/:provider` takes it away; a guest is refused in words (403);
+- whose connection answers: one's own first, then the workspace's — Drive asked only for what is shared with the whole organisation (`anyoneCanFind`, `anyoneWithLink`, `domainCanFind`, `domainWithLink`), SharePoint without anybody's OneDrive; a workspace Gmail connected before this answers its connector alone; a guest is answered by none (`federatedCredential`);
+- a source says whose it is (`listSources`: `heldBy` you, the workspace, or nobody, and whether this person may connect their own), and the search palette says it — the workspace's, shared things only, with Connect your own; your own, with Disconnect; or not connected, with the offer — and App Center's Connect only for an admin, never for Gmail;
+- the lanes and CI answer Drive, Gmail and Graph search, and Google's consent and profile, from the calendar stub (`GOOGLE_DRIVE_API_URL`, `GMAIL_API_URL`, `MICROSOFT_GRAPH_API_URL`, `GOOGLE_USERINFO_URL`), so a search reaches a source that holds what the suite put there.
+
+Measured: before (main's lane 4, the tree before it): `connected-search` 0 passed, 2 failed, 2 of 11 run — the personal connect route 404, and the workspace's Drive answered everybody with its connector's private files. After (lane 8): 11 of 11 (8 of 11 on the way: the phrase searched was not in the shared file's name, and the connect route answers 201); `search-sources`, re-aimed, 11 of 11; unit `search.service.test.ts` and `drive-scope.test.ts`, 71 of 71. A guard was misplaced on the way: the new route took the calendar route's decorators, leaving the disconnect and the calendar route unguarded — each route has its own now.
+
+Checks (`connected-search`, 11): "nothing connected: Drive, Gmail and SharePoint say not connected, and each member may connect their own", "through the workspace’s Drive a member finds what is shared with the whole organization and not the connector’s private file — Drive was asked for the shared ones alone", "SharePoint through the workspace finds the organisation’s sites and no one’s OneDrive", "a mailbox is personal: the Gmail Olga connected for the workspace is searched for her alone, and for Max it is not connected", "and through the workspace’s Drive its connector finds the shared files too, not her own private ones", "a member connects their own Gmail: the consent comes back to search, and her own connection is kept — the workspace’s untouched (read by SQL)", "her mail is searched for her alone: she finds it, Max does not, and her source says it is her own", "with her own Drive connected, Mia’s search reaches her private files — Drive asked for everything she may see — and Max’s still reaches only the workspace’s shared ones", "a guest uses no Connected Search: the workspace’s Drive finds them nothing, connecting their own is refused in words (403), and their sources say so", "the palette tells Max his Drive results are the workspace’s, shared things only, and offers to connect his own — and that his Gmail is not connected, with the same offer", "Mia’s palette says her Gmail is her own and offers to disconnect it; disconnected, it is gone (read by SQL) and her mail is searched no more".
+- Patches `ccs-1` to `ccs-10` (the API) and `ccs-w1` to `ccs-w3` (the web) redden their checks on lane 8 — `ccs-7` and `ccs-10` with knock-ons written under their claims; `ccs-3`, which did not compile, was made to. `search-sources-5` and `search-sources-6` re-aimed (a workspace's Gmail is its connector's; a member is offered their own), `search-sources-5` with a knock-on. The suite pressed ⌘K at `domcontentloaded`, before the shell listened, and seven palette checks went red under patches that touch neither the palette nor the person: it presses until the palette's input shows now.
+
+### `commit-log/log-c980bee-1` — **closed** (feature, large; was not counted, a feature) · reproduced 12 October
+
+**Ten custom field types are unbuilt, and the ledger still gives a reason that commit 4cb50d3 retired**
+
+*Evidence:* custom-fields.ts:7-52 has 22 types. Commits c980bee and ac1d0fa recorded ten as decisions: eight AI fields (Summary, Custom Text, Custom Dropdown, Progress Updates, Translation, Sentiment, Categorize, Action Items), plus Relationship and Button. Ledger row 719 still says the AI eight wait because 'ANTHROPIC_API_KEY is empty here and in CI'. Commit 4cb50d3 retired that exact reason ('The reason is retired and the seam is proven'): the SDK reads ANTHROPIC_BASE_URL, and model-stub.mjs answers there. Button waits on 'AutomationsService has no manual trigger'.
+
+*To close:* Research ClickUp's AI fields, Relationship field and Button field. Build the AI fields against the model-stub lane. Replace the stale reason on row 719 now, whatever is built.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The ten field types (eight AI fields, Relationship and Button) are still refused by the API, which accepts 22 types. The stale 'API key is empty' reason on the ledger row now carries a correction, but the original sentence is still there. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 12 October* (lanes 10 and 9), as ClickUp works it. ClickUp (help centre, "AI Fields", "Use Button Custom Fields", "Create Relationship Custom Fields", "Custom Relationships"; read 12 October): AI fields live within Short Text, Long Text and Dropdown — Sentiment a Short Text; Summary, Progress Updates, Action Items and Translation Long Text; Categorize a Dropdown; and Custom Text and Custom Dropdown follow an instruction their maker writes — fill when asked, fill new tasks when set to, update when a task changes (every twenty minutes), and use AI credits; a Button field, clicked on a task, runs the automation it triggers; a Relationship is to "any task in your Workspace" or to "tasks from a specific List", chosen when it is made and kept, with rollup columns of the related tasks' fields. Built so:
+- the eight AI fields are `text`, `long_text` and `dropdown` definitions with `config.ai` — the kind, checked for the type it lives within, a custom field's instruction, a translation's language, and whether it fills new tasks and updates on a change (`ai-field.ts`); `POST …/tasks/:id/custom-fields/:fieldId/generate` asks the task's read rule, the field on the task and the write rule before any model, then the model through `AiService.fillAiField` (metered as `custom_field.<kind>`), and keeps what the field takes — a Dropdown one of its options, Sentiment one of its three words — or refuses the answer in words (502); a new task is filled after a second, and a changed one asked again once per wait (`AI_FIELD_REFRESH_SECONDS`, twenty minutes as ClickUp's; three on a lane), through an in-process task-change event (`common/events/task-changes.ts`);
+- the Button type (migration 0184): its words, no value (refused, 400), and `POST …/custom-fields/:fieldId/press`, which asks the task's write rule and runs the automations whose trigger is `button.clicked` for that field — a rule must name a Button of the workspace (400) — and says how many ran; the automation builder offers "A button is pressed" with the workspace's Buttons;
+- the Relationship is the `tasks` type with `config.listId` — a list its maker may open, kept once made (400) — and `config.rollups`, fields that list's tasks have; a value outside the list is refused (400); the field's read gives each rollup's value on each related task the reader may open; the sheet's picker searches that list alone (`GET /tasks/workspace/:id?listId=`), and draws the rollups under each related task;
+- the task sheet's field form offers the AI fields (with their instruction, language and fill settings), a Button's words, a Relationship's list and rollups; an AI field carries ✦ Generate, a Button presses and says what ran;
+- the lanes' model stub answers each kind in the product's own words, a Dropdown with the first option its prompt lists.
+
+Measured: before (main's lane 4, the tree before it): `ai-button-relationship-fields` 2 passed, 8 failed, 10 of 17 run — an AI field's settings were dropped, the generate and press routes 404, and `button` was an unknown type; the two that passed are the refusal branch's "nothing filled". After: lane 10, with a model, 17 of 17 (16 of 17 on the way: autofill filled a task made a moment before its field — fills only tasks made after the field now); lane 9, without one (CI's path), 17 of 17; unit `ai-field.test.ts`, 6.
+
+Checks (`ai-button-relationship-fields`, 17): "the eight AI fields are made, each within the type ClickUp puts it in (read by SQL) — and a kind in the wrong type, a custom field without its instruction and a translation without its language are refused in words", "the sheet’s field picker offers the eight AI fields, asks a custom one for its instruction, and makes it as a Long Text with its settings (read by SQL)", "Generate fills the Summary: the model was asked with the task’s title, description and comments, its answer is the field’s value (read by SQL), and the use is metered to the asker", "Categorize is asked to choose among its own options and keeps the one named (read by SQL); an answer that is none of them is refused in words (502) and the value stays", "the other six fill too, each asked in its own words — Progress Updates with the comments, Translation into its language, the custom ones with their instruction — and each keeps its answer in its own type (read by SQL)", "a reader of the task is refused before any model is asked (403, nothing kept, no use recorded), as are a field that is not an AI field (400, in words) and an AI field the task has not got (404)", "a task made where a field set to fill new tasks is gets its value without anybody asking — that field’s, and no field not set to (read by SQL)", "a field set to update when the task changes is asked again after an edit — with the edited description — and once for two edits in a row, not once each (read by SQL)", "the sheet offers ✦ Generate on an AI field, and what the model wrote is drawn in the field and kept (read by SQL)", "pressing a Button on a task runs the automation it triggers for that task, as the presser (read by SQL) — not another Button’s — and a Button holds no value to set", "a “button is pressed” rule must name a Button (400, in words, for none or a field that is not one); a reader of the task is refused the press and nothing runs; a field that is not a Button is not pressed", "the sheet draws a Button with its words; pressing it says one automation ran and the task changed (read by SQL); a Button made from the sheet with nothing set to run says so when pressed", "the automation builder offers “A button is pressed” with the workspace’s Buttons to wait for — not other fields — and will not save one waiting for no Button", "a Relationship limited to a list takes that list’s tasks and refuses any other in words; its list is kept once made; its rollups are fields that list’s tasks have, and need the list (read by SQL)", "a Relationship’s rollups give each related task’s value of the rolled-up field — the owner sees both clients’, and Mia, who may not open the private one, sees only the one she may", "the sheet draws each related task’s rolled-up value beside it, and its picker offers the Clients list’s tasks and no task outside it", "the sheet makes a Relationship limited to the list chosen, offering as rollups only the fields that list’s tasks have (read by SQL)".
+- Patches `abr-1` to `abr-17` (the API) and `abr-w1` to `abr-w8` (the web) redden their checks on lane 10 — `abr-1` and `abr-9` with knock-ons written under their claims — and `abr-u1`, `abr-u2` their unit tests. `docs/video2-reaudit.md`'s field types row is B now, 29 of 29, its stale reason marked superseded.
+
+### `ledger-rows/row-719` — **closed** (feature, large; was not counted, a feature) · reproduced 12 October
+
+**Field types: 10 of the frame's 29 absent; the 'ANTHROPIC_API_KEY is empty' blocker for the 8 AI types is stale**
+
+*Evidence:* reaudit.md:719: the 10 absent are 'not a build'. Eight need a language model and 'ANTHROPIC_API_KEY is empty here and in CI'. Relationship 'would be a second store for what task_doc_links already holds'. Button has no manual trigger. Tree: custom-fields.ts:7-53 has 22 types including 'tasks' (a named task→task reference, 0158). The key reason is retired by the ledger itself (reaudit.md:2843-2863) and by the model stub now being wired into the lanes (commits 6fbd79b, ad00a7c: RUNDESK_LANE_MODEL). For Button: AutomationsService.fire(triggerType, ctx) takes any trigger string (automations.service.ts:209-236), so a button trigger type is an addition, not a missing engine. The Relationship reason names task_doc_links (task↔doc), while the `tasks` field type already stores task→task references.
+
+*To close:* Build the 8 AI field types on ai.service's existing Anthropic path, measured on a model-stub lane. Add Button as a new automation trigger type fired by the field. Decide Relationship against ClickUp's actual Relationship field (list-scoped, rollups) versus the existing `tasks` type. Rewrite the row's reason.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The 10 field types (8 AI, Relationship, Button) are still unbuilt (lane 6 refuses each with 400 'Unknown custom field type'), and the row's stale empty-key reason now carries a note saying they are unbuilt, not blocked. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 12 October*, with `commit-log/log-c980bee-1`, which says how: the eight AI field types are built on `ai.service`'s path and measured on a model lane, Button is an automation trigger fired by the field, and Relationship is ClickUp's — the `tasks` type, limited to a list with rollups. The row's stale reason is marked superseded and the row is B.
+
+### `harness/ai-rows-blocked-on-empty-key` — **closed** (feature, large; was not counted, a feature) · reproduced 12 October
+
+**Ledger rows still give 'ANTHROPIC_API_KEY is empty here and in CI' as the reason the AI field types and AI surfaces are unbuilt or refusal-only**
+
+*Evidence:* docs/video2-reaudit.md:642 ('eight of the ten need a language model and ANTHROPIC_API_KEY is empty here and in CI') and :719 (row P, the 10 absent field types: Summary, Custom Text, Custom Dropdown, Progress Updates, Translation, Sentiment, Categorize, Action Items, plus Relationship and Button). Also :727 (row B: the task AI bar ends in 'not configured'). The same ledger at :2843 says 'The ANTHROPIC_API_KEY half of that reason is now known to be wrong', and scripts/e2e-lanes/model-stub.mjs plus lane_model_env (lane-env.sh:170-177) now supply a model to a lane. Under the owner's policy these rows are UNBUILT, not blocked.
+
+*To close:* Relabel these rows as unbuilt. Build the eight AI field types, and Relationship and Button, to ClickUp's documented behaviour. Measure them on a model lane through model-stub (this depends on model-lane-routing-unbuilt).
+
+*Partly fixed, 30 September:*
+- The rows are relabelled. `docs/video2-reaudit.md` keeps its words about the empty key, and says beside each (§4's paragraph, the field-types row, the task AI bar's row) that a lane runs a model stub, so the eight AI types are unbuilt, not blocked.
+- The dependency is closed: model-lane routing is built (`harness/model-lane-routing-unbuilt`).
+- What stays open is the build: the eight AI field types, and Relationship and Button, to ClickUp's documented behaviour, measured on the model lane.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The ledger rows are relabelled and the routing dependency is closed; what remains, the 8 AI field types plus Relationship and Button, is unbuilt (lane 6 rejects each type), which duplicates row-719. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 12 October*, with `commit-log/log-c980bee-1`: the rows were relabelled on 30 September, and what stayed open — the eight AI field types, Relationship and Button — is built to ClickUp's documented behaviour and measured on the model lane (and without a model, CI's path).
+
+### `commit-log/log-3943965-1` — **closed** (feature, medium; was not counted, a feature) · reproduced 12 October
+
+**Credit meter, Credits tab, usage-trend chart and the metered 'uses have expired' paywall are all unbuilt; the data for them already exists**
+
+*Evidence:* Commit 3943965 found its own blocker stale: ai_usage records every call, and ai.controller.ts:183 @Get('usage') serves it. It re-blocked the work on 'allowance, reset policy, Add credits ... no frame specifies', which is the reason the owner no longer accepts. workspace-settings-page.tsx:1304-1318 shows usage tables only. There is no trend chart with a limit line, and grep for 'credits left', 'creditMeter' and 'usage-trend' finds nothing in apps/web/src. Ledger §6 line 2819 still has the usage-trend chart as STILL OPEN (e07683b, d8d1e04). Row 788's metered state was blocked on the same reason (446cdba). Row 869 counts Credits as M, while §3 lines 889-891 call Credits a decision.
+
+*To close:* Research ClickUp's AI credits: the allowance per plan, reset timing, Add credits, and the usage chart with its limit line. Decide with the owner whether the §3 'no in-app currency' decision still stands. Build the usage-trend chart now, since §6 already says it is separable from credits. Then build the meter and the metered paywall state on top of ai_usage.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The credit meter, Credits tab, dollar usage-trend chart and metered paywall do not exist. ai_usage and GET /ai/usage serve only totals and per-user, per-model and per-feature splits. Whether to have credits at all still waits on the owner's §3 decision. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 12 October* (lane 9 with a model, lane 7 without), as ClickUp works it. ClickUp (help centre, "New plans and pricing options", "Which features are included with the AI add-ons?", "Purchase or track ClickUp AI Super Credits"; read 12 October): each user brings a monthly number of AI credits, pooled across the workspace; they renew each month and do not roll over; a credit is a tenth of a cent, and more are bought in $10 packs; the workspace is warned at 80% and at 100% of its credits, and past 100% AI pauses until the month renews or credits are bought. The owner's §3 "no in-app currency" decision is superseded by the owner's policy that ClickUp's behaviour is the specification. Built so:
+- each call's credits are kept with its use (`ai_usage.credits`, migration 0185): its estimated cost at a tenth of a cent a credit, never less than one (`credits.ts`, unit-tested);
+- the month's credits are the plan's share per member (`PlanLimits.aiCreditsPerMember`: Free none, Pro 1,000, Business 1,500, Enterprise unlimited; a guest brings none) and what was bought and paid for this month (`ai_credit_purchases`); from 80% the composer warns with how many are left; used up, every AI call is refused before the model is asked, with when the month renews (402, `code: 'out_of_credits'`), written down as a refusal that cost nothing;
+- `GET /ai/credits` gives the month: allowance, used, bought, left, its state, each day's use with the running total, and the use by kind; the AI hub's Credits tab and Settings › AI usage draw it — the running total against the limit line, the use by category, and Add credits for whoever holds billing;
+- Add credits buys packs of 10,000 through the payment provider's checkout (`POST /:workspaceId/billing/ai-credits/checkout`, `workspace.billing`): one to a hundred packs (400 otherwise, in words); a server with no payment provider says so (400); a purchase counts only once its checkout is paid (`checkout.session.completed`).
+
+Measured: before (lane 9 on the tree before it): `ai-credits` 0 passed, 2 failed, 2 of 16 run — `GET /ai/credits` was a 404 and `ai_usage` had no `credits` column. After: lane 9, with a model, 16 of 16 (on the way: the usage row was read before it was written, and the paywall before the locked card opened; the suite now waits for each); lane 7, without one (CI's path), 16 of 16; unit `credits.test.ts`, 5.
+
+Checks (`ai-credits`, 16, the eleven of credits here and five of free uses under `ledger-rows/row-788`): "the month’s credits are the plan’s per member times its members — a guest brings none — unlimited on Enterprise, and renew on the 1st", "a call the model answers costs credits — its cost at a tenth of a cent a credit, at least one — and the month’s use counts it (read by SQL)", "at 80% of the month’s credits the workspace is warned: the composer says so and how many are left", "with the month’s credits used, AI pauses: a call is refused in words with when they renew (402), written down as a refusal that cost nothing (read by SQL)", "the composer says AI is paused, until when, and that an admin can add credits — none left of the month’s", "credits bought and paid for count toward the month: the allowance grows by them and AI is no longer paused", "a purchase not yet paid for counts for nothing", "only whoever holds billing adds credits (a member is refused, 403); credits come in packs of 10,000 (400, in words); and a server with no payment provider says so — nothing kept (read by SQL)", "the credits card shows the month’s credits, used and bought, each day’s running total against the limit line, what each kind of AI used, and Add credits to the owner", "a member reads the same credits, and is offered no Add credits", "Add credits offers three amounts and a custom number of packs; Get credits asks for that many, and the server’s refusal is said in the dialog".
+- Patches `acr-1` to `acr-15` (the API) and `acr-w1` to `acr-w8` (the web) redden their checks on lane 9 — `acr-1`, `acr-7`, `acr-8`, `acr-11`, `acr-13` and `acr-14` with knock-ons written under their claims — and `acr-u1` to `acr-u3` their unit tests. Measured on main with batches 31 to 33 (lanes 1 to 6): `paywall-sites`, `team-view`, `list-export` and `list-customize` asked a Free plan's first use of Team View or the board download to be refused, which it no longer is; each now spends the sixty uses first, by SQL, and asks the refusal that follows, and the gate stays the plan's (frame `09:26`) with `09:30`'s sentence under it once the uses are spent.
+
+### `ledger-rows/row-788` — **closed** (feature, medium; was not counted, a feature) · reproduced 12 October
+
+**Paywall's metered 'uses have expired' state (B* remainder) — absent, held only because frame 09:30 shows no allowance or reset**
+
+*Evidence:* reaudit.md:788 B*: the metered state is 'blocked on the reference'; reaudit.md:2887-2891 repeats that. Tree: plans.constants.ts:40-55 has PLAN_FEATURES ['teamView','boardExport'] and PlanLimits {maxMembers, maxProjects} only. A grep for expired/usesLeft/feature_uses across feature-gate.tsx, the plans module and billing schema finds nothing. Parts that exist: plan-feature.guard.ts (server refusal), FeatureGateDialog.
+
+*To close:* Research ClickUp's limited-uses model for Free-plan features (the allowance and whether it resets). Add a per-workspace per-feature use counter incremented by the guard's allowed path, and render 09:30's state (preview, sentence, one Contact admin button) when the counter is exhausted.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). There is no metered paywall: a Free workspace is refused a paid feature from the first use, with no use counter and no 'uses have expired' state. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 12 October* (lanes 9 and 7), as ClickUp works it. ClickUp (help centre, "Views feature availability and limits", and the pricing page's questions; read through search excerpts, 12 October): a Free plan has a number of uses of some paid features — Gantt view sixty — that add up over the workspace's life and do not reset; spent, the feature can no longer be used, and nothing made with it is lost. The pages read do not say what one use is; here it is a member's day with the feature, so opening Team View twice in a day costs one. Built so:
+- `FEATURE_FREE_USES` gives Team View and board export, the two features frame `09:26` names as paid, ClickUp's sixty; `plan_feature_uses` (migration 0185) keeps one row per workspace, feature, member and day, written only while a use is left — the test and the write are one statement — and a member's later uses that day take none;
+- spent, the plan guard refuses in ClickUp's words, naming the plan and the sixty, with `code: 'uses_expired'` (403); `GET /workspaces/:id/plan` gives each such feature's allowance, used and left;
+- the Team View says how many free uses are left; spent, the paywall is still the plan's (frame `09:26`), and says under its first line, as frame `09:30` does, that the uses are spent and nothing made is lost, with its one button; on a plan that includes the feature nothing is counted and no uses are offered.
+
+Checks (`ai-credits`, the five of free uses): "Pro has sixty free uses of Team View, each a member’s day with it: Mia opening it twice takes one, Olga another", "the Team View says how many of its free uses are left", "with its sixty uses spent, Team View is refused in words — nothing made with it lost — to a member with no use today, and not to one who already has today’s", "the paywall says the free uses are spent, and nothing made is lost", "on Business, which has Team View, it is not counted, and no free uses are offered". Measured with `commit-log/log-3943965-1`, which gives the before and after.
+
+### `ledger-rows/row-869` — **closed** (decision, large; was not counted, a decision for the owner) · reproduced 12 October
+
+**Credits (tab, category table, trend chart with limit, Add credits, My Agent Performance) — absent; a recorded decision plus parts no frame opens**
+
+*Evidence:* reaudit.md:869 (M). §3 decision at reaudit.md:889-891. §6 at reaudit.md:2819 says the usage-trend chart is separable and 'STILL OPEN'. Parts that exist: GET /ai/usage (ai.controller.ts:183-190) and an AI Usage settings tab (workspace-settings-page.tsx:1287-1330) with per-user and per-model spend over 7/30/90 days. The response has totals/byUser/byModel and no per-day series, so there is no trend. rollUpByCategory gives the 8 categories (ai-categories.ts). No AI quota exists in PlanLimits.
+
+*To close:* Build the dollar trend chart now: a per-day series from ai_usage. Take the credit unit, allowance and 'Add credits' flow from ClickUp research, and get the owner to reconsider the §3 decision. 'My Agent Performance' waits for Super Agents (row-852).
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Credits (the tab, credit table, limit line and Add credits) wait on the owner's §3 decision. The dollar usage-trend chart is an unbuilt feature that can be built now, and My Agent Performance waits for Super Agents. None of it is a defect. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 12 October*, with `commit-log/log-3943965-1`, which says how: the Credits tab is in the AI hub (and Settings › AI usage), with the month's credits, the category table, the daily running total against the limit line, and Add credits — packs bought through the payment provider. ClickUp's credits were researched and are built as ClickUp counts them, so the §3 decision is superseded. My Agent Performance is the performance of Super Agents, which Rundesk does not have: it goes with them, under `ledger-rows/row-852`.
+
+### `commit-log/log-6f62af6-1` — **closed** (decision, small; was not counted, a decision for the owner) · reproduced 12 October
+
+**The end of the third Teams carousel card is our own wording and is not checked**
+
+*Evidence:* Commit 6f62af6: the third card is cut off in the frame, 'its tail is written by me' and is not checked. catalogs.ts:2831-2835 reads 'Stay focused with Priorities' / 'Instantly know what each team is working on ...'.
+
+*To close:* Research ClickUp's actual Teams empty-state card copy, use it in all four locales, and check it.
+
+*Researched, 29 September:* not settled by public sources. ClickUp's pages describe Priorities in Teams Hub ("see what each person is working on", "share and compare priorities") but not the empty state's carousel copy, and no page quotes the third card. The frame's beginning stays, and the tail stays ours until the owner or a later frame gives the real one.
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). The end of the third Teams card is still our own wording and is not checked. Nothing behaves wrongly; it waits for the owner or a later frame to give ClickUp's real text. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 12 October* (lane 7). ClickUp's help centre ("What are Personal Priorities?", read through search excerpts, 12 October) says what Priorities in Teams Hub are for: "your Personal Priorities are automatically displayed on your profile, and in Teams Hub, so your team and manager can see what you're focused on". The third card's body is that sentence — "Your Personal Priorities are displayed in Teams Hub, so your team and manager can see what you're focused on." — in all four locales, under the frame's own "Stay focused with Priorities". `teams-empty-state` checks it with the first two cards' (22 checks; before, lane 8 on the tree before it: 21 passed, 1 failed — the card said our own sentence; after, main's lane 1: 22 of 22).
+- Patch `teams-empty-state-7-the-third-card-ours` reddens it on lane 9.
+
 ### `resume-defects/s4-composer-email` — **closed** (feature, large; was not counted, a feature) · reproduced 9 October
 
 **Section 4: 'The composer posts as Email' is still unbuilt. The mode menu now exists with Email disabled, a suite locks that state in, and the ledger's 'today' text is stale**
@@ -10886,7 +11090,7 @@ Moved here by the triage of 5 October, at the owner's request: these are not ope
 counts. Each says what it is in its heading, with the status it had before. Their full evidence is in
 `docs/triage-2026-10-05.md`.
 
-#### Features and ClickUp gaps — 20
+#### Features and ClickUp gaps — 12
 
 ### `found-9-oct/task-email-sends-from-the-server` — feature, not counted (found closing `resume-defects/s4-composer-email`, 9 October)
 
@@ -10895,38 +11099,6 @@ counts. Each says what it is in its heading, with the status it had before. Thei
 *Evidence, 9 October:* ClickUp's Email ClickApp sends from the person's connected email account — Gmail, Outlook, or another over IMAP — with their signature, saved templates and a time to send (help centre, "Use Email in ClickUp", through search excerpts). Rundesk sends a task's email from the server's own address, named "<the writer> via Rundesk", its answers coming back to an address of its own (`comment-email.service.ts`), with no signature, template or send time.
 
 *To close:* connect a mailbox per person (each provider's OAuth app, the owner's to register), send from it and read its answers from it; signatures, templates and a send time on the Email form.
-
-### `found-24-sep/planner-default-list-read-by-nothing` — feature, not counted (triage, 5 October; was: partly-fixed, small (dead control; found fixing the block prefix))
-
-**The planner's Time blocking "Default list" saves, and nothing reads it**
-
-*Evidence, read not run:* `planner-settings-dialog.tsx` draws a Default list picker (`planner-default-list`). Its comment calls it "the answer to the question video 1 left open: where a task made from a message, from /task, or by the AI should land". It writes `defaultListId` into the person's planner settings, and the server checks the list exists. A search of `apps/web/src` and `apps/api/src` finds no other reader. A task made from a chat message, from `/task` or by the AI lands wherever those flows put it, and the picker changes nothing. `planner-settings` checks only that the picker offers the workspace's lists.
-
-*The frame answers what it governs:* `14:20`, Time blocking, "**Default list for new tasks** — *Defaults to your personal list*" (`video2-frame-observations.md`). The gap audit reads it as the answer to video 1's open question: where a task made by `/task`, from a message, or by the AI lands. That is the person's Personal List unless they choose another.
-
-*To close:* have each of those flows read the setting when no list is named: `/task`, a message turned into a task, and the AI's task-making. Add a check per flow that the task lands in the chosen list, and in the personal list when none is chosen.
-
-*Partly fixed, 24 September.* A chosen list now decides where all three land. `defaultListFor` (tasks.service), which `/task` and the AI's "Create task from this" already asked, reads the person's chosen list first. It uses it when the list is in this workspace and they may add to it (`canCreateTaskIn`), and otherwise takes the oldest list they can add to, as before. The chat page chose the first list of the first project of the first space itself and always named it. It names none now, and `create-task` from a message asks `defaultListFor`, as `/task` does. Three strings for the page's own lookup went with it.
-
-The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the first four): `/task`, a message and an AI answer each landed in the oldest list with a list chosen, and the twin (none chosen: the oldest) passed. After, 6/6, with two more for the guards on the chosen list:
-- a list chosen in another workspace is not used here (a message's words would have crossed into the other workspace);
-- a member's chosen list in a private space they are not in is passed over, not refused.
-
-`pdl-1..4` (the choice ignored, the page picking the list, any workspace, no create rule), each compiled, 4 of 4 reddened on lane 2.
-
-*What is left:* the frame's default, "your personal list". This product's personal tasks are a separate table, not a list, so there is no personal list to default to. The empty choice was labelled "My personal list" over a behaviour that is the oldest list the person can add to. It says so now ("The first list I can add to", in the four locales). A personal list per person, as ClickUp has, is unbuilt. Regression on lane 1, 12/12: `planner-default-list`, `chat-message-actions`, `chat-history`, `replies-inline-thread`, `task-creation-access`, `lookup-read-access`, `ai-answer-rendering`, `planner-settings`, `task-mentions`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The dead-control defect does not reproduce, because all three flows now read the chosen Default list (7/7 on lane 4). What remains is ClickUp's per-person Personal List, which is unbuilt. The triage's skeptic reproduced a defect beside it, now counted as `found-5-oct/default-list-files-into-an-archived-list`. Evidence: `docs/triage-2026-10-05.md`.
-
-### `found-23-sep/connected-search-per-person` — feature, not counted (triage, 5 October; was: open, medium (unbuilt; found closing federated search))
-
-**Each member should search their OWN mail and files; today one person's connection is the workspace's only one**
-
-*Evidence:* `workspace_integration_connections` is unique on (workspace, provider), so a second member connecting Google replaces the first's grant — and since 23 September a grant answers only the person who connected it, so everyone else's Gmail, Drive and SharePoint tabs say "Connected with someone else's account". The frame (§V2-11 `19:07`, "meri Gmail pe jaa ke") is a person searching their own mailbox.
-
-*To close:* research ClickUp's Connected Search — which apps each person connects for themselves and which an admin connects for the workspace, and what a member sees of the latter — then store per-person grants beside the workspace one (the calendar accounts already do: `user_calendar_accounts`), connect from the person's own settings, and search with the searcher's own grant. A suite per source: two members, each finding only their own.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). Connected search allows one grant per workspace and provider, and that grant answers only the person who connected it. Per-person Gmail, Drive and SharePoint grants are unbuilt. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `commit-log/log-214dac0-1` — feature, not counted (triage, 5 October; was: open, large)
 
@@ -10958,36 +11130,6 @@ The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the fi
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). A list or space can still only use six view types (list, board, table, calendar, gantt, team). The API refuses Activity, Workload, Map, Mind Map and Timeline with a 400, and the app does not offer them. Nothing that exists is wrong. Evidence: `docs/triage-2026-10-05.md`.
 
-### `commit-log/log-713a611-1` — feature, not counted (triage, 5 October; was: open, large)
-
-**'Add to ›' (one task in several lists) is blocked because it is ClickUp's feature rather than the video's**
-
-*Evidence:* Commit 713a611 and ledger row 845: 'The gloss ... a task in more than one list is ClickUp's real product, not anything in the video ... Blocked on the reference'. Under the new instruction, ClickUp's real product is the spec to build to. packages/db/src/schema/tasks.ts:17 has listId as a single notNull foreign key, and no task-to-list join table exists in the schema.
-
-*To close:* Research ClickUp's Tasks in Multiple Lists: the Add to submenu, the home list vs added lists, and how filters, views and moves treat a task in more than one list. Add a join table with readers in every list query, then a suite and break patches.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). A task still belongs to exactly one list. The Add to menu offers only Personal Priorities, and nothing exists for 'Add to another List': no join table and no route. Evidence: `docs/triage-2026-10-05.md`.
-
-### `commit-log/log-c980bee-1` — feature, not counted (triage, 5 October; was: open, large)
-
-**Ten custom field types are unbuilt, and the ledger still gives a reason that commit 4cb50d3 retired**
-
-*Evidence:* custom-fields.ts:7-52 has 22 types. Commits c980bee and ac1d0fa recorded ten as decisions: eight AI fields (Summary, Custom Text, Custom Dropdown, Progress Updates, Translation, Sentiment, Categorize, Action Items), plus Relationship and Button. Ledger row 719 still says the AI eight wait because 'ANTHROPIC_API_KEY is empty here and in CI'. Commit 4cb50d3 retired that exact reason ('The reason is retired and the seam is proven'): the SDK reads ANTHROPIC_BASE_URL, and model-stub.mjs answers there. Button waits on 'AutomationsService has no manual trigger'.
-
-*To close:* Research ClickUp's AI fields, Relationship field and Button field. Build the AI fields against the model-stub lane. Replace the stale reason on row 719 now, whatever is built.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The ten field types (eight AI fields, Relationship and Button) are still refused by the API, which accepts 22 types. The stale 'API key is empty' reason on the ledger row now carries a correction, but the original sentence is still there. Evidence: `docs/triage-2026-10-05.md`.
-
-### `ledger-rows/row-719` — feature, not counted (triage, 5 October; was: open, large)
-
-**Field types: 10 of the frame's 29 absent; the 'ANTHROPIC_API_KEY is empty' blocker for the 8 AI types is stale**
-
-*Evidence:* reaudit.md:719: the 10 absent are 'not a build'. Eight need a language model and 'ANTHROPIC_API_KEY is empty here and in CI'. Relationship 'would be a second store for what task_doc_links already holds'. Button has no manual trigger. Tree: custom-fields.ts:7-53 has 22 types including 'tasks' (a named task→task reference, 0158). The key reason is retired by the ledger itself (reaudit.md:2843-2863) and by the model stub now being wired into the lanes (commits 6fbd79b, ad00a7c: RUNDESK_LANE_MODEL). For Button: AutomationsService.fire(triggerType, ctx) takes any trigger string (automations.service.ts:209-236), so a button trigger type is an addition, not a missing engine. The Relationship reason names task_doc_links (task↔doc), while the `tasks` field type already stores task→task references.
-
-*To close:* Build the 8 AI field types on ai.service's existing Anthropic path, measured on a model-stub lane. Add Button as a new automation trigger type fired by the field. Decide Relationship against ClickUp's actual Relationship field (list-scoped, rollups) versus the existing `tasks` type. Rewrite the row's reason.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The 10 field types (8 AI, Relationship, Button) are still unbuilt (lane 6 refuses each with 400 'Unknown custom field type'), and the row's stale empty-key reason now carries a note saying they are unbuilt, not blocked. Evidence: `docs/triage-2026-10-05.md`.
-
 ### `ledger-rows/row-770` — feature, not counted (triage, 5 October; was: open, large)
 
 **Create-menu 'Super Agent' — still absent**
@@ -11018,6 +11160,8 @@ The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the fi
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The Brain hub's main column exists at /app/:ws/ai. Super Agents, the Ask|Agents toggle, the AI-scoped nav, /ai/brain and the onboarding are all still unbuilt features, not defects. Evidence: `docs/triage-2026-10-05.md`.
 
+*12 October:* `ledger-rows/row-869`'s My Agent Performance is carried here: it is the performance of Super Agents, and is built with them.
+
 ### `ledger-rows/row-853` — feature, not counted (triage, 5 October; was: open, large)
 
 **Credit meter, rotating placeholder, composer '+', generated artifacts/slide deck — absent; the placeholder's revert reason is weakening now lanes can carry a model**
@@ -11028,15 +11172,7 @@ The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the fi
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The rotating placeholder is built. The composer '+' and generated slide decks are unbuilt features, and the credit meter waits on the owner's Credits decision. None of it is a defect. Evidence: `docs/triage-2026-10-05.md`.
 
-### `commit-log/log-3943965-1` — feature, not counted (triage, 5 October; was: open, medium)
-
-**Credit meter, Credits tab, usage-trend chart and the metered 'uses have expired' paywall are all unbuilt; the data for them already exists**
-
-*Evidence:* Commit 3943965 found its own blocker stale: ai_usage records every call, and ai.controller.ts:183 @Get('usage') serves it. It re-blocked the work on 'allowance, reset policy, Add credits ... no frame specifies', which is the reason the owner no longer accepts. workspace-settings-page.tsx:1304-1318 shows usage tables only. There is no trend chart with a limit line, and grep for 'credits left', 'creditMeter' and 'usage-trend' finds nothing in apps/web/src. Ledger §6 line 2819 still has the usage-trend chart as STILL OPEN (e07683b, d8d1e04). Row 788's metered state was blocked on the same reason (446cdba). Row 869 counts Credits as M, while §3 lines 889-891 call Credits a decision.
-
-*To close:* Research ClickUp's AI credits: the allowance per plan, reset timing, Add credits, and the usage chart with its limit line. Decide with the owner whether the §3 'no in-app currency' decision still stands. Build the usage-trend chart now, since §6 already says it is separable from credits. Then build the meter and the metered paywall state on top of ai_usage.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The credit meter, Credits tab, dollar usage-trend chart and metered paywall do not exist. ai_usage and GET /ai/usage serve only totals and per-user, per-model and per-feature splits. Whether to have credits at all still waits on the owner's §3 decision. Evidence: `docs/triage-2026-10-05.md`.
+*12 October:* the credit meter is built, with the Credits tab and Add credits (`commit-log/log-3943965-1`). What stays is the composer '+' and generated slide decks.
 
 ### `ledger-rows/row-745` — feature, not counted (triage, 5 October; was: open, medium)
 
@@ -11047,31 +11183,6 @@ The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the fi
 *To close:* @Brain: research how ClickUp's @Brain answers in a comment thread, then build it on ai.service + comment create, measured on a model-stub lane. Agents: wait for row-852's Super Agents.
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The @ picker has six sections and no Brain or Agents section. @Brain could be built on the existing AI service, but Agents cannot be built until Super Agents (row-852) exists. Evidence: `docs/triage-2026-10-05.md`.
-
-### `ledger-rows/row-788` — feature, not counted (triage, 5 October; was: open, medium)
-
-**Paywall's metered 'uses have expired' state (B* remainder) — absent, held only because frame 09:30 shows no allowance or reset**
-
-*Evidence:* reaudit.md:788 B*: the metered state is 'blocked on the reference'; reaudit.md:2887-2891 repeats that. Tree: plans.constants.ts:40-55 has PLAN_FEATURES ['teamView','boardExport'] and PlanLimits {maxMembers, maxProjects} only. A grep for expired/usesLeft/feature_uses across feature-gate.tsx, the plans module and billing schema finds nothing. Parts that exist: plan-feature.guard.ts (server refusal), FeatureGateDialog.
-
-*To close:* Research ClickUp's limited-uses model for Free-plan features (the allowance and whether it resets). Add a per-workspace per-feature use counter incremented by the guard's allowed path, and render 09:30's state (preview, sentence, one Contact admin button) when the counter is exhausted.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). There is no metered paywall: a Free workspace is refused a paid feature from the first use, with no use counter and no 'uses have expired' state. Evidence: `docs/triage-2026-10-05.md`.
-
-### `harness/ai-rows-blocked-on-empty-key` — feature, not counted (triage, 5 October; was: partly-fixed, large)
-
-**Ledger rows still give 'ANTHROPIC_API_KEY is empty here and in CI' as the reason the AI field types and AI surfaces are unbuilt or refusal-only**
-
-*Evidence:* docs/video2-reaudit.md:642 ('eight of the ten need a language model and ANTHROPIC_API_KEY is empty here and in CI') and :719 (row P, the 10 absent field types: Summary, Custom Text, Custom Dropdown, Progress Updates, Translation, Sentiment, Categorize, Action Items, plus Relationship and Button). Also :727 (row B: the task AI bar ends in 'not configured'). The same ledger at :2843 says 'The ANTHROPIC_API_KEY half of that reason is now known to be wrong', and scripts/e2e-lanes/model-stub.mjs plus lane_model_env (lane-env.sh:170-177) now supply a model to a lane. Under the owner's policy these rows are UNBUILT, not blocked.
-
-*To close:* Relabel these rows as unbuilt. Build the eight AI field types, and Relationship and Button, to ClickUp's documented behaviour. Measure them on a model lane through model-stub (this depends on model-lane-routing-unbuilt).
-
-*Partly fixed, 30 September:*
-- The rows are relabelled. `docs/video2-reaudit.md` keeps its words about the empty key, and says beside each (§4's paragraph, the field-types row, the task AI bar's row) that a lane runs a model stub, so the eight AI types are unbuilt, not blocked.
-- The dependency is closed: model-lane routing is built (`harness/model-lane-routing-unbuilt`).
-- What stays open is the build: the eight AI field types, and Relationship and Button, to ClickUp's documented behaviour, measured on the model lane.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The ledger rows are relabelled and the routing dependency is closed; what remains, the 8 AI field types plus Relationship and Button, is unbuilt (lane 6 rejects each type), which duplicates row-719. Evidence: `docs/triage-2026-10-05.md`.
 
 ### `resume-defects/resume-5` — feature, not counted (triage, 5 October; was: partly-fixed, large)
 
@@ -11565,29 +11676,7 @@ reason (`found-30-sep/private-task-reads-say-403`, reverted). This item asked to
 so it no longer describes a defect, and it is not counted. The 400 "Doc belongs to a
 different workspace" could still be reviewed as a tenant-boundary matter of its own.
 
-#### Decisions for the owner — 3
-
-### `ledger-rows/row-869` — decision, not counted (triage, 5 October; was: open, large)
-
-**Credits (tab, category table, trend chart with limit, Add credits, My Agent Performance) — absent; a recorded decision plus parts no frame opens**
-
-*Evidence:* reaudit.md:869 (M). §3 decision at reaudit.md:889-891. §6 at reaudit.md:2819 says the usage-trend chart is separable and 'STILL OPEN'. Parts that exist: GET /ai/usage (ai.controller.ts:183-190) and an AI Usage settings tab (workspace-settings-page.tsx:1287-1330) with per-user and per-model spend over 7/30/90 days. The response has totals/byUser/byModel and no per-day series, so there is no trend. rollUpByCategory gives the 8 categories (ai-categories.ts). No AI quota exists in PlanLimits.
-
-*To close:* Build the dollar trend chart now: a per-day series from ai_usage. Take the credit unit, allowance and 'Add credits' flow from ClickUp research, and get the owner to reconsider the §3 decision. 'My Agent Performance' waits for Super Agents (row-852).
-
-*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Credits (the tab, credit table, limit line and Add credits) wait on the owner's §3 decision. The dollar usage-trend chart is an unbuilt feature that can be built now, and My Agent Performance waits for Super Agents. None of it is a defect. Evidence: `docs/triage-2026-10-05.md`.
-
-### `commit-log/log-6f62af6-1` — decision, not counted (triage, 5 October; was: partly-fixed, small)
-
-**The end of the third Teams carousel card is our own wording and is not checked**
-
-*Evidence:* Commit 6f62af6: the third card is cut off in the frame, 'its tail is written by me' and is not checked. catalogs.ts:2831-2835 reads 'Stay focused with Priorities' / 'Instantly know what each team is working on ...'.
-
-*To close:* Research ClickUp's actual Teams empty-state card copy, use it in all four locales, and check it.
-
-*Researched, 29 September:* not settled by public sources. ClickUp's pages describe Priorities in Teams Hub ("see what each person is working on", "share and compare priorities") but not the empty state's carousel copy, and no page quotes the third card. The frame's beginning stays, and the tail stays ours until the owner or a later frame gives the real one.
-
-*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). The end of the third Teams card is still our own wording and is not checked. Nothing behaves wrongly; it waits for the owner or a later frame to give ClickUp's real text. Evidence: `docs/triage-2026-10-05.md`.
+#### Decisions for the owner — 1
 
 ### `commit-log/log-39863ff-1` — decision, not counted (triage, 5 October; was: open, medium)
 

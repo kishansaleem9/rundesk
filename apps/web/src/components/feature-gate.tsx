@@ -64,6 +64,14 @@ export type PlanUsage = {
   label: string
   features: Record<string, boolean>
   catalog?: PlanTierRow[]
+  /** A plan's free uses of a feature it lacks, and how many are left (`ledger-rows/row-788`). */
+  freeUses?: Array<{ feature: string; label: string; allowance: number; used: number; left: number }>
+}
+
+/** The free uses this plan has of `feature`, when it has any. */
+export function freeUsesOf(plan: PlanUsage | null | undefined, feature?: string) {
+  if (!plan || !feature) return null
+  return plan.freeUses?.find((u) => u.feature === feature) ?? null
 }
 
 export interface GatedFeature {
@@ -110,7 +118,10 @@ export function useWorkspacePlan(workspaceId?: string | null) {
   const planEnabled = (feature?: PlanFeatureKey): boolean => {
     if (!feature) return true
     if (!features) return true
-    return features[feature] !== false
+    if (features[feature] !== false) return true
+    // A feature with free uses left is usable: the server counts each use (`ledger-rows/row-788`).
+    const free = freeUsesOf(query.data, feature)
+    return !!free && free.left > 0
   }
   return { plan: query.data ?? null, planEnabled, isLoading: query.isLoading }
 }
@@ -215,6 +226,9 @@ export function FeatureGateDialog({
    * this afternoon, and following it costs real money.
    */
   const planBlocked = !!feature.planFeature && plan?.features?.[feature.planFeature] === false
+  /* ClickUp's free uses, spent (`ledger-rows/row-788`): said as uses used up, nothing lost. */
+  const spent = planBlocked ? freeUsesOf(plan, feature.planFeature) : null
+  const usesSpent = !!spent && spent.left === 0
   const target = planBlocked ? upgradeTarget(plan, feature.planFeature) : null
   const switchHere = !planBlocked && !!feature.flag && !!workspaceId && maySwitch
   const openFeatures = () => {
@@ -289,6 +303,7 @@ export function FeatureGateDialog({
       className="fixed inset-0 z-[80] grid place-items-center bg-black/60 p-4"
       data-testid="feature-gate"
       data-gate-kind={planBlocked ? 'plan' : 'flag'}
+      data-uses-spent={usesSpent ? 'yes' : 'no'}
       onClick={onClose}
     >
       <div
@@ -309,6 +324,12 @@ export function FeatureGateDialog({
         <p className="pr-8 text-[12px] text-muted-foreground" data-testid="feature-gate-eyebrow">
           {planBlocked ? t('gate.notOnYourPlan') : t('gate.switchedOff')}
         </p>
+        {/* And when its free uses are spent, frame `09:30`'s sentence: they are, and nothing is lost. */}
+        {usesSpent && (
+          <p className="pr-8 text-[12px] font-medium text-foreground" data-testid="feature-gate-uses">
+            {t('gate.usesSpent', { count: spent!.allowance, feature: feature.name })}
+          </p>
+        )}
         <h3 className="flex items-center gap-2 pr-8 text-base font-semibold" data-testid="feature-gate-title">
           <Lock className="h-4 w-4 shrink-0 text-violet-500" />
           {title}

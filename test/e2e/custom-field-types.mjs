@@ -105,6 +105,8 @@ const ALL_TYPES = [
   'money', 'rating', 'progress_auto', 'long_text', 'labels', 'people',
   'location', 'tshirt_size', 'progress_manual', 'files', 'voting',
   'formula', 'tasks', 'signature',
+  // 0184
+  'button',
 ]
 
 const chromium = await resolveChromium()

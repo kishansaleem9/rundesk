@@ -420,6 +420,11 @@ lane_model_env () {
   # Any non-empty value: `ai.service.ts` only asks whether a key is SET before
   # building the client, and the stub authenticates nobody.
   export ANTHROPIC_API_KEY=stub-model-key
+  # AI fields that fill and update themselves (`ledger-rows/row-719`) wait as
+  # ClickUp's do — twenty minutes between an edit and its refresh — which no
+  # suite can sit through; a lane with a model waits seconds.
+  export AI_FIELD_AUTOFILL_SECONDS=1
+  export AI_FIELD_REFRESH_SECONDS=3
 }
 
 lane_model_up () {
@@ -596,6 +601,13 @@ lane_calendar_env () {
   export MS_GRAPH_API_URL="$base/graph/v1.0"
   export GOOGLE_TOKEN_URL="$base/google/token"
   export MICROSOFT_TOKEN_URL="$base/microsoft/token"
+  # And search's three federated sources, which the same stub answers
+  # (`found-23-sep/connected-search-per-person`).
+  export GOOGLE_DRIVE_API_URL="$base/google/drive/v3"
+  export GMAIL_API_URL="$base/gmail/v1"
+  export MICROSOFT_GRAPH_API_URL="$base/graph/v1.0"
+  # And Google's profile, read when a connection is made, so a connect completes here.
+  export GOOGLE_USERINFO_URL="$base/google/userinfo"
 }
 
 lane_calendar_up () {

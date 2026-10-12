@@ -23,12 +23,15 @@
 #
 # Re-anchored 23 September: `listSources` now tells each person whose account a
 # grant is (`heldBy`), so the line this patched is two lines now. Same break.
+# Re-aimed 12 October: Connected Search reads the person's own grant and then the
+# workspace's; a provider with neither falls to the last line, which says
+# connected now. Same break.
 #
 # Reddens: search-sources: "and a provider with no stored credential reports itself unconnected"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/search/search.service.ts'
-a = '      if (!grant || !grantCoversSource(id, grant.scopes)) return { id, provider, connected: false, heldBy: null }'
-b = '      if (!grant || !grantCoversSource(id, grant.scopes)) return { id, provider, connected: true, heldBy: null }'
+a = '      return { id, provider, connected: false, heldBy: null, canConnect: true }\n'
+b = '      return { id, provider, connected: true, heldBy: null, canConnect: true }\n'
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

@@ -19,13 +19,26 @@ import { api } from './api'
 export function useTaskSearch<T extends { id: string; title: string }>(
   workspaceId: string | null | undefined,
   query: string,
-  { enabled = true, limit = 50, key }: { enabled?: boolean; limit?: number; key: string },
+  {
+    enabled = true,
+    limit = 50,
+    key,
+    listId,
+  }: {
+    enabled?: boolean
+    limit?: number
+    key: string
+    /** One list's tasks alone — a Relationship limited to that list (`ledger-rows/row-719`). */
+    listId?: string | null
+  },
 ) {
   const q = query.trim()
   return useQuery({
-    queryKey: ['task-search', key, workspaceId, q, limit],
+    queryKey: ['task-search', key, workspaceId, q, limit, listId ?? null],
     queryFn: () =>
-      api<T[]>(`/tasks/workspace/${workspaceId}?limit=${limit}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
+      api<T[]>(
+        `/tasks/workspace/${workspaceId}?limit=${limit}${q ? `&q=${encodeURIComponent(q)}` : ''}${listId ? `&listId=${encodeURIComponent(listId)}` : ''}`,
+      ),
     enabled: Boolean(workspaceId) && enabled,
     placeholderData: keepPreviousData,
   })

@@ -162,25 +162,33 @@ try {
     'and choosing an unconnected one says so, instead of showing an empty list',
     'an unconnected source returned silence — indistinguishable from having nothing',
   )
+  /*
+   * The workspace's way to connect a source is the App Center's, for whoever
+   * may connect apps — asked of Drive: a mailbox is connected by each person
+   * for themselves (`found-23-sep/connected-search-per-person`), so Gmail
+   * offers "Connect your own" and no App Center button.
+   */
+  await page.getByTestId('palette-source-google-drive').click({ timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('palette-source-connect').waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {})
   chk(
     await page.getByTestId('palette-source-connect').isVisible().catch(() => false),
     'and offers the way to connect it',
     'the message names no way out',
   )
-  // And the way leads somewhere that connects it: the App Center, at Gmail's own
+  // And the way leads somewhere that connects it: the App Center, at Drive's own
   // tile. It went to Settings → General, which connects no source at all.
   await page.getByTestId('palette-source-connect').click({ timeout: 5000 }).catch(() => {})
   await page.waitForURL(/\/integrations/, { timeout: 15_000 }).catch(() => {})
-  const gmailTile = page.locator('[data-testid="integration-card"][data-provider="gmail"]')
+  const gmailTile = page.locator('[data-testid="integration-card"][data-provider="google-drive"]')
   const tileShown = await gmailTile.waitFor({ state: 'visible', timeout: 15_000 }).then(() => true).catch(() => false)
   const landedAt = new URL(page.url()).pathname
   // AT the app: the catalogue opens searched for it, not at all eighty tiles.
   const searched = await page.getByTestId('integrations-search').inputValue({ timeout: 5000 }).catch(() => null)
   const tiles = await page.locator('[data-testid="integration-card"]').count()
   chk(
-    landedAt.endsWith('/integrations') && tileShown && searched === 'Gmail' && tiles <= 3,
+    landedAt.endsWith('/integrations') && tileShown && searched === 'Google Drive' && tiles <= 3,
     'and that way is the App Center, at the source’s own app',
-    `it led to ${landedAt}; Gmail's tile shown ${tileShown}; the catalogue searched for ${JSON.stringify(searched)}, ${tiles} tile(s) shown`,
+    `it led to ${landedAt}; Drive's tile shown ${tileShown}; the catalogue searched for ${JSON.stringify(searched)}, ${tiles} tile(s) shown`,
   )
 
   // ══ WHOSE ACCOUNT ════════════════════════════════════════════════════════
@@ -207,8 +215,8 @@ try {
   const memberGmail = await gmailOf(M)
   chk(
     adminGmail?.connected === true && adminGmail?.heldBy === 'you' &&
-      memberGmail?.connected === false && memberGmail?.heldBy === 'someone-else',
-    'the admin’s Gmail is connected for the admin, and for a member it is somebody else’s',
+      memberGmail?.connected === false && memberGmail?.heldBy === null && memberGmail?.canConnect === true,
+    'the admin’s Gmail is connected for the admin, and for a member it is not connected — theirs to connect for themselves',
     `admin ${JSON.stringify(adminGmail)}; member ${JSON.stringify(memberGmail)}`,
   )
 
@@ -228,17 +236,18 @@ try {
   await mNotice.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {})
   const noticeText = ((await mNotice.filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
   const mConnect = await mpage.getByTestId('palette-source-connect').count()
+  const mConnectOwn = await mpage.getByTestId('palette-source-connect-own').count()
   chk(
-    /someone else/i.test(noticeText) && mConnect === 0,
-    'a member choosing Gmail is told it is somebody else’s account — and offered no Connect that would replace it',
-    `notice ${JSON.stringify(noticeText)}; Connect buttons ${mConnect}`,
+    /not connected/i.test(noticeText) && mConnectOwn === 1 && mConnect === 0,
+    'a member choosing Gmail is told it is not connected and offered to connect their own — and no Connect for the workspace',
+    `notice ${JSON.stringify(noticeText)}; Connect your own ${mConnectOwn}; Connect buttons ${mConnect}`,
   )
   await mpage.getByTestId('palette-source-sharepoint').click({ timeout: 10_000 }).catch(() => {})
   await mpage.waitForTimeout(600)
   const spText = ((await mNotice.filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
   const spConnect = await mpage.getByTestId('palette-source-connect').count()
   chk(
-    /not connected/i.test(spText) && !/someone else/i.test(spText) && spConnect === 0,
+    /not connected/i.test(spText) && spConnect === 0,
     'and a source nobody connected says so, with no Connect for a member who may not connect apps',
     `notice ${JSON.stringify(spText)}; Connect buttons ${spConnect}`,
   )

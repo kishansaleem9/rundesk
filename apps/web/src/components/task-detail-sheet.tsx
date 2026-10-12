@@ -287,7 +287,29 @@ const FIELD_TYPE_LABEL_KEYS: Record<string, TranslationKey> = {
   formula: 'taskDetail.fieldType.formula',
   tasks: 'taskDetail.fieldType.tasks',
   signature: 'taskDetail.fieldType.signature',
+  // 0184 — ClickUp's Button (`ledger-rows/row-719`).
+  button: 'taskDetail.fieldType.button',
 }
+
+/**
+ * CLICKUP'S AI FIELDS (`commit-log/log-c980bee-1`, `ledger-rows/row-719`), each
+ * living within the type ClickUp puts it in — what the API's `AI_FIELD_BASE`
+ * says. Offered in the picker as `ai:<kind>`, made as their base type with
+ * `config.ai`.
+ */
+type AiFieldKind =
+  | 'summary' | 'progress_updates' | 'action_items' | 'translation'
+  | 'sentiment' | 'categorize' | 'custom_text' | 'custom_dropdown'
+const AI_FIELD_CHOICES: Array<{ kind: AiFieldKind; base: 'text' | 'long_text' | 'dropdown'; labelKey: TranslationKey }> = [
+  { kind: 'summary', base: 'long_text', labelKey: 'taskDetail.fieldType.aiSummary' },
+  { kind: 'progress_updates', base: 'long_text', labelKey: 'taskDetail.fieldType.aiProgressUpdates' },
+  { kind: 'action_items', base: 'long_text', labelKey: 'taskDetail.fieldType.aiActionItems' },
+  { kind: 'translation', base: 'long_text', labelKey: 'taskDetail.fieldType.aiTranslation' },
+  { kind: 'sentiment', base: 'text', labelKey: 'taskDetail.fieldType.aiSentiment' },
+  { kind: 'categorize', base: 'dropdown', labelKey: 'taskDetail.fieldType.aiCategorize' },
+  { kind: 'custom_text', base: 'long_text', labelKey: 'taskDetail.fieldType.aiCustomText' },
+  { kind: 'custom_dropdown', base: 'dropdown', labelKey: 'taskDetail.fieldType.aiCustomDropdown' },
+]
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 type TaskStatus =
@@ -9364,12 +9386,20 @@ type CustomFieldDef = {
      * is: the API refuses a write to it, so an editor would be a control that
      * errors every time it is used. */
     | 'formula' | 'tasks' | 'signature'
+    /* 0184 — pressed, never set: it holds no value. */
+    | 'button'
   isRequired: boolean
   options: Array<{ label: string; value: string; color?: string }> | null
   /** 0158 — `{ expression }` on a formula, the progress sources on a
-   *  `progress_auto`. Sent by the API on every definition; only these two
-   *  types ever put anything in it. */
-  config?: { expression?: string } | null
+   *  `progress_auto`; an AI field's `ai`, a Button's `label`, a Relationship's
+   *  `listId` and `rollups` (`ledger-rows/row-719`). */
+  config?: {
+    expression?: string
+    ai?: { kind: AiFieldKind; prompt?: string; language?: string; autofill?: boolean; autoUpdate?: boolean }
+    label?: string
+    listId?: string | null
+    rollups?: string[]
+  } | null
 }
 
 /** `string[]` is §V2-01c's `labels` and `people`; the API sends [] when unset,
@@ -9379,6 +9409,8 @@ type CustomFieldValue = string | number | boolean | string[] | null
 type CustomFieldRow = {
   definition: CustomFieldDef
   value: CustomFieldValue
+  /** A Relationship's rollups: each field's value on each related task the reader may open. */
+  rollups?: Array<{ fieldId: string; name: string; type: string; values: Array<{ taskId: string; value: CustomFieldValue }> }>
 }
 
 function CustomFieldsPanel({
@@ -9456,6 +9488,15 @@ function CustomFieldsPanelInner({
   const [newOptions, setNewOptions] = useState('')
   /* 0158 — the formula's expression, e.g. `{Budget} - {Spent}`. */
   const [newExpression, setNewExpression] = useState('')
+  /* `ledger-rows/row-719` — an AI field's instruction, language and fill
+   * settings; a Button's words; a Relationship's list and rollups. */
+  const [newAiPrompt, setNewAiPrompt] = useState('')
+  const [newAiLanguage, setNewAiLanguage] = useState('')
+  const [newAiAutofill, setNewAiAutofill] = useState(false)
+  const [newAiAutoUpdate, setNewAiAutoUpdate] = useState(false)
+  const [newButtonLabel, setNewButtonLabel] = useState('')
+  const [newRelList, setNewRelList] = useState('')
+  const [newRollups, setNewRollups] = useState<string[]>([])
   const [createError, setCreateError] = useState<string | null>(null)
   /*
    * Keyed on the stamp CHANGING, so pressing "Add fields" again re-opens a form
@@ -9505,7 +9546,7 @@ function CustomFieldsPanelInner({
       type: string
       scope: 'project' | 'list'
       options?: Array<{ label: string; value: string }>
-      config?: { expression: string }
+      config?: Record<string, unknown>
     }) =>
       api<CustomFieldDef>(`/workspaces/${workspaceId}/tasks/${taskId}/custom-fields`, {
         method: 'POST',
@@ -9516,6 +9557,13 @@ function CustomFieldsPanelInner({
       setNewName('')
       setNewOptions('')
       setNewExpression('')
+      setNewAiPrompt('')
+      setNewAiLanguage('')
+      setNewAiAutofill(false)
+      setNewAiAutoUpdate(false)
+      setNewButtonLabel('')
+      setNewRelList('')
+      setNewRollups([])
       setNewType('text')
       setNewScope('project')
       setCreateError(null)
@@ -9538,13 +9586,41 @@ function CustomFieldsPanelInner({
     .map((line) => line.trim())
     .filter(Boolean)
     .map((label) => ({ label, value: label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') }))
-  const needsOptions = TYPES_NEEDING_OPTIONS.has(newType)
-  const needsExpression = TYPES_NEEDING_EXPRESSION.has(newType)
+  /* An AI field is offered as `ai:<kind>` and made as the type it lives within. */
+  const aiChoice = newType.startsWith('ai:') ? AI_FIELD_CHOICES.find((c) => `ai:${c.kind}` === newType) ?? null : null
+  const baseType = aiChoice ? aiChoice.base : newType
+  const needsOptions = TYPES_NEEDING_OPTIONS.has(baseType)
+  const needsExpression = TYPES_NEEDING_EXPRESSION.has(baseType)
+  const needsAiPrompt = aiChoice?.kind === 'custom_text' || aiChoice?.kind === 'custom_dropdown'
+  const needsAiLanguage = aiChoice?.kind === 'translation'
   const canSubmit =
     newName.trim() !== '' &&
     (!needsOptions || parsedOptions.length > 0) &&
     (!needsExpression || newExpression.trim() !== '') &&
+    (!needsAiPrompt || newAiPrompt.trim() !== '') &&
+    (!needsAiLanguage || newAiLanguage.trim() !== '') &&
     !createField.isPending
+  /* A Relationship's choices: the lists this person may see, and the chosen list's fields for rollups. */
+  const relTargets = useQuery({
+    queryKey: ['move-targets', workspaceId],
+    queryFn: () =>
+      api<Array<{ id: string; name: string; projects: Array<{ id: string; name: string }>; lists?: Array<{ id: string; name: string; projectId: string }> }>>(
+        `/spaces/workspace/${workspaceId}/move-targets`,
+      ),
+    enabled: creating && baseType === 'tasks',
+  })
+  const relLists = (relTargets.data ?? []).flatMap((sp) =>
+    (sp.lists ?? []).map((l) => ({ ...l, label: `${sp.name} / ${sp.projects.find((pr) => pr.id === l.projectId)?.name ?? '—'} / ${l.name}` })),
+  )
+  const relProjectId = relLists.find((l) => l.id === newRelList)?.projectId ?? null
+  const relFields = useQuery({
+    queryKey: ['custom-fields', workspaceId, 'project', relProjectId],
+    queryFn: () => api<CustomFieldDef[]>(`/workspaces/${workspaceId}/projects/${relProjectId}/custom-fields`),
+    enabled: creating && baseType === 'tasks' && !!relProjectId,
+  })
+  const rollupChoices = (relFields.data ?? []).filter(
+    (f) => f.type !== 'button' && ((f as { listId?: string | null }).listId == null || (f as { listId?: string | null }).listId === newRelList),
+  )
 
   const createForm = creating ? (
     <form
@@ -9556,10 +9632,25 @@ function CustomFieldsPanelInner({
         setCreateError(null)
         createField.mutate({
           name: newName.trim(),
-          type: newType,
+          type: baseType,
           scope: newScope,
           ...(needsOptions ? { options: parsedOptions } : {}),
           ...(needsExpression ? { config: { expression: newExpression.trim() } } : {}),
+          ...(aiChoice
+            ? {
+                config: {
+                  ai: {
+                    kind: aiChoice.kind,
+                    ...(needsAiPrompt ? { prompt: newAiPrompt.trim() } : {}),
+                    ...(needsAiLanguage ? { language: newAiLanguage.trim() } : {}),
+                    autofill: newAiAutofill,
+                    autoUpdate: newAiAutoUpdate,
+                  },
+                },
+              }
+            : {}),
+          ...(baseType === 'button' && newButtonLabel.trim() ? { config: { label: newButtonLabel.trim() } } : {}),
+          ...(baseType === 'tasks' && newRelList ? { config: { listId: newRelList, rollups: newRollups } } : {}),
         })
       }}
     >
@@ -9584,6 +9675,13 @@ function CustomFieldsPanelInner({
               {t(FIELD_TYPE_LABEL_KEYS[type])}
             </option>
           ))}
+          <optgroup label={t('taskDetail.fieldType.aiGroup')}>
+            {AI_FIELD_CHOICES.map((c) => (
+              <option key={c.kind} value={`ai:${c.kind}`}>
+                {t(c.labelKey)}
+              </option>
+            ))}
+          </optgroup>
         </select>
         <select
           data-testid="task-field-create-scope"
@@ -9606,6 +9704,98 @@ function CustomFieldsPanelInner({
           aria-label={t('taskDetail.newFieldOptions')}
           className="w-full rounded-md border border-border bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
         />
+      )}
+      {needsAiPrompt && (
+        <textarea
+          data-testid="task-field-create-ai-prompt"
+          value={newAiPrompt}
+          onChange={(e) => setNewAiPrompt(e.target.value)}
+          rows={2}
+          placeholder={t('taskDetail.newFieldAiPrompt')}
+          aria-label={t('taskDetail.newFieldAiPrompt')}
+          className="w-full rounded-md border border-border bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+      )}
+      {needsAiLanguage && (
+        <input
+          data-testid="task-field-create-ai-language"
+          value={newAiLanguage}
+          onChange={(e) => setNewAiLanguage(e.target.value)}
+          placeholder={t('taskDetail.newFieldAiLanguage')}
+          aria-label={t('taskDetail.newFieldAiLanguage')}
+          className="h-8 w-full rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+      )}
+      {aiChoice && (
+        <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+          <label className="inline-flex items-center gap-1">
+            <input
+              type="checkbox"
+              data-testid="task-field-create-ai-autofill"
+              checked={newAiAutofill}
+              onChange={(e) => setNewAiAutofill(e.target.checked)}
+            />
+            {t('taskDetail.newFieldAiAutofill')}
+          </label>
+          <label className="inline-flex items-center gap-1">
+            <input
+              type="checkbox"
+              data-testid="task-field-create-ai-autoupdate"
+              checked={newAiAutoUpdate}
+              onChange={(e) => setNewAiAutoUpdate(e.target.checked)}
+            />
+            {t('taskDetail.newFieldAiAutoUpdate')}
+          </label>
+        </div>
+      )}
+      {baseType === 'button' && (
+        <input
+          data-testid="task-field-create-button-label"
+          value={newButtonLabel}
+          onChange={(e) => setNewButtonLabel(e.target.value)}
+          placeholder={t('taskDetail.newFieldButtonLabel')}
+          aria-label={t('taskDetail.newFieldButtonLabel')}
+          className="h-8 w-full rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+      )}
+      {baseType === 'tasks' && (
+        <div className="space-y-1">
+          <select
+            data-testid="task-field-create-relationship-list"
+            value={newRelList}
+            onChange={(e) => {
+              setNewRelList(e.target.value)
+              setNewRollups([])
+            }}
+            aria-label={t('taskDetail.newFieldRelationshipList')}
+            className="h-8 w-full rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">{t('taskDetail.newFieldRelationshipAnyTask')}</option>
+            {relLists.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+          {newRelList && rollupChoices.length > 0 && (
+            <div className="space-y-0.5" data-testid="task-field-create-rollups">
+              <p className="text-[11px] text-muted-foreground">{t('taskDetail.newFieldRollups')}</p>
+              {rollupChoices.map((f) => (
+                <label key={f.id} className="flex items-center gap-1 text-xs">
+                  <input
+                    type="checkbox"
+                    data-testid={`task-field-create-rollup-${f.id}`}
+                    checked={newRollups.includes(f.id)}
+                    onChange={(e) =>
+                      setNewRollups((was) => (e.target.checked ? [...was, f.id] : was.filter((id) => id !== f.id)))
+                    }
+                  />
+                  {f.name}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
       )}
       {needsExpression && (
         <input
@@ -9682,8 +9872,9 @@ function CustomFieldsPanelInner({
    * Required fields are never hidden. An empty required field is the one thing
    * on this panel somebody needs to see.
    */
+  // A Button holds nothing, and is never "empty": it is there to be pressed.
   const isHideable = ({ definition, value }: CustomFieldRow) =>
-    !definition.isRequired && isEmptyFieldValue(value)
+    definition.type !== 'button' && !definition.isRequired && isEmptyFieldValue(value)
   const hiddenCount = fields.filter(isHideable).length
   const shown = collapse ? fields.filter((f) => !isHideable(f)) : fields
 
@@ -9691,12 +9882,16 @@ function CustomFieldsPanelInner({
     <div className="space-y-3">
       <CollapseEmptyFieldsToggle emptyCount={hiddenCount} />
       {createForm}
-      {shown.map(({ definition, value }) => (
-        <div key={definition.id} data-testid="custom-field-row">
+      {shown.map(({ definition, value, rollups }) => (
+        <div key={definition.id} data-testid="custom-field-row" data-field-id={definition.id}>
           <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-1">
             {definition.name}
             {definition.isRequired && <span className="text-destructive">*</span>}
-            <span className="ml-auto text-[10px] opacity-70">{FIELD_TYPE_LABEL_KEYS[definition.type] ? t(FIELD_TYPE_LABEL_KEYS[definition.type]) : definition.type}</span>
+            <span className="ml-auto text-[10px] opacity-70" data-testid={`cf-type-${definition.id}`}>
+              {definition.config?.ai
+                ? t(AI_FIELD_CHOICES.find((c) => c.kind === definition.config?.ai?.kind)?.labelKey ?? 'taskDetail.fieldType.aiGroup')
+                : FIELD_TYPE_LABEL_KEYS[definition.type] ? t(FIELD_TYPE_LABEL_KEYS[definition.type]) : definition.type}
+            </span>
           </div>
           {/*
             §V2-01b — Progress (Auto) is SHOWN, not edited.
@@ -9713,16 +9908,24 @@ function CustomFieldsPanelInner({
               value={typeof value === 'number' ? value : null}
               expression={definition.config?.expression ?? ''}
             />
+          ) : definition.type === 'button' ? (
+            <ButtonFieldControl definition={definition} workspaceId={workspaceId} taskId={taskId} />
           ) : (
-            <CustomFieldEditor
-              definition={definition}
-              value={value}
-              workspaceId={workspaceId}
-              taskId={taskId}
-              disabled={setValue.isPending}
-              // Settled when the write is (a date box shows what was typed until then).
-              onCommit={(next) => setValue.mutateAsync({ fieldId: definition.id, value: next }).catch(() => undefined)}
-            />
+            <>
+              <CustomFieldEditor
+                // A generated value is drawn as it lands: the editor's draft is its value's.
+                key={`${definition.id}:${JSON.stringify(value)}`}
+                definition={definition}
+                value={value}
+                rollups={rollups}
+                workspaceId={workspaceId}
+                taskId={taskId}
+                disabled={setValue.isPending}
+                // Settled when the write is (a date box shows what was typed until then).
+                onCommit={(next) => setValue.mutateAsync({ fieldId: definition.id, value: next }).catch(() => undefined)}
+              />
+              {definition.config?.ai && <AiFieldGenerate definition={definition} workspaceId={workspaceId} taskId={taskId} />}
+            </>
           )}
         </div>
       ))}
@@ -9773,6 +9976,91 @@ function ProgressAutoValue({ value }: { value: number | null }) {
  * sends null in the first place: a formula whose inputs are unfilled has no
  * answer, and zero is an answer.
  */
+/**
+ * AN AI FIELD'S GENERATE (`commit-log/log-c980bee-1`, `ledger-rows/row-719`):
+ * the model writes the value from the task, as ClickUp's AI fields do. What
+ * the server refuses — a reader, no model here, an answer the field does not
+ * take — is said under the field in the server's words, and nothing is saved.
+ */
+function AiFieldGenerate({ definition, workspaceId, taskId }: { definition: CustomFieldDef; workspaceId: string; taskId: string }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [error, setError] = useState<string | null>(null)
+  const generate = useMutation({
+    mutationFn: () =>
+      api<{ fieldId: string; value: string }>(
+        `/workspaces/${workspaceId}/tasks/${taskId}/custom-fields/${definition.id}/generate`,
+        { method: 'POST' },
+      ),
+    onMutate: () => setError(null),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['custom-fields', workspaceId, taskId] }),
+    onError: (err) => setError(err instanceof ApiError ? err.message : t('taskDetail.fieldAiFailed')),
+  })
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        data-testid={`cf-ai-generate-${definition.id}`}
+        disabled={generate.isPending}
+        onClick={() => generate.mutate()}
+        className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+      >
+        ✦ {generate.isPending ? t('taskDetail.fieldAiGenerating') : t('taskDetail.fieldAiGenerate')}
+      </button>
+      {error && (
+        <span data-testid={`cf-ai-error-${definition.id}`} className="text-[11px] text-destructive">
+          {error}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/**
+ * A BUTTON (`ledger-rows/row-719`): pressed, it runs the automations whose
+ * trigger is this button, for this task. How many ran is said — and none,
+ * with where to give it one, so a Button nobody has set up does not look like
+ * a Button that worked.
+ */
+function ButtonFieldControl({ definition, workspaceId, taskId }: { definition: CustomFieldDef; workspaceId: string; taskId: string }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [said, setSaid] = useState<{ ok: boolean; text: string } | null>(null)
+  const press = useMutation({
+    mutationFn: () =>
+      api<{ ran: number }>(`/workspaces/${workspaceId}/tasks/${taskId}/custom-fields/${definition.id}/press`, { method: 'POST' }),
+    onMutate: () => setSaid(null),
+    onSuccess: async ({ ran }) => {
+      setSaid(ran > 0 ? { ok: true, text: t('taskDetail.fieldButtonRan', { count: ran }) } : { ok: false, text: t('taskDetail.fieldButtonNothing') })
+      // What the automations changed — status, priority, assignees, subtasks — is read again.
+      await qc.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0] as string).startsWith('task') })
+    },
+    onError: (err) => setSaid({ ok: false, text: err instanceof ApiError ? err.message : t('taskDetail.fieldButtonFailed') }),
+  })
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        data-testid={`cf-button-${definition.id}`}
+        disabled={press.isPending}
+        onClick={() => press.mutate()}
+        className="h-7 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50"
+      >
+        {definition.config?.label || definition.name}
+      </button>
+      {said && (
+        <span
+          data-testid={`cf-button-result-${definition.id}`}
+          data-ok={said.ok ? 'true' : 'false'}
+          className={cn('text-[11px]', said.ok ? 'text-muted-foreground' : 'text-destructive')}
+        >
+          {said.text}
+        </span>
+      )}
+    </div>
+  )
+}
+
 function FormulaValue({ value, expression }: { value: number | null; expression: string }) {
   const { t } = useTranslation()
   return (
@@ -9801,6 +10089,7 @@ function FormulaValue({ value, expression }: { value: number | null; expression:
 function CustomFieldEditor({
   definition,
   value,
+  rollups,
   workspaceId,
   taskId,
   disabled,
@@ -9808,6 +10097,8 @@ function CustomFieldEditor({
 }: {
   definition: CustomFieldDef
   value: CustomFieldValue
+  /** A Relationship's rollups, drawn under each related task. */
+  rollups?: CustomFieldRow['rollups']
   /** §V2-01c — `people` asks who is in the workspace; 0145's `files` asks what
    *  is attached to this task. Everything else needs neither. */
   workspaceId: string
@@ -10083,6 +10374,8 @@ function CustomFieldEditor({
           value={Array.isArray(value) ? value : []}
           workspaceId={workspaceId}
           taskId={taskId}
+          listId={definition.config?.listId ?? null}
+          rollups={rollups}
           disabled={disabled}
           onCommit={onCommit}
         />
@@ -10287,12 +10580,17 @@ function TasksFieldEditor({
   value,
   workspaceId,
   taskId,
+  listId,
+  rollups,
   disabled,
   onCommit,
 }: {
   value: string[]
   workspaceId: string
   taskId: string
+  /** A Relationship limited to one list offers that list's tasks alone (`ledger-rows/row-719`). */
+  listId?: string | null
+  rollups?: CustomFieldRow['rollups']
   disabled?: boolean
   onCommit: (next: CustomFieldValue) => void
 }) {
@@ -10307,7 +10605,7 @@ function TasksFieldEditor({
     })),
   })
   const titleOf = (id: string) => chosen[value.indexOf(id)]?.data?.title
-  const results = useTaskSearch<MentionTaskLite>(workspaceId, search, { key: 'cf-tasks', enabled: picking })
+  const results = useTaskSearch<MentionTaskLite>(workspaceId, search, { key: 'cf-tasks', enabled: picking, listId })
   /* The task itself is never offered: the API refuses a self-reference, and a
    * row that navigates to the page you are already on is not a reference. */
   const offerable = (results.data ?? []).filter((c) => c.id !== taskId && !value.includes(c.id)).slice(0, 8)
@@ -10320,10 +10618,23 @@ function TasksFieldEditor({
           data-testid={`cf-task-${id}`}
           className="flex items-center gap-2 rounded border border-border px-2 py-1 text-xs"
         >
-          <span className="truncate">
-            {/* No title: a task this person cannot open, or one since deleted.
-                Saying so is better than drawing a uuid as a name. */}
-            {titleOf(id) ?? t('taskDetail.fieldType.tasksUnknown')}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate">
+              {/* No title: a task this person cannot open, or one since deleted.
+                  Saying so is better than drawing a uuid as a name. */}
+              {titleOf(id) ?? t('taskDetail.fieldType.tasksUnknown')}
+            </span>
+            {/* Its rollups: the related task's values of the fields the Relationship shows. */}
+            {(rollups ?? []).map((col) => {
+              const hit = col.values.find((v) => v.taskId === id)
+              if (!hit) return null
+              const shown = Array.isArray(hit.value) ? hit.value.join(', ') : hit.value == null || hit.value === '' ? '—' : String(hit.value)
+              return (
+                <span key={col.fieldId} data-testid={`cf-task-rollup-${id}-${col.fieldId}`} className="block truncate text-[10px] text-muted-foreground">
+                  {col.name}: {shown}
+                </span>
+              )
+            })}
           </span>
           <button
             type="button"

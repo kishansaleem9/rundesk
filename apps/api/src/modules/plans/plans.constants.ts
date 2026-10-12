@@ -51,6 +51,14 @@ export type PlanFeature = (typeof PLAN_FEATURES)[number]
 export type PlanLimits = {
   maxMembers: number | null
   maxProjects: number | null
+  /**
+   * AI CREDITS EACH MEMBER BRINGS A MONTH, pooled for the workspace
+   * (`commit-log/log-3943965-1`). ClickUp's plans give each user a monthly
+   * number of AI credits, pooled across the workspace, renewing each month and
+   * not rolling over (Core 1,000, Business 1,500, …). Enterprise here is the
+   * unlimited tier, as every limit of it is.
+   */
+  aiCreditsPerMember: number | null
 }
 
 export type PlanTier = {
@@ -110,7 +118,7 @@ export const PLAN_TIERS: Record<PlanId, PlanTier> = {
     label: 'Free',
     description: 'For individuals getting started. Up to 5 members and 3 projects.',
     trialDays: 0,
-    limits: { maxMembers: 5, maxProjects: 3 },
+    limits: { maxMembers: 5, maxProjects: 3, aiCreditsPerMember: 0 },
     features: { ...ALL_FEATURES_OFF },
   },
   pro: {
@@ -118,7 +126,7 @@ export const PLAN_TIERS: Record<PlanId, PlanTier> = {
     label: 'Pro',
     description: 'For growing teams. AI, automations, webhooks, guests and integrations.',
     trialDays: 14,
-    limits: { maxMembers: 25, maxProjects: 50 },
+    limits: { maxMembers: 25, maxProjects: 50, aiCreditsPerMember: 1_000 },
     features: {
       ...ALL_FEATURES_OFF,
       ai: true,
@@ -134,7 +142,7 @@ export const PLAN_TIERS: Record<PlanId, PlanTier> = {
     label: 'Business',
     description: 'For scaling orgs. Adds SSO/SCIM and custom roles on top of Pro.',
     trialDays: 14,
-    limits: { maxMembers: 100, maxProjects: 500 },
+    limits: { maxMembers: 100, maxProjects: 500, aiCreditsPerMember: 1_500 },
     features: {
       ...ALL_FEATURES_ON,
       prioritySupport: false,
@@ -145,9 +153,41 @@ export const PLAN_TIERS: Record<PlanId, PlanTier> = {
     label: 'Enterprise',
     description: 'Unlimited members and projects, every feature, priority support.',
     trialDays: 0,
-    limits: { maxMembers: null, maxProjects: null },
+    limits: { maxMembers: null, maxProjects: null, aiCreditsPerMember: null },
     features: { ...ALL_FEATURES_ON },
   },
+}
+
+/**
+ * A PLAN'S FREE USES OF A FEATURE IT DOES NOT INCLUDE (`ledger-rows/row-788`).
+ *
+ * ClickUp's Free plan has a number of uses of some paid features — its Gantt
+ * view sixty — that add up over the workspace's life and never reset; spent,
+ * the feature is refused, and nothing made with it is lost (help centre,
+ * "Views feature availability and limits", and the pricing page's questions;
+ * read through search excerpts, 12 October). Here the two features frame
+ * `09:26` names as paid, at ClickUp's sixty. What one use is, the pages read
+ * do not say: here it is a member's day with the feature
+ * (`PlansService.assertFeature`), so opening Team View twice takes one.
+ */
+export const FEATURE_FREE_USES: Partial<Record<PlanFeature, number>> = {
+  teamView: 60,
+  boardExport: 60,
+}
+
+/** What each gated feature is called where a person reads it. */
+export const FEATURE_LABELS: Record<PlanFeature, string> = {
+  ai: 'AI',
+  automations: 'Automations',
+  sso: 'Single sign-on',
+  customRoles: 'Custom roles',
+  webhooks: 'Webhooks',
+  guests: 'Guests',
+  integrations: 'Integrations',
+  customBranding: 'Custom branding',
+  prioritySupport: 'Priority support',
+  teamView: 'Team View',
+  boardExport: 'Board export',
 }
 
 export function isPlanId(value: unknown): value is PlanId {
@@ -189,6 +229,7 @@ export function planIncludes(planId: PlanId, minimum: PlanId): boolean {
 export type PlanLimitsOverride = {
   maxMembers?: number | null
   maxProjects?: number | null
+  aiCreditsPerMember?: number | null
   features?: Partial<Record<PlanFeature, boolean>>
 }
 
@@ -237,6 +278,8 @@ export function resolvePlanConfig(planId: string | null | undefined, override?: 
   const limits: PlanLimits = {
     maxMembers: override?.maxMembers !== undefined ? override.maxMembers : tier.limits.maxMembers,
     maxProjects: override?.maxProjects !== undefined ? override.maxProjects : tier.limits.maxProjects,
+    aiCreditsPerMember:
+      override?.aiCreditsPerMember !== undefined ? override.aiCreditsPerMember : tier.limits.aiCreditsPerMember,
   }
   const features: Record<PlanFeature, boolean> = { ...tier.features, ...(override?.features ?? {}) }
   return {

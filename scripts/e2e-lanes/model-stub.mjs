@@ -84,6 +84,22 @@ const SCRIPTS = [
       estimatedHours: 3,
     }),
   },
+  /*
+   * AN AI FIELD'S VALUE (`ledger-rows/row-719`), one answer per kind, in the
+   * words `AiService.fillAiField` sends. A Dropdown's answer is the first of
+   * the options the prompt lists, so a field that fills itself (autofill,
+   * auto-update — nobody there to stage a reply) still names one of its own.
+   */
+  { when: /You write the Summary field of a task/, text: 'Stubbed summary: the task is under way.' },
+  { when: /You write the Progress Updates field of a task/, text: 'Stubbed progress: the latest comment was read.' },
+  { when: /You write the Action Items field of a task/, text: '- Stubbed first step\n- Stubbed second step' },
+  { when: /You write the Translation field of a task/, text: 'Traduction factice de la tâche.' },
+  { when: /You fill the Sentiment field of a task/, text: 'Positive' },
+  { when: /You fill a custom AI field of a task/, text: 'Stubbed custom text.' },
+  {
+    when: /You fill (?:the Categorize field|a custom AI dropdown field) of a task/,
+    text: (system) => (/as written, and nothing else: ([^|.]+)/.exec(system)?.[1] ?? 'no options').trim(),
+  },
 ]
 // Staged by `POST /__control/next`, consumed by the call it answers.
 let staged = null
@@ -189,7 +205,8 @@ const server = createServer(async (req, res) => {
    * cleared, as the status above is.
    */
   const delayMs = Math.min(Math.max(Number(staged?.delayMs ?? 0) || 0, 0), 30_000)
-  const text = staged?.text ?? SCRIPTS.find((s) => s.when.test(system))?.text ?? 'A stubbed reply.'
+  const scripted = SCRIPTS.find((s) => s.when.test(system))?.text
+  const text = staged?.text ?? (typeof scripted === 'function' ? scripted(system) : scripted) ?? 'A stubbed reply.'
   staged = null
   if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
   // The product meters on these; zeroes would make a usage check pass on a

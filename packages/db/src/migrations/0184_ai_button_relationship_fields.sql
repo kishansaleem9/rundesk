@@ -1,0 +1,18 @@
+-- The ten field types `docs/video2-reaudit.md` left as decisions, as ClickUp
+-- works them (`commit-log/log-c980bee-1`, `ledger-rows/row-719`,
+-- `harness/ai-rows-blocked-on-empty-key`).
+--
+--   · The eight AI fields — Summary, Progress Updates, Action Items,
+--     Translation, Sentiment, Categorize, Custom Text and Custom Dropdown —
+--     need no type of their own: ClickUp's live within Short Text, Long Text
+--     and Dropdown, and so do these, as `config.ai` on a `text`, `long_text`
+--     or `dropdown` definition. Their values are those types' values.
+--
+--   · Relationship is the `tasks` type ("any task in your Workspace"), which
+--     now takes `config.listId` ("tasks from a specific List", chosen when the
+--     field is made and kept) and `config.rollups`, the fields of that list's
+--     tasks shown beside each related task.
+--
+--   · Button is the one new type: it holds no value, and pressing it on a
+--     task runs the automations whose trigger is that button.
+ALTER TYPE "custom_field_type" ADD VALUE IF NOT EXISTS 'button';

@@ -18,12 +18,14 @@
 # may connect is offered it), so deleting the button alone left an empty `&& ( )`
 # and the patch never built (BUILD FAILED twice). The condition is what fails now.
 # AND AGAIN, 25 September: the condition asks `integrations.manage`, not the admin role.
+# AND 12 October: Connected Search is person by person; the workspace's Connect is
+# the App Center button, offered on a source that is not connected and not a mailbox.
 #
 # Reddens: search-sources: "and offers the way to connect it"
 import io
 p = '/home/user/rundesk/apps/web/src/components/command-palette.tsx'
-a = "          {mayConnectApps && activeSource.heldBy !== 'someone-else' && activeSource.provider && (\n"
-b = "          {mayConnectApps && activeSource.heldBy !== 'someone-else' && activeSource.provider && workspaceId === '' && (\n"
+a = "          {mayConnectApps && !activeSource.connected && activeSource.id !== 'gmail' && (\n"
+b = "          {mayConnectApps && !activeSource.connected && activeSource.id !== 'gmail' && workspaceId === '' && (\n"
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

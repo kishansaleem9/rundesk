@@ -1,5 +1,7 @@
 # EVERY REFUSAL OF THE CHOSEN LIST IS THROWN: a list the person may not add to refuses /task instead of being passed over.
-# Reddens: unit: default-list.test.ts "still passes over a chosen list the person may not add to, for the oldest one they may"
+# Reddens: unit: default-list.test.ts "still passes over a chosen list the person may not add to — for a guest, who has no Personal List, the oldest one they may"
+#
+# Re-claimed 12 October: the test is a guest's now (a member is given their Personal List), and its name says so. Same break.
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 a = '          if (!(err instanceof HttpException)) throw err\n'

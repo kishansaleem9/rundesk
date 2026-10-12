@@ -6,10 +6,12 @@
 #   or "a task they made in a private space they are not in, they open, comment on and rename (SQL) — and the task sheet is offered its edits"
 #   or "and the private space’s task takes the super_admin’s other edits too — a subtask under it, themself as its assignee and follower, another task blocked by it (each made, SQL) — and its files and linked docs are listed to them (200)"
 #   or "and so does a task in another member’s private list, and a task made there assigned to themself (SQL)"
+#
+# Re-aimed 12 October: the call asks for the task where it lives (`, { atHome: true }`, Tasks in Multiple Lists).
 import io
 p = '/home/user/rundesk/apps/api/src/common/permissions/task-write.ts'
-a = '  const read = await taskReadAnswer(db, ctx.workspaceId, taskId, { id: actorId, role: account?.role })\n'
-b = '  const read = await taskReadAnswer(db, ctx.workspaceId, taskId, { id: actorId, role: account ? membership.role : null })\n'
+a = '  const read = await taskReadAnswer(db, ctx.workspaceId, taskId, { id: actorId, role: account?.role }, { atHome: true })\n'
+b = '  const read = await taskReadAnswer(db, ctx.workspaceId, taskId, { id: actorId, role: account ? membership.role : null }, { atHome: true })\n'
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

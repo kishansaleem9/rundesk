@@ -328,6 +328,18 @@ try {
   const lockedTaskTitle = `Locked row ${TAG}`
   await A('/tasks', { method: 'POST', body: { listId: lockedList.id, title: lockedTaskTitle } })
   await sql`update workspaces set plan = 'free' where id = ${lockedWs.id}`
+  /*
+   * ITS FREE USES SPENT (`ledger-rows/row-788`). A plan without Team View or
+   * the board download has sixty free uses of each, as ClickUp's Free plan has
+   * of a paid view, and a member's first use of a day takes one; this
+   * workspace has spent them, sixty days of them, so what is asked here is the
+   * refusal after them. `ai-credits` asks the uses themselves.
+   */
+  const meId = (await A('/users/me')).data?.id
+  if (!meId) throw new Error('could not read who this run is, to spend the free uses as')
+  await sql`insert into plan_feature_uses (workspace_id, feature, user_id, day)
+    select ${lockedWs.id}, f, ${meId}, current_date - n
+    from unnest(array['teamView', 'boardExport']::text[]) as f, generate_series(1, 60) as n`
 
   const freeExport = await R(`/tasks/list/${lockedList.id}/export`)
   chk(

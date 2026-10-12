@@ -11,8 +11,10 @@ import {
   workspaceMembers,
   users,
   notifications,
+  aiCreditPurchases,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
+import { CENTS_PER_PACK, CREDITS_PER_PACK, MAX_PACKS, packsFor } from '../ai/credits'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { PlansService } from '../plans/plans.service'
 import { trialDaysForPlan, type PlanId } from '../plans/plans.constants'
@@ -142,6 +144,54 @@ export class BillingService {
   }
 
   /**
+   * ADD AI CREDITS (`commit-log/log-3943965-1`, `ledger-rows/row-869`): ClickUp's
+   * "Add credits" — a suggested amount or a custom one, then checkout. Credits
+   * are sold in $10 packs of 10,000; the purchase is kept `pending` beside its
+   * checkout session and counts only once Stripe says it was paid
+   * (`onCheckoutCompleted`). A server with no Stripe says so, as the plan
+   * checkout does.
+   */
+  async createCreditsCheckout(workspaceId: string, userId: string, credits: unknown): Promise<{ url: string }> {
+    const packs = packsFor(credits)
+    if (packs == null) {
+      throw new BadRequestException(
+        `Credits are bought in packs of ${CREDITS_PER_PACK.toLocaleString('en-US')}, from one pack to ${MAX_PACKS}`,
+      )
+    }
+    const stripe = this.requireStripe()
+    const appUrl = this.appUrl()
+    const existingCustomerId = await this.getCustomerId(workspaceId)
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      line_items: [
+        {
+          price_data: {
+            currency: 'usd',
+            unit_amount: CENTS_PER_PACK,
+            product_data: { name: `AI credits (${CREDITS_PER_PACK.toLocaleString('en-US')})` },
+          },
+          quantity: packs,
+        },
+      ],
+      success_url: `${appUrl}/app/${workspaceId}/settings?tab=ai-usage&credits=success`,
+      cancel_url: `${appUrl}/app/${workspaceId}/settings?tab=ai-usage&credits=cancelled`,
+      client_reference_id: workspaceId,
+      ...(existingCustomerId ? { customer: existingCustomerId } : {}),
+      metadata: { workspaceId, kind: 'ai_credits', credits: String(packs * CREDITS_PER_PACK) },
+    })
+    if (!session.url) throw new BadRequestException('Stripe did not return a checkout URL')
+    await this.db.insert(aiCreditPurchases).values({
+      workspaceId,
+      credits: packs * CREDITS_PER_PACK,
+      amountCents: packs * CENTS_PER_PACK,
+      status: 'pending',
+      checkoutSessionId: session.id,
+      createdById: userId,
+    })
+    return { url: session.url }
+  }
+
+  /**
    * Create a Stripe Billing Portal session (Stripe hosts the manage / upgrade /
    * downgrade / cancel UI). Requires an existing Stripe customer for the
    * workspace — i.e. at least one prior subscription.
@@ -257,6 +307,27 @@ export class BillingService {
     const workspaceId: string | undefined = session?.client_reference_id ?? session?.metadata?.workspaceId
     if (!workspaceId) {
       this.logger.warn('checkout.session.completed without a workspace id — skipping')
+      return
+    }
+    /*
+     * CREDITS BOUGHT (`createCreditsCheckout`): the purchase its session names,
+     * in the workspace it names, paid — once; a session no purchase holds
+     * grants nothing, whatever its metadata claims.
+     */
+    if (session?.metadata?.kind === 'ai_credits') {
+      if (session?.payment_status && session.payment_status !== 'paid') return
+      const sessionId = typeof session?.id === 'string' ? session.id : null
+      if (!sessionId) return
+      await this.db
+        .update(aiCreditPurchases)
+        .set({ status: 'paid', paidAt: new Date() })
+        .where(
+          and(
+            eq(aiCreditPurchases.checkoutSessionId, sessionId),
+            eq(aiCreditPurchases.workspaceId, workspaceId),
+            eq(aiCreditPurchases.status, 'pending'),
+          ),
+        )
       return
     }
     const customerId = idOf(session?.customer)

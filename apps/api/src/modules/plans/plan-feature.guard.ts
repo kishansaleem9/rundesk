@@ -35,7 +35,10 @@ export class PlanFeatureGuard implements CanActivate {
       req.params?.workspaceId ?? req.body?.workspaceId ?? req.query?.workspaceId
     if (!workspaceId) return true // cannot determine a workspace → do not gate
 
-    await this.plans.assertFeature(workspaceId, feature)
+    // A free use is counted against whoever asks (`ledger-rows/row-788`); nobody signed in, none.
+    const userId: string | undefined = req.user?.id
+    if (userId) await this.plans.assertFeature(workspaceId, feature, userId)
+    else await this.plans.assertFeature(workspaceId, feature)
     return true
   }
 }

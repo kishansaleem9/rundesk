@@ -87,7 +87,18 @@ const ALL_TYPES = [
   'location', 'tshirt_size', 'progress_manual', 'files', 'voting',
   // 0158
   'formula', 'tasks', 'signature',
+  // 0184
+  'button',
 ]
+/**
+ * The AI fields, one choice each after the types (0184). Each is stored as the
+ * type it fills — text, long text or a dropdown — so none is a value the column
+ * holds; the picker offers them as `ai:<kind>`.
+ */
+const AI_CHOICES = [
+  'summary', 'progress_updates', 'action_items', 'translation',
+  'sentiment', 'categorize', 'custom_text', 'custom_dropdown',
+].map((kind) => `ai:${kind}`)
 /** The six the list route's picker offers. A picker holding only these is the drifted copy. */
 const THE_SHORT_LIST = ['text', 'number', 'date', 'checkbox', 'url', 'dropdown']
 /** Types no drifted copy has ever carried, so their presence is the real test. */
@@ -270,8 +281,9 @@ try {
     (nodes) => nodes.map((n) => n.value),
   )
   chk(
-    offered.length === ALL_TYPES.length && ALL_TYPES.every((t) => offered.includes(t)),
-    `the type picker offers all ${ALL_TYPES.length} field types`,
+    offered.length === ALL_TYPES.length + AI_CHOICES.length &&
+      [...ALL_TYPES, ...AI_CHOICES].every((t) => offered.includes(t)),
+    `the type picker offers all ${ALL_TYPES.length} field types and the ${AI_CHOICES.length} AI fields`,
     `it offers ${offered.length}: [${offered.join(', ')}]` +
       (offered.length === THE_SHORT_LIST.length ? ' — that is the list route\'s six, copied' : ''),
   )

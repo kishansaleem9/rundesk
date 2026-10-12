@@ -15,6 +15,7 @@ import {
   chatChannels,
   chatMessages,
   users,
+  customFieldDefinitions,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -30,7 +31,18 @@ type TriggerContext = {
   workspaceId: string
   projectId?: string
   listId?: string
+  /** `button.clicked`: the Button pressed (`ledger-rows/row-719`). */
+  fieldId?: string
 }
+
+/*
+ * CLICKUP'S BUTTON (`ledger-rows/row-719`): pressing a Button field on a task
+ * runs the automations whose trigger is that button. The trigger names its
+ * button, always — a rule for "any button" would run for every button in the
+ * workspace, which no Button's maker asked for.
+ */
+export const BUTTON_TRIGGER = 'button.clicked'
+export const BUTTON_TRIGGER_NEEDS_A_BUTTON = 'A “button is pressed” trigger names the Button field it waits for'
 
 /**
  * Replace `{{task.title}}`-style placeholders in an automation message with
@@ -141,6 +153,21 @@ export class AutomationsService {
     })
   }
 
+  /** A `button.clicked` trigger names a Button field of this workspace. */
+  private async assertButtonTrigger(workspaceId: string, trigger: { type: string; filters?: Record<string, string | string[] | undefined> }) {
+    if (trigger.type !== BUTTON_TRIGGER) return
+    const fieldId = trigger.filters?.fieldId
+    if (typeof fieldId !== 'string' || !fieldId) throw new BadRequestException(BUTTON_TRIGGER_NEEDS_A_BUTTON)
+    const [row] = await this.db
+      .select({ id: customFieldDefinitions.id })
+      .from(customFieldDefinitions)
+      .innerJoin(projects, eq(projects.id, customFieldDefinitions.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(customFieldDefinitions.id, fieldId), eq(customFieldDefinitions.type, 'button'), eq(spaces.workspaceId, workspaceId)))
+      .limit(1)
+    if (!row) throw new BadRequestException(BUTTON_TRIGGER_NEEDS_A_BUTTON)
+  }
+
   async create(
     workspaceId: string,
     userId: string,
@@ -151,6 +178,7 @@ export class AutomationsService {
     },
   ) {
     const trigger = this.normaliseTrigger(dto.trigger)
+    await this.assertButtonTrigger(workspaceId, trigger)
     const actions = this.normaliseActions(dto.actions)
     const [row] = await this.db
       .insert(automations)
@@ -175,7 +203,10 @@ export class AutomationsService {
     const set: Record<string, unknown> = { updatedAt: new Date() }
     if (patch.name !== undefined) set.name = patch.name
     if (patch.isEnabled !== undefined) set.isEnabled = patch.isEnabled
-    if (patch.trigger !== undefined) set.trigger = this.normaliseTrigger(patch.trigger)
+    if (patch.trigger !== undefined) {
+      set.trigger = this.normaliseTrigger(patch.trigger)
+      await this.assertButtonTrigger(workspaceId, set.trigger as { type: string; filters?: Record<string, string | string[] | undefined> })
+    }
     if (patch.actions !== undefined) set.actions = this.normaliseActions(patch.actions)
     const [row] = await this.db
       .update(automations)
@@ -207,7 +238,8 @@ export class AutomationsService {
   // Called by other services when domain events occur.
   // Example call: automationsService.fire('task.status_changed', ctx)
 
-  async fire(triggerType: string, ctx: TriggerContext): Promise<void> {
+  /** How many rules ran: a Button's press says so (`ledger-rows/row-719`). */
+  async fire(triggerType: string, ctx: TriggerContext): Promise<number> {
     // Load all enabled automations for this workspace matching trigger type
     const rules = await this.db
       .select()
@@ -228,12 +260,15 @@ export class AutomationsService {
       if (t.filters?.changedField && ctx.changedField && t.filters.changedField !== ctx.changedField) return false
       if (t.filters?.fromStatus && ctx.oldValue && t.filters.fromStatus !== ctx.oldValue) return false
       if (t.filters?.toStatus && ctx.newValue && t.filters.toStatus !== ctx.newValue) return false
+      // A Button's rule runs for its own button and no other.
+      if (t.type === BUTTON_TRIGGER && t.filters?.fieldId !== ctx.fieldId) return false
       return true
     })
 
     for (const rule of matching) {
       await this.executeRule(rule, ctx)
     }
+    return matching.length
   }
 
   private async executeRule(rule: typeof automations.$inferSelect, ctx: TriggerContext) {

@@ -50,10 +50,11 @@ export class TasksController {
    * `PlanFeatureGuard`: gating must never break a read that used to work, and a
    * list with no workspace is a database problem, not an entitlement one.
    */
-  private async assertPlanFeature(listId: string, feature: PlanFeature): Promise<void> {
+  /** The plan's answer, a free use counted against the member who asks (`ledger-rows/row-788`). */
+  private async assertPlanFeature(listId: string, feature: PlanFeature, userId?: string): Promise<void> {
     const workspaceId = await this.tasks.workspaceIdForList(listId)
     if (!workspaceId) return
-    await this.plans.assertFeature(workspaceId, feature)
+    await this.plans.assertFeature(workspaceId, feature, userId)
   }
 
   /**
@@ -68,7 +69,7 @@ export class TasksController {
     @Query('includeArchived') includeArchived?: string,
     @Query('unassignedLabel') unassignedLabel?: string,
   ) {
-    await this.assertPlanFeature(listId, 'teamView')
+    await this.assertPlanFeature(listId, 'teamView', user.id)
     return this.tasks.getTeamRollup(
       listId,
       { id: user.id, role: user.role },
@@ -150,6 +151,8 @@ export class TasksController {
     @Query('limit') limit?: string,
     @Query('assigneeId') assigneeId?: string,
     @Query('q') q?: string,
+    // One list's tasks, for a Relationship limited to it (`ledger-rows/row-719`).
+    @Query('listId') listId?: string,
   ) {
     // Pass the caller so the listing is scoped to containers they can access
     // (the guard only checks workspace membership, not private space/project
@@ -165,6 +168,7 @@ export class TasksController {
        */
       assigneeId: assigneeId === 'me' ? user.id : undefined,
       q,
+      listId,
     })
   }
 
@@ -224,7 +228,7 @@ export class TasksController {
      * that stops the gate spreading.
      */
     const boardShaped = view === 'board'
-    if (boardShaped) await this.assertPlanFeature(listId, 'boardExport')
+    if (boardShaped) await this.assertPlanFeature(listId, 'boardExport', user.id)
     const out = await this.tasks.exportListView(
       listId,
       { id: user.id, role: user.role },

@@ -1,5 +1,4 @@
 import { Injectable, Inject, Optional, OnModuleInit, Logger, ForbiddenException } from '@nestjs/common'
-import { DRIVE_SEARCH_SCOPE, grantCoversWholeDrive } from './drive-scope'
 import {
   SEARCH_SOURCES,
   SOURCE_PROVIDER,
@@ -13,7 +12,7 @@ import { ilike, or, eq, and, asc, desc, inArray, notInArray, gte, lte, sql, type
 import {
   tasks, taskAssignees, taskLabelAssignments, taskComments, taskAttachments, docs, lists, projects, spaces,
   folders, savedSearches, users, workspaceMembers, chatChannels, chatMessages,
-  workspaceIntegrationConnections,
+  workspaceIntegrationConnections, userSearchConnections,
   customFieldDefinitions, customFieldValues, meetings, searchEngagement,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
@@ -166,6 +165,33 @@ export function meiliSort(sort: SearchFilters['sort']): string[] | undefined {
 function engagementKey(hitId: string): string {
   const at = hitId.indexOf('-')
   return at < 0 ? `:${hitId}` : `${hitId.slice(0, at)}:${hitId.slice(at + 1)}`
+}
+
+/** The federated sources' base addresses this server was given, by origin. */
+const configuredFederatedOrigins = () =>
+  new Set(
+    [process.env.GOOGLE_DRIVE_API_URL, process.env.GMAIL_API_URL, process.env.MICROSOFT_GRAPH_API_URL]
+      .filter((u): u is string => !!u)
+      .map((u) => {
+        try {
+          return new URL(u).origin
+        } catch {
+          return ''
+        }
+      })
+      .filter(Boolean),
+  )
+
+/** Drive's own words for a file the whole organization, or anybody, may find or open. */
+const WORKSPACE_DRIVE_VISIBILITY =
+  " and (visibility = 'anyoneCanFind' or visibility = 'anyoneWithLink' or visibility = 'domainCanFind' or visibility = 'domainWithLink')"
+/** A SharePoint hit in somebody's own OneDrive: its host is the tenant's `-my` one. */
+const isPersonalOneDrive = (webUrl: string) => {
+  try {
+    return new URL(webUrl).hostname.endsWith('-my.sharepoint.com')
+  } catch {
+    return true
+  }
 }
 
 @Injectable()
@@ -706,7 +732,34 @@ export class SearchService implements OnModuleInit {
   async listSources(
     workspaceId: string,
     userId: string,
-  ): Promise<Array<{ id: SearchSource; connected: boolean; provider: string | null; heldBy: 'you' | 'someone-else' | null }>> {
+  ): Promise<Array<{ id: SearchSource; connected: boolean; provider: string | null; heldBy: 'you' | 'workspace' | null; canConnect: boolean }>> {
+    const guest = await this.isGuest(workspaceId, userId)
+    const live = await this.workspaceGrants(workspaceId)
+    const own = await this.ownGrants(workspaceId, userId)
+    return SEARCH_SOURCES.map((id) => {
+      const provider = SOURCE_PROVIDER[id]
+      // Our own data needs no credential and is always available.
+      if (provider === null) return { id, provider, connected: true, heldBy: null, canConnect: false }
+      // ClickUp: guests do not use Connected Search, theirs or the workspace's.
+      if (guest) return { id, provider, connected: false, heldBy: null, canConnect: false }
+      const mine = own.get(provider)
+      if (mine && grantCoversSource(id, mine.scopes)) return { id, provider, connected: true, heldBy: 'you' as const, canConnect: true }
+      const shared = live.get(provider)
+      if (shared && grantCoversSource(id, shared.scopes)) {
+        // Gmail is a mailbox, its own person's alone — see `federatedCredential`.
+        if (id === 'gmail') {
+          return shared.connectedById === userId
+            ? { id, provider, connected: true, heldBy: 'you' as const, canConnect: true }
+            : { id, provider, connected: false, heldBy: null, canConnect: true }
+        }
+        return { id, provider, connected: true, heldBy: 'workspace' as const, canConnect: true }
+      }
+      return { id, provider, connected: false, heldBy: null, canConnect: true }
+    })
+  }
+
+  /** The workspace's connections that hold a token, by provider. */
+  private async workspaceGrants(workspaceId: string) {
     const rows = await this.db
       .select({
         provider: workspaceIntegrationConnections.provider,
@@ -717,23 +770,42 @@ export class SearchService implements OnModuleInit {
       })
       .from(workspaceIntegrationConnections)
       .where(eq(workspaceIntegrationConnections.workspaceId, workspaceId))
-    const live = new Map<string, { scopes: readonly string[]; mine: boolean }>()
+    const live = new Map<string, { token: string; scopes: readonly string[]; connectedById: string | null }>()
     for (const row of rows) {
       if (row.status !== 'connected' || !row.accessToken) continue
-      live.set(row.provider as string, { scopes: row.scopes ?? [], mine: row.connectedById === userId })
+      live.set(row.provider as string, { token: row.accessToken, scopes: row.scopes ?? [], connectedById: row.connectedById ?? null })
     }
-    return SEARCH_SOURCES.map((id) => {
-      const provider = SOURCE_PROVIDER[id]
-      // Our own data needs no credential and is always available.
-      if (provider === null) return { id, provider, connected: true, heldBy: null }
-      const grant = live.get(provider)
-      if (!grant || !grantCoversSource(id, grant.scopes)) return { id, provider, connected: false, heldBy: null }
-      // Somebody else's account answers them alone — see `federatedCredential` —
-      // so for everyone else this source is not connected, and says whose it is.
-      return grant.mine
-        ? { id, provider, connected: true, heldBy: 'you' as const }
-        : { id, provider, connected: false, heldBy: 'someone-else' as const }
-    })
+    return live
+  }
+
+  /** This person's own search connections that hold a token, by provider. */
+  private async ownGrants(workspaceId: string, userId: string) {
+    const rows = await this.db
+      .select({
+        userId: userSearchConnections.userId,
+        provider: userSearchConnections.provider,
+        status: userSearchConnections.status,
+        accessToken: userSearchConnections.accessToken,
+        scopes: userSearchConnections.scopes,
+      })
+      .from(userSearchConnections)
+      .where(and(eq(userSearchConnections.workspaceId, workspaceId), eq(userSearchConnections.userId, userId)))
+    const own = new Map<string, { token: string; scopes: readonly string[] }>()
+    for (const row of rows) {
+      // Read in code as well as in SQL: a row is this person's or nobody's here.
+      if (row.userId !== userId || row.status !== 'connected' || !row.accessToken) continue
+      own.set(row.provider, { token: row.accessToken, scopes: row.scopes ?? [] })
+    }
+    return own
+  }
+
+  private async isGuest(workspaceId: string, userId: string) {
+    const [member] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1)
+    return member?.role === 'guest'
   }
 
   /** §G03-6 — somebody opened a search result. */
@@ -1053,6 +1125,25 @@ export class SearchService implements OnModuleInit {
     token: string,
     init?: { method?: string; body?: string },
   ): Promise<{ status: number; text: string } | null> {
+    /*
+     * AN ADDRESS THE OPERATOR SET IS THE OPERATOR'S. The calendar's calls go to
+     * GOOGLE_CALENDAR_API_URL with a plain fetch; these go to the base addresses
+     * configured beside it, which a lane points at its stub on loopback — and
+     * the SSRF guard refuses loopback, so no federated query was ever answered
+     * off Google (`found-23-sep/connected-search-per-person`). Every URL here is
+     * built from one of those bases; anything else still goes through the guard.
+     */
+    if (configuredFederatedOrigins().has(new URL(url).origin)) {
+      const res = await fetch(url, {
+        method: init?.method,
+        body: init?.body,
+        headers: init?.body
+          ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+          : { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(10_000),
+      })
+      return { status: res.status, text: await res.text() }
+    }
     const res = await safeFetch(url, {
       method: init?.method,
       body: init?.body,
@@ -1076,46 +1167,9 @@ export class SearchService implements OnModuleInit {
   private async searchDrive(workspaceId: string, query: string, limit: number, userId: string): Promise<SearchHit[]> {
     const trimmed = query.trim()
     if (!trimmed) return []
-    const [conn] = await this.db
-      .select({
-        status: workspaceIntegrationConnections.status,
-        accessToken: workspaceIntegrationConnections.accessToken,
-        scopes: workspaceIntegrationConnections.scopes,
-        connectedById: workspaceIntegrationConnections.connectedById,
-      })
-      .from(workspaceIntegrationConnections)
-      .where(
-        and(
-          eq(workspaceIntegrationConnections.workspaceId, workspaceId),
-          eq(workspaceIntegrationConnections.provider, 'google-drive'),
-        ),
-      )
-      .limit(1)
-    if (!conn || conn.status !== 'connected' || !conn.accessToken) return []
-    // Somebody's own Drive, searched for them alone — see `federatedCredential`.
-    if (conn.connectedById !== userId) return []
-
-    /*
-     * A grant that cannot answer the question we are about to ask.
-     *
-     * Connections made before the scope changed hold `drive.file`, which sees
-     * only files this app created or the user picked by hand. The query below
-     * is account-wide, so against such a grant Google answers "nothing" — and
-     * an empty Drive section reads to a person as "you have no matching
-     * files", which is false.
-     *
-     * Skipped and logged rather than sent anyway: a request that cannot
-     * succeed is not worth a round trip, and the log is the only place this
-     * currently says why. Reconnecting the integration re-consents at the
-     * broader scope.
-     */
-    if (!grantCoversWholeDrive(conn.scopes)) {
-      this.logger?.warn?.(
-        `Drive search skipped for workspace ${workspaceId}: the stored grant is missing ` +
-          `${DRIVE_SEARCH_SCOPE}, so an account-wide query would return nothing. Reconnect Google Drive.`,
-      )
-      return []
-    }
+    // Whose Drive answers, and how much of it — see `federatedCredential`.
+    const cred = await this.federatedCredential(workspaceId, 'google-drive', userId)
+    if (!cred) return []
 
     // Drive's `q` is its own query language, and the term is interpolated into
     // a quoted string inside it. A name containing an apostrophe would close
@@ -1124,12 +1178,18 @@ export class SearchService implements OnModuleInit {
     const escaped = trimmed.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
     const base = process.env.GOOGLE_DRIVE_API_URL ?? 'https://www.googleapis.com/drive/v3'
     const params = new URLSearchParams({
-      q: `name contains '${escaped}' and trashed = false`,
+      /*
+       * THE WORKSPACE'S DRIVE SHOWS WHAT THE ORGANIZATION MAY SEE. ClickUp:
+       * through a Workspace connection, "only files and folders accessible to
+       * your entire organization are displayed" — a member does not search the
+       * connector's private files. Drive's own `visibility` says which those are.
+       */
+      q: `name contains '${escaped}' and trashed = false${cred.heldBy === 'workspace' ? WORKSPACE_DRIVE_VISIBILITY : ''}`,
       fields: 'files(id,name,mimeType,webViewLink,modifiedTime)',
       pageSize: String(Math.min(Math.max(limit, 1), 25)),
     })
     try {
-      const res = await this.driveRequest(`${base}/files?${params.toString()}`, conn.accessToken)
+      const res = await this.driveRequest(`${base}/files?${params.toString()}`, cred.token)
       if (!res || res.status < 200 || res.status >= 300) return []
       const body = JSON.parse(res.text) as {
         files?: Array<{
@@ -1170,35 +1230,25 @@ export class SearchService implements OnModuleInit {
     workspaceId: string,
     source: SearchSource,
     userId: string,
-  ): Promise<string | null> {
+  ): Promise<{ token: string; heldBy: 'you' | 'workspace' } | null> {
     const provider = SOURCE_PROVIDER[source]
     if (!provider) return null
-    const [conn] = await this.db
-      .select({
-        status: workspaceIntegrationConnections.status,
-        accessToken: workspaceIntegrationConnections.accessToken,
-        scopes: workspaceIntegrationConnections.scopes,
-        connectedById: workspaceIntegrationConnections.connectedById,
-      })
-      .from(workspaceIntegrationConnections)
-      .where(
-        and(
-          eq(workspaceIntegrationConnections.workspaceId, workspaceId),
-          eq(workspaceIntegrationConnections.provider, provider),
-        ),
-      )
-      .limit(1)
-    if (!conn || conn.status !== 'connected' || !conn.accessToken) return null
     /*
-     * THE GRANT IS ONE PERSON'S, SO IT ANSWERS ONE PERSON. The connection is a
-     * single Google or Microsoft account — somebody's own mailbox and Drive —
-     * and every member who searched, guests included, used to search it: the
-     * connector's mail subjects, senders and snippets for anybody in the
-     * workspace. The frame is somebody searching "meri Gmail" — MY Gmail. So
-     * it answers the person who connected it, and nobody else.
+     * WHOSE ACCOUNT ANSWERS (`found-23-sep/connected-search-per-person`).
+     * ClickUp's Connected Search (help centre, through search excerpts, 12
+     * October): a personal connection's results are its person's alone, their
+     * private files and mail included; a Workspace connection, made by an
+     * owner or admin, lets every member find what is shared with the whole
+     * organization; Gmail is personal only; and guests have none of it. So:
+     * the searcher's own grant, else the workspace's (shared things only),
+     * else nothing — and nothing at all for a guest.
      */
-    if (conn.connectedById !== userId) return null
-    if (!grantCoversSource(source, conn.scopes)) {
+    if (await this.isGuest(workspaceId, userId)) return null
+    const mine = (await this.ownGrants(workspaceId, userId)).get(provider)
+    if (mine && grantCoversSource(source, mine.scopes)) return { token: mine.token, heldBy: 'you' }
+    const shared = (await this.workspaceGrants(workspaceId)).get(provider)
+    if (!shared) return null
+    if (!grantCoversSource(source, shared.scopes)) {
       // Named from the table rather than from a ternary here: a log line that
       // reports the wrong missing scope sends somebody to fix the wrong thing.
       this.logger?.warn?.(
@@ -1207,7 +1257,9 @@ export class SearchService implements OnModuleInit {
       )
       return null
     }
-    return conn.accessToken
+    // A mailbox is its own person's: a Gmail connected in the App Center answers its connector alone.
+    if (source === 'gmail') return shared.connectedById === userId ? { token: shared.token, heldBy: 'you' } : null
+    return { token: shared.token, heldBy: 'workspace' }
   }
 
   /**
@@ -1227,7 +1279,7 @@ export class SearchService implements OnModuleInit {
   private async searchGmail(workspaceId: string, query: string, limit: number, userId: string): Promise<SearchHit[]> {
     const trimmed = query.trim()
     if (!trimmed) return []
-    const token = await this.federatedCredential(workspaceId, 'gmail', userId)
+    const token = (await this.federatedCredential(workspaceId, 'gmail', userId))?.token
     if (!token) return []
 
     /*
@@ -1307,8 +1359,9 @@ export class SearchService implements OnModuleInit {
   ): Promise<SearchHit[]> {
     const trimmed = query.trim()
     if (!trimmed) return []
-    const token = await this.federatedCredential(workspaceId, 'sharepoint', userId)
-    if (!token) return []
+    const cred = await this.federatedCredential(workspaceId, 'sharepoint', userId)
+    if (!cred) return []
+    const token = cred.token
 
     const base = process.env.MICROSOFT_GRAPH_API_URL ?? 'https://graph.microsoft.com/v1.0'
     const payload = JSON.stringify({
@@ -1350,6 +1403,8 @@ export class SearchService implements OnModuleInit {
         .filter((r): r is { id?: string; name?: string; webUrl?: string; lastModifiedDateTime?: string } =>
           Boolean(r?.name && r?.webUrl),
         )
+        // Through the workspace's connection, the organization's sites, not the connector's own OneDrive.
+        .filter((r) => cred.heldBy !== 'workspace' || !isPersonalOneDrive(r.webUrl as string))
         .map((r) => ({
           id: `sharepoint-${r.id ?? r.webUrl}`,
           entityType: 'sharepoint',

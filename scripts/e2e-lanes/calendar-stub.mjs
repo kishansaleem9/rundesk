@@ -24,6 +24,13 @@
  *           DELETE /graph/v1.0/me/events/:eventId
  *   Tokens  POST   /google/token and /microsoft/token          (grant_type=refresh_token)
  *
+ * AND THE THREE FEDERATED SEARCHES (`found-23-sep/connected-search-per-person`),
+ * each answered from what a token was seeded with:
+ *   Drive   GET    /google/drive/v3/files                      (q: name contains '…', trashed, visibility)
+ *   Gmail   GET    /gmail/v1/users/me/messages                 (q: "phrase")
+ *           GET    /gmail/v1/users/me/messages/:id             (format=metadata)
+ *   Graph   POST   /graph/v1.0/search/query                    (requests[0].query.queryString)
+ *
  * A CALENDAR IS A BEARER TOKEN. Each request's `Authorization: Bearer <token>`
  * names the calendar it reads and writes, and a token nobody seeded is refused
  * 401, as a revoked grant is. So two suites on one lane never see each other's
@@ -40,6 +47,10 @@
  *   GET  /__control/calendar?token=                      its events, and what the product wrote
  *   POST /__control/fail {token, status, count}          the next `count` calls with it answer `status`
  *   POST /__control/reset {token}                        forget the token entirely
+ *   POST /__control/search {token, drive, gmail, sharepoint}   seed (replace) an account to search
+ *   POST /__control/code {code, accessToken, refreshToken, email, sub, scopes}   a consent's code, for
+ *        `POST /google/token` (grant_type=authorization_code) to answer, and `GET /google/userinfo` after
+ *   GET  /__control/search?token=                        what was asked of it, query by query
  *   GET  /__control/version                              which source this process runs
  *
  * NOT FOR PRODUCTION. Binds loopback, and refuses to start without
@@ -77,6 +88,22 @@ const refreshes = new Map()
  * one, whose `end` is the day after its last, as both providers say it.
  */
 const calendars = new Map()
+/**
+ * token → { drive: [{id, name, visibility, modifiedTime}], gmail: [{id, subject, from, snippet, date}],
+ *           sharepoint: [{id, name, webUrl, lastModifiedDateTime}], asked: [{source, query}] }
+ * A Drive file's `visibility` is Drive's own: `limited` (its owner and whom they shared it with),
+ * `domainCanFind`, `domainWithLink`, `anyoneCanFind` or `anyoneWithLink`.
+ */
+const searchAccounts = new Map()
+/** code → the grant a consent's code is exchanged for; access token → its account's profile. */
+const codes = new Map()
+const profiles = new Map()
+/** Drive's `q`, as far as the product writes it: the name term, and the visibility terms if any. */
+const readDriveQuery = (q) => {
+  const name = /name contains '((?:[^'\\]|\\.)*)'/.exec(q)?.[1]?.replace(/\\(.)/g, '$1') ?? ''
+  const visibility = [...q.matchAll(/visibility = '([a-zA-Z]+)'/g)].map((m) => m[1])
+  return { name, visibility }
+}
 
 const json = (res, status, body) => {
   const s = JSON.stringify(body)
@@ -218,6 +245,76 @@ const server = createServer(async (req, res) => {
     return json(res, 200, { forgot: !!cal })
   }
 
+  if (path === '/__control/search' && req.method === 'POST') {
+    const body = await readBody(req)
+    if (!body?.token) return json(res, 400, { error: 'a token is required' })
+    searchAccounts.set(body.token, {
+      drive: body.drive ?? [],
+      gmail: body.gmail ?? [],
+      sharepoint: body.sharepoint ?? [],
+      asked: [],
+    })
+    return json(res, 200, { token: body.token })
+  }
+  if (path === '/__control/code' && req.method === 'POST') {
+    const body = await readBody(req)
+    if (!body?.code || !body?.accessToken) return json(res, 400, { error: 'a code and the access token it answers are required' })
+    codes.set(body.code, body)
+    return json(res, 200, { code: body.code })
+  }
+  if (path === '/google/userinfo' && req.method === 'GET') {
+    const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1] ?? ''
+    const who = profiles.get(token)
+    if (!who) return refused(res, 'gcal')
+    return json(res, 200, who)
+  }
+  if (path === '/__control/search' && req.method === 'GET') {
+    const acct = searchAccounts.get(url.searchParams.get('token') ?? '')
+    if (!acct) return json(res, 404, { error: 'no account for that token' })
+    return json(res, 200, { asked: acct.asked })
+  }
+
+  // ── the federated searches: an account per bearer token ──────────────────────
+  const driveSearch = path === '/google/drive/v3/files' && req.method === 'GET'
+  const gmailList = path === '/gmail/v1/users/me/messages' && req.method === 'GET'
+  const gmailOne = path.startsWith('/gmail/v1/users/me/messages/') && req.method === 'GET'
+  const graphSearch = path === '/graph/v1.0/search/query' && req.method === 'POST'
+  if (driveSearch || gmailList || gmailOne || graphSearch) {
+    const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1] ?? ''
+    const acct = searchAccounts.get(token)
+    if (!acct) return refused(res, graphSearch ? 'outlook' : 'gcal')
+    const has = (text, term) => String(text ?? '').toLowerCase().includes(String(term ?? '').toLowerCase())
+    if (driveSearch) {
+      const q = url.searchParams.get('q') ?? ''
+      acct.asked.push({ source: 'drive', query: q })
+      const { name, visibility } = readDriveQuery(q)
+      const files = acct.drive.filter((f) => has(f.name, name) && (visibility.length === 0 || visibility.includes(f.visibility ?? 'limited')))
+      return json(res, 200, { files: files.map((f) => ({ id: f.id, name: f.name, mimeType: 'application/vnd.google-apps.document', webViewLink: `https://drive.google.test/file/d/${f.id}/view`, modifiedTime: f.modifiedTime ?? '2026-10-01T09:00:00.000Z' })) })
+    }
+    if (gmailList) {
+      const q = url.searchParams.get('q') ?? ''
+      acct.asked.push({ source: 'gmail', query: q })
+      const phrase = q.replace(/^"|"$/g, '')
+      return json(res, 200, { messages: acct.gmail.filter((m) => has(m.subject, phrase) || has(m.snippet, phrase)).map((m) => ({ id: m.id, threadId: m.id })) })
+    }
+    if (gmailOne) {
+      const id = decodeURIComponent(path.slice('/gmail/v1/users/me/messages/'.length))
+      const m = acct.gmail.find((x) => x.id === id)
+      if (!m) return json(res, 404, { error: { code: 404, message: 'Requested entity was not found.' } })
+      return json(res, 200, {
+        id: m.id,
+        snippet: m.snippet ?? '',
+        internalDate: String(Date.parse(m.date ?? '2026-10-01T09:00:00Z')),
+        payload: { headers: [{ name: 'Subject', value: m.subject ?? '' }, { name: 'From', value: m.from ?? '' }, { name: 'Date', value: m.date ?? '' }] },
+      })
+    }
+    const body = await readBody(req)
+    const query = body?.requests?.[0]?.query?.queryString ?? ''
+    acct.asked.push({ source: 'sharepoint', query })
+    const hits = acct.sharepoint.filter((f) => has(f.name, query)).map((f) => ({ resource: { id: f.id, name: f.name, webUrl: f.webUrl, lastModifiedDateTime: f.lastModifiedDateTime ?? '2026-10-01T09:00:00Z' } }))
+    return json(res, 200, { value: [{ hitsContainers: [{ hits, total: hits.length, moreResultsAvailable: false }] }] })
+  }
+
   // ── the token addresses: a refresh answers a new access token for the same calendar ──
   if ((path === '/google/token' || path === '/microsoft/token') && req.method === 'POST') {
     const raw = await new Promise((resolve) => {
@@ -226,6 +323,20 @@ const server = createServer(async (req, res) => {
       req.on('end', () => resolve(b))
     })
     const form = new URLSearchParams(raw)
+    // A consent's code, once: answered with the grant it was seeded with.
+    if (form.get('grant_type') === 'authorization_code') {
+      const grant = codes.get(form.get('code') ?? '')
+      if (!grant || path !== '/google/token') return json(res, 400, { error: 'invalid_grant', error_description: 'Malformed auth code.' })
+      codes.delete(form.get('code'))
+      profiles.set(grant.accessToken, { sub: grant.sub ?? grant.accessToken, email: grant.email ?? null, name: grant.name ?? null })
+      return json(res, 200, {
+        access_token: grant.accessToken,
+        ...(grant.refreshToken ? { refresh_token: grant.refreshToken } : {}),
+        expires_in: 3599,
+        scope: (grant.scopes ?? []).join(' '),
+        token_type: 'Bearer',
+      })
+    }
     const cal = refreshes.get(form.get('refresh_token') ?? '')
     const provider = path === '/google/token' ? 'gcal' : 'outlook'
     if (form.get('grant_type') !== 'refresh_token' || !cal || cal.provider !== provider) {

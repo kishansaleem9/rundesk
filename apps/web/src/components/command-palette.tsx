@@ -11,6 +11,7 @@ import {
   CommandSeparator,
   PersonAvatar,
   cn,
+  toast,
 } from '@rundesk/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -44,7 +45,7 @@ import {
   Users,
   Zap,
 } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import { forgetSearch, recentSearches, rememberSearch } from '../lib/recent-searches'
 import { rememberRevealedTypes, revealedTypesFor } from '../lib/revealed-types'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
@@ -247,7 +248,7 @@ export function CommandPalette({
     enabled: open && Boolean(workspaceId),
     queryKey: ['search-sources', workspaceId],
     queryFn: () =>
-      api<Array<{ id: string; connected: boolean; provider: string | null; heldBy?: 'you' | 'someone-else' | null }>>(
+      api<Array<{ id: string; connected: boolean; provider: string | null; heldBy?: 'you' | 'workspace' | null; canConnect?: boolean }>>(
         `/search/sources/${workspaceId}`,
       ),
   })
@@ -257,6 +258,19 @@ export function CommandPalette({
   // whomever it lets in (`useSettingsAccess`).
   const mayConnectApps = usePermissions(workspaceId ?? undefined).can('integrations.manage') === true
   const settingsAccess = useSettingsAccess(workspaceId ?? undefined)
+  // One's own search source: connected through the provider's consent page, which comes back to search.
+  const connectOwn = useMutation({
+    mutationFn: (provider: string) => api<{ authUrl: string }>(`/workspaces/${workspaceId}/search/connect/${provider}`, { method: 'POST' }),
+    onSuccess: (res) => {
+      window.location.assign(res.authUrl)
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('palette.sourceNotConnected')),
+  })
+  const disconnectOwn = useMutation({
+    mutationFn: (provider: string) => api(`/workspaces/${workspaceId}/search/connections/${provider}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['search-sources', workspaceId] }),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('palette.sourceNotConnected')),
+  })
 
   const labelsQuery = useQuery({
     enabled: open && Boolean(workspaceId),
@@ -843,29 +857,66 @@ export function CommandPalette({
           ))}
         </div>
       )}
-      {activeSource && !activeSource.connected && (
+      {/*
+        WHOSE ACCOUNT ANSWERS (`found-23-sep/connected-search-per-person`), as
+        ClickUp's Connected Search: your own connection, searched for you alone;
+        else the workspace's, through which you find only what is shared with
+        the whole organization; else none. Anybody but a guest connects their
+        own; the workspace's is connected in the App Center by whoever may
+        connect apps. A mailbox is personal only.
+      */}
+      {activeSource && activeSource.provider && (
         <div
-          className="mx-3 mt-2 flex items-center gap-2 rounded-md border border-border/60 bg-card/60 px-2 py-1.5 text-[11px] text-muted-foreground"
-          data-testid="palette-source-disconnected"
+          className="mx-3 mt-2 flex flex-wrap items-center gap-2 rounded-md border border-border/60 bg-card/60 px-2 py-1.5 text-[11px] text-muted-foreground"
+          data-testid={activeSource.connected ? 'palette-source-held' : 'palette-source-disconnected'}
+          data-held-by={activeSource.heldBy ?? 'none'}
         >
-          {/* Somebody else's account answers them alone (search.service
-              `federatedCredential`), so it is not connected for this person —
-              and "Connect" would replace theirs, not add one. */}
-          <span>{t(activeSource.heldBy === 'someone-else' ? 'palette.sourceSomeoneElses' : 'palette.sourceNotConnected')}</span>
-          {/* To the App Center, at this source's own app: Settings connects
-              no source, and sent the person to a page with nothing to press. */}
-          {mayConnectApps && activeSource.heldBy !== 'someone-else' && activeSource.provider && (
-          <button
-            type="button"
-            data-testid="palette-source-connect"
-            className="text-accent underline underline-offset-2"
-            onClick={() => {
-              setOpen(false)
-              navigate({ to: '/app/$workspaceId/integrations', params: { workspaceId: workspaceId! }, search: { app: activeSource.provider! } })
-            }}
-          >
-            {t('palette.sourceConnect')}
-          </button>
+          <span>
+            {activeSource.heldBy === 'you'
+              ? t('palette.sourceYours')
+              : activeSource.heldBy === 'workspace'
+                ? t('palette.sourceWorkspace')
+                : activeSource.canConnect === false
+                  ? t('palette.sourceGuests')
+                  : activeSource.id === 'gmail' && mayConnectApps
+                    ? t('palette.sourceMailIsPersonal')
+                    : t('palette.sourceNotConnected')}
+          </span>
+          {activeSource.canConnect && activeSource.heldBy !== 'you' && (
+            <button
+              type="button"
+              data-testid="palette-source-connect-own"
+              className="text-accent underline underline-offset-2"
+              disabled={connectOwn.isPending}
+              onClick={() => connectOwn.mutate(activeSource.provider!)}
+            >
+              {t('palette.sourceConnectOwn')}
+            </button>
+          )}
+          {activeSource.heldBy === 'you' && (
+            <button
+              type="button"
+              data-testid="palette-source-disconnect-own"
+              className="text-accent underline underline-offset-2"
+              disabled={disconnectOwn.isPending}
+              onClick={() => disconnectOwn.mutate(activeSource.provider!)}
+            >
+              {t('palette.sourceDisconnectOwn')}
+            </button>
+          )}
+          {/* The workspace's own connection, in the App Center at this source's app — not a mailbox. */}
+          {mayConnectApps && !activeSource.connected && activeSource.id !== 'gmail' && (
+            <button
+              type="button"
+              data-testid="palette-source-connect"
+              className="text-accent underline underline-offset-2"
+              onClick={() => {
+                setOpen(false)
+                navigate({ to: '/app/$workspaceId/integrations', params: { workspaceId: workspaceId! }, search: { app: activeSource.provider! } })
+              }}
+            >
+              {t('palette.sourceConnect')}
+            </button>
           )}
         </div>
       )}

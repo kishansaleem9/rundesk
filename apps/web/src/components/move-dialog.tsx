@@ -240,7 +240,7 @@ export function MoveDialog({
                   <li key={`${r.kind}:${r.id}`}>
                     <button
                       type="button"
-                      data-testid={r.kind === 'list' && r.personal ? 'move-target-personal-list' : undefined}
+                      data-testid={r.kind === 'list' ? (r.personal ? 'move-target-personal-list' : `move-target-list-${r.id}`) : undefined}
                       disabled={!selectable || current || move.isPending}
                       onClick={() => move.mutate(r)}
                       className={cn(

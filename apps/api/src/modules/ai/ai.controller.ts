@@ -185,6 +185,19 @@ export class AiController {
     })
   }
 
+  /**
+   * THE WORKSPACE'S AI CREDITS (`commit-log/log-3943965-1`, `ledger-rows/row-869`):
+   * this month's allowance, use, what is left and when it renews; each day's
+   * use against the limit; and what each category used. Every member reads it,
+   * as ClickUp's AI hub shows used and remaining to all.
+   */
+  @Get('credits')
+  @ApiOperation({ summary: 'This month’s AI credits for a workspace' })
+  credits(@Query('workspaceId') workspaceId?: string) {
+    if (!workspaceId) throw new HttpException('workspaceId is required', HttpStatus.BAD_REQUEST)
+    return this.ai.creditsSummary(workspaceId)
+  }
+
   @Get('usage')
   @ApiOperation({ summary: 'AI usage + estimated cost per user / per model' })
   usage(

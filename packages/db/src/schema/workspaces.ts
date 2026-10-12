@@ -72,6 +72,8 @@ export const workspaces = pgTable('workspaces', {
   planLimits:     jsonb('plan_limits').$type<{
     maxMembers?: number | null
     maxProjects?: number | null
+    /** AI credits a member brings each month (`commit-log/log-3943965-1`); null is unlimited. */
+    aiCreditsPerMember?: number | null
     features?: Record<string, boolean>
   }>(),
   // §A4.2 sharing policy. `defaultSpacePrivate` makes a newly created space

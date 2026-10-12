@@ -138,6 +138,17 @@ try {
    * touched.
    */
   await sql`update workspaces set plan = 'free' where id = ${LOCKED.id}`
+  /*
+   * ITS FREE USES SPENT (`ledger-rows/row-788`). A plan without Team View or
+   * the board download has sixty free uses of each, as ClickUp's Free plan has
+   * of a paid view, and a member's first use of a day takes one; this workspace
+   * has spent them all, sixty days of them, so what is asked below is the
+   * refusal that follows — the gate this suite is about. `ai-credits` asks the
+   * uses themselves.
+   */
+  await sql`insert into plan_feature_uses (workspace_id, feature, user_id, day)
+    select ${LOCKED.id}, f, ${auth.user?.id ?? auth.userId}, current_date - n
+    from unnest(array['teamView', 'boardExport']::text[]) as f, generate_series(1, 60) as n`
   const lockedPlan = (await api(`/workspaces/${LOCKED.id}/plan`)).data
   const okPlan = (await api(`/workspaces/${OK.id}/plan`)).data
   console.log(`\x1b[2m  entitled ${OK.id} (${okPlan?.plan}), blocked ${LOCKED.id} (${lockedPlan?.plan})\x1b[0m`)

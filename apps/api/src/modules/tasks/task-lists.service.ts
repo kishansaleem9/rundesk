@@ -114,13 +114,18 @@ export class TaskListsService {
       .from(lists)
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .where(inArray(lists.id, ids))
-    const out: Array<{ id: string; name: string; projectId: string; spaceId: string; home: boolean }> = []
+    const out: Array<{ id: string; name: string | null; projectId: string | null; spaceId: string | null; home: boolean }> = []
     for (const id of ids) {
       const r = rows.find((x) => x.id === id)
       if (!r) continue
       const home = id === ctx.task.listId
-      // A list this reader may not open is not named to them, though the task is in it.
-      if (!home && !(await readableList(this.db, ctx.workspaceId, id, actor))) continue
+      // A list this reader may not open is not named to them, though the task is
+      // in it: an added one is left out, and the home one — which a reader of an
+      // added list alone may not open — is said to be there, unnamed.
+      if (!(await readableList(this.db, ctx.workspaceId, id, actor))) {
+        if (home) out.push({ id, name: null, projectId: null, spaceId: null, home })
+        continue
+      }
       out.push({ id, name: r.personalOf ? 'Personal List' : r.name, projectId: r.projectId, spaceId: r.spaceId, home })
     }
     const reason = await this.refusal(ctx, actor)

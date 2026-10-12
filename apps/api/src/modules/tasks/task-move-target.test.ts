@@ -48,6 +48,12 @@ function makeDb(rows: Rows) {
       const c: any = { values: () => c, onConflictDoNothing: () => c, returning: () => c, then: (res: (v: unknown) => unknown) => Promise.resolve([]).then(res) }
       return c
     },
+    delete: () => {
+      const c: any = { where: () => c, returning: () => c, then: (res: (v: unknown) => unknown) => Promise.resolve([]).then(res) }
+      return c
+    },
+    // A move is one transaction (the task, and the lists it was added to): run on the same stand-in.
+    transaction: async (fn: (tx: unknown) => unknown) => fn(db),
   } as any
   return { db, updates }
 }

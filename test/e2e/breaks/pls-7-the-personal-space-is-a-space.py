@@ -2,6 +2,9 @@
 # (`found-24-sep/planner-default-list-read-by-nothing`)
 # Reddens: personal-list: "it is no place in the hierarchy: the sidebar’s spaces, search, the calendar sync’s places and the pickers of lists leave its space out, and getting started counts no space or project more once a Personal List is made"
 #   or "Home’s Personal List draws her tasks — the old to-dos and the task moved in — and the sidebar draws the workspace’s space and no personal one"
+#   or "the Move picker offers her her own Personal List — and Max not hers — and the shared task moved into it takes its sharing: Max read it before, and is refused it after"
+#
+# Re-aimed 9 October: the last 1 of these are knock-ons of the same edit, measured on lane 9 — checks that stand on what the first ones lost.
 #
 # The sidebar draws a space called “Personal”, holding everybody’s Personal Lists’ container.
 import io

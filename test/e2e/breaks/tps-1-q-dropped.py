@@ -1,9 +1,12 @@
 # THE WORDS NEVER REACH THE QUERY: the route takes `q` and passes nothing on.
 # Reddens: task-pickers-search: "the oldest task is not among the newest 200 — and its own word finds it, and only it"
+#
+# Re-aimed 12 October: the route passes a list too (the Relationship field limited
+# to one list), after `q`. Same break.
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.controller.ts'
-a = "      assigneeId: assigneeId === 'me' ? user.id : undefined,\n      q,\n    })\n"
-b = "      assigneeId: assigneeId === 'me' ? user.id : undefined,\n    })\n"
+a = "      assigneeId: assigneeId === 'me' ? user.id : undefined,\n      q,\n      listId,\n    })\n"
+b = "      assigneeId: assigneeId === 'me' ? user.id : undefined,\n      listId,\n    })\n"
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

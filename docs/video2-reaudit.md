@@ -655,7 +655,7 @@ two (Relationship, Button) are written up in §2's row as decisions rather than
 as work. *(30 September: the model half of that no longer holds. The lanes run
 a model through `scripts/e2e-lanes/model-stub.mjs` (`RUNDESK_LANE_MODEL`), and
 the product reaches it by the SDK's own `ANTHROPIC_BASE_URL`. So the eight are
-unbuilt, not blocked (`harness/ai-rows-blocked-on-empty-key`).)* Everything in §2 still marked M or P, and V2-03.
+unbuilt, not blocked (`harness/ai-rows-blocked-on-empty-key`).)* *(12 October: the ten field types are built, as ClickUp works them — §2's row says how: `commit-log/log-c980bee-1`.)* Everything in §2 still marked M or P, and V2-03.
 
 **Known and left alone:** the Later chip's count comes from
 `/notifications/counts`, which counts snoozed notifications only — so Later can
@@ -730,7 +730,7 @@ Legend: **B** built · **P** partial · **M** missing.
 |---|---|
 | B | Create-modal tab strip; time estimate, dates+times, priority, tags-on-enter |
 | B | `+ Create new field` on the create modal. It said "17 field types", which was true when it was written and has been wrong twice since — the count lives in the row below, where the gap is, rather than in two places that drift apart |
-| P | **29** field types the frames' own transcription records, and the 32 that stood here did not survive being re-added. `00:20` lists 16 rows, `00:40` lists 16 more, and the two overlap on Progress (Auto) · Email · Phone: 16 + 16 − 3 = **29**, which is `video2-frame-observations.md`'s "~30" made exact. The 32 was this product's 22 plus the 10 absent, which counts **text**, **dropdown** and **date** as rows the frame draws — and the transcription names none of the three. Rundesk holds those three anyway, so it holds **22 types, 19 of them among the frame's 29**. A number that can only be reached by assuming the evidence contains what it does not name is the confident zero wearing a total, and it was mine. **~~Formula~~ ~~Tasks~~ ~~Signature~~ built in `0158`** — closed by `custom-field-types.mjs`, **32 checks, and all 32 break-tested** — baseline 32/32 green, every patch reddening the check it names. **The 10 absent are not a build and are recorded as such:** eight need a language model — Summary, Custom Text, Custom Dropdown, Progress Updates, Translation, Sentiment, Categorize, Action Items, and the picker's own **AI Fields** group names the first three — and `ANTHROPIC_API_KEY` is empty here and in CI *(since 29 September a lane runs a model stub, so these eight are unbuilt rather than blocked: `harness/ai-rows-blocked-on-empty-key`)*; **Relationship** would be a second store for what `task_doc_links` already holds; **Button** stores no value at all, and `AutomationsService` has no manual trigger, so the only thing buildable today is a button wired to nothing. 19 + 10 = 29, which is the list. ~~Files~~ and ~~Voting~~ built in `0145` |
+| B | **29** field types the frames' own transcription records, and the 32 that stood here did not survive being re-added. `00:20` lists 16 rows, `00:40` lists 16 more, and the two overlap on Progress (Auto) · Email · Phone: 16 + 16 − 3 = **29**, which is `video2-frame-observations.md`'s "~30" made exact. The 32 was this product's 22 plus the 10 absent, which counts **text**, **dropdown** and **date** as rows the frame draws — and the transcription names none of the three. Rundesk holds those three anyway, so it holds **22 types, 19 of them among the frame's 29**. A number that can only be reached by assuming the evidence contains what it does not name is the confident zero wearing a total, and it was mine. **~~Formula~~ ~~Tasks~~ ~~Signature~~ built in `0158`** — closed by `custom-field-types.mjs`, **32 checks, and all 32 break-tested** — baseline 32/32 green, every patch reddening the check it names. *(Superseded 12 October: the ten are built — see the end of this row.)* **The 10 absent are not a build and are recorded as such:** eight need a language model — Summary, Custom Text, Custom Dropdown, Progress Updates, Translation, Sentiment, Categorize, Action Items, and the picker's own **AI Fields** group names the first three — and `ANTHROPIC_API_KEY` is empty here and in CI *(since 29 September a lane runs a model stub, so these eight are unbuilt rather than blocked: `harness/ai-rows-blocked-on-empty-key`)*; **Relationship** would be a second store for what `task_doc_links` already holds; **Button** stores no value at all, and `AutomationsService` has no manual trigger, so the only thing buildable today is a button wired to nothing. 19 + 10 = 29, which is the list. ~~Files~~ and ~~Voting~~ built in `0145`. **12 October: the ten built, as ClickUp works them** (`0184`; `ai-button-relationship-fields`, 17 checks, each break-tested; `commit-log/log-c980bee-1`, `ledger-rows/row-719`): the eight AI fields live within Short Text, Long Text and Dropdown as ClickUp's do, and are filled by the model through `ai.service` — on asking, on a new task, and when the task changes — measured on a model lane; **Button** runs the automations whose trigger it is (`button.clicked`); **Relationship** is the `tasks` type, to any task or to one list's, chosen when it is made, with rollups. 29 of 29. |
 | B | Searchable field-type picker — a search box that narrows the `<select>` and selects as you type |
 | B | Progress (Auto) config panel — engine *and* the panel frame `00:25` shows |
 | B | Field config: required flag and Cancel/Create |
@@ -916,7 +916,7 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 
 ## 4. Counts
 
-**174 rows: 159 built · 8 partial · 7 missing.**
+**174 rows: 160 built · 7 partial · 7 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -952,9 +952,9 @@ rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 121 | 7 | 5 | 133 |
+| §2, the sections table | 122 | 6 | 5 | 133 |
 | §5, recovered from the frame observations | 38 | 1 | 2 | 41 |
-| **consolidated** | **159** | **8** | **7** | **174** |
+| **consolidated** | **160** | **7** | **7** | **174** |
 
 FOUR ROWS MOVED FROM `P` TO `B` AND THE TOTAL DID NOT CHANGE, which is the
 only shape of movement this table should ever show for a build — and the fourth
@@ -1015,7 +1015,15 @@ remainder of §2's `Comment ▾` row, which was `B*` for it alone; it is `B` now
 and §2's split does not move, `B*` being counted as built: 120 `B`, 1 `B*`,
 7 `P` and 5 `M`.
 
-§2's 121 built includes the one marked `B*` — built, but the row also records
+ONE ROW MOVED FROM `P` TO `B` ON 12 OCTOBER, AND THE TOTAL DID NOT. The field
+types row was `P`, ten of the frame's twenty-nine absent: the eight AI fields,
+Button and Relationship — the AI eight on a reason the ledger had already
+retired. All ten are built as ClickUp works them and measured on a model lane
+and without one (`ai-button-relationship-fields.mjs`, 17 checks;
+`commit-log/log-c980bee-1`, `ledger-rows/row-719`). So §2 moves `121 · 7 · 5` →
+`122 · 6 · 5`: 121 `B`, 1 `B*`, 6 `P` and 5 `M`.
+
+§2's 122 built includes the one marked `B*` — built, but the row also records
 something the frame asks for that is not there. It is counted as built
 because that is what it is; the asterisk is where the remainder is written
 down. This read "the four" until 29 September while §2 held six: the two that

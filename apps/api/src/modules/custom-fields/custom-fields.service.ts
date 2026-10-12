@@ -12,14 +12,16 @@ import {
   taskComments,
   workspaceMembers,
   taskAttachments,
+  taskLists,
   customFieldTypeEnum,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
-import { readableProject, readableTask, type ReadActor } from '../../common/permissions/read-access'
+import { readableList, readableProject, readableTask, readableTaskIds, type ReadActor } from '../../common/permissions/read-access'
 import { assertTaskWritable } from '../../common/permissions/task-write'
 import { assertMayDefineFields, fieldsOnReadableLists, listOfProject } from '../../common/permissions/field-access'
 import { computeProgress, toProgressConfig, type ProgressInputs } from './progress'
+import { AI_BASE_TYPES, AiFieldConfigError, aiConfigOf, toAiConfig, type AiFieldConfig } from './ai-field'
 import {
   compileFormula,
   evaluateFormula,
@@ -47,6 +49,9 @@ const CUSTOM_FIELD_TYPE_SET: ReadonlySet<string> = new Set(CUSTOM_FIELD_TYPES)
 /** `string[]` is §V2-01c's: `labels` and `people` hold several at once. */
 type FieldValue = string | number | boolean | string[] | null
 
+/** One field a Relationship rolls up: its value on each related task. */
+export type RollupColumn = { fieldId: string; name: string; type: string; values: Array<{ taskId: string; value: FieldValue }> }
+
 /**
  * §V2-01c — T-shirt Size is a FIXED set, not a per-field one.
  *
@@ -58,6 +63,34 @@ export const TSHIRT_SIZES = ['xs', 's', 'm', 'l', 'xl'] as const
 
 /** The types that hold a list rather than one value. */
 const MULTI_TYPES: ReadonlySet<string> = new Set(['labels', 'people', 'files', 'voting', 'tasks'])
+
+/*
+ * CLICKUP'S BUTTON AND RELATIONSHIP, in their own words (`ledger-rows/row-719`).
+ *
+ * A Button holds nothing: pressing it on a task runs the automations whose
+ * trigger is that button. A Relationship ("Tasks" here) is to "any task in
+ * your Workspace", or to "tasks from a specific List", chosen when the field
+ * is made — ClickUp: "you can't change the List later" — with rollups, the
+ * fields of that list's tasks shown beside each related task.
+ */
+export const BUTTON_HOLDS_NOTHING = 'A Button is pressed, not set — it holds no value'
+export const NOT_A_BUTTON = 'This field is not a Button — only a Button is pressed'
+export const RELATIONSHIP_LIST_KEPT = 'A Relationship’s list is chosen when the field is made, and cannot be changed'
+export const ROLLUPS_NEED_A_LIST = 'Rollups come from the fields of the list a Relationship is limited to — choose its list first'
+export const NOT_IN_RELATIONSHIP_LIST = 'Those tasks are not in the list this Relationship is limited to'
+export const NOT_AN_AI_FIELD = 'This field is not an AI field — only an AI field is generated'
+/** At most this many rollups on one Relationship, and this many words on a Button. */
+const ROLLUPS_MAX = 10
+const BUTTON_LABEL_MAX = 40
+
+/** A Relationship's settings as stored: its list, when it is limited to one, and its rollups. */
+export function relationshipConfigOf(config: unknown): { listId: string | null; rollups: string[] } {
+  const c = (config ?? {}) as { listId?: unknown; rollups?: unknown }
+  return {
+    listId: typeof c.listId === 'string' ? c.listId : null,
+    rollups: Array.isArray(c.rollups) ? c.rollups.filter((r): r is string => typeof r === 'string') : [],
+  }
+}
 
 /**
  * A field's name holds no `{` or `}`: a formula reads them as the edges of the
@@ -314,6 +347,13 @@ export class CustomFieldsService {
      */
     const formulaConfig =
       dto.type === 'formula' ? await this.checkedFormulaConfig(projectId, dto.config, undefined, { workspaceId, reader }) : null
+    /*
+     * An AI field's, a Button's and a Relationship's settings
+     * (`ledger-rows/row-719`), checked before they are stored for the reason a
+     * formula is: a setting that saves and does nothing is a field nobody can
+     * tell from a broken one.
+     */
+    const typeConfig = await this.checkedTypeConfig(workspaceId, dto.type, dto.config, reader)
 
     // Position = current max + 1
     const existing = await this.db
@@ -338,7 +378,7 @@ export class CustomFieldsService {
             ? toProgressConfig(dto.config)
             : dto.type === 'formula'
               ? formulaConfig
-              : null,
+              : typeConfig,
         position: nextPos,
       })
       .returning()
@@ -467,6 +507,83 @@ export class CustomFieldsService {
     return { expression: parsed.expression, compiled: compileFormula(parsed.expression, (name) => idOf.get(name)!) }
   }
 
+  /**
+   * THE SETTINGS OF THE TYPES CLICKUP MAKES OF ITS FIELDS (`ledger-rows/row-719`),
+   * as they will be stored, or null for none.
+   *
+   * · An AI field (`text`, `long_text`, `dropdown` with `ai`): its kind, for
+   *   the type it lives within, and what that kind needs (`toAiConfig`).
+   * · A Button: the words on it.
+   * · A Relationship (`tasks`): the list it is limited to — one its maker may
+   *   open in this workspace — and its rollups, fields that list's tasks have.
+   */
+  private async checkedTypeConfig(
+    workspaceId: string,
+    type: string,
+    raw: unknown,
+    reader?: ReadActor,
+  ): Promise<Record<string, unknown> | null> {
+    if (raw != null && (typeof raw !== 'object' || Array.isArray(raw))) {
+      throw new BadRequestException('A field’s settings are an object')
+    }
+    const r = (raw ?? {}) as Record<string, unknown>
+    if (AI_BASE_TYPES.has(type)) {
+      if (r.ai == null) return null
+      try {
+        return { ai: toAiConfig(type, r.ai) }
+      } catch (err) {
+        if (err instanceof AiFieldConfigError) throw new BadRequestException(err.message)
+        throw err
+      }
+    }
+    if (type === 'button') {
+      const label = typeof r.label === 'string' ? r.label.trim() : ''
+      if (label.length > BUTTON_LABEL_MAX) throw new BadRequestException(`A Button’s words are at most ${BUTTON_LABEL_MAX} characters`)
+      return label ? { label } : null
+    }
+    if (type === 'tasks') {
+      const listId = r.listId == null ? null : r.listId
+      if (listId !== null && typeof listId !== 'string') throw new BadRequestException('listId must be a string or null')
+      const rollups = r.rollups == null ? [] : r.rollups
+      if (!Array.isArray(rollups) || rollups.some((x) => typeof x !== 'string')) {
+        throw new BadRequestException('Rollups are a list of field ids')
+      }
+      if (rollups.length > ROLLUPS_MAX) throw new BadRequestException(`A Relationship shows at most ${ROLLUPS_MAX} rollups`)
+      if (new Set(rollups).size !== rollups.length) throw new BadRequestException('The same rollup was given twice')
+      if (!listId) {
+        if (rollups.length) throw new BadRequestException(ROLLUPS_NEED_A_LIST)
+        return null
+      }
+      // A list its maker may open, in this workspace; any other is not there to them.
+      const list = reader
+        ? await readableList(this.db, workspaceId, listId, reader)
+        : (
+            await this.db
+              .select({ listId: lists.id })
+              .from(lists)
+              .innerJoin(projects, eq(projects.id, lists.projectId))
+              .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+              .where(and(eq(lists.id, listId), eq(spaces.workspaceId, workspaceId)))
+              .limit(1)
+          )[0]
+      if (!list) throw new NotFoundException('List not found in this workspace')
+      if (rollups.length) {
+        const [home] = await this.db.select({ projectId: lists.projectId }).from(lists).where(eq(lists.id, listId)).limit(1)
+        const fields = await this.db
+          .select({ id: customFieldDefinitions.id, type: customFieldDefinitions.type, listId: customFieldDefinitions.listId })
+          .from(customFieldDefinitions)
+          .where(and(eq(customFieldDefinitions.projectId, home!.projectId), inArray(customFieldDefinitions.id, rollups as string[])))
+        const ok = new Set(fields.filter((f) => f.type !== 'button' && fieldIsOnList(f, listId)).map((f) => f.id))
+        const strays = (rollups as string[]).filter((id) => !ok.has(id))
+        if (strays.length) {
+          throw new BadRequestException('A rollup is a field the related list’s tasks have — not a Button, and not a field of another list')
+        }
+      }
+      return { listId, rollups }
+    }
+    return null
+  }
+
   async updateDefinition(
     workspaceId: string,
     fieldId: string,
@@ -509,6 +626,20 @@ export class CustomFieldsService {
      * edited into one that create would have refused. */
     if (patch.config !== undefined && def.type === 'formula') {
       set.config = await this.checkedFormulaConfig(def.projectId, patch.config, def.id, { workspaceId, reader })
+    }
+    /*
+     * An AI field's and a Button's settings, checked as when the field is
+     * made. A Relationship keeps its list, as ClickUp's does: its rollups
+     * change, the list it is limited to does not (`ledger-rows/row-719`).
+     */
+    if (patch.config !== undefined && (AI_BASE_TYPES.has(def.type) || def.type === 'button')) {
+      set.config = await this.checkedTypeConfig(workspaceId, def.type, patch.config, reader)
+    }
+    if (patch.config !== undefined && def.type === 'tasks') {
+      const was = relationshipConfigOf(def.config)
+      const asked = (patch.config ?? {}) as { listId?: unknown; rollups?: unknown }
+      if ((asked.listId ?? null) !== was.listId) throw new BadRequestException(RELATIONSHIP_LIST_KEPT)
+      set.config = await this.checkedTypeConfig(workspaceId, def.type, { listId: was.listId, rollups: asked.rollups ?? [] }, reader)
     }
     /*
      * A RENAME CARRIES EVERY FORMULA THAT READS THE FIELD WITH IT, AND IS NEVER
@@ -581,6 +712,8 @@ export class CustomFieldsService {
         name: customFieldDefinitions.name,
         type: customFieldDefinitions.type,
         options: customFieldDefinitions.options,
+        // An AI field's kind, a Button's words, a Relationship's list.
+        config: customFieldDefinitions.config,
       })
       .from(customFieldDefinitions)
       .innerJoin(projects, eq(projects.id, customFieldDefinitions.projectId))
@@ -592,7 +725,12 @@ export class CustomFieldsService {
   }
 
   // ── Values ──────────────────────────────────────────────────────────────────
-  async getValuesForTask(workspaceId: string, taskId: string, reader?: ReadActor) {
+  /**
+   * @param opts.rollups whether a Relationship's rollups are read too — not
+   *   when this is itself reading a related task's values for one, so a
+   *   Relationship to a task with a Relationship stops there.
+   */
+  async getValuesForTask(workspaceId: string, taskId: string, reader?: ReadActor, opts: { rollups?: boolean } = {}) {
     const task = await this.assertTaskOpenTo(workspaceId, taskId, reader)
     /*
      * §V2-S01c — `listId` NARROWS THE FIELD, and until now it did not.
@@ -661,7 +799,7 @@ export class CustomFieldsService {
       }
     }
 
-    return defs.map((d) => {
+    const rows: Array<{ definition: (typeof defs)[number]; value: FieldValue; rollups?: RollupColumn[] }> = defs.map((d) => {
       if (d.type === 'progress_auto') {
         return {
           definition: d,
@@ -692,6 +830,43 @@ export class CustomFieldsService {
         definition: d,
         value: MULTI_TYPES.has(d.type) ? (Array.isArray(stored) ? stored : []) : stored,
       }
+    })
+    if (opts.rollups === false) return rows
+    /*
+     * A RELATIONSHIP'S ROLLUPS (`ledger-rows/row-719`): each field it rolls up,
+     * with its value on each related task this reader may open. A related task
+     * they may not open is named by nobody here, its values least of all.
+     */
+    for (const row of rows) {
+      if (row.definition.type !== 'tasks' || !Array.isArray(row.value) || row.value.length === 0) continue
+      const { rollups } = relationshipConfigOf(row.definition.config)
+      if (rollups.length) row.rollups = await this.rollupsFor(workspaceId, row.value as string[], rollups, reader)
+    }
+    return rows
+  }
+
+  /** The rolled-up fields' values on each related task the reader may open. */
+  private async rollupsFor(workspaceId: string, ids: string[], fieldIds: string[], reader?: ReadActor): Promise<RollupColumn[]> {
+    const open = reader ? await readableTaskIds(this.db, workspaceId, reader.id, ids, reader.role) : new Set(ids)
+    const defs = await this.db
+      .select({ id: customFieldDefinitions.id, name: customFieldDefinitions.name, type: customFieldDefinitions.type })
+      .from(customFieldDefinitions)
+      .where(inArray(customFieldDefinitions.id, fieldIds))
+    const byTask = new Map<string, Map<string, FieldValue>>()
+    for (const id of ids) {
+      if (!open.has(id)) continue
+      const values = await this.getValuesForTask(workspaceId, id, undefined, { rollups: false }).catch(() => [])
+      byTask.set(id, new Map(values.map((v) => [v.definition.id, v.value])))
+    }
+    return fieldIds.flatMap((fieldId) => {
+      const d = defs.find((x) => x.id === fieldId)
+      if (!d) return []
+      return [{
+        fieldId,
+        name: d.name,
+        type: d.type,
+        values: [...byTask].map(([taskId, m]) => ({ taskId, value: m.has(fieldId) ? m.get(fieldId)! : null })),
+      }]
     })
   }
 
@@ -796,6 +971,8 @@ export class CustomFieldsService {
         'Formula is calculated from the other fields on this task — it cannot be set directly',
       )
     }
+    /* A Button holds nothing; it is pressed (`pressButton`). */
+    if (def.type === 'button') throw new BadRequestException(BUTTON_HOLDS_NOTHING)
 
     /*
      * VOTING IGNORES THE SUBMITTED VALUE, on purpose.
@@ -841,7 +1018,11 @@ export class CustomFieldsService {
      * stated once. Whatever it answers is what is stored.
      */
     value = await this.checkValue(workspaceId, taskId, def, value)
+    return this.upsertValue(taskId, fieldId, value)
+  }
 
+  /** The value of a field on a task, written whether or not a row held one. */
+  private async upsertValue(taskId: string, fieldId: string, value: FieldValue) {
     // Upsert (taskId, fieldId) is unique
     const existing = await this.db
       .select()
@@ -894,7 +1075,7 @@ export class CustomFieldsService {
   async checkValue(
     workspaceId: string,
     taskId: string,
-    def: { type: string; options: unknown },
+    def: { type: string; options: unknown; config?: unknown },
     value: FieldValue,
   ): Promise<FieldValue> {
     // Type validation
@@ -1046,6 +1227,22 @@ export class CustomFieldsService {
             if ((value as string[]).some((v) => !known.has(v))) {
               throw new BadRequestException('Those tasks are not in this workspace')
             }
+            /*
+             * A RELATIONSHIP LIMITED TO A LIST takes that list's tasks and no
+             * others (ClickUp's "Tasks from a specific List",
+             * `ledger-rows/row-719`): a task whose home is the list, or one
+             * added to it (Tasks in Multiple Lists).
+             */
+            const { listId } = relationshipConfigOf(def.config)
+            if (listId) {
+              const ids = value as string[]
+              const [home, added] = await Promise.all([
+                this.db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.listId, listId), inArray(tasks.id, ids))),
+                this.db.select({ id: taskLists.taskId }).from(taskLists).where(and(eq(taskLists.listId, listId), inArray(taskLists.taskId, ids))),
+              ])
+              const inList = new Set([...home, ...added].map((r) => r.id))
+              if (ids.some((v) => !inList.has(v))) throw new BadRequestException(NOT_IN_RELATIONSHIP_LIST)
+            }
           }
           break
         }
@@ -1088,5 +1285,103 @@ export class CustomFieldsService {
       }
     }
     return value
+  }
+
+  // ── AI fields and Buttons (`ledger-rows/row-719`) ───────────────────────────
+  /**
+   * THE AI FIELD A TASK HAS, for its Generate: a task the asker may open, a
+   * field it has, an AI field, and — the answer being written onto the task —
+   * the task's write rule. All before any model is asked, so a refusal costs
+   * nothing and says the same whether a model answers here or not.
+   */
+  async aiFieldOnTask(workspaceId: string, taskId: string, fieldId: string, reader: ReadActor) {
+    const task = await this.assertTaskOpenTo(workspaceId, taskId, reader)
+    const def = await this.getDefOwnedBy(workspaceId, fieldId)
+    if (!fieldIsOnTask(def, task)) throw new NotFoundException('Custom field not found on this task')
+    const ai = aiConfigOf(def.type, def.config)
+    if (!ai) throw new BadRequestException(NOT_AN_AI_FIELD)
+    await assertTaskWritable(this.db, taskId, reader.id)
+    return { task, def, ai }
+  }
+
+  /**
+   * The AI fields a task has that fill themselves: `autofill` on a task just
+   * made where the field is, `autoUpdate` on one that changed — ClickUp's
+   * "Autofill" and "Auto-update" settings. None for a task that is gone.
+   */
+  async aiFieldsOfTask(
+    workspaceId: string,
+    taskId: string,
+    which: 'autofill' | 'autoUpdate',
+  ): Promise<Array<{ def: { id: string; type: string; options: unknown; config: unknown; name: string }; ai: AiFieldConfig }>> {
+    const task = await this.assertTaskInWorkspace(workspaceId, taskId).catch(() => null)
+    if (!task) return []
+    const [made] = await this.db.select({ createdAt: tasks.createdAt }).from(tasks).where(eq(tasks.id, taskId)).limit(1)
+    const defs = await this.db
+      .select({
+        id: customFieldDefinitions.id,
+        name: customFieldDefinitions.name,
+        type: customFieldDefinitions.type,
+        options: customFieldDefinitions.options,
+        config: customFieldDefinitions.config,
+        listId: customFieldDefinitions.listId,
+        createdAt: customFieldDefinitions.createdAt,
+      })
+      .from(customFieldDefinitions)
+      .where(eq(customFieldDefinitions.projectId, task.projectId))
+    return defs
+      .filter((d) => fieldIsOnList(d, task.listId))
+      // "Autofill new tasks": tasks made after the field, not one made a moment before it.
+      .filter((d) => which !== 'autofill' || !made || d.createdAt <= made.createdAt)
+      .flatMap((d) => {
+        const ai = aiConfigOf(d.type, d.config)
+        return ai && ai[which] ? [{ def: d, ai }] : []
+      })
+  }
+
+  /** What the model answered, written as the field's value by the rules its route asks (`checkValue`). */
+  async writeGenerated(
+    workspaceId: string,
+    taskId: string,
+    def: { id: string; type: string; options: unknown; config?: unknown },
+    value: string,
+  ) {
+    const checked = await this.checkValue(workspaceId, taskId, def, value)
+    return this.upsertValue(taskId, def.id, checked)
+  }
+
+  /**
+   * A BUTTON A TASK HAS, pressed by somebody who may change the task: its
+   * automations change the task, so pressing asks what changing it asks.
+   */
+  async buttonOnTask(workspaceId: string, taskId: string, fieldId: string, reader: ReadActor) {
+    const task = await this.assertTaskOpenTo(workspaceId, taskId, reader)
+    const def = await this.getDefOwnedBy(workspaceId, fieldId)
+    if (!fieldIsOnTask(def, task)) throw new NotFoundException('Custom field not found on this task')
+    if (def.type !== 'button') throw new BadRequestException(NOT_A_BUTTON)
+    await assertTaskWritable(this.db, taskId, reader.id)
+    return { task, def }
+  }
+
+  /** The workspace's Buttons this reader may see, for an automation's "When a button is pressed". */
+  async buttonsFor(workspaceId: string, reader: ReadActor) {
+    const rows = await this.db
+      .select({
+        id: customFieldDefinitions.id,
+        name: customFieldDefinitions.name,
+        projectId: customFieldDefinitions.projectId,
+        projectName: projects.name,
+        listId: customFieldDefinitions.listId,
+      })
+      .from(customFieldDefinitions)
+      .innerJoin(projects, eq(projects.id, customFieldDefinitions.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(customFieldDefinitions.type, 'button')))
+      .orderBy(asc(projects.name), asc(customFieldDefinitions.name))
+    const open = new Set<string>()
+    for (const projectId of new Set(rows.map((r) => r.projectId))) {
+      if (await readableProject(this.db, workspaceId, projectId, reader)) open.add(projectId)
+    }
+    return fieldsOnReadableLists(this.db, workspaceId, rows.filter((r) => open.has(r.projectId)), reader)
   }
 }

@@ -43,8 +43,9 @@ describe('TasksService.defaultListFor — the chosen list', () => {
     assert.equal(db.select.mock.callCount(), 1, 'no other list was looked for')
   })
 
-  it('still passes over a chosen list the person may not add to, for the oldest one they may', async () => {
-    const { svc } = service([settings, [{ id: 'oldest' }]])
+  // A member's fallback is their Personal List (`ensurePersonalList`, measured by `personal-list.mjs`); a guest has none.
+  it('still passes over a chosen list the person may not add to — for a guest, who has no Personal List, the oldest one they may', async () => {
+    const { svc } = service([settings, [{ role: 'guest' }], [{ id: 'oldest' }]])
     svc.assertCanCreateTaskIn = mock.fn(async () => {
       throw new ForbiddenException('This space’s default permission is "View only", which does not allow adding a task')
     })

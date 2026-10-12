@@ -176,12 +176,25 @@ try {
   const A = apiAs(admin.accessToken)
   const workspaceId = admin.workspaces[0].id
   const meId = admin.user?.id ?? admin.id
-  // Somewhere to seed the bucket fixtures; the panel reads across the whole
-  // workspace, so any list in it will do.
-  const bucketSpaces = await A(`/spaces/workspace/${workspaceId}`)
-  const bucketProjects = await A(`/projects/space/${bucketSpaces.data?.[0]?.id}`)
-  const bucketLists = await A(`/lists/project/${bucketProjects.data?.[0]?.id}`)
-  const bucketListId = bucketLists.data?.[0]?.id
+  /*
+   * Somewhere to seed the bucket fixtures: a list of this run's own. The panel
+   * reads across the whole workspace, so any list in it will do — but "the
+   * first list of the first project of the first space" was whatever the runs
+   * before this one had left there. On CI, where this suite runs after two
+   * hundred others, it was nothing, every POST /tasks went out with no list,
+   * and the guard answered 404 "Resource not found" for each
+   * (`found-12-oct/person-panel-seeds-into-whatever-list-is-first`). The space
+   * is registered as it is made (`apiAs`), and swept with all it holds when the
+   * run ends.
+   */
+  const RUN = Date.now()
+  const bucketSpace = await A('/spaces', { method: 'POST', body: { workspaceId, name: `person-panel ${RUN}` } })
+  const bucketProject = await A('/projects', { method: 'POST', body: { spaceId: bucketSpace.data?.id, name: `person-panel ${RUN}` } })
+  const bucketList = await A('/lists', { method: 'POST', body: { projectId: bucketProject.data?.id, name: `person-panel ${RUN}` } })
+  const bucketListId = bucketList.data?.id
+  if (!bucketListId) {
+    throw new Error(`no list to seed into: the space ${bucketSpace.status}, the project ${bucketProject.status}, the list ${bucketList.status} ${JSON.stringify(bucketList.message ?? null)}`)
+  }
 
   // A known timezone, so the clock check is about rendering rather than about
   // whatever this account happened to be set to.

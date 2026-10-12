@@ -5,6 +5,7 @@ import type { ReadActor } from '../../common/permissions/read-access'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import { AutomationsService, BUTTON_TRIGGER } from '../automations/automations.service'
 
 /*
  * The type union used to be written out again here, ten of the nineteen the
@@ -21,7 +22,10 @@ const reader = (user: { id: string; role?: string }): ReadActor => ({ id: user.i
 @UseGuards(JwtAuthGuard, WorkspaceMemberGuard)
 @Controller('workspaces/:workspaceId')
 export class CustomFieldsController {
-  constructor(private readonly svc: CustomFieldsService) {}
+  constructor(
+    private readonly svc: CustomFieldsService,
+    private readonly automations: AutomationsService,
+  ) {}
 
   // ── Definitions (project-scoped) ──────────────────────────────────────────
   @Get('projects/:projectId/custom-fields')
@@ -75,6 +79,16 @@ export class CustomFieldsController {
     return this.svc.deleteDefinition(workspaceId, fieldId, reader(user))
   }
 
+  /** The workspace's Buttons this person may see, for "When a button is pressed" (`ledger-rows/row-719`). */
+  @Get('custom-fields/buttons')
+  @ApiOperation({ summary: 'List the Button fields a member may see' })
+  buttons(
+    @CurrentUser() user: { id: string; role?: string },
+    @Param('workspaceId') workspaceId: string,
+  ) {
+    return this.svc.buttonsFor(workspaceId, reader(user))
+  }
+
   // ── Values (task-scoped) ──────────────────────────────────────────────────
   @Get('tasks/:taskId/custom-fields')
   @ApiOperation({ summary: 'Get all custom field values for a task' })
@@ -123,5 +137,31 @@ export class CustomFieldsController {
     // The actor is passed for `voting` only, which ignores `body.value` and
     // toggles this person's own vote — see the service.
     return this.svc.setValue(workspaceId, taskId, fieldId, body.value, user.id, reader(user))
+  }
+
+  /**
+   * CLICKUP'S BUTTON, pressed (`ledger-rows/row-719`): the automations whose
+   * trigger is this button run for this task, as the one who pressed it.
+   * `ran` is how many; none is said, not hidden, so a Button nobody has given
+   * an automation tells its presser so.
+   */
+  @Post('tasks/:taskId/custom-fields/:fieldId/press')
+  @ApiOperation({ summary: 'Press a Button field on a task' })
+  async press(
+    @CurrentUser() user: { id: string; role?: string },
+    @Param('workspaceId') workspaceId: string,
+    @Param('taskId') taskId: string,
+    @Param('fieldId') fieldId: string,
+  ) {
+    const { task, def } = await this.svc.buttonOnTask(workspaceId, taskId, fieldId, reader(user))
+    const ran = await this.automations.fire(BUTTON_TRIGGER, {
+      workspaceId,
+      taskId,
+      userId: user.id,
+      projectId: task.projectId,
+      listId: task.listId,
+      fieldId: def.id,
+    })
+    return { ran }
   }
 }

@@ -47,7 +47,7 @@ const argOf = (name, fallback) => {
 }
 
 /** Exact, never `<`: a branch that silently skipped must fail, not shorten. */
-const EXPECTED_CHECKS = 21
+const EXPECTED_CHECKS = 22
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -179,11 +179,14 @@ try {
    * the carousel correctly. That is the worst kind of check there is, and it
    * carried the frame's authority in its own failure message while doing it.
    *
-   * THE COUNT AND THE PAGER ARE ASSERTED; THE THIRD CARD'S PROSE IS NOT.
-   * `21:02` cuts that card at the viewport after "Stay focused with P…", so
-   * its tail is ours — and a check comparing our own string to itself proves
-   * nothing. The first two cards' copy IS legible in full and is still checked
-   * below, by name.
+   * THE COUNT AND THE PAGER ARE ASSERTED, AND THE THIRD CARD'S WORDS ARE
+   * CLICKUP'S (`commit-log/log-6f62af6-1`). `21:02` cuts that card at the
+   * viewport after "Stay focused with P…", so its tail was ours; it is now
+   * ClickUp's own sentence for what Priorities in Teams Hub are for — "your
+   * Personal Priorities are automatically displayed on your profile, and in
+   * Teams Hub, so your team and manager can see what you're focused on"
+   * (help centre, "What are Personal Priorities?", read 12 October) — and is
+   * checked below with the first two cards'.
    */
   const cards = page.getByTestId('teams-empty-card')
   const cardCount = await cards.count()
@@ -191,6 +194,13 @@ try {
     cardCount === 3,
     'there are the frame’s three explainer cards',
     `there are ${cardCount} — \`21:02\` advances the carousel and a third card enters from the right`,
+  )
+  const thirdCard = (await cards.nth(2).filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')).replace(/\s+/g, ' ').trim()
+  chk(
+    thirdCard.includes('Stay focused with Priorities')
+      && thirdCard.includes('Your Personal Priorities are displayed in Teams Hub, so your team and manager can see what you’re focused on.'.replace('’', "'")),
+    'the third card says what ClickUp says Priorities in Teams Hub are for: your team and manager see what you’re focused on',
+    JSON.stringify({ thirdCard }),
   )
   const pagerPrev = await page.getByTestId('teams-empty-pager-prev').count()
   const pagerNext = await page.getByTestId('teams-empty-pager-next').count()

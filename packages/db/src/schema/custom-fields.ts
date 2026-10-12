@@ -50,6 +50,13 @@ export const customFieldTypeEnum = pgEnum('custom_field_type', [
   'formula',
   'tasks',
   'signature',
+  /*
+   * 0184 — ClickUp's Button (`ledger-rows/row-719`). It holds no value: pressing
+   * it on a task runs the automations whose trigger is this button
+   * (`button.clicked`, filtered by the field's id). Its definition carries
+   * `config.label`, the words on the button.
+   */
+  'button',
 ])
 
 /**
@@ -78,6 +85,15 @@ export const customFieldDefinitions = pgTable(
      * progress_auto: { sources: { subtasks, checklists, assignedComments },
      *                  doneStatusIs100 }
      * formula:       { expression }   — 0158, e.g. `({Spent} / {Budget}) * 100`
+     * button:        { label }        — 0184, the words on the button
+     * tasks:         { listId?, rollups? } — a Relationship limited to one list
+     *                  (chosen when the field is made, and kept), and the
+     *                  fields of that list's tasks shown beside each related
+     *                  task (`ledger-rows/row-719`)
+     * text, long_text, dropdown: { ai? } — an AI field (`commit-log/log-c980bee-1`):
+     *                  { kind, prompt?, language?, autofill?, autoUpdate? }, the
+     *                  value written by the model when asked, as ClickUp's AI
+     *                  fields live within Short Text, Long Text and Dropdown
      */
     config:       jsonb('config').$type<Record<string, unknown>>(),
     createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

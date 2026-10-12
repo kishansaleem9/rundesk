@@ -143,7 +143,8 @@ export async function assertTaskWritable(
    * below is asked of them as of any member, as the create gate asks it.
    */
   const [account] = await db.select({ role: users.role }).from(users).where(eq(users.id, actorId)).limit(1)
-  const read = await taskReadAnswer(db, ctx.workspaceId, taskId, { id: actorId, role: account?.role })
+  // Where it lives: a task read through a list it was added to is not changed from there.
+  const read = await taskReadAnswer(db, ctx.workspaceId, taskId, { id: actorId, role: account?.role }, { atHome: true })
   if (!read) throw new NotFoundException('Task not found')
   if ('refused' in read) throw new ForbiddenException(read.refused)
   const [assignee] = await db

@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
 import { and, eq, sql } from 'drizzle-orm'
-import { workspaces, workspaceMembers, projects, spaces } from '@rundesk/db'
+import { workspaces, workspaceMembers, projects, spaces, planFeatureUses } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import {
@@ -11,6 +11,8 @@ import {
   type PlanId,
   type PlanLimitsOverride,
   type ResolvedPlan,
+  FEATURE_FREE_USES,
+  FEATURE_LABELS,
 } from './plans.constants'
 
 /** A workspace's resolved plan plus the raw stored id + any override. */
@@ -26,9 +28,11 @@ export type PlanUsage = {
   rawPlan: string
   label: string
   description: string
-  limits: { maxMembers: number | null; maxProjects: number | null }
+  limits: { maxMembers: number | null; maxProjects: number | null; aiCreditsPerMember: number | null }
   features: Record<PlanFeature, boolean>
   usage: { members: number; projects: number }
+  /** The free uses left of each feature the plan lacks (`ledger-rows/row-788`). */
+  freeUses: Array<{ feature: PlanFeature; label: string; allowance: number; used: number; left: number }>
   catalog: ReturnType<typeof planCatalog>
 }
 
@@ -40,6 +44,18 @@ export type PlanUsage = {
  * Every assertion is a NO-OP for an unlimited/enabled plan, so an enterprise
  * workspace (the default for all existing workspaces) is never restricted.
  */
+/** The rows a raw statement answered, whichever shape the driver gives them in. */
+function rowsOf(result: unknown): unknown[] {
+  if (Array.isArray(result)) return result
+  const rows = (result as { rows?: unknown[] } | null)?.rows
+  return Array.isArray(rows) ? rows : []
+}
+
+/** ClickUp's words for spent uses: they are used up, and nothing is lost. */
+export function usesExpired(planLabel: string, feature: PlanFeature, allowance: number): string {
+  return `This workspace has used all ${allowance} of its free uses of ${FEATURE_LABELS[feature]} on the ${planLabel} plan. Nothing made with it is lost — upgrade to keep using it.`
+}
+
 @Injectable()
 export class PlansService {
   constructor(@Inject(DB_TOKEN) private db: Db) {}
@@ -62,14 +78,66 @@ export class PlansService {
     return plan.features[feature] === true
   }
 
-  /** Throw 403 if the workspace's plan does not include `feature`. No-op for enterprise. */
-  async assertFeature(workspaceId: string, feature: PlanFeature): Promise<void> {
+  /**
+   * Throw 403 if the workspace's plan does not include `feature`. No-op for enterprise.
+   *
+   * A FEATURE WITH FREE USES (`FEATURE_FREE_USES`, `ledger-rows/row-788`) is let
+   * through while the workspace has uses of it left. A use is a member's day
+   * with it: their first use on a day is written, and takes one of the
+   * workspace's uses, only while one is left — the test and the write are one
+   * statement — and any more that day take none. Spent, it is refused with
+   * what ClickUp says — the uses are used up, nothing made with it is lost —
+   * and `code: 'uses_expired'`, which the paywall reads. With nobody to count
+   * it against, it is refused as before.
+   */
+  async assertFeature(workspaceId: string, feature: PlanFeature, userId?: string): Promise<void> {
     const plan = await this.getWorkspacePlan(workspaceId)
-    if (plan.features[feature] !== true) {
-      throw new ForbiddenException(
-        `Your ${plan.label} plan does not include this capability (${feature}). Upgrade your plan to enable it.`,
-      )
+    if (plan.features[feature] === true) return
+    const free = FEATURE_FREE_USES[feature]
+    if (free && userId) {
+      const day = new Date().toISOString().slice(0, 10)
+      const taken = await this.db.execute(sql`
+        insert into ${planFeatureUses} (workspace_id, feature, user_id, day)
+        select ${workspaceId}, ${feature}, ${userId}, ${day}::date
+        where (select count(*) from ${planFeatureUses} where workspace_id = ${workspaceId} and feature = ${feature}) < ${free}
+        on conflict do nothing
+        returning 1 as ok`)
+      if (rowsOf(taken).length) return
+      const [already] = await this.db
+        .select({ day: planFeatureUses.day })
+        .from(planFeatureUses)
+        .where(and(eq(planFeatureUses.workspaceId, workspaceId), eq(planFeatureUses.feature, feature), eq(planFeatureUses.userId, userId), eq(planFeatureUses.day, day)))
+        .limit(1)
+      if (already) return
+      throw new ForbiddenException({
+        message: usesExpired(plan.label, feature, free),
+        code: 'uses_expired',
+        feature,
+        allowance: free,
+      })
     }
+    throw new ForbiddenException(
+      `Your ${plan.label} plan does not include this capability (${feature}). Upgrade your plan to enable it.`,
+    )
+  }
+
+  /** A workspace's free uses of each feature its plan lacks: how many, and how many spent. */
+  async freeUses(workspaceId: string): Promise<Array<{ feature: PlanFeature; label: string; allowance: number; used: number; left: number }>> {
+    const plan = await this.getWorkspacePlan(workspaceId)
+    const metered = (Object.entries(FEATURE_FREE_USES) as Array<[PlanFeature, number]>).filter(([f]) => plan.features[f] !== true)
+    if (!metered.length) return []
+    // One row per member-day, at most a feature's allowance of them: counted here.
+    const rows = await this.db
+      .select({ feature: planFeatureUses.feature })
+      .from(planFeatureUses)
+      .where(eq(planFeatureUses.workspaceId, workspaceId))
+    const used = new Map<string, number>()
+    for (const r of rows) used.set(r.feature, (used.get(r.feature) ?? 0) + 1)
+    return metered
+      .map(([feature, allowance]) => {
+        const u = Math.min(used.get(feature) ?? 0, allowance)
+        return { feature, label: FEATURE_LABELS[feature], allowance, used: u, left: allowance - u }
+      })
   }
 
   async countMembers(workspaceId: string): Promise<number> {
@@ -124,9 +192,10 @@ export class PlansService {
   /** Plan + limits + features + current usage for the plan card / GET endpoint. */
   async getUsage(workspaceId: string): Promise<PlanUsage> {
     const plan = await this.getWorkspacePlan(workspaceId)
-    const [members, projectCount] = await Promise.all([
+    const [members, projectCount, freeUses] = await Promise.all([
       this.countMembers(workspaceId),
       this.countProjects(workspaceId),
+      this.freeUses(workspaceId),
     ])
     return {
       plan: plan.id,
@@ -136,6 +205,7 @@ export class PlansService {
       limits: plan.limits,
       features: plan.features,
       usage: { members, projects: projectCount },
+      freeUses,
       catalog: planCatalog(),
     }
   }

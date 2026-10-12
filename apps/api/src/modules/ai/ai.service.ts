@@ -14,7 +14,7 @@ import { ConfigService } from '@nestjs/config'
 import Anthropic from '@anthropic-ai/sdk'
 import type { Response } from '@nestjs/common'
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql, type SQL } from 'drizzle-orm'
-import { aiAnswerFeedback, aiModelPreferences, aiUsage, meetings, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, listStatuses, tasks, taskComments, taskAttachments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings, personalTasks, skills } from '@rundesk/db'
+import { aiAnswerFeedback, aiModelPreferences, aiUsage, aiCreditPurchases, meetings, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, listStatuses, tasks, taskComments, taskAttachments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings, personalTasks, skills } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { FOLLOW_UP_INSTRUCTION, createFollowUpSplitter } from './follow-ups'
@@ -35,6 +35,9 @@ import {
 } from '../skills/skill-proposal'
 import { R2Service } from '../../common/storage/r2.service'
 import { estimateAiCostUsd } from './ai-cost'
+import { creditMonth, creditState, creditsFor, creditsPausedMessage, dailySeries } from './credits'
+import { categoryOf } from './ai-categories'
+import { resolvePlanConfig, type PlanLimitsOverride } from '../plans/plans.constants'
 import { TasksService } from '../tasks/tasks.service'
 import { ListsService } from '../lists/lists.service'
 import { FoldersService } from '../folders/folders.service'
@@ -1011,6 +1014,91 @@ export class AiService {
         throw new HttpException(message, HttpStatus.TOO_MANY_REQUESTS)
       }
     }
+    // And the month's AI credits, which every call through here spends (`assertWithinCredits`).
+    await this.assertWithinCredits(feature, ctx, now)
+  }
+
+  /**
+   * A WORKSPACE'S AI CREDITS THIS MONTH (`commit-log/log-3943965-1`): its
+   * plan's credits per member, times its members — guests bring none, as they
+   * hold no seat — and the credits bought and paid for this month; what its
+   * calls have used since the month began; and so what is left (`creditState`).
+   */
+  async creditsOf(workspaceId: string, now: Date = new Date()) {
+    const month = creditMonth(now)
+    const [ws] = await this.db
+      .select({ plan: workspaces.plan, planLimits: workspaces.planLimits })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1)
+    const plan = resolvePlanConfig(ws?.plan, (ws?.planLimits ?? null) as PlanLimitsOverride | null)
+    const perMember = plan.limits.aiCreditsPerMember
+    const [[members], [bought], [used]] = await Promise.all([
+      this.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(workspaceMembers)
+        .where(and(eq(workspaceMembers.workspaceId, workspaceId), ne(workspaceMembers.role, 'guest'))),
+      this.db
+        .select({ n: sql<number>`coalesce(sum(${aiCreditPurchases.credits}), 0)::int` })
+        .from(aiCreditPurchases)
+        .where(and(eq(aiCreditPurchases.workspaceId, workspaceId), eq(aiCreditPurchases.status, 'paid'), gte(aiCreditPurchases.paidAt, month.start))),
+      this.db
+        .select({ n: sql<number>`coalesce(sum(${aiUsage.credits}), 0)::int` })
+        .from(aiUsage)
+        .where(and(eq(aiUsage.workspaceId, workspaceId), gte(aiUsage.createdAt, month.start))),
+    ])
+    const state = creditState({ perMember, members: members?.n ?? 0, purchased: bought?.n ?? 0, used: used?.n ?? 0 })
+    return { plan: { id: plan.id, label: plan.label }, perMember, members: members?.n ?? 0, purchased: bought?.n ?? 0, month, ...state }
+  }
+
+  /**
+   * PAST 100%, AI PAUSES until the month renews or credits are bought, as
+   * ClickUp's does — refused in words, with when it comes back (402), and
+   * written down like every refusal, using no credits.
+   */
+  async assertWithinCredits(feature: string, ctx: AiCtx, now: Date = new Date()) {
+    if (!ctx.workspaceId) return
+    const credits = await this.creditsOf(ctx.workspaceId, now)
+    if (credits.state !== 'paused') return
+    const message = creditsPausedMessage(credits.month.renewsAt)
+    await this.recordFailure(feature, 'credits', ctx, 'out_of_credits', message)
+    throw new HttpException(
+      { message, code: 'out_of_credits', renewsAt: credits.month.renewsAt.toISOString() },
+      HttpStatus.PAYMENT_REQUIRED,
+    )
+  }
+
+  /**
+   * THE CREDITS VIEW (`ledger-rows/row-869`): the month's credits as
+   * `creditsOf` reads them, each day's use and the running total against the
+   * allowance — the trend and its limit line — and what each category of AI
+   * used.
+   */
+  async creditsSummary(workspaceId: string, now: Date = new Date()) {
+    const credits = await this.creditsOf(workspaceId, now)
+    const rows = await this.db
+      .select({
+        day: sql<string>`to_char(${aiUsage.createdAt} at time zone 'UTC', 'YYYY-MM-DD')`,
+        feature: aiUsage.feature,
+        credits: sql<number>`coalesce(sum(${aiUsage.credits}), 0)::int`,
+      })
+      .from(aiUsage)
+      .where(and(eq(aiUsage.workspaceId, workspaceId), gte(aiUsage.createdAt, credits.month.start)))
+      .groupBy(sql`1`, aiUsage.feature)
+    const byDay = new Map<string, number>()
+    const byCategory = new Map<string, number>()
+    for (const r of rows) {
+      byDay.set(r.day, (byDay.get(r.day) ?? 0) + r.credits)
+      const category = categoryOf(r.feature) ?? 'other'
+      byCategory.set(category, (byCategory.get(category) ?? 0) + r.credits)
+    }
+    return {
+      ...credits,
+      monthStart: credits.month.start.toISOString(),
+      renewsAt: credits.month.renewsAt.toISOString(),
+      days: dailySeries(credits.month, now, [...byDay].map(([day, c]) => ({ day, credits: c }))),
+      byCategory: [...byCategory].map(([category, c]) => ({ category, credits: c })).sort((a, b) => b.credits - a.credits),
+    }
   }
 
   /**
@@ -1054,6 +1142,8 @@ export class AiService {
    * it is a dropdown with one reachable value.
    */
   async assertAvailable(feature: string, ctx: AiCtx = {}) {
+    // A workspace whose month's credits are spent is paused, whatever the server has (`assertWithinCredits`).
+    await this.assertWithinCredits(feature, ctx)
     if (this.isAvailable()) return
     const message = 'AI features are not configured'
     await this.recordFailure(feature, 'none', ctx, 'not_configured', message)
@@ -1111,6 +1201,8 @@ export class AiService {
         inputTokens,
         outputTokens,
         status: 'succeeded',
+        // What it cost in AI credits (`creditsFor`): what the month's credits are spent by.
+        credits: creditsFor(model, inputTokens, outputTokens),
       })
     } catch {
       // Usage tracking must never break an AI response.
@@ -1134,7 +1226,7 @@ export class AiService {
     feature: string,
     model: string,
     ctx: AiCtx,
-    errorCode: 'not_configured' | 'rate_limited' | 'provider_error',
+    errorCode: 'not_configured' | 'rate_limited' | 'provider_error' | 'out_of_credits',
     errorMessage: string,
   ) {
     try {
@@ -1624,6 +1716,48 @@ Focus on the key goals, current status, and any blockers.`,
     })
 
     return response.content[0].type === 'text' ? response.content[0].text : ''
+  }
+
+  /**
+   * AN AI FIELD'S VALUE (`commit-log/log-c980bee-1`, `ledger-rows/row-719`),
+   * written from the task — what Summarize reads — as ClickUp's AI fields are:
+   * Summary, Progress Updates, Action Items and Translation into Long Text,
+   * Sentiment into Short Text, Categorize into a Dropdown, and Custom Text and
+   * Custom Dropdown by the instruction their maker wrote. Metered as every
+   * call through `complete` is, under `custom_field.<kind>`; what the answer
+   * may be stored as is the field's to decide (`aiFieldValue`).
+   */
+  async fillAiField(
+    kind: string,
+    input: { task: string; prompt?: string; language?: string; options?: string[] },
+    ctx: AiCtx = {},
+  ): Promise<string> {
+    const choose = input.options?.length ? `Answer with exactly one of these options, as written, and nothing else: ${input.options.join(' | ')}.` : ''
+    const SYSTEMS: Record<string, string> = {
+      summary:
+        'You write the Summary field of a task in Rundesk: two to four plain sentences saying what the task is and where it stands. Use only what the task says.',
+      progress_updates:
+        'You write the Progress Updates field of a task in Rundesk: what has happened on it lately — from its comments, subtasks, activity and status — newest first, in two to four plain sentences. Use only what the task says.',
+      action_items:
+        'You write the Action Items field of a task in Rundesk: the concrete next steps the task names, one per line, each starting with "- ". Use only what the task says; if it names none, answer "No action items."',
+      translation: `You write the Translation field of a task in Rundesk: the task's title and description translated into ${input.language ?? 'English'}. Answer with the translation alone.`,
+      sentiment:
+        'You fill the Sentiment field of a task in Rundesk: answer with exactly one word — Positive, Neutral or Negative — for the tone of its description and comments.',
+      categorize: `You fill the Categorize field of a task in Rundesk: choose the option that best describes the task. ${choose}`,
+      custom_text:
+        'You fill a custom AI field of a task in Rundesk, following the instruction its maker wrote. Answer with the field’s text alone.',
+      custom_dropdown: `You fill a custom AI dropdown field of a task in Rundesk, following the instruction its maker wrote. ${choose}`,
+    }
+    const system = SYSTEMS[kind]
+    if (!system) throw new HttpException('Not an AI field this product fills', HttpStatus.BAD_REQUEST)
+    const instruction = input.prompt ? `\n\nThe field’s instruction: ${input.prompt}` : ''
+    const response = await this.complete(`custom_field.${kind}`, ctx, {
+      model: 'claude-haiku-4-5',
+      max_tokens: kind === 'sentiment' || kind === 'categorize' || kind === 'custom_dropdown' ? 50 : 800,
+      system,
+      messages: [{ role: 'user', content: `${input.task}${instruction}` }],
+    })
+    return response.content[0]?.type === 'text' ? response.content[0].text : ''
   }
 
   /**

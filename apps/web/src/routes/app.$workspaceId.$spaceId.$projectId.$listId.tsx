@@ -116,7 +116,7 @@ import { SharePanel } from '../components/share-panel'
 // §V2-13 frames `09:26` / `10:42` — the one gate, reused. Not a second dialog:
 // the whole reason `feature-gate.tsx` exists is that every locked feature
 // should explain itself the same way.
-import { useFeatureGate, type GatedFeature } from '../components/feature-gate'
+import { useFeatureGate, freeUsesOf, type GatedFeature } from '../components/feature-gate'
 import { getRealtimeSocket, joinRooms } from '../lib/realtime'
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent, useDraggable, useDroppable } from '@dnd-kit/core'
 import { addDays, addMonths, differenceInCalendarDays, endOfMonth, endOfWeek, format, isSameMonth, isToday, startOfDay, startOfMonth, startOfWeek } from 'date-fns'
@@ -253,7 +253,38 @@ type TaskItem = {
    * home list, which its row names, as ClickUp marks a task that lives
    * elsewhere. Absent for a task whose home this list is.
    */
-  addedFrom?: { id: string; name: string } | null
+  addedFrom?: { id: string; name: string | null } | null
+  /**
+   * And its status as its home list names it: a task keeps one status, its
+   * home list's, so this list may have no status of its key.
+   */
+  homeStatus?: { key: string; name: string; color: string; category: StatusCategory } | null
+}
+
+/**
+ * `commit-log/log-713a611-1` — the groups a list draws for the statuses of
+ * tasks added to it from lists whose statuses differ: a task keeps its home
+ * list's one status, as ClickUp, so a status this list does not have is drawn
+ * after its own, named as at home. Without it such a task was in no group and
+ * on no column: added, and nowhere to be seen. A task cannot be made in one,
+ * or moved into one, here: those take this list's statuses.
+ */
+function foreignStatuses(tasks: TaskItem[], own: ListStatus[]): ListStatus[] {
+  const ownKeys = new Set(own.map((s) => s.key))
+  const out = new Map<string, ListStatus>()
+  for (const task of tasks) {
+    if (ownKeys.has(task.status) || out.has(task.status)) continue
+    out.set(task.status, {
+      id: `home:${task.status}`,
+      listId: task.addedFrom?.id ?? '',
+      key: task.status,
+      name: task.homeStatus?.name ?? task.status,
+      color: task.homeStatus?.color ?? '#94a3b8',
+      category: task.homeStatus?.category ?? 'open',
+      position: Number.MAX_SAFE_INTEGER,
+    })
+  }
+  return [...out.values()]
 }
 
 /**
@@ -2940,6 +2971,9 @@ function ListDetail() {
               : 'open',
         position: i,
       }))
+  // `commit-log/log-713a611-1` — and a column for each status of a task added from a list whose statuses differ.
+  const boardForeign = foreignStatuses(visibleTasks, boardStatuses)
+  const boardForeignKeys = new Set(boardForeign.map((s) => s.key))
 
   return (
     <ListStatusesContext.Provider value={listStatuses}>
@@ -3710,10 +3744,11 @@ function ListDetail() {
         ) : activeView === 'board' ? (
           <DndContext sensors={boardSensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {boardStatuses.map((s) => (
+              {[...boardStatuses, ...boardForeign].map((s) => (
                 <BoardColumn
                   key={s.key}
                   status={s.key}
+                  homeOnly={boardForeignKeys.has(s.key) ? { name: s.name, color: s.color } : undefined}
                   showWip={spaceFeatures.wipLimits}
                   // §V2-S13 `10:35` — the two Customize rows, reaching the card.
                   cardSize={cardSize}
@@ -3747,7 +3782,7 @@ function ListDetail() {
                       return next
                     })
                   }
-                  onRename={listStatuses.length === 0 || !listAccess.statuses ? undefined : async (name) => {
+                  onRename={listStatuses.length === 0 || !listAccess.statuses || boardForeignKeys.has(s.key) ? undefined : async (name) => {
                     await api(`/lists/${listId}/statuses/${s.id}`, {
                       method: 'PATCH',
                       body: { name },
@@ -3846,6 +3881,7 @@ function ListDetail() {
             stamp={dataUpdatedAt}
             onOpenTask={(id) => setSelectedTaskId(id)}
             onUnlock={() => requireFeature(TEAM_VIEW_GATE)}
+            freeUses={freeUsesOf(plan, 'teamView')}
           />
         ) : (
           <Card className="p-4" data-testid="list-calendar" data-calendar-period={calendarPeriodKey}>
@@ -4301,13 +4337,17 @@ function GroupedListView({
     )
   }
 
+  // The statuses of tasks added from lists whose statuses differ, after this list's own.
+  const foreign = foreignStatuses(tasks, ordered)
+  const foreignKeys = new Set(foreign.map((s) => s.key))
+
   return (
     <div className="space-y-5">
-      {ordered
-        .filter((s) => (grouped[s.key]?.length ?? 0) > 0 || s.category === 'open' || s.category === 'in_progress')
+      {[...ordered.filter((s) => (grouped[s.key]?.length ?? 0) > 0 || s.category === 'open' || s.category === 'in_progress'), ...foreign]
         .map((statusDef) => {
           const status = statusDef.key
           const groupTasks = grouped[status] ?? []
+          const homeOnly = foreignKeys.has(status)
           const isCollapsed = collapsed[status]
           return (
           <section
@@ -4321,6 +4361,7 @@ function GroupedListView({
             data-testid="list-group"
             data-group={status}
             data-count={groupTasks.length}
+            data-home-only={homeOnly ? 'yes' : undefined}
             className="rounded-lg border border-border bg-card overflow-hidden"
           >
             <header
@@ -4372,13 +4413,15 @@ function GroupedListView({
                     />
                   ))
                 )}
-                {/* §V2-S13 `10:52` — the frame's `+ Add Task`, inside the group. */}
-                <InlineAddTask
-                  status={status}
-                  groupKey={status}
-                  groupLabel={resolveStatusLabel(statusDef.key, statusDef.name, t)}
-                  onAdd={(title, opts) => onAddTask(status, title, opts)}
-                />
+                {/* §V2-S13 `10:52` — the frame's `+ Add Task`, inside the group: not in a home list's status this list does not have. */}
+                {!homeOnly && (
+                  <InlineAddTask
+                    status={status}
+                    groupKey={status}
+                    groupLabel={resolveStatusLabel(statusDef.key, statusDef.name, t)}
+                    onAdd={(title, opts) => onAddTask(status, title, opts)}
+                  />
+                )}
               </div>
             )}
           </section>
@@ -4649,11 +4692,11 @@ function TaskRow({
           {task.addedFrom && (
             <span
               data-testid={`task-row-home-list-${task.id}`}
-              title={t('list.homeListChip', { name: task.addedFrom.name })}
+              title={task.addedFrom.name !== null ? t('list.homeListChip', { name: task.addedFrom.name }) : t('list.homeListHidden')}
               className="inline-flex shrink-0 items-center gap-1 rounded border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground"
             >
               <Layers className="h-2.5 w-2.5" aria-hidden />
-              <span className="max-w-[16rem] truncate">{t('list.homeListChip', { name: task.addedFrom.name })}</span>
+              <span className="max-w-[16rem] truncate">{task.addedFrom.name !== null ? t('list.homeListChip', { name: task.addedFrom.name }) : t('list.homeListHidden')}</span>
             </span>
           )}
           {hasSubtasks && (
@@ -5893,6 +5936,7 @@ function BoardColumn({
   cardCover = 'image',
   stackFields = false,
   showEmptyFields = true,
+  homeOnly,
 }: {
   status: TaskStatus
   tasks: TaskItem[]
@@ -5912,14 +5956,22 @@ function BoardColumn({
   /** §V2-S13 `10:35` — "Stack fields" and "Show empty fields", for the cards. */
   stackFields?: boolean
   showEmptyFields?: boolean
+  /**
+   * `commit-log/log-713a611-1` — a column for a status of tasks added from a
+   * list whose statuses differ (`foreignStatuses`), named as at home: nothing
+   * is made in it, dropped on it, or limited there.
+   */
+  homeOnly?: { name: string; color: string }
 }) {
   const { t } = useTranslation()
   const caps = useListCaps()
   const [renaming, setRenaming] = useState(false)
   const { isOver, setNodeRef } = useDroppable({
     id: `status:${status}`,
+    disabled: !!homeOnly,
   })
-  const meta = useStatusMeta(status)
+  const ownMeta = useStatusMeta(status)
+  const meta = homeOnly ? { ...ownMeta, label: homeOnly.name, color: homeOnly.color } : ownMeta
   const [addTitle, setAddTitle] = useState('')
   const [editingWip, setEditingWip] = useState(false)
   const overWip = wipLimit != null && tasks.length > wipLimit
@@ -5935,6 +5987,7 @@ function BoardColumn({
        */
       data-testid="board-column"
       data-status={status}
+      data-home-only={homeOnly ? 'yes' : undefined}
       data-collapsed={collapsed ? 'true' : 'false'}
       data-count={tasks.length}
       className={cn(
@@ -6014,7 +6067,7 @@ function BoardColumn({
           // no control to set one. An existing limit still shows in the count
           // above: hiding the number would make a column look uncapped while
           // the cap was still in force.
-          showWip && (
+          showWip && !homeOnly && (
             <button
               type="button"
               onClick={() => setEditingWip(true)}
@@ -6067,7 +6120,7 @@ function BoardColumn({
               <div className="text-xs text-muted-foreground text-center py-4">{t('list.board.dropHere')}</div>
             )}
           </div>
-          {caps.add && (
+          {caps.add && !homeOnly && (
           <form
             className="p-2 pt-0"
             onSubmit={async (e) => {
@@ -6521,6 +6574,7 @@ function TeamView({
   stamp,
   onOpenTask,
   onUnlock,
+  freeUses,
 }: {
   listId: string
   includeArchived: boolean
@@ -6529,8 +6583,11 @@ function TeamView({
   onOpenTask: (id: string) => void
   /** Re-opens the paywall when the server says this workspace cannot have it. */
   onUnlock: () => void
+  /** A plan without Team View: its free uses, and how many are left (`ledger-rows/row-788`). */
+  freeUses?: { allowance: number; left: number } | null
 }) {
   const { t } = useTranslation()
+  const qc = useQueryClient()
 
   const rollup = useQuery({
     queryKey: ['team-view', listId, includeArchived, stamp],
@@ -6547,14 +6604,32 @@ function TeamView({
   })
 
   /*
+   * A PLAN WITHOUT TEAM VIEW SPENDS A FREE USE each member-day it is opened
+   * (`ledger-rows/row-788`): the plan is read again after each load, and after
+   * a refusal for uses spent, so the count left and the paywall say what the
+   * server counted.
+   */
+  const rollupCode = rollup.error instanceof ApiError ? (rollup.error.details as { code?: string } | undefined)?.code : undefined
+  useEffect(() => {
+    if (!freeUses) return
+    if (rollup.isSuccess || rollupCode === 'uses_expired') void qc.invalidateQueries({ queryKey: ['workspace-plan'] })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rollup.dataUpdatedAt, rollupCode])
+
+  /*
    * A 403 here is the plan refusing, not a bug. It is reachable without ever
    * pressing the tab — a space whose DEFAULT view is Team opens straight onto
    * it — so the locked state lives in the view rather than only on the tab.
    */
   if (rollup.error instanceof ApiError && rollup.error.status === 403) {
+    /* Its free uses spent (`ledger-rows/row-788`): said so, and the plan read again for the paywall. */
+    const details = rollup.error.details as { code?: string; allowance?: number } | undefined
+    const spent = details?.code === 'uses_expired'
     return (
-      <Card className="p-6 text-center space-y-3" data-testid="team-view-locked">
-        <p className="text-sm text-muted-foreground">{t('gate.notOnYourPlan')}</p>
+      <Card className="p-6 text-center space-y-3" data-testid="team-view-locked" data-locked={spent ? 'uses' : 'plan'}>
+        <p className="text-sm text-muted-foreground">
+          {spent ? t('gate.usesSpent', { count: details?.allowance ?? 0, feature: t('gate.teamView') }) : t('gate.notOnYourPlan')}
+        </p>
         <Button size="sm" onClick={onUnlock} data-testid="team-view-unlock">
           {t('gate.unlock', { feature: t('gate.teamView') })}
         </Button>
@@ -6611,6 +6686,11 @@ function TeamView({
 
   return (
     <div className="space-y-2" data-testid="team-view">
+      {freeUses && (
+        <p className="text-[11px] text-muted-foreground" data-testid="team-view-free-uses" data-left={freeUses.left}>
+          {t('list.team.freeUsesLeft', { left: freeUses.left, allowance: freeUses.allowance })}
+        </p>
+      )}
       {groups.map((g) => (
         <Card key={g.id} className="p-3" data-testid="team-view-row">
           <div className="flex items-center gap-3">

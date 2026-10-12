@@ -57,9 +57,11 @@ describe('§G03 the Drive grant can answer the Drive query', () => {
   })
 
   it('refuses to send an account-wide query on a grant that cannot answer it', () => {
+    // Every source's grant is asked through one rule (`federatedCredential`), Drive's with it.
+    assert.match(search, /federatedCredential\(workspaceId, 'google-drive', userId\)/, 'Drive no longer asks the one credential rule')
     assert.match(
       search,
-      /grantCoversWholeDrive\(conn\.scopes\)/,
+      /grantCoversSource\(source, shared\.scopes\)/,
       'search no longer checks the stored grant, so an old connection silently returns nothing',
     )
   })

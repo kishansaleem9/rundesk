@@ -150,7 +150,14 @@ export async function taskReadAnswer(
   workspaceId: string,
   taskId: string,
   actor: ReadActor,
-  opts: { asAssignee?: boolean } = {},
+  /**
+   * `atHome`: read where it lives, and only there — the write rule's question.
+   * A task added to a list its reader may open is read there, and changed only
+   * by those who may open it where it lives (`commit-log/log-713a611-1`):
+   * reading it through the team list is no leave to rename a task in a private
+   * list (measured: Max renamed Mia's task through the list it was added to).
+   */
+  opts: { asAssignee?: boolean; atHome?: boolean } = {},
 ): Promise<{ found: { taskId: string; listId: string; projectId: string } } | { refused: string } | null> {
   const [row] = await db
     .select({
@@ -192,7 +199,7 @@ export async function taskReadAnswer(
         ? READ_REFUSALS.privateList
         : null
   // Read where it lives, or in a list it was added to (`readsThroughAddedList`).
-  if (homeRefusal && !(await readsThroughAddedList(db, workspaceId, taskId, actor))) return { refused: homeRefusal }
+  if (homeRefusal && (opts.atHome || !(await readsThroughAddedList(db, workspaceId, taskId, actor)))) return { refused: homeRefusal }
   if (row.taskVisibility === 'private' && !isManager && row.taskCreatedById !== actor.id && !opts.asAssignee) {
     const [assigned] = await db
       .select({ userId: taskAssignees.userId })

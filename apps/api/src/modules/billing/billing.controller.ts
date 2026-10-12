@@ -38,6 +38,19 @@ export class BillingController {
     return this.billing.createCheckoutSession(workspaceId, body?.tier)
   }
 
+  /** ClickUp's "Add credits": a checkout for packs of AI credits (`commit-log/log-3943965-1`). */
+  @Post(':workspaceId/billing/ai-credits/checkout')
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('workspace.billing')
+  @ApiOperation({ summary: 'Start a Stripe Checkout session to buy AI credits' })
+  async creditsCheckout(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @CurrentUser() user: { id: string },
+    @Body() body: { credits?: unknown },
+  ) {
+    return this.billing.createCreditsCheckout(workspaceId, user.id, body?.credits)
+  }
+
   @Post(':workspaceId/billing/portal')
   @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
   @RequirePermissions('workspace.billing')

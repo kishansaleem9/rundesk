@@ -19,10 +19,13 @@
 # fields it counts. Only the required blank disappears.
 #
 # Reddens: collapse-empty-fields: "and the empty REQUIRED field is not hidden"
+#
+# Re-aimed 12 October: a Button field is never collapsed either (it holds no
+# value), so the clause sits after that one now. Same break.
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
-a = "    !definition.isRequired && isEmptyFieldValue(value)"
-b = "    isEmptyFieldValue(value)"
+a = "    definition.type !== 'button' && !definition.isRequired && isEmptyFieldValue(value)"
+b = "    definition.type !== 'button' && isEmptyFieldValue(value)"
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

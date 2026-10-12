@@ -1,5 +1,5 @@
 import { WS_ADMIN_ROLES } from '../../../common/permissions/workspace-roles'
-import { BadRequestException, Inject, Injectable, UnauthorizedException } from '@nestjs/common'
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common'
 import { DRIVE_SEARCH_SCOPE } from '../../search/drive-scope'
 import { GMAIL_SEARCH_SCOPE, SHAREPOINT_SEARCH_SCOPE } from '../../search/sources'
 import { ConfigService } from '@nestjs/config'
@@ -8,6 +8,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { Db } from '@rundesk/db'
 import {
   integrationAccessRequests,
+  userSearchConnections,
   users,
   workspaceIntegrationConnections,
   workspaceMembers,
@@ -49,6 +50,14 @@ type Provider =
   | 'salesforce'
   | 'dropbox'
   | 'zoom'
+/** The search sources a person connects for themselves (ClickUp's personal Connected Search). */
+export const PERSONAL_SEARCH_PROVIDERS: ReadonlySet<Provider> = new Set<Provider>(['google-drive', 'gmail', 'sharepoint'])
+export const PERSONAL_SEARCH_REFUSALS = {
+  notPersonal: 'Only a calendar, Google Drive, Gmail or SharePoint is connected by one person for themselves',
+  guest: 'Guests do not use Connected Search',
+  notConnected: 'You have not connected this to search',
+} as const
+
 type ProviderConfig = {
   provider: Provider
   authUrl: string
@@ -69,7 +78,7 @@ type ProviderAvailability = {
   available: boolean
   reason?: string
 }
-/** A grant's signed state. `personal`: a calendar connected by one person for themselves. */
+/** A grant's signed state. `personal`: a calendar, or a search source, connected by one person for themselves. */
 type OAuthState = { provider: Provider; workspaceId: string; userId: string; ts: number; personal?: true }
 
 @Injectable()
@@ -222,14 +231,24 @@ export class IntegrationConnectionsService {
   }
 
   /**
-   * `personal`: a calendar connected by one person for themselves, from the
-   * planner — marked in the signed state, so its callback writes their account
-   * and nothing of the workspace's. Only a calendar is connected that way.
+   * `personal`: a calendar, or a search source, connected by one person for
+   * themselves — marked in the signed state, so its callback writes their own
+   * account and nothing of the workspace's. A calendar from the planner; Google
+   * Drive, Gmail or SharePoint from search (`found-23-sep/connected-search-per-person`):
+   * ClickUp's personal Connected Search, which a guest does not have.
    */
   async getOAuthStartUrl(workspaceId: string, userId: string, providerRaw: string, opts: { personal?: boolean } = {}) {
     const provider = this.assertProvider(providerRaw)
-    if (opts.personal && provider !== 'gcal' && provider !== 'outlook') {
-      throw new BadRequestException('Only a calendar is connected by one person for themselves')
+    if (opts.personal && provider !== 'gcal' && provider !== 'outlook' && !PERSONAL_SEARCH_PROVIDERS.has(provider)) {
+      throw new BadRequestException(PERSONAL_SEARCH_REFUSALS.notPersonal)
+    }
+    if (opts.personal && PERSONAL_SEARCH_PROVIDERS.has(provider)) {
+      const [member] = await this.db
+        .select({ role: workspaceMembers.role })
+        .from(workspaceMembers)
+        .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+        .limit(1)
+      if (member?.role === 'guest') throw new ForbiddenException(PERSONAL_SEARCH_REFUSALS.guest)
     }
     // Asked as `providers/status` asks it, so the two answer alike: with no
     // keys this server has no application at the provider, and the address it
@@ -288,6 +307,38 @@ export class IntegrationConnectionsService {
      * which is the admin's to set in the App Center. Not best-effort here,
      * either: this row IS the connection.
      */
+    // A search source of the person's own: their Drive, mail or SharePoint, searched by them alone.
+    if (payload.personal && PERSONAL_SEARCH_PROVIDERS.has(provider)) {
+      const row = {
+        status: 'connected',
+        scopes: token.scopes,
+        externalAccountEmail: profile.email,
+        accessToken: token.accessToken,
+        refreshToken: token.refreshToken,
+        tokenExpiresAt: token.expiresAt,
+        updatedAt: new Date(),
+      }
+      await this.db
+        .insert(userSearchConnections)
+        .values({ workspaceId: payload.workspaceId, userId: payload.userId, provider, ...row })
+        .onConflictDoUpdate({
+          target: [userSearchConnections.workspaceId, userSearchConnections.userId, userSearchConnections.provider],
+          set: row,
+        })
+      await this.security.logAuditEvent({
+        workspaceId: payload.workspaceId,
+        actorId: payload.userId,
+        action: 'search_connection.connected',
+        resourceType: 'search_connection',
+        resourceId: provider,
+        // Without the account's address: it is the person's own.
+        description: `Connected their own ${provider} to search`,
+        metadata: { provider },
+        ipAddress,
+      })
+      return { workspaceId: payload.workspaceId, provider, personal: true }
+    }
+
     if (payload.personal) {
       await this.calendarAccounts.upsertFromOAuth({
         userId: payload.userId,
@@ -411,6 +462,27 @@ export class IntegrationConnectionsService {
       provider,
       personal: false,
     }
+  }
+
+  /** A person takes their own search source away: their row, and nothing of the workspace's. */
+  async disconnectPersonalSearch(workspaceId: string, userId: string, providerRaw: string) {
+    const provider = this.assertProvider(providerRaw)
+    if (!PERSONAL_SEARCH_PROVIDERS.has(provider)) throw new BadRequestException(PERSONAL_SEARCH_REFUSALS.notPersonal)
+    const gone = await this.db
+      .delete(userSearchConnections)
+      .where(and(eq(userSearchConnections.workspaceId, workspaceId), eq(userSearchConnections.userId, userId), eq(userSearchConnections.provider, provider)))
+      .returning({ id: userSearchConnections.id })
+    if (gone.length === 0) throw new NotFoundException(PERSONAL_SEARCH_REFUSALS.notConnected)
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId: userId,
+      action: 'search_connection.disconnected',
+      resourceType: 'search_connection',
+      resourceId: provider,
+      description: `Disconnected their own ${provider} from search`,
+      metadata: { provider },
+    })
+    return { provider, connected: false }
   }
 
   async disconnect(workspaceId: string, providerRaw: string, actorId?: string) {
@@ -753,7 +825,8 @@ export class IntegrationConnectionsService {
     return {
       provider,
       authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
-      tokenUrl: 'https://oauth2.googleapis.com/token',
+      // The same address the calendar's refresh reads, which a lane points at its stub.
+      tokenUrl: process.env.GOOGLE_TOKEN_URL ?? 'https://oauth2.googleapis.com/token',
       clientId: process.env.GOOGLE_CLIENT_ID ?? '',
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
       scopes,
@@ -865,8 +938,14 @@ export class IntegrationConnectionsService {
    * new calendar — or, when it failed, says why. The workspace's own card is
    * not the person's, so nothing of theirs is written onto it.
    */
-  getPersonalRedirect(workspaceId: string, error?: string) {
+  getPersonalRedirect(workspaceId: string, error?: string, provider?: string) {
     const webBase = this.getWebBase().replace(/\/$/, '')
+    // A search source of one's own lands on search, which lists it — or says why not.
+    if (provider && PERSONAL_SEARCH_PROVIDERS.has(provider as Provider)) {
+      const params = new URLSearchParams({ connected: provider })
+      if (error) params.set('connectError', String(error).trim().slice(0, 300) || 'Unknown error')
+      return `${webBase}/app/${workspaceId}/search?${params.toString()}`
+    }
     const params = new URLSearchParams({ settings: 'accounts' })
     // Bounded, as `recordFailure` bounds what it keeps: a provider's page of
     // HTML must not become somebody's address bar.
@@ -1078,7 +1157,7 @@ export class IntegrationConnectionsService {
       }
     }
 
-    const profileRes = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+    const profileRes = await fetch(process.env.GOOGLE_USERINFO_URL ?? 'https://openidconnect.googleapis.com/v1/userinfo', {
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },

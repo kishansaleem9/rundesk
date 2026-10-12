@@ -479,15 +479,20 @@ describe('RealtimeGateway — what a room pass costs, and in what order it asks'
 
   it('within one sweep a room’s workspace is read once, and a person’s membership of it once, however many of their rooms ask; a subscribe reads afresh', async () => {
     const reads: string[] = []
-    const fromTable = (table: unknown) => ({
-      innerJoin() { return this },
-      where() { return this },
-      limit: async () => {
-        if (table === lists) { reads.push('workspace of a list'); return [{ w: 'w1' }] }
-        if (table === workspaceMembers) { reads.push('membership'); return [{ role: 'workspace_admin' }] }
-        throw new Error('an unexpected read')
-      },
-    })
+    // A list is read for its workspace through its project and space, and alone for whose Personal List it is.
+    const fromTable = (table: unknown) => {
+      let joined = false
+      return {
+        innerJoin() { joined = true; return this },
+        where() { return this },
+        limit: async () => {
+          if (table === lists && !joined) { reads.push('owner of a list'); return [{ personalOf: null }] }
+          if (table === lists) { reads.push('workspace of a list'); return [{ w: 'w1' }] }
+          if (table === workspaceMembers) { reads.push('membership'); return [{ role: 'workspace_admin' }] }
+          throw new Error('an unexpected read')
+        },
+      }
+    }
     const db = { select: () => ({ from: (table: unknown) => fromTable(table) }) }
     const gateway = new RealtimeGateway({} as any, {} as any, db as any, { recordHeartbeat: async () => undefined } as any)
     const one = holding('s1', 'u1', LIVE, ['workspace:w1', 'list:a', 'list:b'])
@@ -500,7 +505,12 @@ describe('RealtimeGateway — what a room pass costs, and in what order it asks'
     // A subscribe is no sweep: it reads afresh every time.
     reads.length = 0
     await gateway.handleSubscribe(one.client as any, { rooms: ['list:a', 'list:a'] as any })
-    assert.deepEqual(reads, ['workspace of a list', 'membership', 'workspace of a list', 'membership'], 'a subscribe was answered from an earlier read')
+    // (Whose Personal List it is is asked each time too, after the membership: `canReadListOrTask`.)
+    assert.deepEqual(
+      reads.filter((r) => r !== 'owner of a list'),
+      ['workspace of a list', 'membership', 'workspace of a list', 'membership'],
+      'a subscribe was answered from an earlier read',
+    )
   })
 
   it('each answer is acted on when it comes: a refused room is left while the pass is still asking about others', async () => {

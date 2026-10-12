@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { AiCreditsCard } from '../components/ai-credits'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Button, Card, Input, cn, toast } from '@rundesk/ui'
@@ -23,6 +24,7 @@ import {
   ShieldCheck,
   RefreshCw,
   LineChart,
+  Coins,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { AiPanel } from '../components/ai-panel'
@@ -124,7 +126,7 @@ export function AiPage() {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/ai' })
   const { prompt, skillId, thread: threadFromUrl } = useSearch({ from: '/app/$workspaceId/ai' })
-  const [activeTab, setActiveTab] = useState<'chat' | 'knowledge' | 'commands' | 'generate' | 'notes' | 'writing' | 'analytics'>('chat')
+  const [activeTab, setActiveTab] = useState<'chat' | 'knowledge' | 'commands' | 'generate' | 'notes' | 'writing' | 'analytics' | 'credits'>('chat')
 
   // §A2.3 — `?prompt=` is a question handed over from another surface; the chat
   // tab asks it on arrival, then the param is dropped so switching tabs or
@@ -198,6 +200,8 @@ export function AiPage() {
             // §V2-11, frames `19:00`/`19:05` — Analytics sits in the AI section's
             // own nav, which here is this tab strip.
             { id: 'analytics', labelKey: 'ai.tabAnalytics', icon: LineChart },
+            // ClickUp's AI hub shows every member the credits used and left (`commit-log/log-3943965-1`).
+            { id: 'credits', labelKey: 'ai.tabCredits', icon: Coins },
           ] as const
         ).map((tab) => (
           <button
@@ -238,6 +242,11 @@ export function AiPage() {
         {activeTab === 'notes' && <MeetingNotesTab workspaceId={workspaceId} />}
         {activeTab === 'writing' && <WritingTab />}
         {activeTab === 'analytics' && <AiValuePanel workspaceId={workspaceId} />}
+        {activeTab === 'credits' && (
+          <div className="h-full overflow-auto p-4">
+            <AiCreditsCard workspaceId={workspaceId} />
+          </div>
+        )}
       </div>
     </div>
   )

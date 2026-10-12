@@ -68,7 +68,7 @@ export function templateFieldValue(value: unknown): TemplateFieldValue {
  *     route takes only files attached to the task itself.
  *   · `progress_auto` and `formula` — worked out on read; no value is stored.
  */
-const NOT_FROM_TEMPLATES: ReadonlySet<string> = new Set(['voting', 'files', 'progress_auto', 'formula'])
+const NOT_FROM_TEMPLATES: ReadonlySet<string> = new Set(['voting', 'files', 'progress_auto', 'formula', 'button'])
 
 /** The fields whose value is a list a template may write: people, options, tasks. */
 const LIST_FIELDS: ReadonlySet<string> = new Set(['people', 'labels', 'tasks'])
@@ -928,6 +928,8 @@ export class TaskTemplatesService {
         type: customFieldDefinitions.type,
         options: customFieldDefinitions.options,
         listId: customFieldDefinitions.listId,
+        // A Relationship limited to a list takes that list's tasks alone (`checkValue`).
+        config: customFieldDefinitions.config,
       })
       .from(customFieldDefinitions)
       .where(eq(customFieldDefinitions.projectId, target.projectId))
