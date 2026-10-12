@@ -212,7 +212,17 @@ try {
   // ══ 3. THE BOX BECOMES AN EMAIL ════════════════════════════════════════════
   console.log('\n▶ Comment ▾ → Email')
   await chooseEmail()
-  const fromLine = (await readText(page.getByTestId('comment-email-from').filter({ visible: true }), { timeoutMs: 5000 })).trim()
+  /*
+   * From is a picker since a person's own mailbox can be linked (`found-9-oct/task-email-sends-from-the-server`):
+   * with none linked it holds the server's address alone, chosen. The line it replaced is drawn only while the
+   * picker's list is loading, so the address is read off the picker's chosen option, waited for, and off the line
+   * where the picker is not drawn.
+   */
+  const fromPicker = page.getByTestId('comment-email-from-select').filter({ visible: true })
+  const pickerDrawn = await fromPicker.waitFor({ state: 'visible', timeout: 8000 }).then(() => true, () => false)
+  const fromLine = pickerDrawn
+    ? ((await fromPicker.evaluate((sel) => sel.selectedOptions[0]?.textContent ?? '').catch(() => '')) ?? '').trim()
+    : (await readText(page.getByTestId('comment-email-from').filter({ visible: true }), { timeoutMs: 5000 })).trim()
   const mode = await page.getByTestId('comment-mode-trigger').getAttribute('data-mode').catch(() => null)
   const subjectHint = await page.getByTestId('comment-email-subject').getAttribute('placeholder').catch(() => null)
   const sendShown = await page.getByTestId('comment-email-send').isVisible().catch(() => false)
@@ -269,10 +279,21 @@ try {
 
   // ══ 5. KEPT IN THE TASK ════════════════════════════════════════════════════
   console.log('\n▶ the email, kept in the task with its envelope')
+  /*
+   * The mail server has the email before the API has kept it — the send, then the comment, then the row its
+   * answers are routed by — so the row is waited for before any of it is read, not read once
+   * (`found-12-oct/comment-email-reads-the-answer-row-before-it-is-written`).
+   */
+  const replyId = /^reply-([0-9a-f-]{36})@/.exec(m?.headers.replyTo ?? '')?.[1] ?? null
+  let outbound = null
+  if (replyId) {
+    await waitUntil(async () => {
+      ;[outbound] = await sql`select message_id, comment_id from outbound_email_messages where id = ${replyId}`
+      return !!outbound
+    }, { timeoutMs: 10_000 })
+  }
   const [kept] = await emailComments()
   const [envelope] = kept ? await sql`select direction, to_addresses, cc_addresses, bcc_addresses, subject, message_id from task_comment_emails where comment_id = ${kept.id}` : []
-  const replyId = /^reply-([0-9a-f-]{36})@/.exec(m?.headers.replyTo ?? '')?.[1] ?? null
-  const [outbound] = replyId ? await sql`select message_id, comment_id from outbound_email_messages where id = ${replyId}` : []
   const [file] = kept ? await sql`select file_name from task_attachments where comment_id = ${kept.id}` : []
   chk(
     kept?.body === words && kept?.parent_comment_id === null && envelope?.direction === 'out'

@@ -289,7 +289,9 @@ try {
     'an empty workspace’s dashboard offers no Load demo data to a guest granted workspace.import by a custom role',
     `the guest ${guestGranted ? `was offered it ${guestDemo} time(s)` : 'was NOT GRANTED the key'}`,
   )
-  const emptySpaces = async () => (await sql`select count(*)::int as n from spaces where workspace_id = ${WS2}`)[0].n
+  // The spaces a seed would make: a workspace's personal space, which holds its members' Personal Lists, is made
+  // when one of them first opens it, and is no import (`found-12-oct/data-transfer-keys-counts-the-personal-space`).
+  const emptySpaces = async () => (await sql`select count(*)::int as n from spaces where workspace_id = ${WS2} and not is_personal`)[0].n
   const guestSeeds = await guestImporter.as(`/workspaces/${WS2}/sample-data/seed`, { method: 'POST', body: {} })
   const guestLeft = await emptySpaces()
   chk(

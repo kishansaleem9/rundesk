@@ -39,4 +39,14 @@ export class SendCommentEmailDto {
   @ArrayMaxSize(50)
   @IsString({ each: true })
   attachmentIds?: string[]
+
+  /** The mailbox it goes from (`found-9-oct/task-email-sends-from-the-server`); none: the server's address. */
+  @IsOptional()
+  @IsString()
+  accountId?: string
+
+  /** An instant to send it at, later. */
+  @IsOptional()
+  @IsString()
+  sendAt?: string
 }

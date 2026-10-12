@@ -2,11 +2,14 @@ import { WS_ADMIN_ROLES } from '../../../common/permissions/workspace-roles'
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common'
 import { DRIVE_SEARCH_SCOPE } from '../../search/drive-scope'
 import { GMAIL_SEARCH_SCOPE, SHAREPOINT_SEARCH_SCOPE } from '../../search/sources'
+/** Gmail's consent to send as the mailbox; reading its answers is `GMAIL_SEARCH_SCOPE`'s read-only. */
+const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send'
 import { ConfigService } from '@nestjs/config'
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { Db } from '@rundesk/db'
 import {
+  emailAccounts,
   integrationAccessRequests,
   userSearchConnections,
   users,
@@ -17,6 +20,8 @@ import { DB_TOKEN } from '../../../common/database/database.module'
 import { SecurityService } from '../../security/security.service'
 import { NotificationsService } from '../../notifications/notifications.service'
 import { CalendarAccountsService } from '../../calendar-sync/calendar-accounts.service'
+import { PlansService } from '../../plans/plans.service'
+import { EMAIL_PLANS, EMAIL_PLAN_REFUSALS } from '../../email-accounts/email-plan'
 
 /**
  * §V2-11 frame `19:07` — `gmail` and `sharepoint` join this union, and they are
@@ -78,8 +83,19 @@ type ProviderAvailability = {
   available: boolean
   reason?: string
 }
-/** A grant's signed state. `personal`: a calendar, or a search source, connected by one person for themselves. */
-type OAuthState = { provider: Provider; workspaceId: string; userId: string; ts: number; personal?: true }
+/**
+ * A grant's signed state. `personal`: a calendar, or a search source, connected by one person for themselves.
+ * `email`: a mailbox linked to send a task's email from (`found-9-oct/task-email-sends-from-the-server`).
+ */
+type OAuthState = { provider: Provider; workspaceId: string; userId: string; ts: number; personal?: true; email?: true }
+
+/** The mailboxes a person links to send a task's email from, and what each refuses. */
+export const EMAIL_ACCOUNT_PROVIDERS: ReadonlySet<Provider> = new Set<Provider>(['gmail', 'outlook'])
+export const EMAIL_ACCOUNT_REFUSALS = {
+  notAMailbox: 'Only Gmail or Outlook is linked to send email',
+  guest: 'Guests cannot send email from a task',
+  linkedByAnother: 'This mailbox is already linked in this workspace by somebody else: ask them to let you send from it',
+} as const
 
 @Injectable()
 export class IntegrationConnectionsService {
@@ -89,6 +105,7 @@ export class IntegrationConnectionsService {
     private readonly config: ConfigService,
     private readonly notifications: NotificationsService,
     private readonly calendarAccounts: CalendarAccountsService,
+    private readonly plans: PlansService,
   ) {}
 
   async list(workspaceId: string) {
@@ -237,10 +254,28 @@ export class IntegrationConnectionsService {
    * Drive, Gmail or SharePoint from search (`found-23-sep/connected-search-per-person`):
    * ClickUp's personal Connected Search, which a guest does not have.
    */
-  async getOAuthStartUrl(workspaceId: string, userId: string, providerRaw: string, opts: { personal?: boolean } = {}) {
+  async getOAuthStartUrl(workspaceId: string, userId: string, providerRaw: string, opts: { personal?: boolean; email?: boolean } = {}) {
     const provider = this.assertProvider(providerRaw)
     if (opts.personal && provider !== 'gcal' && provider !== 'outlook' && !PERSONAL_SEARCH_PROVIDERS.has(provider)) {
       throw new BadRequestException(PERSONAL_SEARCH_REFUSALS.notPersonal)
+    }
+    if (opts.email) {
+      if (!EMAIL_ACCOUNT_PROVIDERS.has(provider)) throw new BadRequestException(EMAIL_ACCOUNT_REFUSALS.notAMailbox)
+      const [member] = await this.db
+        .select({ role: workspaceMembers.role })
+        .from(workspaceMembers)
+        .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+        .limit(1)
+      if (member?.role === 'guest') throw new ForbiddenException(EMAIL_ACCOUNT_REFUSALS.guest)
+      // Said before the provider is asked, as well as after: a full plan's link would only be refused on the way back.
+      // A person with a mailbox of this provider may be linking it again, which takes no more room; the
+      // callback, which knows which mailbox it is, asks again for a new one.
+      const [own] = await this.db
+        .select({ id: emailAccounts.id })
+        .from(emailAccounts)
+        .where(and(eq(emailAccounts.workspaceId, workspaceId), eq(emailAccounts.ownerId, userId), eq(emailAccounts.provider, provider)))
+        .limit(1)
+      if (!own) await this.assertEmailAccountRoom(workspaceId)
     }
     if (opts.personal && PERSONAL_SEARCH_PROVIDERS.has(provider)) {
       const [member] = await this.db
@@ -258,8 +293,15 @@ export class IntegrationConnectionsService {
     if (missing.length > 0) {
       throw new BadRequestException(`${provider} is not configured on this server — missing backend configuration: ${missing.join(', ')}`)
     }
-    const cfg = this.getProviderConfig(provider)
-    const state = this.signState({ provider, workspaceId, userId, ts: Date.now(), ...(opts.personal ? { personal: true as const } : {}) })
+    const cfg = this.getProviderConfig(provider, opts.email ? 'email' : undefined)
+    const state = this.signState({
+      provider,
+      workspaceId,
+      userId,
+      ts: Date.now(),
+      ...(opts.personal ? { personal: true as const } : {}),
+      ...(opts.email ? { email: true as const } : {}),
+    })
     const redirectUri = this.getRedirectUri(provider)
     const params = new URLSearchParams({
       client_id: cfg.clientId,
@@ -290,10 +332,61 @@ export class IntegrationConnectionsService {
       .limit(1)
     if (!stillMember[0]) throw new UnauthorizedException('You are no longer a workspace member')
 
-    const cfg = this.getProviderConfig(provider)
+    const cfg = this.getProviderConfig(provider, payload.email ? 'email' : undefined)
     const redirectUri = this.getRedirectUri(provider)
     const token = await this.exchangeCode(cfg, code, redirectUri)
     const profile = await this.fetchProfile(provider, token.accessToken)
+
+    /*
+     * A MAILBOX LINKED TO SEND A TASK'S EMAIL FROM
+     * (`found-9-oct/task-email-sends-from-the-server`): the person's own, under
+     * their name until they choose another, kept beside the workspace's other
+     * mailboxes — as many as the plan has room for. Linking it again refreshes
+     * its grant; one somebody else linked is theirs to share.
+     */
+    if (payload.email && EMAIL_ACCOUNT_PROVIDERS.has(provider)) {
+      const address = (profile.email ?? '').trim().toLowerCase()
+      if (!address) throw new BadRequestException(`${provider} did not say which mailbox this is`)
+      const [existing] = await this.db
+        .select({ id: emailAccounts.id, ownerId: emailAccounts.ownerId })
+        .from(emailAccounts)
+        .where(and(eq(emailAccounts.workspaceId, payload.workspaceId), eq(emailAccounts.provider, provider), eq(emailAccounts.address, address)))
+        .limit(1)
+      if (existing && existing.ownerId !== payload.userId) throw new ForbiddenException(EMAIL_ACCOUNT_REFUSALS.linkedByAnother)
+      const grant = {
+        accessToken: token.accessToken,
+        refreshToken: token.refreshToken,
+        tokenExpiresAt: token.expiresAt,
+        scopes: token.scopes,
+        status: 'connected',
+        lastError: null,
+        updatedAt: new Date(),
+      }
+      let accountId = existing?.id
+      if (existing) {
+        await this.db.update(emailAccounts).set(grant).where(eq(emailAccounts.id, existing.id))
+      } else {
+        await this.assertEmailAccountRoom(payload.workspaceId)
+        const [me] = await this.db.select({ displayName: users.displayName }).from(users).where(eq(users.id, payload.userId)).limit(1)
+        const name = (me?.displayName ?? '').trim() || (() => { const m = profile.metadata as Record<string, unknown> | undefined; return typeof m?.name === 'string' ? m.name : typeof m?.displayName === 'string' ? m.displayName : '' })() || address.split('@')[0]
+        const [row] = await this.db
+          .insert(emailAccounts)
+          .values({ workspaceId: payload.workspaceId, ownerId: payload.userId, provider, address, senderName: name.slice(0, 120), ...grant })
+          .returning({ id: emailAccounts.id })
+        accountId = row.id
+      }
+      await this.security.logAuditEvent({
+        workspaceId: payload.workspaceId,
+        actorId: payload.userId,
+        action: 'email_account.linked',
+        resourceType: 'email_account',
+        resourceId: accountId ?? provider,
+        description: `Linked a ${provider === 'gmail' ? 'Gmail' : 'Outlook'} mailbox to send email from`,
+        metadata: { provider },
+        ipAddress,
+      })
+      return { workspaceId: payload.workspaceId, provider, personal: true, email: true }
+    }
 
     /*
      * A PERSONAL GRANT IS THE PERSON'S ALONE
@@ -714,7 +807,12 @@ export class IntegrationConnectionsService {
     return parsed
   }
 
-  private getProviderConfig(provider: Provider): ProviderConfig {
+  /**
+   * `email`: the same application, asked for a mailbox's consent — Gmail's
+   * send and read, Graph's mail read-write (a draft is how Graph threads an
+   * answer) and send — rather than the search or calendar scope.
+   */
+  private getProviderConfig(provider: Provider, purpose?: 'email'): ProviderConfig {
     if (provider === 'github') {
       return {
         provider,
@@ -745,7 +843,7 @@ export class IntegrationConnectionsService {
        * never answer.
        */
       const microsoftScopes: Record<'outlook' | 'onedrive' | 'sharepoint', string> = {
-        outlook: 'Calendars.ReadWrite',
+        outlook: purpose === 'email' ? 'Mail.ReadWrite Mail.Send' : 'Calendars.ReadWrite',
         onedrive: 'Files.ReadWrite',
         sharepoint: SHAREPOINT_SEARCH_SCOPE,
       }
@@ -818,7 +916,7 @@ export class IntegrationConnectionsService {
     const googleScopes: Record<'gcal' | 'google-drive' | 'gmail', string> = {
       gcal: 'https://www.googleapis.com/auth/calendar.events',
       'google-drive': DRIVE_SEARCH_SCOPE,
-      gmail: GMAIL_SEARCH_SCOPE,
+      gmail: purpose === 'email' ? `${GMAIL_SEND_SCOPE} ${GMAIL_SEARCH_SCOPE}` : GMAIL_SEARCH_SCOPE,
     }
     const scopes = ['openid', 'email', 'profile', googleScopes[provider]]
 
@@ -923,11 +1021,11 @@ export class IntegrationConnectionsService {
    * tell it. Signature-checked all the same: an unsigned state must not be
    * able to write an error message onto somebody else's workspace.
    */
-  peekState(state: string): { workspaceId: string; provider: Provider; personal: boolean } | null {
+  peekState(state: string): { workspaceId: string; provider: Provider; personal: boolean; email: boolean } | null {
     try {
       const payload = this.verifyState(state)
       if (!payload?.workspaceId || !payload?.provider) return null
-      return { workspaceId: payload.workspaceId, provider: payload.provider, personal: payload.personal === true }
+      return { workspaceId: payload.workspaceId, provider: payload.provider, personal: payload.personal === true, email: payload.email === true }
     } catch {
       return null
     }
@@ -951,6 +1049,24 @@ export class IntegrationConnectionsService {
     // HTML must not become somebody's address bar.
     if (error) params.set('calendarError', String(error).trim().slice(0, 300) || 'Unknown error')
     return `${webBase}/app/${workspaceId}/calendar?${params.toString()}`
+  }
+
+  /** Where a mailbox's link lands: the Email settings, which list it — or say why not. */
+  getEmailRedirect(workspaceId: string, error?: string, provider?: string) {
+    const webBase = this.getWebBase().replace(/\/$/, '')
+    const params = new URLSearchParams()
+    if (provider) params.set('connected', provider)
+    if (error) params.set('connectError', String(error).trim().slice(0, 300) || 'Unknown error')
+    return `${webBase}/app/${workspaceId}/email?${params.toString()}`
+  }
+
+  /** A plan's room for one more mailbox (`EMAIL_PLANS`), or its refusal in words. */
+  private async assertEmailAccountRoom(workspaceId: string) {
+    const plan = await this.plans.getWorkspacePlan(workspaceId)
+    const room = EMAIL_PLANS[plan.id].accounts
+    if (room === null) return
+    const linked = await this.db.select({ id: emailAccounts.id }).from(emailAccounts).where(eq(emailAccounts.workspaceId, workspaceId))
+    if (linked.length >= room) throw new ForbiddenException(EMAIL_PLAN_REFUSALS.accounts(plan.label, room))
   }
 
   private async exchangeCode(cfg: ProviderConfig, code: string, redirectUri: string) {

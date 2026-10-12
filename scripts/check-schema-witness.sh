@@ -5,6 +5,9 @@
 #
 #   a table       a newest migration that creates a table is its witness
 #   a column      one that adds a column is, with the column
+#   its own table a column is paired with the ALTER TABLE it is added under,
+#                 not the file's first one, which can be another table's
+#                 constraint (0186's was), and on the line before it too
 #   walked past   a data-only migration names nothing and is skipped
 #   nothing       no migration naming anything prints nothing
 #   the script    `fleet-restart.sh` reads its witness from the helper, and
@@ -29,6 +32,11 @@ mig added 0001_a.sql 'CREATE TABLE IF NOT EXISTS "t1" ("id" uuid);'
 mig added 0002_b.sql 'ALTER TABLE "t2" ADD COLUMN IF NOT EXISTS "c2" text;'
 mig added 0003_c.sql 'UPDATE "t2" SET "c2" = 2;'
 mig none 0001_a.sql 'UPDATE "t" SET "x" = 1;'
+mig paired 0001_a.sql 'CREATE TABLE IF NOT EXISTS "t5" ("id" uuid);
+ALTER TABLE "t5" ADD CONSTRAINT "t5_fk" FOREIGN KEY ("x") REFERENCES "t6"("id");
+ALTER TABLE "t7" ADD COLUMN IF NOT EXISTS "c7" uuid;'
+mig split 0001_a.sql 'ALTER TABLE "t8"
+  ADD COLUMN IF NOT EXISTS "c8" text;'
 
 cases () {
   local env="$1" restart="$2" bad=0 out
@@ -37,6 +45,10 @@ cases () {
   [ "$out" = "$TMP/created/0003_c.sql t3" ] || fail "a table: '$out'"
   out=$(bash -c ". '$env'; newest_schema_witness '$TMP/added'")
   [ "$out" = "$TMP/added/0002_b.sql t2 c2" ] || fail "a column, past a data-only migration: '$out'"
+  out=$(bash -c ". '$env'; newest_schema_witness '$TMP/paired'")
+  [ "$out" = "$TMP/paired/0001_a.sql t7 c7" ] || fail "a column with its own table, not the first ALTER TABLE's: '$out'"
+  out=$(bash -c ". '$env'; newest_schema_witness '$TMP/split'")
+  [ "$out" = "$TMP/split/0001_a.sql t8 c8" ] || fail "a column added on the line after its ALTER TABLE: '$out'"
   out=$(bash -c ". '$env'; newest_schema_witness '$TMP/none'")
   [ -z "$out" ] || fail "nothing: '$out'"
   grep -q 'newest_schema_witness "$R/packages/db/src/migrations"' "$restart" || fail 'fleet-restart.sh: does not read its witness from the helper'
@@ -59,7 +71,11 @@ MUTANTS=(
   # Oldest first: the witness is a migration everybody has.
   'env|s/^  for f in \$\(ls "\$dir"\/\*\.sql 2>\/dev\/null \| sort -r\); do$/  for f in $(ls "$dir"\/*.sql 2>\/dev\/null | sort); do/'
   # A data-only migration stops the walk with nothing to check.
-  'env|s/^    col=\$\(grep -oiE .*$/    return 0/'
+  'env|s/^    if \[ -n "\$pair" \]; then echo "\$f \$pair"; return 0; fi$/    echo "$f $pair"; return 0/'
+  # The file's first ALTER TABLE is the column's, as it was (0186).
+  'env|s/\{ t = substr\(l/{ if (t == "") t = substr(l/'
+  # A column is paired only with an ALTER TABLE on its own line.
+  'env|s/\{ l = tolower\(\$0\) \}/{ l = tolower($0); t = "" }/'
   # The script checks a column whatever the witness is.
   "restart|s/^        \"select count\\(\\*\\) from information_schema.tables where table_name='\\\$NEWEST_TBL'\" 2>\\/dev\\/null \\| tr -d ' '\\)\$/        \"select 1\" 2>\\/dev\\/null | tr -d ' ')/"
 )

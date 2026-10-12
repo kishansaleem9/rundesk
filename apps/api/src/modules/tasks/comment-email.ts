@@ -78,3 +78,20 @@ export function replySubject(subject: string): string {
   const s = subject.trim()
   return /^re:/i.test(s) ? s : `Re: ${s}`.slice(0, EMAIL_SUBJECT_MAX)
 }
+
+/** The words of a send time refused (`found-9-oct/task-email-sends-from-the-server`). */
+export const SCHEDULE_REFUSALS = {
+  when: 'A send time is a moment from a minute to a year from now',
+  notFound: 'That scheduled email is not one of yours on this task',
+  notScheduled: 'That email is no longer waiting to be sent',
+} as const
+const SCHEDULE_MIN_MS = 60_000
+const SCHEDULE_MAX_MS = 366 * 24 * 60 * 60 * 1000
+
+/** A send time as given: an instant from a minute to a year ahead; null when it is not one. */
+export function scheduleTime(raw: unknown, now = Date.now()): Date | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null
+  const at = Date.parse(raw)
+  if (!Number.isFinite(at) || at - now < SCHEDULE_MIN_MS || at - now > SCHEDULE_MAX_MS) return null
+  return new Date(at)
+}

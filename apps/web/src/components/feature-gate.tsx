@@ -50,6 +50,7 @@ export type PlanFeatureKey =
   | 'prioritySupport'
   | 'teamView'
   | 'boardExport'
+  | 'ganttExport'
 
 type PlanTierRow = {
   id: string

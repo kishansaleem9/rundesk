@@ -245,6 +245,8 @@ try {
     await page.goto(`${B}/app/${WS}/timeline`, { waitUntil: 'domcontentloaded' })
     await page.locator(`[data-testid="timeline-bar"][data-task-id="${firstBar}"]`).waitFor({ timeout: 30_000 }).catch(() => {})
     if (projectId) await page.getByTestId('timeline-project-filter').selectOption(projectId, { timeout: 10_000 }).catch(() => {})
+    // The zoom is the time period's menu (`resume-defects/resume-5`).
+    await page.getByTestId('timeline-period').click({ timeout: 10_000 }).catch(() => {})
     await page.getByTestId('timeline-zoom-day').click({ timeout: 10_000 }).catch(() => {})
     await page.waitForTimeout(300)
   }
@@ -292,6 +294,8 @@ try {
     }
     // West of UTC, what the file says of a date-only task (still the 12th to the 14th: it was only pressed).
     if (zone === 'America/Los_Angeles') {
+      // The CSV is one of the Export menu's three (`resume-defects/resume-5`).
+      await page.getByTestId('timeline-export-menu').click({ timeout: 10_000 }).catch(() => {})
       const download = await Promise.all([
         page.waitForEvent('download', { timeout: 20_000 }),
         page.getByTestId('timeline-export').click({ timeout: 10_000 }),
@@ -346,16 +350,20 @@ try {
     await page.getByTestId('work-view-tab-type-gantt').click({ timeout: 20_000 }).catch(() => {})
     const gbar = (title) => page.locator(`div[role="button"][aria-label="${title}"]`).first()
     await gbar(w.ganttTimedTitle).waitFor({ timeout: 20_000 }).catch(() => {})
-    await page.getByRole('group', { name: 'Timeline zoom' }).getByRole('button', { name: 'Day' }).click({ timeout: 10_000 }).catch(() => {})
-    await page.waitForTimeout(300)
+    // The list's Gantt is the one Gantt now, its zoom the time period's menu (`resume-defects/resume-5`).
+    await page.getByTestId('timeline-period').click({ timeout: 10_000 }).catch(() => {})
+    await page.getByTestId('timeline-zoom-day').click({ timeout: 10_000 }).catch(() => {})
+    // `waitUntil` answers whether the wait was met, so the width is read once it was.
+    const dayZoomed = await waitUntil(async () => (await page.getByTestId('timeline-axis').getAttribute('data-zoom', { timeout: 2000 }).catch(() => null)) === 'day', { timeoutMs: 10_000 }).catch(() => false)
+    const dayPx = dayZoomed ? Number(await page.getByTestId('timeline-axis').getAttribute('data-day-px', { timeout: 2000 }).catch(() => 0)) || null : null
     const titleBefore = await gbar(w.ganttDateTitle).getAttribute('title', { timeout: 5000 }).catch(() => null)
-    // Where each bar is drawn, in Day columns of 36px: the 19th is three days after the 16th, in every zone.
+    // Where each bar is drawn, in Day columns: the 19th is three days after the 16th, in every zone.
     const leftOf = (title) => gbar(title).evaluate((e) => parseFloat(e.style.left)).catch(() => NaN)
-    const daysApart = ((await leftOf(w.ganttDateTitle)) - (await leftOf(w.ganttTimedTitle))) / 36
+    const daysApart = dayPx ? ((await leftOf(w.ganttDateTitle)) - (await leftOf(w.ganttTimedTitle))) / dayPx : NaN
     for (const [k, title, out] of [['ganttTimed', w.ganttTimedTitle, ganttTimed], ['ganttDateOnly', w.ganttDateTitle, ganttDate]]) {
       const before = await rowOf(w[k])
-      // A Day column is 36px: a day's drag.
-      const did = await dragBy(page, gbar(title), 36)
+      // A Day column's width: a day's drag.
+      const did = dayPx ? await dragBy(page, gbar(title), dayPx) : false
       out.push({ zone, did, before, after: await settled(w[k], before), sent: sent(w[k]), ...(k === 'ganttDateOnly' ? { titleBefore, daysApart } : {}) })
       await page.keyboard.press('Escape').catch(() => {})
     }
@@ -617,6 +625,10 @@ try {
      * narrowed to the widest a browser lays out at the Week zoom already, so the
      * two zooms draw the same px a day here, in cells of a day or of a week.
      */
+    // The time period is a menu on the one chart (`resume-defects/resume-5`): it is opened before the clock
+    // starts, so what is timed is the Day zoom drawn, not two presses and a menu's animation.
+    await within(90_000, () => page.getByTestId('timeline-period').click({ timeout: 90_000 }).catch(() => {}))
+    await within(90_000, () => page.getByTestId('timeline-zoom-day').waitFor({ state: 'visible', timeout: 90_000 }).catch(() => {}))
     t0 = Date.now()
     await within(90_000, () => page.getByTestId('timeline-zoom-day').click({ timeout: 90_000 }).catch(() => {}))
     const zoomed = await within(90_000, () => waitUntil(async () => {
@@ -680,29 +692,37 @@ try {
       if (document.querySelector(sel)) done()
     }), gbarSel).catch(() => null))
     const scrollerOf = async () => within(10_000, () => page.locator(gbarSel).first().evaluate((e) => {
-      const s = e.closest('.overflow-x-auto')
+      const s = e.closest('[data-testid="timeline-chart-viewport"]')
       return s ? { nodes: s.querySelectorAll('*').length, width: s.scrollWidth } : null
     }).catch(() => null))
     const week = await scrollerOf()
     const widthOf = () => page.locator(gbarSel).first().evaluate((e) => e.getBoundingClientRect().width).catch(() => null)
-    const weekBar = await within(10_000, widthOf)
+    // As above: the menu opened first, the Day zoom timed.
+    await within(90_000, () => page.getByTestId('timeline-period').click({ timeout: 90_000 }).catch(() => {}))
+    await within(90_000, () => page.getByTestId('timeline-zoom-day').waitFor({ state: 'visible', timeout: 90_000 }).catch(() => {}))
     t0 = Date.now()
-    await within(90_000, () => page.getByRole('group', { name: 'Timeline zoom' }).getByRole('button', { name: 'Day' }).click({ timeout: 90_000 }).catch(() => {}))
+    await within(90_000, () => page.getByTestId('timeline-zoom-day').click({ timeout: 90_000 }).catch(() => {}))
+    /*
+     * Zoomed when the chart says so, as the timeline's section above asks it: the
+     * list's Gantt is the timeline's chart now (`resume-defects/resume-5`), and a
+     * span this long is narrowed to the same width a day at Week and at Day, so
+     * a bar's width cannot tell the two apart.
+     */
     const zoomed = await within(90_000, () => waitUntil(async () => {
-      const w = await widthOf()
-      return w != null && w !== weekBar
+      const zoom = await page.getByTestId('timeline-axis').getAttribute('data-zoom', { timeout: 1000 }).catch(() => null)
+      return zoom === 'day' && (await widthOf()) != null
     }, { timeoutMs: 90_000 }))
     const dayZoomMs = Date.now() - t0
-    await within(30_000, () => page.locator(gbarSel).first().evaluate((e) => { const s = e.closest('.overflow-x-auto'); if (s) s.scrollLeft = s.scrollWidth }).catch(() => {}))
+    await within(30_000, () => page.locator(gbarSel).first().evaluate((e) => { const s = e.closest('[data-testid="timeline-chart-viewport"]'); if (s) s.scrollLeft = s.scrollWidth }).catch(() => {}))
     let end = null
     let under = null
     await within(30_000, () => waitUntil(async () => {
       end = await page.locator(gbarSel).first().evaluate((e) => {
-        const s = e.closest('.overflow-x-auto')?.getBoundingClientRect()
+        const s = e.closest('[data-testid="timeline-chart-viewport"]')?.getBoundingClientRect()
         const b = e.getBoundingClientRect()
         return s ? { inView: b.right > s.left && b.left < s.right, barLeft: b.left } : null
       }).catch(() => null)
-      under = end?.inView ? await cellUnder(page, '[data-testid="gantt-day"]', end.barLeft + 2, null) : null
+      under = end?.inView ? await cellUnder(page, '[data-testid="timeline-date-cell"]', end.barLeft + 2, null) : null
       return under === '2026-10-07'
     }, { timeoutMs: 20_000 }))
     ganttFar.push({ drawn, firstMs, left, ganttMs, week, zoomed, dayZoomMs, end, under })

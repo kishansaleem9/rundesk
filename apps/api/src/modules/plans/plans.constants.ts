@@ -44,6 +44,14 @@ export const PLAN_FEATURES = [
    */
   'teamView',
   'boardExport',
+  /*
+   * THE GANTT VIEW EXPORTED AS A PICTURE (`resume-defects/resume-5`): ClickUp's
+   * "Export view" as a PDF or a PNG, on the Business plan and above
+   * (changelog, "Improved Gantt view export"). It has no free uses: ClickUp
+   * meters the Gantt VIEW on Free, not its export. The picture is drawn in the
+   * browser from what the reader can already see, so this key is asked there.
+   */
+  'ganttExport',
 ] as const
 export type PlanFeature = (typeof PLAN_FEATURES)[number]
 
@@ -90,6 +98,7 @@ const ALL_FEATURES_OFF: Record<PlanFeature, boolean> = {
   prioritySupport: false,
   teamView: false,
   boardExport: false,
+  ganttExport: false,
 }
 
 const ALL_FEATURES_ON: Record<PlanFeature, boolean> = {
@@ -110,6 +119,7 @@ const ALL_FEATURES_ON: Record<PlanFeature, boolean> = {
    */
   teamView: true,
   boardExport: true,
+  ganttExport: true,
 }
 
 export const PLAN_TIERS: Record<PlanId, PlanTier> = {
@@ -188,6 +198,7 @@ export const FEATURE_LABELS: Record<PlanFeature, string> = {
   prioritySupport: 'Priority support',
   teamView: 'Team View',
   boardExport: 'Board export',
+  ganttExport: 'Gantt export',
 }
 
 export function isPlanId(value: unknown): value is PlanId {

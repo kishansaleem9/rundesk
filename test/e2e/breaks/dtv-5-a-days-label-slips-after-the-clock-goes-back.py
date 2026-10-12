@@ -6,8 +6,12 @@
 # one it stands for, while the bars stand on their own days.
 #
 # Reddens: timeline-dates: "in Los Angeles, at Day zoom, a task of 10 November sits under the cell “Nov 10”, after the clock goes back on 1 November as before it"
+#
+# Re-aimed 12 October: the chart is one component now (`components/gantt-chart.tsx`),
+# the timeline page's and the list's Gantt tab's (`resume-defects/resume-5`); the line
+# moved there with it. Same break.
 import io
-p = '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx'
+p = '/home/user/rundesk/apps/web/src/components/gantt-chart.tsx'
 a = "      const at = addDays(startMs, i)\n"
 b = "      const at = startMs + i * 86400_000\n"
 s = io.open(p, encoding='utf-8').read()

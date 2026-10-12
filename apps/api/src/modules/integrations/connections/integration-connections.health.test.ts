@@ -27,7 +27,7 @@ describe('IntegrationConnectionsService.list — whose connection it still is', 
       return p
     }
     const db = { select: () => node(queue.shift() ?? []) } as any
-    const svc = new IntegrationConnectionsService(db, {} as any, {} as any, {} as any, {} as any)
+    const svc = new IntegrationConnectionsService(db, {} as any, {} as any, {} as any, {} as any, {} as any)
     const health = Object.fromEntries((await svc.list('ws-1')).map((c) => [c.provider, c.health]))
     assert.deepEqual(health, { gcal: 'owner_left', outlook: 'healthy', zoom: 'owner_left', slack: 'disconnected' })
   })

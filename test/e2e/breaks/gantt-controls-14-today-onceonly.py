@@ -5,8 +5,12 @@
 # passes, which is precisely why check 25 exists.
 #
 # Reddens: gantt-controls: "and a second press scrolls back to today after the chart was scrolled away"
+#
+# Re-aimed 12 October: the chart is one component now (`components/gantt-chart.tsx`),
+# the timeline page's and the list's Gantt tab's (`resume-defects/resume-5`); the line
+# moved there with it. Same break.
 import io, os
-p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
+p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/components/gantt-chart.tsx')
 s = io.open(p, encoding='utf-8').read()
 a = "    if (todayStamp === handledTodayStamp.current) return"
 assert s.count(a) == 1, s.count(a)

@@ -1,9 +1,10 @@
-import { pgTable, text, timestamp, uuid, integer, unique, index, check } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, uuid, integer, unique, index, uniqueIndex, check } from 'drizzle-orm/pg-core'
 import { relations, sql } from 'drizzle-orm'
 import { taskComments } from './comments'
 import { lists } from './lists'
 import { users } from './users'
 import { tasks } from './tasks'
+import { emailAccounts } from './email-accounts'
 
 /**
  * Per-list inbound email address. Each list gets at most one alias of the
@@ -119,6 +120,20 @@ export const taskCommentEmails = pgTable(
     subject:       text('subject').notNull(),
     messageId:     text('message_id').notNull(),
     createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /*
+     * SENT FROM, OR READ FROM, A MAILBOX ITS WRITER LINKED
+     * (`found-9-oct/task-email-sends-from-the-server`, migration 0186): the
+     * account, and the provider's own ids — Gmail's thread and message, or
+     * Graph's conversation and message — by which its answers are read back
+     * from that mailbox, each once. Null for one the server sent.
+     */
+    accountId:          uuid('account_id').references(() => emailAccounts.id, { onDelete: 'set null' }),
+    providerThreadId:   text('provider_thread_id'),
+    providerMessageId:  text('provider_message_id'),
   },
-  (t) => [check('task_comment_emails_direction_check', sql`${t.direction} IN ('out', 'in')`)],
+  (t) => [
+    check('task_comment_emails_direction_check', sql`${t.direction} IN ('out', 'in')`),
+    index('idx_task_comment_emails_thread').on(t.accountId, t.providerThreadId),
+    uniqueIndex('uq_task_comment_emails_provider_message').on(t.accountId, t.providerMessageId).where(sql`${t.providerMessageId} is not null`),
+  ],
 )

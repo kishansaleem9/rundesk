@@ -31,6 +31,18 @@
  *           GET    /gmail/v1/users/me/messages/:id             (format=metadata)
  *   Graph   POST   /graph/v1.0/search/query                    (requests[0].query.queryString)
  *
+ * AND A MAILBOX TO SEND A TASK'S EMAIL FROM (`found-9-oct/task-email-sends-from-the-server`),
+ * a bearer token each, its messages kept with which way they went:
+ *   Gmail   POST   /gmail/v1/users/me/messages/send            ({raw, threadId}: the whole message, base64url)
+ *           GET    /gmail/v1/users/me/messages/:id             (format=metadata: its headers)
+ *           GET    /gmail/v1/users/me/threads/:id              (format=full: every message, its words a part)
+ *   Graph   GET    /graph/v1.0/me                              (whose mailbox; after a consent, whose grant)
+ *           POST   /graph/v1.0/me/messages                     (a draft, in a new conversation)
+ *           POST   /graph/v1.0/me/messages/:id/createReply     (a draft, in that message's conversation)
+ *           POST   /graph/v1.0/me/messages/:id/attachments     (a file on a draft)
+ *           POST   /graph/v1.0/me/messages/:id/send            (the draft sent: 202, no body)
+ *           GET    /graph/v1.0/me/messages                     ($filter=conversationId eq '…')
+ *
  * A CALENDAR IS A BEARER TOKEN. Each request's `Authorization: Bearer <token>`
  * names the calendar it reads and writes, and a token nobody seeded is refused
  * 401, as a revoked grant is. So two suites on one lane never see each other's
@@ -51,6 +63,13 @@
  *   POST /__control/code {code, accessToken, refreshToken, email, sub, scopes}   a consent's code, for
  *        `POST /google/token` (grant_type=authorization_code) to answer, and `GET /google/userinfo` after
  *   GET  /__control/search?token=                        what was asked of it, query by query
+ *   POST /__control/mailbox {token, provider, address, name, refreshToken}   seed (replace) a mailbox
+ *   GET  /__control/mailbox?token=                       its messages, sent and received, and drafts
+ *   POST /__control/mailbox/answer {token, threadId, from, fromName, text}   somebody answers in a thread
+ *   POST /__control/mailbox/fail {token, status, count, on}  the next `count` calls with it answer `status` —
+ *                                                          with `on: "write"`, only its sends and drafts, not the
+ *                                                          reads a poll for answers makes between them
+ *        (a consent's code is answered at `/microsoft/token` too, and `GET /graph/v1.0/me` after)
  *   GET  /__control/version                              which source this process runs
  *
  * NOT FOR PRODUCTION. Binds loopback, and refuses to start without
@@ -98,6 +117,101 @@ const searchAccounts = new Map()
 /** code → the grant a consent's code is exchanged for; access token → its account's profile. */
 const codes = new Map()
 const profiles = new Map()
+/**
+ * token → { provider: 'gmail' | 'outlook', address, name, messages: [message], fail: {status, left} | null }
+ * A message: { id, threadId, internetMessageId, from, fromName, to, cc, bcc, subject, text, inReplyTo,
+ *              attachments: [{ name, contentType, size }], direction: 'sent' | 'received', isDraft, at }.
+ * Gmail's thread and Graph's conversation are both `threadId` here. Refresh token → the mailbox.
+ */
+const mailboxes = new Map()
+const mailboxRefreshes = new Map()
+
+/** RFC 2047's encoded words read back: `=?UTF-8?B?…?=` and `=?UTF-8?Q?…?=`. */
+const decodeWords = (v) =>
+  String(v ?? '').replace(/=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g, (_, _cs, enc, data) =>
+    enc.toUpperCase() === 'B'
+      ? Buffer.from(data, 'base64').toString('utf8')
+      : Buffer.from(data.replace(/_/g, ' ').replace(/=([0-9A-F]{2})/gi, (__, h) => String.fromCharCode(parseInt(h, 16))), 'latin1').toString('utf8'),
+  )
+/** A message's header block and body, its folded lines unfolded. */
+function splitMessage(raw) {
+  const at = raw.search(/\r?\n\r?\n/)
+  const head = at === -1 ? raw : raw.slice(0, at)
+  const body = at === -1 ? '' : raw.slice(at).replace(/^\r?\n\r?\n/, '')
+  const headers = {}
+  for (const line of head.replace(/\r?\n[ \t]+/g, ' ').split(/\r?\n/)) {
+    const i = line.indexOf(':')
+    if (i > 0) headers[line.slice(0, i).trim().toLowerCase()] = line.slice(i + 1).trim()
+  }
+  return { headers, body }
+}
+const bodyOf = (headers, body) =>
+  /base64/i.test(headers['content-transfer-encoding'] ?? '') ? Buffer.from(body.replace(/\s+/g, ''), 'base64') : Buffer.from(body, 'utf8')
+const addressList = (v) => String(v ?? '').split(',').map((p) => (/<([^>]+)>/.exec(p)?.[1] ?? p).trim().toLowerCase()).filter((a) => a.includes('@'))
+/** What Gmail's `raw` says: who, to whom, about what, its words and its files. */
+function readRaw(raw) {
+  const { headers, body } = splitMessage(raw)
+  const type = headers['content-type'] ?? 'text/plain'
+  let text = ''
+  const attachments = []
+  const boundary = /boundary="?([^";]+)"?/i.exec(type)?.[1]
+  if (/^multipart\//i.test(type) && boundary) {
+    for (const part of body.split(`--${boundary}`).slice(1)) {
+      if (part.startsWith('--')) break
+      const p = splitMessage(part.replace(/^\r?\n/, ''))
+      const disposition = p.headers['content-disposition'] ?? ''
+      const content = bodyOf(p.headers, p.body.replace(/\r?\n$/, ''))
+      if (/attachment/i.test(disposition)) {
+        const name = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1]
+        attachments.push({ name: name ? decodeURIComponent(name) : (/filename="([^"]*)"/i.exec(disposition)?.[1] ?? ''), contentType: p.headers['content-type'] ?? '', size: content.length })
+      } else if (!text && /text\/plain/i.test(p.headers['content-type'] ?? '')) text = content.toString('utf8')
+    }
+  } else text = bodyOf(headers, body).toString('utf8')
+  const from = headers.from ?? ''
+  return {
+    from: (/<([^>]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase(),
+    fromName: decodeWords(from.replace(/<[^>]*>/, '').replace(/"/g, '').trim()),
+    to: addressList(headers.to),
+    cc: addressList(headers.cc),
+    bcc: addressList(headers.bcc),
+    subject: decodeWords(headers.subject ?? ''),
+    inReplyTo: headers['in-reply-to'] ?? null,
+    text,
+    attachments,
+  }
+}
+const gmailMessage = (m) => ({
+  id: m.id,
+  threadId: m.threadId,
+  labelIds: [m.direction === 'sent' ? 'SENT' : 'INBOX'],
+  internalDate: String(m.at),
+  payload: {
+    mimeType: 'text/plain',
+    headers: [
+      { name: 'From', value: m.fromName ? `"${m.fromName}" <${m.from}>` : m.from },
+      { name: 'To', value: m.to.join(', ') },
+      { name: 'Subject', value: m.subject },
+      { name: 'Message-ID', value: m.internetMessageId },
+      { name: 'Date', value: new Date(m.at).toUTCString() },
+    ],
+    body: { data: Buffer.from(m.text, 'utf8').toString('base64url') },
+  },
+})
+const graphMessage = (m) => ({
+  id: m.id,
+  conversationId: m.threadId,
+  internetMessageId: m.internetMessageId,
+  subject: m.subject,
+  isDraft: m.isDraft === true,
+  receivedDateTime: new Date(m.at).toISOString(),
+  from: { emailAddress: { address: m.from, name: m.fromName ?? '' } },
+  toRecipients: m.to.map((address) => ({ emailAddress: { address } })),
+  ccRecipients: m.cc.map((address) => ({ emailAddress: { address } })),
+  bccRecipients: m.bcc.map((address) => ({ emailAddress: { address } })),
+  body: { contentType: 'text', content: m.text },
+  hasAttachments: m.attachments.length > 0,
+})
+const fromGraphRecipients = (xs) => (Array.isArray(xs) ? xs.map((r) => String(r?.emailAddress?.address ?? '').toLowerCase()).filter(Boolean) : [])
 /** Drive's `q`, as far as the product writes it: the name term, and the visibility terms if any. */
 const readDriveQuery = (q) => {
   const name = /name contains '((?:[^'\\]|\\.)*)'/.exec(q)?.[1]?.replace(/\\(.)/g, '$1') ?? ''
@@ -274,6 +388,182 @@ const server = createServer(async (req, res) => {
     return json(res, 200, { asked: acct.asked })
   }
 
+  // ── mailboxes: seeded, read, answered in, and failed ─────────────────────────
+  if (path === '/__control/mailbox' && req.method === 'POST') {
+    const body = await readBody(req)
+    if (!body?.token || !['gmail', 'outlook'].includes(body.provider) || !body.address) {
+      return json(res, 400, { error: 'a token, a provider (gmail or outlook) and the address are required' })
+    }
+    const box = { provider: body.provider, address: String(body.address).toLowerCase(), name: body.name ?? '', messages: [], fail: null }
+    mailboxes.set(body.token, box)
+    if (body.refreshToken) mailboxRefreshes.set(body.refreshToken, box)
+    return json(res, 200, { token: body.token })
+  }
+  if (path === '/__control/mailbox' && req.method === 'GET') {
+    const box = mailboxes.get(url.searchParams.get('token') ?? '')
+    if (!box) return json(res, 404, { error: 'no mailbox for that token' })
+    return json(res, 200, { provider: box.provider, address: box.address, messages: box.messages })
+  }
+  if (path === '/__control/mailbox/answer' && req.method === 'POST') {
+    const body = await readBody(req)
+    const box = mailboxes.get(body?.token ?? '')
+    if (!box) return json(res, 404, { error: 'no mailbox for that token' })
+    const thread = box.messages.filter((m) => m.threadId === body.threadId && !m.isDraft)
+    if (thread.length === 0) return json(res, 404, { error: 'no such thread in that mailbox' })
+    const last = thread[thread.length - 1]
+    const id = `in-${randomUUID()}`
+    const m = {
+      id,
+      threadId: body.threadId,
+      internetMessageId: `<${id}@answer.test>`,
+      from: String(body.from ?? '').toLowerCase(),
+      fromName: body.fromName ?? '',
+      to: [box.address],
+      cc: [],
+      bcc: [],
+      subject: body.subject ?? (/^re:/i.test(last.subject) ? last.subject : `Re: ${last.subject}`),
+      text: String(body.text ?? ''),
+      inReplyTo: last.internetMessageId,
+      attachments: [],
+      direction: 'received',
+      isDraft: false,
+      at: Math.max(Date.now(), last.at + 1),
+    }
+    box.messages.push(m)
+    return json(res, 200, { id: m.id, internetMessageId: m.internetMessageId })
+  }
+  if (path === '/__control/mailbox/fail' && req.method === 'POST') {
+    const body = await readBody(req)
+    const box = mailboxes.get(body?.token ?? '')
+    if (!box) return json(res, 404, { error: 'no mailbox for that token' })
+    box.fail = { status: Number(body.status ?? 500), left: Number(body.count ?? 1), on: body.on === 'write' ? 'write' : 'any' }
+    return json(res, 200, { staged: box.fail })
+  }
+
+  const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1] ?? ''
+  // Whose grant a consent gave, read by the product before anything else (Graph's `/me`).
+  if (path === '/graph/v1.0/me' && req.method === 'GET' && (profiles.has(bearer) || mailboxes.has(bearer))) {
+    const who = profiles.get(bearer)
+    const box = mailboxes.get(bearer)
+    return json(res, 200, {
+      id: who?.sub ?? `mailbox-${box?.address}`,
+      mail: who?.email ?? box?.address ?? null,
+      userPrincipalName: who?.email ?? box?.address ?? null,
+      displayName: who?.name ?? box?.name ?? null,
+    })
+  }
+  const box = mailboxes.get(bearer)
+  const gmailMail = path === '/gmail/v1/users/me/messages/send' || path.startsWith('/gmail/v1/users/me/threads/') || (path.startsWith('/gmail/v1/users/me/messages/') && !!box)
+  const graphMail = path === '/graph/v1.0/me/messages' || path.startsWith('/graph/v1.0/me/messages/')
+  if (gmailMail || graphMail) {
+    const provider = gmailMail ? 'gmail' : 'outlook'
+    if (!box || box.provider !== provider) return refused(res, provider === 'gmail' ? 'gcal' : 'outlook')
+    if (box.fail && box.fail.left > 0 && (box.fail.on !== 'write' || req.method !== 'GET')) {
+      box.fail.left -= 1
+      const status = box.fail.status
+      if (box.fail.left === 0) box.fail = null
+      return status === 401 ? refused(res, provider === 'gmail' ? 'gcal' : 'outlook') : failed(res, provider === 'gmail' ? 'gcal' : 'outlook', status)
+    }
+    const notFound = () =>
+      provider === 'gmail'
+        ? json(res, 404, { error: { code: 404, message: 'Requested entity was not found.' } })
+        : json(res, 404, { error: { code: 'ErrorItemNotFound', message: 'The specified object was not found in the store.' } })
+
+    if (path === '/gmail/v1/users/me/messages/send' && req.method === 'POST') {
+      const body = await readBody(req)
+      if (typeof body?.raw !== 'string') return json(res, 400, { error: { code: 400, message: "'raw' RFC822 payload message string or uploading message via /upload/* URL required" } })
+      const read = readRaw(Buffer.from(body.raw, 'base64url').toString('utf8'))
+      if (body.threadId && !box.messages.some((m) => m.threadId === body.threadId)) return notFound()
+      const id = `gm-${randomUUID()}`
+      box.messages.push({
+        id,
+        threadId: body.threadId || id,
+        internetMessageId: `<${id}@mail.gmail.test>`,
+        ...read,
+        // Gmail sends as the mailbox, whatever From says.
+        from: box.address,
+        direction: 'sent',
+        isDraft: false,
+        at: Date.now(),
+      })
+      return json(res, 200, { id, threadId: body.threadId || id, labelIds: ['SENT'] })
+    }
+    if (path.startsWith('/gmail/v1/users/me/messages/') && req.method === 'GET') {
+      const m = box.messages.find((x) => x.id === decodeURIComponent(path.slice('/gmail/v1/users/me/messages/'.length)))
+      return m ? json(res, 200, gmailMessage(m)) : notFound()
+    }
+    if (path.startsWith('/gmail/v1/users/me/threads/') && req.method === 'GET') {
+      const threadId = decodeURIComponent(path.slice('/gmail/v1/users/me/threads/'.length))
+      const messages = box.messages.filter((m) => m.threadId === threadId && !m.isDraft)
+      return messages.length ? json(res, 200, { id: threadId, messages: messages.map(gmailMessage) }) : notFound()
+    }
+
+    const draftFrom = (body, threadId, inReplyTo) => {
+      const id = `ol-${randomUUID()}`
+      return {
+        id,
+        threadId,
+        internetMessageId: `<${id}@outlook.test>`,
+        from: box.address,
+        fromName: box.name,
+        to: fromGraphRecipients(body?.toRecipients),
+        cc: fromGraphRecipients(body?.ccRecipients),
+        bcc: fromGraphRecipients(body?.bccRecipients),
+        subject: String(body?.subject ?? ''),
+        text: String(body?.body?.content ?? ''),
+        inReplyTo,
+        attachments: (Array.isArray(body?.attachments) ? body.attachments : []).map((a) => ({ name: a.name, contentType: a.contentType, size: Buffer.from(a.contentBytes ?? '', 'base64').length })),
+        direction: 'sent',
+        isDraft: true,
+        at: Date.now(),
+      }
+    }
+    if (path === '/graph/v1.0/me/messages' && req.method === 'POST') {
+      const body = await readBody(req)
+      const draft = draftFrom(body, `conv-${randomUUID()}`, null)
+      box.messages.push(draft)
+      return json(res, 201, graphMessage(draft))
+    }
+    if (path === '/graph/v1.0/me/messages' && req.method === 'GET') {
+      const filter = url.searchParams.get('$filter') ?? ''
+      const conversation = /conversationId eq '((?:[^']|'')*)'/.exec(filter)?.[1]?.replace(/''/g, "'")
+      const messages = box.messages.filter((m) => conversation === undefined || m.threadId === conversation)
+      return json(res, 200, { value: messages.map(graphMessage) })
+    }
+    const m = /^\/graph\/v1\.0\/me\/messages\/([^/]+)(?:\/(createReply|attachments|send))?$/.exec(path)
+    const target = m ? box.messages.find((x) => x.id === decodeURIComponent(m[1])) : null
+    if (!m || !target) return notFound()
+    if (m[2] === 'createReply' && req.method === 'POST') {
+      const body = (await readBody(req)) ?? {}
+      const given = body.message ?? {}
+      const draft = draftFrom(
+        {
+          ...given,
+          subject: given.subject ?? (/^re:/i.test(target.subject) ? target.subject : `RE: ${target.subject}`),
+          toRecipients: given.toRecipients ?? [{ emailAddress: { address: target.from } }],
+        },
+        target.threadId,
+        target.internetMessageId,
+      )
+      box.messages.push(draft)
+      return json(res, 201, graphMessage(draft))
+    }
+    if (m[2] === 'attachments' && req.method === 'POST') {
+      if (!target.isDraft) return json(res, 400, { error: { code: 'ErrorInvalidRequest', message: 'Attachments are added to a draft.' } })
+      const a = (await readBody(req)) ?? {}
+      target.attachments.push({ name: a.name, contentType: a.contentType, size: Buffer.from(a.contentBytes ?? '', 'base64').length })
+      return json(res, 201, { id: `att-${randomUUID()}`, name: a.name })
+    }
+    if (m[2] === 'send' && req.method === 'POST') {
+      if (!target.isDraft) return json(res, 400, { error: { code: 'ErrorInvalidRequest', message: 'Only a draft is sent.' } })
+      target.isDraft = false
+      target.at = Date.now()
+      return empty(res, 202)
+    }
+    if (!m[2] && req.method === 'GET') return json(res, 200, graphMessage(target))
+    return notFound()
+  }
+
   // ── the federated searches: an account per bearer token ──────────────────────
   const driveSearch = path === '/google/drive/v3/files' && req.method === 'GET'
   const gmailList = path === '/gmail/v1/users/me/messages' && req.method === 'GET'
@@ -326,7 +616,9 @@ const server = createServer(async (req, res) => {
     // A consent's code, once: answered with the grant it was seeded with.
     if (form.get('grant_type') === 'authorization_code') {
       const grant = codes.get(form.get('code') ?? '')
-      if (!grant || path !== '/google/token') return json(res, 400, { error: 'invalid_grant', error_description: 'Malformed auth code.' })
+      // A code is answered at its own provider's address: Microsoft's only when it was seeded as Microsoft's.
+      const theirs = path === '/google/token' ? grant?.provider !== 'outlook' : grant?.provider === 'outlook'
+      if (!grant || !theirs) return json(res, 400, { error: 'invalid_grant', error_description: 'Malformed auth code.' })
       codes.delete(form.get('code'))
       profiles.set(grant.accessToken, { sub: grant.sub ?? grant.accessToken, email: grant.email ?? null, name: grant.name ?? null })
       return json(res, 200, {
@@ -336,6 +628,13 @@ const server = createServer(async (req, res) => {
         scope: (grant.scopes ?? []).join(' '),
         token_type: 'Bearer',
       })
+    }
+    // A mailbox's refresh: a new access token for the same mailbox.
+    const mailbox = form.get('grant_type') === 'refresh_token' ? mailboxRefreshes.get(form.get('refresh_token') ?? '') : null
+    if (mailbox && (path === '/google/token') === (mailbox.provider === 'gmail')) {
+      const token = `mailbox-refreshed-${randomUUID()}`
+      mailboxes.set(token, mailbox)
+      return json(res, 200, { access_token: token, expires_in: 3599, token_type: 'Bearer' })
     }
     const cal = refreshes.get(form.get('refresh_token') ?? '')
     const provider = path === '/google/token' ? 'gcal' : 'outlook'

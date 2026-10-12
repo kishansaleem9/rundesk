@@ -3,6 +3,8 @@ import { TasksService } from './tasks.service'
 import { TasksController } from './tasks.controller'
 import { TaskCommentsController, SavedCommentsController } from './comments.controller'
 import { CommentEmailService } from './comment-email.service'
+import { TaskEmailJobsService } from './task-email-jobs.service'
+import { EmailAccountsModule } from '../email-accounts/email-accounts.module'
 import { TaskListsService } from './task-lists.service'
 import { TaskListsController } from './task-lists.controller'
 import { TaskChecklistsController } from './checklists.controller'
@@ -46,8 +48,10 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
     // §V2-13 frames `09:26` / `10:42` — Team View and the board download are
     // refused by the SERVER for a workspace whose plan does not include them.
     PlansModule,
+    // A task's email from a mailbox its writer linked, read back from it (`found-9-oct/task-email-sends-from-the-server`).
+    EmailAccountsModule,
   ],
-  providers: [TasksService, CommentEmailService, TaskListsService, ChecklistTemplatesService, TaskTypesService, WorkspaceMemberGuard],
+  providers: [TasksService, CommentEmailService, TaskEmailJobsService, TaskListsService, ChecklistTemplatesService, TaskTypesService, WorkspaceMemberGuard],
   controllers: [
     TasksController,
     TaskCommentsController,

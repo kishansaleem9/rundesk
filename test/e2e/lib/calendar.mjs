@@ -62,6 +62,33 @@ export async function searchesAsked(base, token) {
   return res.ok ? (await res.json()).asked : null
 }
 
-/** A consent's code: `POST /google/token` exchanges it once for this grant, and `/google/userinfo` names its account. */
-export const seedConsentCode = (base, { code, accessToken, refreshToken, email, sub, scopes = [] }) =>
-  post(base, '/__control/code', { code, accessToken, refreshToken, email, sub, scopes })
+/**
+ * A consent's code: its provider's token address exchanges it once for this
+ * grant — `POST /google/token`, or `/microsoft/token` for `provider: 'outlook'`
+ * — and `/google/userinfo` or Graph's `/me` names its account.
+ */
+export const seedConsentCode = (base, { code, accessToken, refreshToken, email, sub, scopes = [], provider, name }) =>
+  post(base, '/__control/code', { code, accessToken, refreshToken, email, sub, scopes, provider, name })
+
+/**
+ * A MAILBOX TO SEND A TASK'S EMAIL FROM (`found-9-oct/task-email-sends-from-the-server`):
+ * seed (replace) the Gmail or Outlook mailbox a token opens; with
+ * `refreshToken`, a refresh at its provider's token address answers a new
+ * token for it.
+ */
+export const seedMailbox = (base, { token, provider, address, name = '', refreshToken }) =>
+  post(base, '/__control/mailbox', { token, provider, address, name, refreshToken })
+
+/** Its messages, sent and received: `{ provider, address, messages }`, or null. */
+export async function readMailbox(base, token) {
+  const res = await fetch(`${base}/__control/mailbox?token=${encodeURIComponent(token)}`)
+  return res.ok ? res.json() : null
+}
+
+/** Somebody answers in a thread of the mailbox: `{ id, internetMessageId }`. */
+export const answerInMailbox = (base, { token, threadId, from, fromName, text, subject }) =>
+  post(base, '/__control/mailbox/answer', { token, threadId, from, fromName, text, subject })
+
+/** The next `count` calls with this mailbox's token answer `status`. */
+/** The next `count` calls with a mailbox's token answer `status`; `on: 'write'` spares the reads a poll makes. */
+export const failMailbox = (base, token, status, count = 1, on = 'any') => post(base, '/__control/mailbox/fail', { token, status, count, on })

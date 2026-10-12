@@ -65,10 +65,36 @@ export class TaskCommentsController {
     return this.emails.suggestions(taskId, user, typeof q === 'string' ? q.slice(0, 200) : '')
   }
 
-  /** Sends it, and keeps it in the task as an email comment; its answers land under it. */
+  /** Sends it — or keeps it until its send time — and keeps it in the task as an email comment; its answers land under it. */
   @Post('email')
   sendEmail(@Param('taskId') taskId: string, @CurrentUser() user: CurrentUserPayload, @Body() body: SendCommentEmailDto) {
     return this.emails.send(taskId, user, body)
+  }
+
+  /** This person's emails waiting to be sent from this task, and any that could not go (`found-9-oct/task-email-sends-from-the-server`). */
+  @Get('email/scheduled')
+  scheduledEmails(@Param('taskId') taskId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.emails.scheduled(taskId, user)
+  }
+
+  @Post('email/scheduled/:scheduledId/send')
+  sendScheduledNow(@Param('taskId') taskId: string, @Param('scheduledId') scheduledId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.emails.sendScheduledNow(taskId, user, scheduledId)
+  }
+
+  @Patch('email/scheduled/:scheduledId')
+  reschedule(
+    @Param('taskId') taskId: string,
+    @Param('scheduledId') scheduledId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { sendAt?: unknown },
+  ) {
+    return this.emails.reschedule(taskId, user, scheduledId, body?.sendAt)
+  }
+
+  @Delete('email/scheduled/:scheduledId')
+  cancelScheduled(@Param('taskId') taskId: string, @Param('scheduledId') scheduledId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.emails.cancelScheduled(taskId, user, scheduledId)
   }
 
   @Patch(':commentId')

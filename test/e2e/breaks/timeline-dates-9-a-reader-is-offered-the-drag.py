@@ -4,8 +4,12 @@
 #
 # Re-aimed 6 October, by the review: a bar's offer is its task's own `mayEdit` (the write rule's answer, which the
 # timeline's read carries), no longer its list's capabilities.
+#
+# Re-aimed 12 October: the chart is one component now (`components/gantt-chart.tsx`),
+# the timeline page's and the list's Gantt tab's (`resume-defects/resume-5`); the line
+# moved there with it. Same break.
 import io
-p = '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx'
+p = '/home/user/rundesk/apps/web/src/components/gantt-chart.tsx'
 a = '  const mayMove = editable\n'
 b = '  const mayMove = true\n'
 s = io.open(p, encoding='utf-8').read()

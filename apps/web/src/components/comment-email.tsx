@@ -13,10 +13,21 @@
  * envelope in the thread (`CommentEmailEnvelope`). The sheet's composer keeps
  * the words and the files, as it does for a comment, and sends.
  */
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState, type Ref } from 'react'
-import { Mail, X } from 'lucide-react'
-import { api } from '../lib/api'
+import { CalendarClock, ChevronDown, FileText, Mail, PenLine, X } from 'lucide-react'
+import {
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  toast,
+} from '@rundesk/ui'
+import { api, ApiError } from '../lib/api'
+import { useDateFormat } from '../lib/date-format'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 export type CommentEmail = {
@@ -26,13 +37,55 @@ export type CommentEmail = {
   cc: string[]
   bcc: string[]
   subject: string
+  /** Sent from, or read from, a mailbox its writer linked (`found-9-oct/task-email-sends-from-the-server`). */
+  viaMailbox?: boolean
 }
+
+/** A mailbox this person may send from: theirs, or shared with them. */
+export type EmailAccount = {
+  id: string
+  provider: 'gmail' | 'outlook'
+  address: string
+  senderName: string
+  status: 'connected' | 'needs_reconnect'
+  lastError: string | null
+  usesLeft: number | null
+  owner: { id: string; name: string }
+  mine: boolean
+}
+export type EmailSignature = { id: string; name: string; body: string; isDefault: boolean }
+export type EmailTemplate = { id: string; name: string; subject: string | null; body: string; shared: boolean; mine: boolean }
+export type EmailPlan = { id: string; label: string; accounts: number | null; uses: number | null; scheduling: boolean; signaturesAndTemplates: boolean }
+type ProviderReadiness = { available: boolean; reason?: string }
 
 export type CommentEmailSetup = {
   available: boolean
   reason: 'comment' | 'guest' | 'off' | 'unconfigured' | null
   message: string | null
   from: { name: string; address: string }
+  /** The server's own address, "<writer> via Rundesk", when it sends mail. */
+  server: { name: string; address: string } | null
+  accounts: EmailAccount[]
+  providers: { gmail: ProviderReadiness; outlook: ProviderReadiness } | null
+  plan: EmailPlan | null
+  signatures: EmailSignature[]
+  templates: EmailTemplate[]
+}
+
+/** Where an email goes from: a mailbox's id, or `server`. */
+export type EmailFrom = string
+
+/** The From the composer starts on: the first mailbox that sends, else the server's address, else none. */
+export function defaultEmailFrom(setup: CommentEmailSetup | undefined): EmailFrom {
+  const ready = setup?.accounts?.find((a) => a.status === 'connected')
+  if (ready) return ready.id
+  return setup?.server ? 'server' : ''
+}
+
+/** A mailbox's consent page, opened in this tab: the provider sends the person back to the Email settings. */
+export async function linkMailbox(workspaceId: string, provider: 'gmail' | 'outlook') {
+  const { authUrl } = await api<{ authUrl: string }>(`/workspaces/${workspaceId}/email-accounts/connect/${provider}`, { method: 'POST' })
+  window.location.assign(authUrl)
 }
 
 /** Whether this person may send email from this task, and why not; who it goes from. */
@@ -189,6 +242,10 @@ export function CommentEmailFields({
   taskId,
   taskTitle,
   from,
+  setup,
+  fromId,
+  onFromChange,
+  workspaceId,
   draft,
   onChange,
   toInputRef,
@@ -196,6 +253,11 @@ export function CommentEmailFields({
   taskId: string
   taskTitle: string
   from: { name: string; address: string } | null
+  /** The mailboxes and the server's address it can go from (`found-9-oct/task-email-sends-from-the-server`). */
+  setup?: CommentEmailSetup
+  fromId?: EmailFrom
+  onFromChange?: (next: EmailFrom) => void
+  workspaceId?: string
   draft: EmailDraft
   onChange: (next: EmailDraft) => void
   /** The To box, for the composer to put the cursor in once Email is chosen. */
@@ -213,9 +275,13 @@ export function CommentEmailFields({
     <div className="mb-2 space-y-1.5 rounded-md border border-border bg-muted/20 p-2" data-testid="comment-email-form" ref={toRef}>
       <div className="flex items-center gap-2 text-xs">
         <span className="w-12 shrink-0 text-muted-foreground">{t('taskDetail.emailFrom')}</span>
-        <span className="truncate" data-testid="comment-email-from">
-          {from ? `${from.name} <${from.address}>` : '…'}
-        </span>
+        {setup && onFromChange ? (
+          <EmailFromPicker setup={setup} value={fromId ?? ''} onChange={onFromChange} workspaceId={workspaceId} />
+        ) : (
+          <span className="truncate" data-testid="comment-email-from">
+            {from ? `${from.name} <${from.address}>` : '…'}
+          </span>
+        )}
         <span className="ml-auto flex gap-2">
           {!showCc && (
             <button type="button" className="text-muted-foreground hover:text-foreground" data-testid="comment-email-show-cc" onClick={() => setShowCc(true)}>
@@ -261,6 +327,9 @@ export function CommentEmailEnvelope({ commentId, email }: { commentId: string; 
         <Mail className="h-3 w-3" />
         {email.direction === 'out' ? t('taskDetail.emailSentBadge') : t('taskDetail.emailReceivedBadge', { from: email.from })}
       </p>
+      {email.direction === 'out' && email.viaMailbox && (
+        <p data-testid={`comment-email-${commentId}-from`}>{t('taskDetail.emailSentFrom', { from: email.from })}</p>
+      )}
       {email.direction === 'out' && (
         <>
           <p data-testid={`comment-email-${commentId}-to`}>{t('taskDetail.emailToLine', { to: list(email.to) })}</p>
@@ -269,6 +338,331 @@ export function CommentEmailEnvelope({ commentId, email }: { commentId: string; 
         </>
       )}
       <p data-testid={`comment-email-${commentId}-subject`}>{t('taskDetail.emailSubjectLine', { subject: email.subject })}</p>
+    </div>
+  )
+}
+
+/**
+ * FROM: THE MAILBOXES THIS PERSON MAY SEND FROM, AND THE SERVER'S ADDRESS
+ * (`found-9-oct/task-email-sends-from-the-server`). ClickUp's From lists the
+ * linked accounts and offers "Link an email"; a mailbox the provider refused
+ * says to link it again and is not chosen.
+ */
+function EmailFromPicker({
+  setup,
+  value,
+  onChange,
+  workspaceId,
+}: {
+  setup: CommentEmailSetup
+  value: EmailFrom
+  onChange: (next: EmailFrom) => void
+  workspaceId?: string
+}) {
+  const { t } = useTranslation()
+  const providers = setup.providers
+  const linkable = (['gmail', 'outlook'] as const).filter((p) => providers?.[p]?.available)
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-2">
+      <select
+        data-testid="comment-email-from-select"
+        className="min-w-0 max-w-[18rem] flex-1 truncate rounded-md border border-border bg-background px-1.5 py-1 text-xs"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {!value && <option value="">{t('taskDetail.emailNoFrom')}</option>}
+        {setup.accounts.map((a) => (
+          <option key={a.id} value={a.id} disabled={a.status !== 'connected'} data-provider={a.provider}>
+            {a.status === 'connected' ? `${a.senderName} <${a.address}>` : t('taskDetail.emailFromNeedsReconnect', { address: a.address })}
+          </option>
+        ))}
+        {setup.server && <option value="server">{`${setup.server.name} <${setup.server.address}>`}</option>}
+      </select>
+      {workspaceId && linkable.length > 0 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button type="button" className="shrink-0 text-muted-foreground hover:text-foreground" data-testid="comment-email-link">
+              {t('taskDetail.emailLinkEmail')}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {linkable.map((p) => (
+              <DropdownMenuItem
+                key={p}
+                data-testid={`comment-email-link-${p}`}
+                onSelect={() => {
+                  void linkMailbox(workspaceId, p).catch((err) => toast.error(err instanceof ApiError ? err.message : String(err)))
+                }}
+              >
+                {p === 'gmail' ? t('taskDetail.emailLinkGmail') : t('taskDetail.emailLinkOutlook')}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem data-testid="comment-email-settings" onSelect={() => window.location.assign(`/app/${workspaceId}/email`)}>
+              {t('taskDetail.emailSettings')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </span>
+  )
+}
+
+/**
+ * TEMPLATES AND SIGNATURES, under the subject (Business and above, as ClickUp's):
+ * a template puts its subject and words in the email; a signature goes under
+ * the words; what is written can be saved as a template of one's own.
+ */
+export function CommentEmailTools({
+  setup,
+  workspaceId,
+  draft,
+  text,
+  onUseTemplate,
+  onUseSignature,
+}: {
+  setup?: CommentEmailSetup
+  workspaceId?: string
+  draft: EmailDraft
+  text: string
+  onUseTemplate: (template: EmailTemplate) => void
+  onUseSignature: (signature: EmailSignature) => void
+}) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [naming, setNaming] = useState(false)
+  const [name, setName] = useState('')
+  const save = useMutation({
+    mutationFn: () =>
+      api(`/workspaces/${workspaceId}/email-templates`, {
+        method: 'POST',
+        body: { name: name.trim(), subject: draft.subject.trim() || undefined, body: text },
+      }),
+    onSuccess: async () => {
+      toast.success(t('taskDetail.emailTemplateSaved'))
+      setNaming(false)
+      setName('')
+      await qc.invalidateQueries({ queryKey: ['task-email-setup'] })
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : String(err)),
+  })
+  if (!setup?.plan?.signaturesAndTemplates) return null
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="comment-email-tools">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button type="button" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground" data-testid="comment-email-templates">
+            <FileText className="h-3 w-3" />
+            {t('taskDetail.emailTemplates')}
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-64">
+          {setup.templates.length === 0 && <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">{t('taskDetail.emailTemplatesNone')}</DropdownMenuLabel>}
+          {setup.templates.map((tpl) => (
+            <DropdownMenuItem key={tpl.id} data-testid={`comment-email-template-${tpl.id}`} onSelect={() => onUseTemplate(tpl)}>
+              {tpl.name}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button type="button" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground" data-testid="comment-email-signatures">
+            <PenLine className="h-3 w-3" />
+            {t('taskDetail.emailSignature')}
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-64">
+          {setup.signatures.map((sig) => (
+            <DropdownMenuItem key={sig.id} data-testid={`comment-email-signature-${sig.id}`} onSelect={() => onUseSignature(sig)}>
+              {sig.name}
+            </DropdownMenuItem>
+          ))}
+          {workspaceId && (
+            <>
+              {setup.signatures.length > 0 && <DropdownMenuSeparator />}
+              <DropdownMenuItem onSelect={() => window.location.assign(`/app/${workspaceId}/email?tab=signatures`)}>{t('taskDetail.emailSettings')}</DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {workspaceId && !naming && (
+        <button
+          type="button"
+          className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+          data-testid="comment-email-save-template"
+          disabled={!text.trim()}
+          onClick={() => setNaming(true)}
+        >
+          {t('taskDetail.emailSaveTemplate')}
+        </button>
+      )}
+      {naming && (
+        <span className="flex items-center gap-1">
+          <input
+            autoFocus
+            data-testid="comment-email-template-name"
+            className="w-40 rounded-md border border-border bg-background px-1.5 py-0.5"
+            placeholder={t('taskDetail.emailTemplateName')}
+            value={name}
+            maxLength={120}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && name.trim()) save.mutate()
+              if (e.key === 'Escape') setNaming(false)
+            }}
+          />
+          <Button size="sm" variant="outline" data-testid="comment-email-template-save" disabled={!name.trim() || save.isPending} onClick={() => save.mutate()}>
+            {t('common.save')}
+          </Button>
+        </span>
+      )}
+    </div>
+  )
+}
+
+/** Monday next, or today when it is Monday before nine, at nine. */
+function nextMondayAtNine(now: Date): Date {
+  const d = new Date(now)
+  d.setHours(9, 0, 0, 0)
+  const add = (8 - d.getDay()) % 7 || (now < d ? 0 : 7)
+  d.setDate(d.getDate() + add)
+  return d
+}
+
+/**
+ * SEND LATER: the arrow beside Send, as ClickUp's — a few times, or one picked.
+ * Pro and above; below, it says so rather than going missing.
+ */
+export function CommentEmailSchedule({ setup, disabled, onSchedule }: { setup?: CommentEmailSetup; disabled: boolean; onSchedule: (at: Date) => void }) {
+  const { t } = useTranslation()
+  const [picking, setPicking] = useState(false)
+  const [when, setWhen] = useState('')
+  const allowed = setup?.plan?.scheduling === true
+  const now = new Date()
+  const inHour = new Date(now.getTime() + 60 * 60 * 1000)
+  const tomorrow = new Date(now)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  tomorrow.setHours(9, 0, 0, 0)
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" variant="outline" className="px-1.5" data-testid="comment-email-schedule" disabled={disabled} title={t('taskDetail.emailScheduleMenu')}>
+            <ChevronDown className="h-3.5 w-3.5" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuLabel className="text-xs">{t('taskDetail.emailScheduleMenu')}</DropdownMenuLabel>
+          {!allowed && (
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground" data-testid="comment-email-schedule-locked">
+              {t('taskDetail.emailPlanScheduling')}
+            </DropdownMenuLabel>
+          )}
+          <DropdownMenuItem disabled={!allowed} data-testid="comment-email-schedule-hour" onSelect={() => onSchedule(inHour)}>
+            {t('taskDetail.emailScheduleInHour')}
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={!allowed} data-testid="comment-email-schedule-tomorrow" onSelect={() => onSchedule(tomorrow)}>
+            {t('taskDetail.emailScheduleTomorrow')}
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={!allowed} data-testid="comment-email-schedule-monday" onSelect={() => onSchedule(nextMondayAtNine(now))}>
+            {t('taskDetail.emailScheduleMonday')}
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={!allowed} data-testid="comment-email-schedule-pick" onSelect={() => setPicking(true)}>
+            <CalendarClock className="mr-2 h-3.5 w-3.5" />
+            {t('taskDetail.emailSchedulePick')}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {picking && (
+        <span className="flex items-center gap-1">
+          <input
+            type="datetime-local"
+            data-testid="comment-email-schedule-at"
+            className="rounded-md border border-border bg-background px-1.5 py-0.5 text-xs"
+            value={when}
+            onChange={(e) => setWhen(e.target.value)}
+          />
+          <Button
+            size="sm"
+            data-testid="comment-email-schedule-confirm"
+            disabled={!when}
+            onClick={() => {
+              const at = new Date(when)
+              if (!Number.isNaN(at.getTime())) onSchedule(at)
+              setPicking(false)
+              setWhen('')
+            }}
+          >
+            {t('taskDetail.emailScheduleConfirm')}
+          </Button>
+        </span>
+      )}
+    </>
+  )
+}
+
+export type ScheduledEmail = {
+  id: string
+  sendAt: string
+  status: 'scheduled' | 'sending' | 'failed'
+  error: string | null
+  to: string[]
+  subject: string | null
+}
+
+/**
+ * THIS PERSON'S EMAILS WAITING ON THE TASK, as ClickUp shows a reminder of a
+ * scheduled one: when, to whom, Send now and Cancel — and one that could not
+ * go, with why.
+ */
+export function ScheduledEmails({ taskId }: { taskId: string }) {
+  const { t } = useTranslation()
+  const { formatDateTime } = useDateFormat()
+  const qc = useQueryClient()
+  const list = useQuery({
+    queryKey: ['task-email-scheduled', taskId],
+    queryFn: () => api<ScheduledEmail[]>(`/tasks/${taskId}/comments/email/scheduled`),
+    staleTime: 10_000,
+    refetchInterval: (q) => ((q.state.data ?? []).some((e) => e.status !== 'failed') ? 15_000 : false),
+  })
+  const act = useMutation({
+    mutationFn: ({ id, how }: { id: string; how: 'send' | 'cancel' }) =>
+      how === 'send'
+        ? api(`/tasks/${taskId}/comments/email/scheduled/${id}/send`, { method: 'POST' })
+        : api(`/tasks/${taskId}/comments/email/scheduled/${id}`, { method: 'DELETE' }),
+    onSettled: async () => {
+      await qc.invalidateQueries({ queryKey: ['task-email-scheduled', taskId] })
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'comments'] })
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : String(err)),
+  })
+  const rows = list.data ?? []
+  if (rows.length === 0) return null
+  return (
+    <div className="mb-2 space-y-1 rounded-md border border-border bg-muted/20 p-2 text-xs" data-testid="comment-email-scheduled">
+      <p className="font-medium">{t('taskDetail.emailScheduledList')}</p>
+      {rows.map((e) => (
+        <div key={e.id} className="flex flex-wrap items-center gap-2" data-testid="comment-email-scheduled-row" data-status={e.status} data-id={e.id}>
+          <CalendarClock className="h-3 w-3 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate">
+            {e.status === 'failed'
+              ? t('taskDetail.emailScheduledFailed', { error: e.error ?? '' })
+              : t('taskDetail.emailScheduledRow', { to: e.to.join(', '), when: formatDateTime(e.sendAt) })}
+            {e.subject ? ` — ${e.subject}` : ''}
+          </span>
+          {e.status === 'scheduled' && (
+            <button type="button" className="text-accent hover:underline" data-testid="comment-email-scheduled-send" onClick={() => act.mutate({ id: e.id, how: 'send' })}>
+              {t('taskDetail.emailSendNow')}
+            </button>
+          )}
+          {e.status !== 'sending' && (
+            <button type="button" className="text-muted-foreground hover:text-foreground" data-testid="comment-email-scheduled-cancel" onClick={() => act.mutate({ id: e.id, how: 'cancel' })}>
+              {t('taskDetail.emailCancelScheduled')}
+            </button>
+          )}
+        </div>
+      ))}
     </div>
   )
 }

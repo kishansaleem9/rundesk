@@ -59,6 +59,7 @@ function makeSvc() {
     config,
     {} as never,
     { upsertFromOAuth: async (input: unknown) => { accounts.push(input); return { id: 'acct', created: true } } } as never,
+    {} as never,
   )
   Object.assign(svc as never, {
     exchangeCode: async () => ({ accessToken: 'access', refreshToken: 'refresh', expiresAt: null, scopes: ['calendar'] }),

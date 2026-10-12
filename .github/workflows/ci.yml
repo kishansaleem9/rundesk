@@ -130,13 +130,19 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # A unit run passes when no test failed, not when it exited 0: node:test
+      # exits 0 over a describe whose body threw, none of its tests run
+      # (found-12-oct/a-describe-that-throws-passes).
       - name: API tests
-        run: pnpm --filter @rundesk/api test
+        run: node scripts/unit-tests-pass.mjs -- pnpm --filter @rundesk/api test
 
       # Pure logic lifted out of components so it can be checked without a DOM
       # — e.g. which notification types Clear all is allowed to bin.
       - name: Web unit tests
-        run: pnpm --filter @rundesk/web test
+        run: node scripts/unit-tests-pass.mjs -- pnpm --filter @rundesk/web test
+
+      - name: And a unit run fails on a suite that never ran
+        run: node scripts/unit-tests-pass.mjs --mutate
 
       - name: Migration sequence guardrail
         run: node scripts/check-migration-order.mjs
@@ -997,6 +1003,12 @@ jobs:
           SMTP_USER: lane-mail
           SMTP_PASS: lane-mail-key
           SMTP_SECURE: 'false'
+          # And the two it sets for a task's email from a linked mailbox
+          # (`found-9-oct/task-email-sends-from-the-server`): its answers are
+          # read back every two seconds rather than two minutes, and one set
+          # for later is sent within a second, so the suite can wait them out.
+          EMAIL_REPLY_POLL_SECONDS: 2
+          TASK_EMAIL_SCHEDULE_SECONDS: 1
           # Integration keys that are not real — the six `lane_oauth_env`
           # exports. A grant's start refuses a provider with no keys, and the
           # suites that read a grant's state start Google, Microsoft and
@@ -1946,6 +1958,18 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # One Gantt, as ClickUp's (resume-defects/resume-5): the list's Gantt tab
+      # and the workspace timeline draw the same chart — the time period from
+      # Day to Year, the date marker named for the scale, dependency lines drawn
+      # and double-clicked away, the critical path and slack time, and Export as
+      # PDF or PNG on Business. Dates and dependencies read back by SQL.
+      - name: One Gantt on the list and the timeline
+        timeout-minutes: 15
+        run: node test/e2e/gantt-one-chart.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §M frame `20:57` — the Teams empty state. Asserted in BOTH conditions:
       # a check run only when empty cannot tell an empty state from a broken page.
       - name: Teams empty state
@@ -2054,6 +2078,19 @@ jobs:
       - name: The comment box sends email, and the answers land in the task
         timeout-minutes: 15
         run: node test/e2e/comment-email.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # `found-9-oct/task-email-sends-from-the-server` — a task's email from the
+      # writer's own Gmail or Outlook, as ClickUp's Email ClickApp sends it:
+      # linked through the provider's consent (the calendar stub above plays
+      # Google and Microsoft), shared by its linker, sent through the provider
+      # and its answers read back into the task; signatures and templates on
+      # Business; sent later, cancelled or sent now; a Free plan's 100 emails.
+      - name: A task's email goes from the writer's own Gmail or Outlook
+        timeout-minutes: 15
+        run: node test/e2e/task-email-accounts.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

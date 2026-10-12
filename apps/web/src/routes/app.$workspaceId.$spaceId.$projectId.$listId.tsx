@@ -103,9 +103,8 @@ import {
   UNASSIGNED_FILTER,
 } from '../lib/task-filters'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
-import { carriesTime, toDateInput, withDatePart, shownDay, shiftByDays } from '../lib/task-dates'
-import { criticalPath, GANTT_DRAG_THRESHOLD } from '../lib/gantt'
-import { chartDayPx, useDrawnDays } from '../lib/drawn-days'
+import { carriesTime, toDateInput, withDatePart, shownDay } from '../lib/task-dates'
+import { GanttChart, type DatePatch, type GanttGroup, type GanttLink, type GanttTask } from '../components/gantt-chart'
 import { SPACE_VIEW_KEYS, type SpaceViewKey } from '../lib/space-views'
 import { TaskDetailSheet } from '../components/task-detail-sheet'
 import { DayBox } from '../components/date-time-box'
@@ -119,7 +118,7 @@ import { SharePanel } from '../components/share-panel'
 import { useFeatureGate, freeUsesOf, type GatedFeature } from '../components/feature-gate'
 import { getRealtimeSocket, joinRooms } from '../lib/realtime'
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent, useDraggable, useDroppable } from '@dnd-kit/core'
-import { addDays, addMonths, differenceInCalendarDays, endOfMonth, endOfWeek, format, isSameMonth, isToday, startOfDay, startOfMonth, startOfWeek } from 'date-fns'
+import { addDays, addMonths, endOfMonth, endOfWeek, format, isSameMonth, isToday, startOfMonth, startOfWeek } from 'date-fns'
 import { ListSkeleton } from '../components/loading-skeletons'
 import { relativeTime } from '../lib/relative-time'
 import { fieldsOfList } from '../lib/field-scope'
@@ -236,6 +235,8 @@ type TaskItem = {
   openBlockerCount?: number
   blocksOpenCount?: number
   blockedBy?: string[]
+  /** The tasks it waits on, each with the dependency's own row (`resume-defects/resume-5`). */
+  dependencyLinks?: Array<{ id: string; blocker: string }>
   /*
    * §V2-S13 frame `10:35` — "Card cover  Image ›".
    *
@@ -1596,6 +1597,12 @@ function ListDetail() {
     blurb: t('gate.boardExportBlurb'),
     highlights: [t('gate.boardExportPoint1'), t('gate.boardExportPoint2'), t('gate.boardExportPoint3')],
   }
+  const GANTT_EXPORT_GATE: GatedFeature = {
+    planFeature: 'ganttExport',
+    name: t('gate.ganttExport'),
+    blurb: t('gate.ganttExportBlurb'),
+    highlights: [t('gate.ganttExportPoint1'), t('gate.ganttExportPoint2'), t('gate.ganttExportPoint3')],
+  }
   // §5 per-space view config (ClickUp "required views"): which task views this
   // space's lists expose + the default that opens. Reuses the ['spaces', ws]
   // cache, so it adds no fetch beyond what the sidebar/space page already do.
@@ -2770,23 +2777,6 @@ function ListDetail() {
       dueDateHasTime: carriesTime(current, task?.dueDateHasTime),
     })
   }
-  // Shift a task's whole span by `deltaDays` (Gantt bar drag, Plan §5.4). Reuses
-  // the same PATCH /tasks/:id path as the calendar reschedule above, moving
-  // whichever of start/due the task actually has so the duration is preserved.
-  // Each by whole days from the day it is drawn on, keeping its time
-  // (`shiftByDays`; `found-5-oct/timeline-press-moves-dates`): `yyyy-MM-dd`
-  // saved a task due at 15:00 as due at midnight.
-  const rescheduleTaskSpan = async (task: TaskItem, deltaDays: number) => {
-    if (deltaDays === 0) return
-    const patch: Record<string, string | boolean> = {}
-    const start = shiftByDays(task.startDate, deltaDays, task.startDateHasTime)
-    const due = shiftByDays(task.dueDate, deltaDays, task.dueDateHasTime)
-    // Each with the time it carried, or its lack of one (`carriesTime`).
-    if (start) Object.assign(patch, { startDate: start, startDateHasTime: carriesTime(task.startDate, task.startDateHasTime) })
-    if (due) Object.assign(patch, { dueDate: due, dueDateHasTime: carriesTime(task.dueDate, task.dueDateHasTime) })
-    if (Object.keys(patch).length === 0) return
-    await patchTaskSaying(task.id, patch)
-  }
   const createTaskOnDay = async (day: Date, title: string) => {
     await api('/tasks', {
       method: 'POST',
@@ -3860,11 +3850,14 @@ function ListDetail() {
             onRefresh={refetch}
           />
         ) : activeView === 'gantt' ? (
-          <GanttView
+          <ListGantt
             tasks={visibleTasks}
             groupBy={groupBy}
+            listName={listMeta?.name ?? t('list.defaultListName')}
             onOpenTask={(id) => setSelectedTaskId(id)}
-            onReschedule={rescheduleTaskSpan}
+            onPatch={(taskId, patch) => patchTaskSaying(taskId, patch)}
+            onRefresh={refetch}
+            mayExportPicture={() => requireFeature(GANTT_EXPORT_GATE)}
           />
         ) : activeView === 'team' ? (
           <TeamView
@@ -6423,128 +6416,6 @@ function VirtualizedBoardCards({
 
 const BULK_PRIORITIES: TaskPriority[] = ['urgent', 'high', 'normal', 'low']
 
-// ---------------------------------------------------------------------------
-// Gantt view — timeline bars, dependency arrows, critical-path highlight, and
-// group-by swimlanes (Plan §5.4). Bars are click-to-open and can be dragged
-// horizontally to reschedule their whole span (snapped to the day grid) via the
-// same PATCH /tasks/:id path as the calendar; a day/week/month zoom control
-// varies the per-day column width.
-// ---------------------------------------------------------------------------
-// Per-day column width by zoom level. "day" is the most zoomed-in (widest
-// columns); "month" packs many days into the viewport.
-type GanttZoom = 'day' | 'week' | 'month'
-const GANTT_DAY_WIDTHS: Record<GanttZoom, number> = { day: 36, week: 18, month: 7 }
-// Below this column width the per-day number labels are dropped (too cramped).
-const GANTT_DAYNUM_MIN_W = 16
-// Pointer travel before a bar press is a drag rather than a click: `GANTT_DRAG_THRESHOLD`
-// (`lib/gantt.ts`), the workspace timeline's too.
-const GANTT_ROW_H = 34
-const GANTT_LABEL_W = 220
-const GANTT_HEADER_H = 44
-const GANTT_BAR_H = 18
-
-// A single draggable Gantt bar. A press that moves past GANTT_DRAG_THRESHOLD
-// becomes a reschedule (snapped to whole days); a press that doesn't is a click
-// that opens the task — keeping click-to-open working alongside drag (§5.4).
-function GanttBar({
-  task,
-  x,
-  w,
-  top,
-  dayW,
-  critical,
-  done,
-  locale,
-  onOpen,
-  onReschedule,
-}: {
-  task: TaskItem
-  x: number
-  w: number
-  top: number
-  dayW: number
-  critical: boolean
-  done: boolean
-  locale: string
-  onOpen: (taskId: string) => void
-  onReschedule: (task: TaskItem, deltaDays: number) => void
-}) {
-  const [dragDx, setDragDx] = useState<number | null>(null)
-  const state = useRef<{ startX: number; moved: boolean } | null>(null)
-  /* A drag reschedules the task; a reader who may not change it gets the press, which opens it. */
-  const mayDrag = useListCaps().mayEditTask(task)
-  const start = shownDay(task.startDate, task.startDateHasTime) ?? shownDay(task.dueDate, task.dueDateHasTime)
-  const end = shownDay(task.dueDate, task.dueDateHasTime) ?? shownDay(task.startDate, task.startDateHasTime)
-
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return
-    e.stopPropagation()
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId)
-    } catch {
-      // capture is best-effort
-    }
-    state.current = { startX: e.clientX, moved: false }
-    setDragDx(0)
-  }
-  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!state.current || !mayDrag) return
-    const dx = e.clientX - state.current.startX
-    if (Math.abs(dx) > GANTT_DRAG_THRESHOLD) state.current.moved = true
-    setDragDx(dx)
-  }
-  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    const st = state.current
-    const dx = dragDx ?? 0
-    state.current = null
-    setDragDx(null)
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId)
-    } catch {
-      // release is best-effort
-    }
-    if (st && st.moved) {
-      const days = Math.round(dx / dayW)
-      if (days !== 0) onReschedule(task, days)
-    } else {
-      onOpen(task.id)
-    }
-  }
-
-  const snapDays = dragDx != null ? Math.round(dragDx / dayW) : 0
-  const dragging = dragDx != null
-
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-label={task.title}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onOpen(task.id)
-        }
-      }}
-      className={cn(
-        'absolute flex touch-none select-none items-center truncate rounded px-1.5 text-[10px] text-white shadow-sm',
-        !mayDrag ? 'cursor-pointer' : dragging ? 'z-20 cursor-grabbing ring-2 ring-white/70' : 'cursor-grab',
-        critical ? 'bg-red-500' : done ? 'bg-emerald-500/80' : 'bg-brand-700',
-      )}
-      style={{ left: x + snapDays * dayW, top, width: w, height: GANTT_BAR_H }}
-      title={
-        start && end
-          ? `${task.title} · ${shortDate(start, locale)} – ${shortDate(end, locale)}`
-          : task.title
-      }
-    >
-      <span className="pointer-events-none truncate">{task.title}</span>
-    </div>
-  )
-}
-
 /**
  * §V2-13 — TEAM VIEW, frames `07:40` and `09:25`.
  *
@@ -6734,335 +6605,129 @@ function TeamView({
   )
 }
 
-function GanttView({
+/*
+ * THE LIST'S GANTT TAB — the one Gantt (`components/gantt-chart.tsx`,
+ * `resume-defects/resume-5`), drawn from this list's dated tasks and grouped as
+ * the list groups them. It was a Gantt of its own here, with arrows and a
+ * critical path and none of the timeline's Today, Auto fit, week numbers,
+ * panel or export; the two had drifted apart, and nothing here had a test id.
+ */
+function ListGantt({
   tasks,
   groupBy,
+  listName,
   onOpenTask,
-  onReschedule,
+  onPatch,
+  onRefresh,
+  mayExportPicture,
 }: {
   tasks: TaskItem[]
   groupBy: 'status' | 'priority' | 'assignee'
+  listName: string
   onOpenTask: (taskId: string) => void
-  onReschedule: (task: TaskItem, deltaDays: number) => void
+  onPatch: (taskId: string, patch: DatePatch) => Promise<void>
+  onRefresh: () => Promise<unknown>
+  mayExportPicture: () => boolean
 }) {
-  const { t, locale } = useTranslation()
+  const { t } = useTranslation()
+  const caps = useListCaps()
   const ordered = useOrderedStatuses()
-  const [zoom, setZoom] = useState<GanttZoom>('week')
-  const scroller = useRef<HTMLDivElement | null>(null)
+  const dated = useMemo(() => tasks.filter((task) => task.startDate || task.dueDate), [tasks])
 
-  // Each task's [start,end]; a task needs at least a due or start date to plot.
-  // On the day each is SHOWN as (`shownDay`): a date-only day is that day in
-  // any zone, where the local day of its UTC midnight drew it a day early west
-  // of UTC (`found-5-oct/timeline-press-moves-dates`).
-  const scheduled = useMemo(() => {
-    return tasks
-      .map((task) => {
-        const s = shownDay(task.startDate, task.startDateHasTime)
-        const d = shownDay(task.dueDate, task.dueDateHasTime)
-        if (!s && !d) return null
-        const start = s ?? d!
-        const end = d ?? s!
-        return { task, start: start <= end ? start : end, end: start <= end ? end : start }
-      })
-      .filter((x): x is { task: TaskItem; start: Date; end: Date } => x != null)
-  }, [tasks])
-
-  const range = useMemo(() => {
-    if (scheduled.length === 0) return null
-    let min = scheduled[0].start
-    let max = scheduled[0].end
-    for (const s of scheduled) {
-      if (s.start < min) min = s.start
-      if (s.end > max) max = s.end
-    }
-    const start = addDays(min, -2)
-    const end = addDays(max, 2)
-    return { start, end, days: differenceInCalendarDays(end, start) + 1 }
-  }, [scheduled])
-  // A zoom's width, narrowed for a span too long to lay out at it (`chartDayPx`).
-  const dayW = chartDayPx(GANTT_DAY_WIDTHS[zoom], range?.days ?? 0)
-
-  // Critical path: longest cumulative-duration chain through blockedBy edges.
-  const criticalIds = useMemo(() => {
-    const ids = new Set(scheduled.map((s) => s.task.id))
-    return criticalPath(
-      scheduled.map((s) => ({
-        id: s.task.id,
-        durationDays: differenceInCalendarDays(s.end, s.start) + 1,
-        blockedBy: (s.task.blockedBy ?? []).filter((b) => ids.has(b)),
-      })),
-    )
-  }, [scheduled])
-
-  // Build swimlanes + a flat render order; assign each task a row index.
-  const { flatRows, layout } = useMemo(() => {
-    const groupsMap = new Map<string, { label: string; items: typeof scheduled }>()
-    const groupKey = (task: TaskItem): { id: string; label: string } => {
+  /*
+   * The list's grouping, in the list's own order: statuses as the list orders
+   * them, priorities from urgent down, people by name with nobody last.
+   */
+  const groups = useMemo<GanttGroup[]>(() => {
+    const byKey = new Map<string, { title: string; order: number; rows: GanttTask[] }>()
+    for (const task of dated) {
+      let key: string
+      let title: string
+      let order: number
       if (groupBy === 'assignee') {
         const a = task.assignees?.[0]
-        return { id: a?.userId ?? '__unassigned__', label: a?.user?.displayName ?? t('list.group.unassigned') }
+        key = a?.userId ?? '__unassigned__'
+        title = a?.user?.displayName ?? t('list.group.unassigned')
+        order = a ? 0 : 1
+      } else if (groupBy === 'priority') {
+        key = task.priority
+        title = t(PRIORITY_LABEL_KEYS[task.priority])
+        order = BULK_PRIORITIES.indexOf(task.priority)
+      } else {
+        const meta = ordered.find((s) => s.key === task.status)
+        key = task.status
+        title = resolveStatusLabel(task.status, meta?.name, t)
+        order = meta ? ordered.indexOf(meta) : Number.MAX_SAFE_INTEGER
       }
-      if (groupBy === 'priority') return { id: task.priority, label: t(PRIORITY_LABEL_KEYS[task.priority]) }
-      const meta = ordered.find((s) => s.key === task.status)
-      return { id: task.status, label: resolveStatusLabel(task.status, meta?.name, t) }
-    }
-    for (const s of scheduled) {
-      const g = groupKey(s.task)
-      if (!groupsMap.has(g.id)) groupsMap.set(g.id, { label: g.label, items: [] })
-      groupsMap.get(g.id)!.items.push(s)
-    }
-    const rows: Array<{ kind: 'group'; label: string } | { kind: 'task'; s: (typeof scheduled)[number] }> = []
-    const lay = new Map<string, { rowIdx: number; x: number; w: number }>()
-    let idx = 0
-    for (const [, group] of groupsMap) {
-      rows.push({ kind: 'group', label: group.label })
-      idx++
-      const sorted = [...group.items].sort((a, b) => a.start.getTime() - b.start.getTime())
-      for (const s of sorted) {
-        if (range) {
-          const x = differenceInCalendarDays(s.start, range.start) * dayW
-          const w = Math.max(dayW, (differenceInCalendarDays(s.end, s.start) + 1) * dayW)
-          lay.set(s.task.id, { rowIdx: idx, x, w })
-        }
-        rows.push({ kind: 'task', s })
-        idx++
-      }
-    }
-    return { flatRows: rows, layout: lay }
-  }, [scheduled, groupBy, ordered, range, dayW, t])
-
-  if (!range) {
-    return (
-      <Card className="p-8 text-center text-sm text-muted-foreground">
-        {t('list.gantt.noDatedTasks')}
-      </Card>
-    )
-  }
-
-  const timelineW = range.days * dayW
-  const bodyH = flatRows.length * GANTT_ROW_H
-  const showDayNums = dayW >= GANTT_DAYNUM_MIN_W
-
-  // Arrow endpoints from blocker bar right-edge → blocked bar left-edge.
-  const arrows: Array<{ id: string; d: string; critical: boolean }> = []
-  for (const s of scheduled) {
-    const to = layout.get(s.task.id)
-    if (!to) continue
-    for (const bId of s.task.blockedBy ?? []) {
-      const from = layout.get(bId)
-      if (!from) continue
-      const y1 = GANTT_HEADER_H + from.rowIdx * GANTT_ROW_H + GANTT_ROW_H / 2
-      const x1 = from.x + from.w
-      const y2 = GANTT_HEADER_H + to.rowIdx * GANTT_ROW_H + GANTT_ROW_H / 2
-      const x2 = to.x
-      const midX = Math.max(x1 + 8, x2 - 8)
-      const critical = criticalIds.has(s.task.id) && criticalIds.has(bId)
-      arrows.push({
-        id: `${bId}->${s.task.id}`,
-        d: `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`,
-        critical,
+      const g = byKey.get(key) ?? { title, order, rows: [] }
+      g.rows.push({
+        id: task.id,
+        title: task.title,
+        startDate: task.startDate ?? null,
+        dueDate: task.dueDate ?? null,
+        startDateHasTime: task.startDateHasTime,
+        dueDateHasTime: task.dueDateHasTime,
+        // A status of the closed kind is drawn faded, as `done` is, whatever the list calls it.
+        status: task.statusCategory === 'closed' ? 'done' : task.status,
+        priority: task.priority,
+        isMilestone: task.isMilestone,
+        listName,
+        mayEdit: caps.mayEditTask(task),
       })
+      byKey.set(key, g)
     }
+    const startOf = (row: GanttTask) => new Date(row.startDate ?? row.dueDate ?? 0).getTime()
+    return [...byKey.entries()]
+      .sort(([, a], [, b]) => (a.order !== b.order ? a.order - b.order : a.title.localeCompare(b.title)))
+      .map(([key, g]) => ({ key, title: g.title, rows: g.rows.sort((x, y) => startOf(x) - startOf(y)) }))
+  }, [dated, groupBy, ordered, t, listName, caps])
+
+  const links = useMemo<GanttLink[]>(
+    () => dated.flatMap((task) => (task.dependencyLinks ?? []).map((l) => ({ id: l.id, blocker: l.blocker, blocked: task.id }))),
+    [dated],
+  )
+
+  /*
+   * A LINE DRAWN OR TAKEN OUT IS A DEPENDENCY MADE OR DELETED, by the routes the
+   * task sheet's Relationships use, and refused in their words.
+   */
+  const said = (err: unknown) => toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotUpdateTask'))
+  const link = async (blocker: string, blocked: string) => {
+    try {
+      await api(`/tasks/${blocked}/dependencies`, { method: 'POST', body: { relatedTaskId: blocker, type: 'blocked_by' } })
+    } catch (err) {
+      said(err)
+    }
+    await onRefresh()
+  }
+  const unlink = async (line: GanttLink) => {
+    try {
+      await api(`/tasks/${line.blocked}/dependencies/${line.id}`, { method: 'DELETE' })
+    } catch (err) {
+      said(err)
+    }
+    await onRefresh()
   }
 
-  const todayX =
-    differenceInCalendarDays(startOfDay(new Date()), range.start) * dayW
-
+  if (dated.length === 0) {
+    return <Card className="p-8 text-center text-sm text-muted-foreground">{t('list.gantt.noDatedTasks')}</Card>
+  }
   return (
-    <Card className="overflow-hidden p-0">
-      <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
-        <span className="min-h-4">
-          {criticalIds.size > 0 && (
-            <>
-              <span className="mr-1 inline-block h-2 w-2 rounded-sm bg-red-500 align-middle" /> {t('list.gantt.criticalPath')}
-            </>
-          )}
-        </span>
-        <div
-          className="flex items-center gap-0.5 rounded-md border border-border p-0.5"
-          role="group"
-          aria-label={t('list.gantt.zoomAria')}
-        >
-          {(['day', 'week', 'month'] as const).map((z) => (
-            <button
-              key={z}
-              type="button"
-              onClick={() => setZoom(z)}
-              className={cn(
-                'rounded px-2 py-0.5',
-                zoom === z ? 'bg-brand-700 text-white' : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {z === 'day' ? t('timeline.zoomDay') : z === 'week' ? t('timeline.zoomWeek') : t('timeline.zoomMonth')}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="flex">
-        {/* Label column */}
-        <div className="shrink-0 border-r border-border" style={{ width: GANTT_LABEL_W }}>
-          <div style={{ height: GANTT_HEADER_H }} className="border-b border-border bg-muted/40" />
-          {flatRows.map((row, i) =>
-            row.kind === 'group' ? (
-              <div
-                key={`g-${i}`}
-                style={{ height: GANTT_ROW_H }}
-                className="flex items-center px-3 text-xs font-semibold text-foreground bg-muted/30 truncate"
-              >
-                {row.label}
-              </div>
-            ) : (
-              <button
-                key={row.s.task.id}
-                onClick={() => onOpenTask(row.s.task.id)}
-                style={{ height: GANTT_ROW_H }}
-                className="flex w-full items-center px-3 text-left text-[13px] hover:bg-muted/40 truncate"
-                title={row.s.task.title}
-              >
-                <span className="truncate">{row.s.task.title}</span>
-              </button>
-            ),
-          )}
-        </div>
-
-        {/* Timeline */}
-        <div ref={scroller} data-testid="gantt-scroller" className="overflow-x-auto flex-1">
-          <div className="relative" style={{ width: timelineW, height: GANTT_HEADER_H + bodyH }}>
-            <GanttDays
-              scroller={scroller}
-              start={range.start}
-              days={range.days}
-              dayW={dayW}
-              height={GANTT_HEADER_H + bodyH}
-              showDayNums={showDayNums}
-              locale={locale}
-            />
-            {/* today line */}
-            {todayX >= 0 && todayX <= timelineW && (
-              <div
-                className="absolute top-0 w-px bg-red-400/70 z-10"
-                style={{ left: todayX, height: GANTT_HEADER_H + bodyH }}
-              />
-            )}
-            {/* dependency arrows */}
-            <svg
-              className="absolute inset-0 pointer-events-none"
-              width={timelineW}
-              height={GANTT_HEADER_H + bodyH}
-            >
-              <defs>
-                <marker id="gantt-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-                  <path d="M0,0 L6,3 L0,6 Z" className="fill-muted-foreground" />
-                </marker>
-                <marker id="gantt-arrow-crit" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-                  <path d="M0,0 L6,3 L0,6 Z" className="fill-red-500" />
-                </marker>
-              </defs>
-              {arrows.map((a) => (
-                <path
-                  key={a.id}
-                  d={a.d}
-                  fill="none"
-                  className={a.critical ? 'stroke-red-500' : 'stroke-muted-foreground/50'}
-                  strokeWidth={a.critical ? 1.6 : 1.2}
-                  markerEnd={`url(#${a.critical ? 'gantt-arrow-crit' : 'gantt-arrow'})`}
-                />
-              ))}
-            </svg>
-            {/* bars — drag to reschedule (snapped to the day grid), click to open */}
-            {flatRows.map((row, i) => {
-              if (row.kind !== 'task') return null
-              const lay = layout.get(row.s.task.id)
-              if (!lay) return null
-              const critical = criticalIds.has(row.s.task.id)
-              const done = row.s.task.statusCategory === 'closed' || row.s.task.status === 'done'
-              return (
-                <GanttBar
-                  key={row.s.task.id}
-                  task={row.s.task}
-                  x={lay.x}
-                  w={lay.w}
-                  top={GANTT_HEADER_H + i * GANTT_ROW_H + (GANTT_ROW_H - GANTT_BAR_H) / 2}
-                  dayW={dayW}
-                  critical={critical}
-                  done={done}
-                  locale={locale}
-                  onOpen={onOpenTask}
-                  onReschedule={onReschedule}
-                />
-              )
-            })}
-          </div>
-        </div>
-      </div>
-    </Card>
-  )
-}
-
-/**
- * The Gantt's month markers and day grid, for the days its scroller shows and
- * a margin (`useDrawnDays`), not the whole span: one task in year 202 made the
- * span 666,000 days, a column each, and the Gantt took a minute to draw with
- * 1.5 million nodes (`found-6-oct/timeline-and-gantt-draw-a-column-per-day`).
- * Its own component, so a scroll that moves the window draws the grid again
- * and not the bars. A month's marker stands on its first day, and on the
- * span's first.
- */
-function GanttDays({
-  scroller,
-  start,
-  days,
-  dayW,
-  height,
-  showDayNums,
-  locale,
-}: {
-  scroller: React.RefObject<HTMLDivElement | null>
-  start: Date
-  days: number
-  dayW: number
-  height: number
-  showDayNums: boolean
-  locale: string
-}) {
-  const drawn = useDrawnDays(scroller, dayW, days)
-  const columns: Array<{ i: number; day: Date }> = []
-  for (let i = drawn.from; i < drawn.to; i++) columns.push({ i, day: addDays(start, i) })
-  return (
-    <>
-      <div className="absolute inset-x-0 top-0" style={{ height: GANTT_HEADER_H }}>
-        {columns
-          .filter(({ i, day }) => i === 0 || day.getDate() === 1)
-          .map(({ i, day }) => (
-            <div
-              key={i}
-              data-testid="gantt-month-marker"
-              className="absolute top-1 text-[10px] font-medium text-muted-foreground"
-              style={{ left: i * dayW + 2 }}
-            >
-              {day.toLocaleDateString(locale, { month: 'short', year: 'numeric' })}
-            </div>
-          ))}
-      </div>
-      {columns.map(({ i, day }) => {
-        const weekend = day.getDay() === 0 || day.getDay() === 6
-        return (
-          <div
-            key={i}
-            data-testid="gantt-day"
-            data-day={format(day, 'yyyy-MM-dd')}
-            className={cn('absolute top-0 border-l border-border/40', weekend && 'bg-muted/20')}
-            style={{ left: i * dayW, width: dayW, height }}
-          >
-            {showDayNums && (
-              <div className="text-center text-[9px] text-muted-foreground" style={{ marginTop: GANTT_HEADER_H - 14 }}>
-                {format(day, 'd')}
-              </div>
-            )}
-          </div>
-        )
-      })}
-    </>
+    <div className="space-y-3">
+      <GanttChart
+        groups={groups}
+        links={links}
+        onCommitDates={(taskId, patch) => onPatch(taskId, patch)}
+        onOpenTask={onOpenTask}
+        onLink={link}
+        onUnlink={unlink}
+        mayExportPicture={mayExportPicture}
+        exportName="rundesk-gantt"
+        exportTitle={listName}
+        storageKey="rundesk.gantt"
+        plotKey={groupBy}
+      />
+    </div>
   )
 }
 

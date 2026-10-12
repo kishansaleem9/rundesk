@@ -246,11 +246,18 @@ lane_model_port () { echo $((9200 + $1)); }
 # then 500'd on its first write to it. A data-only migration names nothing to
 # look for and is walked past. Prints nothing when no migration does.
 newest_schema_witness () {
-  local dir="$1" f col tbl created
+  local dir="$1" f pair created
   for f in $(ls "$dir"/*.sql 2>/dev/null | sort -r); do
-    col=$(grep -oiE 'ADD COLUMN IF NOT EXISTS "[a-z0-9_]+"' "$f" | head -1 | grep -oE '"[a-z0-9_]+"' | tr -d '"')
-    tbl=$(grep -oiE 'ALTER TABLE "[a-z0-9_]+"' "$f" | head -1 | grep -oE '"[a-z0-9_]+"' | tr -d '"')
-    if [ -n "$col" ] && [ -n "$tbl" ]; then echo "$f $tbl $col"; return 0; fi
+    # The column AND ITS TABLE: the ALTER TABLE it is added under, on its own
+    # line or on one before it (older migrations split the statement). This
+    # paired the file's first column with the file's first ALTER TABLE, which
+    # can be another table's constraint, and 0186's was — the witness read
+    # `email_accounts.account_id`, a column on `task_comment_emails`, and
+    # refused a lane whose schema was whole (found-12-oct/schema-witness-pairs-another-table).
+    pair=$(awk '{ l = tolower($0) }
+      match(l, /alter table "[a-z0-9_]+"/) { t = substr(l, RSTART + 13, RLENGTH - 14) }
+      match(l, /add column if not exists "[a-z0-9_]+"/) { if (t != "") { print t, substr(l, RSTART + 26, RLENGTH - 27); exit } }' "$f")
+    if [ -n "$pair" ]; then echo "$f $pair"; return 0; fi
     created=$(grep -oiE 'CREATE TABLE IF NOT EXISTS "[a-z0-9_]+"' "$f" | head -1 | grep -oE '"[a-z0-9_]+"' | tr -d '"')
     if [ -n "$created" ]; then echo "$f $created"; return 0; fi
   done
@@ -699,6 +706,11 @@ lane_mail_env () {
   export SMTP_USER=lane-mail
   export SMTP_PASS=lane-mail-key
   export SMTP_SECURE=false
+  # A task's email from a linked mailbox (`found-9-oct/task-email-sends-from-the-server`):
+  # its answers are read back every two minutes and one set for later is sent
+  # within thirty seconds; a lane does both in seconds, so a suite can wait them out.
+  export EMAIL_REPLY_POLL_SECONDS=2
+  export TASK_EMAIL_SCHEDULE_SECONDS=1
 }
 
 lane_mail_up () {

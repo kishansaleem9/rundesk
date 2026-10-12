@@ -140,11 +140,16 @@ import { ClipEmbeds } from './clip-embed'
 import {
   CommentEmailEnvelope,
   CommentEmailFields,
+  CommentEmailSchedule,
+  CommentEmailTools,
+  ScheduledEmails,
+  defaultEmailFrom,
   emailAnswerDefaults,
   emailUnavailableReason,
   useCommentEmailSetup,
   type CommentEmail,
   type EmailDraft,
+  type EmailFrom,
 } from './comment-email'
 import { clipTokensIn } from '../lib/clip-links'
 import { RecurringTaskDialog, type RecurrenceRule } from './recurring-task-dialog'
@@ -6821,6 +6826,18 @@ function CommentsPanel({
   const emailSetup = useCommentEmailSetup(taskId)
   const emailAvailable = emailSetup.data?.available === true
   /*
+   * FROM (`found-9-oct/task-email-sends-from-the-server`): a mailbox this
+   * person linked or may send from, else the server's address; the first that
+   * sends until one is chosen, and chosen again if the one chosen went away.
+   */
+  const [emailFrom, setEmailFrom] = useState<EmailFrom>('')
+  useEffect(() => {
+    const setup = emailSetup.data
+    if (!setup) return
+    const still = (emailFrom === 'server' && !!setup.server) || setup.accounts.some((a) => a.id === emailFrom && a.status === 'connected')
+    if (!still) setEmailFrom(defaultEmailFrom(setup))
+  }, [emailSetup.data, emailFrom])
+  /*
    * WHERE THE CURSOR GOES WHEN EMAIL IS CHOSEN. The form is drawn at the choice,
    * and the closing menu then hands the cursor back to its trigger: measured on
    * lane 10, an address typed into To at once lost the box mid-word, and what
@@ -7148,9 +7165,10 @@ function CommentsPanel({
    * the form keeps everything typed and says why, beside the box and in a toast.
    */
   const sendEmail = useMutation({
-    mutationFn: async () => {
+    // `sendAt`: the arrow beside Send, as ClickUp's — kept until then (`found-9-oct/task-email-sends-from-the-server`).
+    mutationFn: async (opts: { sendAt?: Date } | void) => {
       const attachmentIds = await uploadCommentFiles()
-      return api<{ id: string }>(`/tasks/${taskId}/comments/email`, {
+      return api<{ id?: string; scheduled?: { id: string; sendAt: string } }>(`/tasks/${taskId}/comments/email`, {
         method: 'POST',
         body: {
           to: emailDraft.to,
@@ -7160,10 +7178,12 @@ function CommentsPanel({
           body: text,
           parentCommentId: replyTo ?? undefined,
           attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
+          accountId: emailFrom && emailFrom !== 'server' ? emailFrom : undefined,
+          sendAt: opts && opts.sendAt ? opts.sendAt.toISOString() : undefined,
         },
       })
     },
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       setText('')
       setCommentFiles([])
       uploadedFilesRef.current.clear()
@@ -7171,6 +7191,11 @@ function CommentsPanel({
       setEmailDraft({ to: [], cc: [], bcc: [], subject: '' })
       setEmailError(null)
       setMode('comment')
+      if (result?.scheduled) {
+        toast.success(t('taskDetail.emailScheduled', { when: new Date(result.scheduled.sendAt).toLocaleString() }))
+        await qc.invalidateQueries({ queryKey: ['task-email-scheduled', taskId] })
+        return
+      }
       toast.success(t('taskDetail.emailSent'))
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'comments'] })
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'attachments'] })
@@ -7186,6 +7211,9 @@ function CommentsPanel({
   const startEmail = (answering?: TaskComment | null) => {
     setMode('email')
     setEmailError(null)
+    // The default signature under the words, as ClickUp's composer puts it.
+    const sig = emailSetup.data?.signatures?.find((x) => x.isDefault)
+    if (sig && !text.includes(sig.body)) setText((prev) => (prev.trim() ? `${prev.trimEnd()}\n\n${sig.body}` : `\n\n${sig.body}`))
     const env = answering?.email
     if (env) {
       const d = emailAnswerDefaults(env)
@@ -7711,14 +7739,32 @@ function CommentsPanel({
             </button>
           </div>
         )}
+        <ScheduledEmails taskId={taskId} />
         {mode === 'email' && (
           <CommentEmailFields
             taskId={taskId}
             taskTitle={taskTitle ?? ''}
             from={emailSetup.data?.from ?? null}
+            setup={emailSetup.data}
+            fromId={emailFrom}
+            onFromChange={setEmailFrom}
+            workspaceId={workspaceId}
             draft={emailDraft}
             onChange={setEmailDraft}
             toInputRef={emailToInputRef}
+          />
+        )}
+        {mode === 'email' && (
+          <CommentEmailTools
+            setup={emailSetup.data}
+            workspaceId={workspaceId}
+            draft={emailDraft}
+            text={text}
+            onUseTemplate={(tpl) => {
+              setText(tpl.body)
+              if (tpl.subject) setEmailDraft((prev) => ({ ...prev, subject: tpl.subject ?? prev.subject }))
+            }}
+            onUseSignature={(sig) => setText((prev) => `${prev.trimEnd()}\n\n${sig.body}`)}
           />
         )}
         {mode === 'email' && emailError && (
@@ -8469,10 +8515,17 @@ function CommentsPanel({
                 size="sm"
                 data-testid="comment-email-send"
                 onClick={() => sendEmail.mutate()}
-                disabled={emailDraft.to.length === 0 || (!text.trim() && commentFiles.length === 0) || sendEmail.isPending}
+                disabled={!emailFrom || emailDraft.to.length === 0 || (!text.trim() && commentFiles.length === 0) || sendEmail.isPending}
               >
                 {sendEmail.isPending ? t('taskDetail.emailSending') : t('taskDetail.emailSend')}
               </Button>
+            )}
+            {mode === 'email' && (
+              <CommentEmailSchedule
+                setup={emailSetup.data}
+                disabled={!emailFrom || emailDraft.to.length === 0 || (!text.trim() && commentFiles.length === 0) || sendEmail.isPending}
+                onSchedule={(at) => sendEmail.mutate({ sendAt: at })}
+              />
             )}
             {mode === 'comment' && (
             <Button

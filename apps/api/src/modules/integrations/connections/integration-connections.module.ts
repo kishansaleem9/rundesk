@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common'
+import { PlansModule } from '../../plans/plans.module'
 import { DatabaseModule } from '../../../common/database/database.module'
 import { IntegrationConnectionsController } from './integration-connections.controller'
 import { IntegrationConnectionsService } from './integration-connections.service'
@@ -13,7 +14,7 @@ import { RateLimitGuard } from '../../../common/guards/rate-limit.guard'
 @Module({
   // §V2-14 — a calendar grant is also recorded as the connecting person's own
   // account, so the callback needs CalendarAccountsService.
-  imports: [DatabaseModule, SecurityModule, CustomRolesModule, NotificationsModule, CalendarSyncModule],
+  imports: [DatabaseModule, SecurityModule, CustomRolesModule, NotificationsModule, CalendarSyncModule, PlansModule],
   controllers: [IntegrationConnectionsController],
   // RateLimitGuard for the OAuth callback's thirty a minute (`found-30-sep/oauth-routes-unthrottled`).
   providers: [IntegrationConnectionsService, WorkspaceMemberGuard, WorkspaceAdminGuard, RateLimitGuard],

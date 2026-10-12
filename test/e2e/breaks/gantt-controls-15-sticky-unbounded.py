@@ -5,15 +5,19 @@
 # fit on screen.
 #
 # Reddens: gantt-controls: "and the date header held the top of the pane while the bars moved"
+#
+# Re-aimed 12 October: the chart is one component now (`components/gantt-chart.tsx`),
+# the timeline page's and the list's Gantt tab's (`resume-defects/resume-5`); the line
+# moved there with it. Same break.
 import io, os
-p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
+p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/components/gantt-chart.tsx')
 s = io.open(p, encoding='utf-8').read()
-a = """                style={{ maxHeight: PANE_MAX_H }}
-                onScroll={() => syncPaneScroll('chart')}
-                className="flex-1 min-w-0 overflow-auto\""""
+a = """            style={{ maxHeight: PANE_MAX_H }}
+            onScroll={() => syncPaneScroll('chart')}
+            className="flex-1 min-w-0 overflow-auto\""""
 assert s.count(a) == 1, s.count(a)
 io.open(p, 'w', encoding='utf-8').write(s.replace(
     a,
-    """                className="flex-1 min-w-0 overflow-x-auto\"""",
+    """            className="flex-1 min-w-0 overflow-x-auto\"""",
 ))
 print('BROKE 26/27: the chart pane is unbounded again, so its sticky header has no scrollport that moves')

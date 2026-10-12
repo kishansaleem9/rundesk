@@ -3,8 +3,12 @@
 # the cheapest possible reason: the tasks past day 30 are simply not drawn.
 #
 # Reddens: gantt-controls: "and nothing was cropped to do it: the range still runs"
+#
+# Re-aimed 12 October: the chart is one component now (`components/gantt-chart.tsx`),
+# the timeline page's and the list's Gantt tab's (`resume-defects/resume-5`); the line
+# moved there with it. Same break.
 import io, os
-p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
+p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/components/gantt-chart.tsx')
 s = io.open(p, encoding='utf-8').read()
 a = "    const days = Math.max(14, Math.ceil((endMs - startMs) / 86400_000))"
 assert s.count(a) == 1, s.count(a)

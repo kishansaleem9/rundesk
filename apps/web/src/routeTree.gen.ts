@@ -62,6 +62,7 @@ import { Route as AppWorkspaceIdInboxRouteImport } from './routes/app.$workspace
 import { Route as AppWorkspaceIdImportRouteImport } from './routes/app.$workspaceId.import'
 import { Route as AppWorkspaceIdGoalsRouteImport } from './routes/app.$workspaceId.goals'
 import { Route as AppWorkspaceIdFormsRouteImport } from './routes/app.$workspaceId.forms'
+import { Route as AppWorkspaceIdEmailRouteImport } from './routes/app.$workspaceId.email'
 import { Route as AppWorkspaceIdDocsRouteImport } from './routes/app.$workspaceId.docs'
 import { Route as AppWorkspaceIdDashboardRouteImport } from './routes/app.$workspaceId.dashboard'
 import { Route as AppWorkspaceIdClipsRouteImport } from './routes/app.$workspaceId.clips'
@@ -409,6 +410,13 @@ const AppWorkspaceIdFormsRoute = AppWorkspaceIdFormsRouteImport.update({
 } as any).lazy(() =>
   import('./routes/app.$workspaceId.forms.lazy').then((d) => d.Route),
 )
+const AppWorkspaceIdEmailRoute = AppWorkspaceIdEmailRouteImport.update({
+  id: '/email',
+  path: '/email',
+  getParentRoute: () => AppWorkspaceIdRoute,
+} as any).lazy(() =>
+  import('./routes/app.$workspaceId.email.lazy').then((d) => d.Route),
+)
 const AppWorkspaceIdDocsRoute = AppWorkspaceIdDocsRouteImport.update({
   id: '/docs',
   path: '/docs',
@@ -598,6 +606,7 @@ export interface FileRoutesByFullPath {
   '/app/$workspaceId/clips': typeof AppWorkspaceIdClipsRoute
   '/app/$workspaceId/dashboard': typeof AppWorkspaceIdDashboardRoute
   '/app/$workspaceId/docs': typeof AppWorkspaceIdDocsRoute
+  '/app/$workspaceId/email': typeof AppWorkspaceIdEmailRoute
   '/app/$workspaceId/forms': typeof AppWorkspaceIdFormsRouteWithChildren
   '/app/$workspaceId/goals': typeof AppWorkspaceIdGoalsRouteWithChildren
   '/app/$workspaceId/import': typeof AppWorkspaceIdImportRoute
@@ -670,6 +679,7 @@ export interface FileRoutesByTo {
   '/app/$workspaceId/clips': typeof AppWorkspaceIdClipsRoute
   '/app/$workspaceId/dashboard': typeof AppWorkspaceIdDashboardRoute
   '/app/$workspaceId/docs': typeof AppWorkspaceIdDocsRoute
+  '/app/$workspaceId/email': typeof AppWorkspaceIdEmailRoute
   '/app/$workspaceId/import': typeof AppWorkspaceIdImportRoute
   '/app/$workspaceId/inbox': typeof AppWorkspaceIdInboxRoute
   '/app/$workspaceId/insights': typeof AppWorkspaceIdInsightsRoute
@@ -739,6 +749,7 @@ export interface FileRoutesById {
   '/app/$workspaceId/clips': typeof AppWorkspaceIdClipsRoute
   '/app/$workspaceId/dashboard': typeof AppWorkspaceIdDashboardRoute
   '/app/$workspaceId/docs': typeof AppWorkspaceIdDocsRoute
+  '/app/$workspaceId/email': typeof AppWorkspaceIdEmailRoute
   '/app/$workspaceId/forms': typeof AppWorkspaceIdFormsRouteWithChildren
   '/app/$workspaceId/goals': typeof AppWorkspaceIdGoalsRouteWithChildren
   '/app/$workspaceId/import': typeof AppWorkspaceIdImportRoute
@@ -814,6 +825,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/clips'
     | '/app/$workspaceId/dashboard'
     | '/app/$workspaceId/docs'
+    | '/app/$workspaceId/email'
     | '/app/$workspaceId/forms'
     | '/app/$workspaceId/goals'
     | '/app/$workspaceId/import'
@@ -886,6 +898,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/clips'
     | '/app/$workspaceId/dashboard'
     | '/app/$workspaceId/docs'
+    | '/app/$workspaceId/email'
     | '/app/$workspaceId/import'
     | '/app/$workspaceId/inbox'
     | '/app/$workspaceId/insights'
@@ -954,6 +967,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/clips'
     | '/app/$workspaceId/dashboard'
     | '/app/$workspaceId/docs'
+    | '/app/$workspaceId/email'
     | '/app/$workspaceId/forms'
     | '/app/$workspaceId/goals'
     | '/app/$workspaceId/import'
@@ -1376,6 +1390,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkspaceIdFormsRouteImport
       parentRoute: typeof AppWorkspaceIdRoute
     }
+    '/app/$workspaceId/email': {
+      id: '/app/$workspaceId/email'
+      path: '/email'
+      fullPath: '/app/$workspaceId/email'
+      preLoaderRoute: typeof AppWorkspaceIdEmailRouteImport
+      parentRoute: typeof AppWorkspaceIdRoute
+    }
     '/app/$workspaceId/docs': {
       id: '/app/$workspaceId/docs'
       path: '/docs'
@@ -1624,6 +1645,7 @@ interface AppWorkspaceIdRouteChildren {
   AppWorkspaceIdClipsRoute: typeof AppWorkspaceIdClipsRoute
   AppWorkspaceIdDashboardRoute: typeof AppWorkspaceIdDashboardRoute
   AppWorkspaceIdDocsRoute: typeof AppWorkspaceIdDocsRoute
+  AppWorkspaceIdEmailRoute: typeof AppWorkspaceIdEmailRoute
   AppWorkspaceIdFormsRoute: typeof AppWorkspaceIdFormsRouteWithChildren
   AppWorkspaceIdGoalsRoute: typeof AppWorkspaceIdGoalsRouteWithChildren
   AppWorkspaceIdImportRoute: typeof AppWorkspaceIdImportRoute
@@ -1655,6 +1677,7 @@ const AppWorkspaceIdRouteChildren: AppWorkspaceIdRouteChildren = {
   AppWorkspaceIdClipsRoute: AppWorkspaceIdClipsRoute,
   AppWorkspaceIdDashboardRoute: AppWorkspaceIdDashboardRoute,
   AppWorkspaceIdDocsRoute: AppWorkspaceIdDocsRoute,
+  AppWorkspaceIdEmailRoute: AppWorkspaceIdEmailRoute,
   AppWorkspaceIdFormsRoute: AppWorkspaceIdFormsRouteWithChildren,
   AppWorkspaceIdGoalsRoute: AppWorkspaceIdGoalsRouteWithChildren,
   AppWorkspaceIdImportRoute: AppWorkspaceIdImportRoute,

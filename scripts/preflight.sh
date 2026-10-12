@@ -21,8 +21,11 @@ step () {
 }
 step "lint (turbo run lint)"            bash -c 'pnpm exec turbo run lint > /tmp/preflight-lint.log 2>&1'
 step "typecheck (turbo run typecheck)"  bash -c 'pnpm exec turbo run typecheck > /tmp/preflight-tsc.log 2>&1'
-step "api unit tests"                   bash -c 'cd apps/api && pnpm exec tsx --test $(find src -name "*.test.ts") > /tmp/preflight-api.log 2>&1'
-step "web unit tests"                   bash -c 'cd apps/web && ../../packages/db/node_modules/.bin/tsx --test $(find src -name "*.test.ts" -o -name "*.test.tsx" | tr "\n" " ") > /tmp/preflight-web.log 2>&1'
+# A unit run passes when no test failed, not when it exited 0: node:test exits 0 over a describe whose body
+# threw, none of its tests run (`found-12-oct/a-describe-that-throws-passes`).
+step "api unit tests"                   node scripts/unit-tests-pass.mjs --log /tmp/preflight-api.log -- bash -c 'cd apps/api && pnpm exec tsx --test $(find src -name "*.test.ts")'
+step "web unit tests"                   node scripts/unit-tests-pass.mjs --log /tmp/preflight-web.log -- bash -c 'cd apps/web && ../../packages/db/node_modules/.bin/tsx --test $(find src -name "*.test.ts" -o -name "*.test.tsx" | tr "\n" " ")'
+step "and a unit run fails on a suite that never ran" node scripts/unit-tests-pass.mjs --mutate
 step "migration guardrail"              node scripts/check-migration-order.mjs
 step "what a migration makes, the schema declares" node scripts/check-schema-declares-migrations.mjs
 step "and the schema gate can fail too"  node scripts/check-schema-declares-migrations-cases.mjs --mutate

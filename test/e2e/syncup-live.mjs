@@ -306,8 +306,8 @@ const OTHER = {
 const stack = REMOTE
   ? { base: BASE, apiBase: IS_LOOPBACK ? BASE : `http://127.0.0.1:${API_PORT}`, close: () => {} }
   : await (async () => {
-      const s = await startLocalStack({ dist: DIST, apiPort: API_PORT })
-      return { ...s, apiBase: s.base }
+      const local = await startLocalStack({ dist: DIST, apiPort: API_PORT })
+      return { ...local, apiBase: local.base }
     })()
 
 console.log(`  driving ${stack.base}${REMOTE && !IS_LOOPBACK ? `  (${HOST} pinned to 127.0.0.1)` : ''}`)

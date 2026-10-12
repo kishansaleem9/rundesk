@@ -12,8 +12,12 @@
 # Reddens: timeline-dates:
 #   "the workspace timeline draws a project holding a task that starts in year 202 within a second of its being chosen, its span starting in year 202, with a few thousand elements at most — not one a day"
 #   "and its Day zoom is drawn within a second, and scrolled to the span’s far end shows this October: the bar of a task starting 7 October in view, under the day “2026-10-07”"
+#
+# Re-aimed 12 October: the chart is one component now (`components/gantt-chart.tsx`),
+# the timeline page's and the list's Gantt tab's (`resume-defects/resume-5`); the line
+# moved there with it. Same break.
 import io
-p = '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx'
+p = '/home/user/rundesk/apps/web/src/components/gantt-chart.tsx'
 a = "  const drawn = useDrawnDays(scroller, dayPx, days)\n"
 b = "  const drawn = { ...useDrawnDays(scroller, dayPx, days), from: 0, to: days }\n"
 s = io.open(p, encoding='utf-8').read()

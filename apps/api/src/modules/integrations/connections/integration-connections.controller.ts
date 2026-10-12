@@ -158,9 +158,11 @@ export class IntegrationConnectionsController {
     try {
       const result = await this.svc.handleOAuthCallback(provider, code, state, ip)
       return reply.redirect(
-        result.personal
-          ? this.svc.getPersonalRedirect(result.workspaceId, undefined, result.provider)
-          : this.svc.getSuccessRedirect(result.workspaceId, result.provider),
+        'email' in result && result.email
+          ? this.svc.getEmailRedirect(result.workspaceId, undefined, result.provider)
+          : result.personal
+            ? this.svc.getPersonalRedirect(result.workspaceId, undefined, result.provider)
+            : this.svc.getSuccessRedirect(result.workspaceId, result.provider),
         302,
       )
     } catch (error: any) {
@@ -178,6 +180,10 @@ export class IntegrationConnectionsController {
       const ctx = state ? this.svc.peekState(state) : null
       // A personal grant's failure is said on the person's own Accounts page;
       // the workspace's calendar card is not theirs to write an error onto.
+      // A mailbox's failure is said on the Email settings it was linked from.
+      if (ctx?.email) {
+        return reply.redirect(this.svc.getEmailRedirect(ctx.workspaceId, reason), 302)
+      }
       if (ctx?.personal) {
         return reply.redirect(this.svc.getPersonalRedirect(ctx.workspaceId, reason, ctx.provider), 302)
       }

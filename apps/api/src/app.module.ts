@@ -69,6 +69,7 @@ import { SsoModule } from './modules/sso/sso.module'
 import { WorkspaceGroupsModule } from './modules/workspace-groups/workspace-groups.module'
 import { CalendarSyncModule } from './modules/calendar-sync/calendar-sync.module'
 import { EmailToTaskModule } from './modules/email-to-task/email-to-task.module'
+import { EmailAccountsModule } from './modules/email-accounts/email-accounts.module'
 import { CustomRolesModule } from './modules/custom-roles/custom-roles.module'
 import { TaskTemplatesModule } from './modules/task-templates/task-templates.module'
 import { SampleDataModule } from './modules/sample-data/sample-data.module'
@@ -155,6 +156,7 @@ import { TenantDatabasesModule } from './modules/tenant-databases/tenant-databas
     WorkspaceGroupsModule,
     CalendarSyncModule,
     EmailToTaskModule,
+    EmailAccountsModule,
     CustomRolesModule,
     TaskTemplatesModule,
     SampleDataModule,

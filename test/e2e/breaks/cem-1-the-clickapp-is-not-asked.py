@@ -13,14 +13,15 @@
 #   or "turned off again, Email is off again"
 #
 # Re-aimed 9 October: the last 10 of these are knock-ons of the same edit, measured on lane 10 — checks that stand on what the first ones lost.
+# Re-aimed 12 October: a refusal now names the task's workspace too (a send from the person's own mailbox asks it).
 #
 # A workspace that never turned Email on sends it anyway.
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/comment-email.service.ts'
 s = io.open(p, encoding='utf-8').read()
 for a, b in [
-    ("    if (!on) return { task, refusal: { reason: 'off', message: COMMENT_EMAIL_REFUSALS.off, status: 403 } }\n",
-     "    if (!on && on) return { task, refusal: { reason: 'off', message: COMMENT_EMAIL_REFUSALS.off, status: 403 } } // BROKEN: the ClickApp is not asked\n"),
+    ("    if (!on) return { task, workspaceId, refusal: { reason: 'off', message: COMMENT_EMAIL_REFUSALS.off, status: 403 } }\n",
+     "    if (!on && on) return { task, workspaceId, refusal: { reason: 'off', message: COMMENT_EMAIL_REFUSALS.off, status: 403 } } // BROKEN: the ClickApp is not asked\n"),
 ]:
     assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
     s = s.replace(a, b)

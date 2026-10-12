@@ -2381,7 +2381,32 @@ export class TasksService {
       .orderBy(asc(tasks.startDate), asc(tasks.dueDate))
 
     const mayEdit = opts.actor ? await this.timelineEditable(workspaceId, rows, opts.actor.id) : null
-    return rows.map(({ folderId: _folderId, ...row }) => (mayEdit ? { ...row, mayEdit: mayEdit(row) } : row))
+    /*
+     * THE DEPENDENCIES BETWEEN THE TASKS IT DRAWS (`resume-defects/resume-5`):
+     * the timeline is the list's Gantt now, lines and all. Only an edge whose two
+     * tasks are both among these rows — rows the reader may already read — so a
+     * line says nothing of a task the reader is not shown.
+     */
+    const ids = rows.map((r) => r.id)
+    const edges = ids.length
+      ? await this.db
+          .select({ id: taskDependencies.id, taskId: taskDependencies.taskId, relatedTaskId: taskDependencies.relatedTaskId, type: taskDependencies.type })
+          .from(taskDependencies)
+          .where(and(inArray(taskDependencies.taskId, ids), inArray(taskDependencies.relatedTaskId, ids)))
+      : []
+    const dependencyLinks = new Map<string, Array<{ id: string; blocker: string }>>()
+    for (const edge of edges) {
+      const pair =
+        edge.type === 'blocked_by' ? [edge.relatedTaskId, edge.taskId] : edge.type === 'blocks' ? [edge.taskId, edge.relatedTaskId] : null
+      if (!pair || pair[0] === pair[1]) continue
+      const [blocker, blocked] = pair
+      dependencyLinks.set(blocked, [...(dependencyLinks.get(blocked) ?? []), { id: edge.id, blocker }])
+    }
+    return rows.map(({ folderId: _folderId, ...row }) => ({
+      ...row,
+      ...(mayEdit ? { mayEdit: mayEdit(row) } : {}),
+      dependencyLinks: dependencyLinks.get(row.id) ?? [],
+    }))
   }
 
   /**
@@ -2908,6 +2933,7 @@ export class TasksService {
     const dependencyRows = taskIds.length
       ? await this.db
           .select({
+            depId: taskDependencies.id,
             taskId: taskDependencies.taskId,
             relatedTaskId: taskDependencies.relatedTaskId,
             type: taskDependencies.type,
@@ -2921,6 +2947,7 @@ export class TasksService {
     const reverseDependencyRows = taskIds.length
       ? await this.db
           .select({
+            depId: taskDependencies.id,
             taskId: taskDependencies.relatedTaskId,
             relatedTaskId: taskDependencies.taskId,
             type: taskDependencies.type,
@@ -2959,17 +2986,21 @@ export class TasksService {
     // for the Gantt view's dependency arrows + critical path (Plan §5).
     const idSet = new Set(taskIds)
     const blockedBy = new Map<string, Set<string>>()
-    const addEdge = (taskId: string, blockerId: string) => {
+    // And each edge's own row, so the Gantt can take a line out
+    // (`resume-defects/resume-5`): a line double-clicked is that row deleted.
+    const dependencyLinks = new Map<string, Array<{ id: string; blocker: string }>>()
+    const addEdge = (taskId: string, blockerId: string, depId: string) => {
       if (!idSet.has(blockerId) || blockerId === taskId) return
       const set = blockedBy.get(taskId) ?? new Set<string>()
       set.add(blockerId)
       blockedBy.set(taskId, set)
+      dependencyLinks.set(taskId, [...(dependencyLinks.get(taskId) ?? []), { id: depId, blocker: blockerId }])
     }
     for (const dep of dependencyRows) {
-      if (dep.type === 'blocked_by') addEdge(dep.taskId, dep.relatedTaskId)
+      if (dep.type === 'blocked_by') addEdge(dep.taskId, dep.relatedTaskId, dep.depId)
     }
     for (const dep of reverseDependencyRows) {
-      if (dep.type === 'blocks') addEdge(dep.taskId, dep.relatedTaskId)
+      if (dep.type === 'blocks') addEdge(dep.taskId, dep.relatedTaskId, dep.depId)
     }
 
     /*
@@ -3067,6 +3098,7 @@ export class TasksService {
         openBlockerCount: openBlockerCount.get(r.id) ?? 0,
         blocksOpenCount: blocksOpenCount.get(r.id) ?? 0,
         blockedBy: [...(blockedBy.get(r.id) ?? [])],
+        dependencyLinks: dependencyLinks.get(r.id) ?? [],
         coverUrl: coverUrlByTask.get(r.id) ?? null,
         ...(editable ? { mayEdit: editable(r) } : {}),
         ...(added ? { addedFrom: { id: r.listId, name: homeNames?.get(r.listId) ?? null }, homeStatus: homeStatusOf(r) } : {}),
@@ -6011,6 +6043,8 @@ export class TasksService {
               cc: e.ccAddresses,
               bcc: viewerId && viewerId === r.authorId ? e.bccAddresses : [],
               subject: e.subject,
+              // Sent from, or read from, a mailbox its writer linked (`found-9-oct/task-email-sends-from-the-server`).
+              viaMailbox: e.accountId !== null && e.accountId !== undefined,
             }
           : null,
       }

@@ -329,7 +329,8 @@ try {
     'timeline-today',
     'timeline-week-numbers',
     'timeline-autofit',
-    'timeline-export',
+    // Export is a menu now — PDF, PNG and this CSV (`resume-defects/resume-5`).
+    'timeline-export-menu',
   ]
   const controls = await Promise.all(TOOLBAR.map((id) => page.getByTestId(id).count()))
   chk(
@@ -547,6 +548,8 @@ try {
    * anything scrolled. This clears the fit (it does not matter that `week` is
    * already the zoom — the click is what clears it).
    */
+  // The zoom is the time period's menu now, as ClickUp's Gantt draws it (`resume-defects/resume-5`).
+  await page.getByTestId('timeline-period').click()
   await page.getByTestId('timeline-zoom-week').click()
   const preToday = await waitUntil(async () => (await geom()).fit === 'off', { timeoutMs: 10_000 })
   if (!preToday) throw new Error('clicking the week zoom did not clear the fit')
@@ -644,6 +647,8 @@ try {
   // ══ 7. LOCAL EXPORT ═══════════════════════════════════════════════════════
   console.log('\n▶ `⤓ Export` `09:44` — a real file, with this run\'s tasks in it')
   const grab = async () => {
+    // The CSV is one of the Export menu's three now (`resume-defects/resume-5`).
+    await page.getByTestId('timeline-export-menu').click()
     const [download] = await Promise.all([
       page.waitForEvent('download', { timeout: 30_000 }),
       page.getByTestId('timeline-export').click(),
