@@ -22,6 +22,8 @@ const rec = (type: number, data: Buffer) => {
 const u16 = (n: number) => { const b = Buffer.alloc(2); b.writeUInt16LE(n); return b }
 const u32 = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32LE(n >>> 0); return b }
 const f64 = (n: number) => { const b = Buffer.alloc(8); b.writeDoubleLE(n); return b }
+// Wide when any character is past Latin-1 — the range starts at NUL, which is the point.
+// eslint-disable-next-line no-control-regex
 const wide = (s: string) => /[^\u0000-ÿ]/.test(s)
 const chars = (s: string) => (wide(s) ? Buffer.from(s, 'utf16le') : Buffer.from(s, 'latin1'))
 /** XLUnicodeString: a two-byte count, the option byte, the characters. */

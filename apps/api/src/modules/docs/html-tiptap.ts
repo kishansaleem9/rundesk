@@ -168,7 +168,7 @@ function tagEnd(html: string, from: number): number {
 
 function parseAttributes(src: string): Record<string, string> {
   const attrs: Record<string, string> = {}
-  const re = /([^\s"'>\/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g
+  const re = /([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g
   let m: RegExpExecArray | null
   while ((m = re.exec(src))) attrs[m[1].toLowerCase()] = decodeHtmlEntities(m[2] ?? m[3] ?? m[4] ?? '')
   return attrs
