@@ -2066,12 +2066,14 @@ ${FOLLOW_UP_INSTRUCTION}${agentPrompt}`
            */
           if (use.name === DECK_TOOL_NAME) {
             const parsed = parseDeck(input)
-            if (!parsed.ok || !this.artifacts) {
+            // Only where this turn offered it, as every tool here (`found-13-oct/a-deck-made-where-none-was-offered`):
+            // a turn a skill answers, or one with no asker to keep it for, makes no deck whatever the model asks.
+            if (!canDeck || !parsed.ok || !this.artifacts) {
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: use.id,
                 is_error: true,
-                content: JSON.stringify({ ok: false, say: parsed.ok ? 'Slide decks cannot be made here' : parsed.reason }),
+                content: JSON.stringify({ ok: false, say: !canDeck ? 'That tool is not offered here' : parsed.ok ? 'Slide decks cannot be made here' : parsed.reason }),
               })
               continue
             }

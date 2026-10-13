@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 557 items: 0 open · 0 partly fixed · 547 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 558 items: 0 open · 0 partly fixed · 548 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 93, each reproduced
+## Found by the triage, 5 October, and since — 94, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10490,6 +10490,14 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 
 *Closed, 13 October.* The suite reads the new words: 19 of 19 on lane 9.
 
+### `found-13-oct/a-deck-made-where-none-was-offered` — **closed** (visible bug, small; found by batch 40b's break runs) · reproduced 13 October
+
+**Brain made a slide deck in a turn that offered no deck tool**
+
+*Evidence, 13 October:* `bcd-17` takes the deck tool away (`canDeck` false) and stayed green on lane 2 at `6848104`, 29 of 29: "asked "What’s new in Brain²?", Brain makes a 4-slide deck kept as its asker’s own, and names it on the wire" still passed. The lane's model stub answers with the tool call it was given whatever tools a request offers, and the chat loop ran `create_slide_deck` whenever the model called it: it asked that the slides parse and that decks can be kept, not that the turn had offered the tool. So a turn a skill answers, or one with no asker to keep a deck for, made a deck whenever the model named the tool — where a container or assign tool in the same place was refused ("That tool is not offered here").
+
+*Closed, 13 October.* A deck is made only where the turn offered the tool, and refused in the same words otherwise (`ai.service.ts`). `bcd-17`'s run on it is owed.
+
 ### `found-13-oct/bcd-reads-the-naming-call` — **closed** (test tooling, small; found by batch 40b's break runs) · reproduced 13 October
 
 **`brain-comments-and-decks` read the chat's naming call as the question's, so its chips check failed on every run after a lane's first**
@@ -10504,7 +10512,7 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 
 *Evidence, 13 October:* batch 41's set on lane 3 (`33d6c4f`), baseline 14 of 14: 27 of its 28 patches reddened, and `tei-7` (any whole number is a port) stayed 14 of 14. Its check, "the form is refused field by field, in words: the address, the password, each server and port, and whether SSL is required (400)", typed SMTP port 0. `mailPortOf` gives `null` for a number out of range, and the service refuses a port that is `null` or 0 alike (`if (!smtpPort)`), so 0 read the same with the range taken away.
 
-*Closed, 13 October.* The check types 70000, which only the range refuses: 14 of 14 on lane 9 at batch 43's tree. `tei-7`'s run on it is owed.
+*Closed, 13 October.* The check types 70000, which only the range refuses: 14 of 14 on lane 9 at batch 43's tree; `tei-7` reddens it now, 13 of 14 on lane 4 at `6848104`.
 
 ## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 46
 
@@ -11501,7 +11509,7 @@ The model stub now streams a staged tool call, as the chat surface asks for one.
 `task-email-imap.mjs` checks this against the lane's mailbox stub (`scripts/e2e-lanes/mailbox-stub.mjs`: IMAP and SMTP with STARTTLS on a certificate of its own, started beside the mail stub; `check-mailbox-stub.mjs --mutate`, 10 cases, 11 of 11 mutations bite, in the preflight and CI). Before, it stopped at its first read; after, lane 9 on batch 41's tree, 14 of 14. Unit `imap-mail.test.ts`, 9, a scripted IMAP server among them. Building it also fixed `found-13-oct/a-refused-refresh-answers-500` and found `found-13-oct/provider-grants-kept-in-the-clear`.
 
 Checks (`task-email-imap`, 14): "Sign in with IMAP links a mailbox once it has signed in to its IMAP and SMTP servers, over TLS as asked; it is kept as its linker’s, under their name, its password sealed and given back to nobody (read by SQL and from the server’s sign-ins)", "a password the server refuses is said in its words, and a server on a private network nobody named is refused before a password goes to it; neither leaves a mailbox (read by SQL)", "the form is refused field by field, in words: the address, the password, each server and port, and whether SSL is required (400)", "a guest links no mailbox (403, in words); on Pro, whose one mailbox is linked, another is refused in words before any server is asked", "sent from the IMAP mailbox through its own SMTP server, signed in as it over TLS: its people, subject and words, the Bcc in the envelope and in no header; the server’s own mail sent nothing; kept as the task’s email with its Message-ID as the thread, one use taken (read by SQL and from what the server was sent)", "the client’s answer, delivered to the inbox naming the email it answers, lands in the task once, under the email, without its quote — and later reads do not fetch it again (read by SQL and from the server’s fetches)", "answering it by email goes through the same SMTP server in the same thread: In-Reply-To the answer, References the thread’s first email, kept under the same email (read by SQL)", "a mailbox linked without SSL is signed in to in the clear, as its linker chose; one that requires it never sends its password in the clear (read from the server’s sign-ins)", "the mailbox sends for whom its linker lets it: Max is refused (403, in words) until Olga lets him, and then his email goes from her mailbox", "when the provider stops taking the password, the next read of the inbox marks the mailbox to link again in the server’s words, and From refuses it (409); linked again with the new password, it is the same mailbox, connected (read by SQL)", "a password sealed for another mailbox does not open in this one: the send is refused in words (502, not 500), nothing is sent, and the mailbox is marked to link again (read by SQL)", "the AI’s draft is left in the IMAP mailbox’s Drafts, flagged a draft, and sent to nobody", "From’s Link an email offers Sign in with IMAP; its form links the mailbox, From chooses it at once, and Send sends from it over TLS", "the Email settings name an IMAP mailbox by its servers; Link it again opens its form started from them, the password left blank; a password the server refuses is said in the form, in its words".
-- Patches, lane 3 at `33d6c4f` (baseline 14 of 14): `tei-1` to `tei-22` (the API) and `tei-w1` to `tei-w6` (the web) each reddened the check it names, but `tei-7`, which stayed 14 of 14 — its check typed a port every rule refuses (`found-13-oct/imap-form-check-types-a-port-every-rule-refuses`), and its run on the fixed check is owed. The unit `tei-u1` to `tei-u6` each reddened its test.
+- Patches, lane 3 at `33d6c4f` (baseline 14 of 14): `tei-1` to `tei-22` (the API) and `tei-w1` to `tei-w6` (the web) each reddened the check it names, but `tei-7`, which stayed 14 of 14 — its check typed a port every rule refuses (`found-13-oct/imap-form-check-types-a-port-every-rule-refuses`); on the fixed check it reddens it, 13 of 14 on lane 4 at `6848104`. The unit `tei-u1` to `tei-u6` each reddened its test.
 
 ### `found-13-oct/importers-by-sign-in-unbuilt` — **closed** (feature, large; was not counted, a feature; found closing `commit-log/log-601eacc-2`, 13 October) · reproduced 13 October
 
