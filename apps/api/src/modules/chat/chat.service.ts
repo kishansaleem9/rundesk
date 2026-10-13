@@ -44,6 +44,7 @@ import { SkillsService } from '../skills/skills.service'
 import { isReservedSlug, resolveSlug } from '../skills/skill-slug'
 import { fetchLinkPreview, type UnfurlResult } from './link-unfurl'
 import { likeContaining } from '../../common/sql/like'
+import { agentTriggers } from '../../common/agents/agent-triggers'
 
 /**
  * WHO A MESSAGE IS DRAWN UNDER (`commit-log/log-601eacc-2`): its author — or,
@@ -1927,8 +1928,13 @@ export class ChatService {
     attachmentIds?: string[]
     /** §12 — the message this one is a forward of. */
     forwardedFromId?: string | null
+    /**
+     * A Super Agent answering (`super-agents.runner.ts`): it writes as itself where the person it answers for may
+     * post. Never set from a route — a route's author is the one signed in.
+     */
+    actingForId?: string
   }) {
-    this.assertCanPost(await this.assertChannelAccess(data.channelId, data.authorId))
+    this.assertCanPost(await this.assertChannelAccess(data.channelId, data.actingForId ?? data.authorId))
     const body = data.body.trim()
     const attachmentIds = (data.attachmentIds ?? []).filter(Boolean)
     // A message must carry either text or at least one attachment (Plan §6.8).
@@ -2173,6 +2179,17 @@ export class ChatService {
 
     // @Rundesk AI assistant (§7.6) — best-effort, fire-and-forget.
     void this.maybeAnswerAiMention(channel, data.authorId, body)
+    // A Super Agent named here, or the agent this DM is with, answers (`ledger-rows/row-852`).
+    agentTriggers.chat({
+      workspaceId: channel.workspaceId,
+      channelId: data.channelId,
+      messageId: row.id,
+      threadId: data.parentMessageId ?? row.id,
+      isDm: channel.isDm,
+      authorId: data.authorId,
+      body,
+      mentionedUserIds: [...mentionIds],
+    })
 
     return enriched
   }

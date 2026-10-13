@@ -21,6 +21,7 @@ import {
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import { InlineSkeleton } from '../components/loading-skeletons'
+import { useSuperAgents } from '../components/super-agents/super-agents-hub'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,8 @@ const ACTION_OPTIONS = [
   // §7.7 post-to-channel: needs a channel picker in addition to the message
   // field, handled specially in the builder (see AutomationBuilder).
   { value: 'post_to_channel', labelKey: 'automations.action.postToChannel', paramLabelKey: 'automations.param.messageWithVars', paramKey: 'message' },
+  // ClickUp's "Run a Super Agent" action (`ledger-rows/row-852`): an agent picker and this run's own instructions.
+  { value: 'run_super_agent', labelKey: 'automations.action.runSuperAgent', paramLabelKey: 'automations.param.agentInstructions', paramKey: 'instructions' },
 ] as const
 
 const RECIPES = [
@@ -503,6 +506,9 @@ function AutomationBuilder({
     queryFn: () => api<ChatChannel[]>(`/workspaces/${workspaceId}/chat/channels`),
   })
   const channels = (channelsQuery.data ?? []).filter((c) => !c.isDm)
+  // The Super Agents this person may use, for the run_super_agent action's picker.
+  const agentsQuery = useSuperAgents(workspaceId)
+  const agents = (agentsQuery.data ?? []).filter((a) => a.isActive)
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -608,6 +614,7 @@ function AutomationBuilder({
               {actions.map((action, i) => {
                 const meta = ACTION_OPTIONS.find((o) => o.value === action.type)
                 const isPostToChannel = action.type === 'post_to_channel'
+                const isRunAgent = action.type === 'run_super_agent'
                 return (
                   <div key={i} className="flex gap-2 items-start flex-wrap">
                     <select
@@ -619,6 +626,8 @@ function AutomationBuilder({
                         const params =
                           e.target.value === 'post_to_channel'
                             ? { channelId: '', message: '' }
+                            : e.target.value === 'run_super_agent'
+                              ? { agentId: '', instructions: '' }
                             : newMeta
                               ? { [newMeta.paramKey]: '' }
                               : {}
@@ -638,6 +647,19 @@ function AutomationBuilder({
                         <option value="">{t('automations.param.selectChannel')}</option>
                         {channels.map((c) => (
                           <option key={c.id} value={c.id}>#{c.name}</option>
+                        ))}
+                      </select>
+                    )}
+                    {isRunAgent && (
+                      <select
+                        data-testid="automation-agent-picker"
+                        className="rounded-md border border-border bg-background px-3 py-1.5 text-sm flex-1 min-w-[9rem]"
+                        value={(action.params.agentId as string) ?? ''}
+                        onChange={(e) => updateAction(i, { params: { ...action.params, agentId: e.target.value } })}
+                      >
+                        <option value="">{t('automations.param.agent')}</option>
+                        {agents.map((a) => (
+                          <option key={a.id} value={a.id}>{a.name}</option>
                         ))}
                       </select>
                     )}

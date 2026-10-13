@@ -43,6 +43,7 @@ import { PlannerModule } from './modules/planner/planner.module'
 import { FormsModule } from './modules/forms/forms.module'
 import { AutomationsModule } from './modules/automations/automations.module'
 import { AiModule } from './modules/ai/ai.module'
+import { SuperAgentsModule } from './modules/super-agents/super-agents.module'
 import { ReportsModule } from './modules/reports/reports.module'
 import { SecurityModule } from './modules/security/security.module'
 import { ExportModule } from './modules/export/export.module'
@@ -138,6 +139,7 @@ import { TenantDatabasesModule } from './modules/tenant-databases/tenant-databas
     FormsModule,
     AutomationsModule,
     AiModule,
+    SuperAgentsModule,
     ReportsModule,
     SecurityModule,
     ExportModule,

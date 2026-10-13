@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AiCreditsCard } from '../components/ai-credits'
+import { SuperAgentsHub } from '../components/super-agents/super-agents-hub'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Button, Card, Input, cn, toast } from '@rundesk/ui'
 import { AiValuePanel } from '../components/ai-value-panel'
 import {
+  Bot,
   Sparkles,
   Wand2,
   FileText,
@@ -127,7 +129,11 @@ function writingModeLabelKey(mode: string): TranslationKey {
 export function AiPage() {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/ai' })
-  const { prompt, skillId, thread: threadFromUrl } = useSearch({ from: '/app/$workspaceId/ai' })
+  const { prompt, skillId, thread: threadFromUrl, hub, agent: agentParam, agentsView } = useSearch({ from: '/app/$workspaceId/ai' })
+  const { role } = useWorkspaceRole(workspaceId)
+  // Guests have no Super Agents, as in ClickUp: the switch is not offered to them.
+  const agentsOffered = role !== 'guest'
+  const showAgents = hub === 'agents' && agentsOffered
   const [activeTab, setActiveTab] = useState<'chat' | 'knowledge' | 'commands' | 'generate' | 'notes' | 'writing' | 'analytics' | 'credits'>('chat')
 
   // §A2.3 — `?prompt=` is a question handed over from another surface; the chat
@@ -189,6 +195,56 @@ export function AiPage() {
         </div>
       </header>
 
+      {/* Ask | Agents — ClickUp's AI hub (`ledger-rows/row-852`) */}
+      {agentsOffered && (
+        <div className="flex gap-1 px-6 pt-3" role="tablist" aria-label={t('ai.title')}>
+          {(
+            [
+              ['ask', 'ai.modeAsk', MessageSquare],
+              ['agents', 'ai.modeAgents', Bot],
+            ] as const
+          ).map(([key, label, Icon]) => {
+            const on = key === 'agents' ? showAgents : !showAgents
+            return (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={on}
+                data-testid={`ai-mode-${key}`}
+                onClick={() =>
+                  navigate({
+                    search: (prev) => ({ ...prev, hub: key === 'agents' ? 'agents' : undefined, agent: undefined, agentsView: undefined }),
+                  })
+                }
+                className={cn(
+                  'flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium',
+                  on ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                )}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {t(label)}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {showAgents ? (
+        <div className="flex-1 overflow-hidden">
+          <SuperAgentsHub
+            workspaceId={workspaceId}
+            agentId={agentParam}
+            view={agentsView ?? 'all'}
+            onOpen={(next) =>
+              navigate({
+                search: (prev) => ({ ...prev, hub: 'agents', agent: next.agent, agentsView: next.view === 'all' ? undefined : next.view }),
+              })
+            }
+          />
+        </div>
+      ) : (
+      <>
       {/* Tabs */}
       <div className="flex border-b border-border/40 px-6 gap-1 overflow-x-auto scrollbar-none">
         {(
@@ -250,6 +306,8 @@ export function AiPage() {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   )
 }

@@ -18,7 +18,7 @@ import {
   cn,
   toast,
 } from '@rundesk/ui'
-import { Layers, Upload, X, Bell, Paperclip, Search, Sparkles, Lock, ChevronDown, Check, RefreshCw, Save } from 'lucide-react'
+import { Bot, Layers, Upload, X, Bell, Paperclip, Search, Sparkles, Lock, ChevronDown, Check, RefreshCw, Save } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { CreateSpaceWizard } from './create-space-wizard'
 import { colorForTagName } from './task-tags'
@@ -29,6 +29,7 @@ import { daysFromToday, localDateTimeValue } from '../lib/local-date'
 import { dateWriteOf } from '../lib/task-dates'
 import { parseEstimate } from '../lib/estimate'
 import { CREATE_TYPES, createTypeOf, type CreateKind } from '../lib/create-types'
+import { useWorkspaceRole } from '../hooks/use-workspace-role'
 
 type Space = { id: string; name: string }
 type Project = { id: string; name: string }
@@ -3175,6 +3176,7 @@ function FormForm({
 function Footer({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const { role } = useWorkspaceRole(workspaceId)
   const go = (to: '/app/$workspaceId/templates' | '/app/$workspaceId/import') => {
     onClose()
     navigate({ to, params: { workspaceId } })
@@ -3205,6 +3207,25 @@ function Footer({ workspaceId, onClose }: { workspaceId: string; onClose: () => 
         <Upload className="h-3.5 w-3.5" />
         {t('quickCreate.import')}
       </button>
+      {/*
+        ClickUp's Create menu makes a Super Agent too (`ledger-rows/row-770`):
+        it opens the AI hub's new-agent page, the builder and the form. Not for
+        a guest — guests have no Super Agents (`ledger-rows/row-852`).
+      */}
+      {role !== 'guest' && (
+        <button
+          type="button"
+          data-testid="create-footer-super-agent"
+          onClick={() => {
+            onClose()
+            navigate({ to: '/app/$workspaceId/ai', params: { workspaceId }, search: { hub: 'agents', agent: 'new' } as never })
+          }}
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <Bot className="h-3.5 w-3.5" />
+          {t('superAgents.createMenuItem')}
+        </button>
+      )}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-12.md`** (12 October; the 9 October handoff before it) — 545 items: 0 open · 0 partly fixed · 528 closed, and 17 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 546 items: 0 open · 0 partly fixed · 531 closed, and 15 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 81, each reproduced
+## Found by the triage, 5 October, and since — 82, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10368,6 +10368,14 @@ Checks: `check-ledger-ids-cases.mjs` 11 → 13: "a day's find of another month, 
 
 *Closed, 12 October:* the check counts the spaces a seed would make — `not is_personal`. 9 of 9 on lane 2.
 
+### `found-13-oct/person-panel-message-sends-the-wrong-field` — **closed** (visible bug, small; found building `ledger-rows/row-852`) · reproduced 13 October
+
+**A colleague's profile panel's Message opened no DM: it sent `userId` where the route reads `peerUserId`, and then went to a DM Chat did not hold**
+
+*Evidence, 13 October:* on lane 8, `POST /workspaces/:ws/chat/dms` with the panel's body, `{ userId }`, answered 400 "A required field is missing"; with `{ peerUserId }`, 201. The panel's Message (`person-message`) sent the first, so it opened nothing — while the sidebar's own "new message" and the Chat page send the second. With the field right, the panel went to the new DM but Chat, whose channel list was read before the DM existed, found no such channel and fell back to #general, which the sidebar avoids by reading the list again first.
+
+*Closed, 13 October.* The panel sends `peerUserId` and reads the channel list again before going to the DM, as the sidebar does; an agent profile's Message does the same. `super-agents.mjs`: "Message on a colleague’s profile panel opens a DM with them" (`sa-33` sends `userId` again, `sa-34` skips the read), and "Message on the profile opens a DM with the agent" (`sa-26`).
+
 ### `found-13-oct/unit-claims-read-a-name-two-files-share` — **closed** (test tooling, small; found by preflight 2 of batches 38 and 39) · reproduced 13 October
 
 **The unit-claims gate ran the first test file of a name, and batch 38 gave the API a `sheet-file.test.ts` beside the web's**
@@ -10384,7 +10392,7 @@ Checks: `check-ledger-ids-cases.mjs` 11 → 13: "a day's find of another month, 
 
 *Closed, 8 October.* The save reads a folder's lists by `position`, then when they were made, then id — the sidebar's order — and each list's tasks the same way (`project-templates.service.ts`). The suite now makes the folder's second list first and dates the first a minute earlier, so the table's order is not the order made: `template-center` 84 of 85 before the fix with that fixture (the lists second first), 85 of 85 after, on lane 1. Patch `template-center-42` (the lists by position alone) reddens the check, 84 of 85 on lane 1.
 
-## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 39
+## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 41
 
 On the owner's word of 8 October ("close all of these properly … close them as they work on clickup"), the
 items the triage set aside as features and decisions are closed one by one: as ClickUp works each where its
@@ -11271,13 +11279,39 @@ Checks (`list-views`, 32): "the newest entry of the list’s feed is the status 
 
 *Closed, 13 October*, with `commit-log/log-68bc188-1` above, which is what it asks for: the five built as list view types over the aggregators that were there — the list's feed beside the project's and the workspace's (`listListActivity`), the workload one service for the page and the view — offered in both copies of the keys, the overload rule settled (the page's, against capacity, as ClickUp's Workload; the AI's is a ranking input, not a band), and the stale comment in `space-views.ts` rewritten. `docs/video2-reaudit.md` §2's row reads `B`, 11 of 11.
 
+### `ledger-rows/row-852` — **closed** (feature, large; was not counted, a feature; triage, 5 October; was: partly-fixed, large) · reproduced 13 October
+
+**Brain² hub row is still M as a whole, but its main column exists at /app/:ws/ai; only Super Agents, Ask|Agents, nav shape and onboarding are absent**
+
+*Evidence:* reaudit.md:852 is `| M | Brain² hub, /ai/brain, AI-scoped left nav, Ask|Agents toggle, Super Agents |`. The ledger's own read at reaudit.md:6500-6550 says the main column is 'largely built' and that the hub lives at /app/:workspaceId/ai. Tree: routes/app.$workspaceId.ai.tsx → workspace-ai-page.tsx:123 and :188-235 have seven tabs (chat, knowledge, commands, generate, notes, writing, analytics); the shell AI dock is at routes/app.tsx:168-190. There is still no agents table, module or route: packages/db/src/schema lists none, and apps/api/src/modules has no agents module. skills.ts:1-29 separates Skills (built) from ClickUp's Super Agents (instructions, triggers, skills, knowledge, memory). The 16:25 'Personalize Brain²' onboarding appears in no row except inside the Brain² decision (reaudit.md:2774).
+
+*To close:* Split the row. Mark the hub's main column B, then build Super Agents (Create / All / My) plus the Ask|Agents toggle from ClickUp research. Parts to reuse: `skills` (instructions), AutomationsService.fire() (triggers, automations.service.ts:209-236), COMMAND_TOOLS including create_list/create_folder (ai-command.ts), and the model stub lanes (RUNDESK_LANE_MODEL, ad00a7c) to measure it. The /ai/brain URL and left-nav shape are cosmetic.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The Brain hub's main column exists at /app/:ws/ai. Super Agents, the Ask|Agents toggle, the AI-scoped nav, /ai/brain and the onboarding are all still unbuilt features, not defects. Evidence: `docs/triage-2026-10-05.md`.
+
+*12 October:* `ledger-rows/row-869`'s My Agent Performance is carried here: it is the performance of Super Agents, and is built with them.
+
+*Closed, 13 October*, as ClickUp's Super Agents work (help centre through search excerpts: the AI hub's Ask | Agents, All Agents and My Agents, the profile's Instructions, Triggers, Skills, Knowledge and Memory, sharing and making private, Activity with its filters, and an agent that answers in the thread it was mentioned in). The AI page has the switch (`ai-mode-ask`, `ai-mode-agents`); Agents is a hub with its own left nav — New Super Agent, All Agents, My Agents, Activity and the recently run — the builder that drafts a profile from a description and a form from scratch, and a profile with Message, Run agent, Share, switch off, Clone and Delete. An agent is its own account in the workspace (`users.is_agent`, migration 0189), so it is mentioned, assigned and messaged like a person but is never on the people roster, never notified and never signs in; made, it DMs its maker what it can do and what starts it. It is started by an @mention in a comment or in Chat (answered in that thread), a direct message, being assigned a task, its schedule (hourly to monthly on its maker's clock, never doubled) and an Automation's "Run a Super Agent" action, and acts with its Skills — the command assistant's own tools — under the rights of whoever started it, so it never does for anybody what they could not; a private agent answers only those it is shared with, a switched-off one nobody, and an agent's own words start no agent. Every run is written down — completed, failed with why, or skipped with why — and its memory keeps its recent work and, once its maker approves, what it was asked to remember. Measured by `super-agents.mjs`, 37 checks on a model lane and its refusal where no model answers (`sa-1` to `sa-35`, `sa-u1`, `sa-u2`).
+
+### `ledger-rows/row-770` — **closed** (feature, large; was not counted, a feature; triage, 5 October; was: open, large) · reproduced 13 October
+
+**Create-menu 'Super Agent' — still absent**
+
+*Evidence:* reaudit.md:770 (P): 'Super Agent stays open and is blocked, not pending: Rundesk has no agents'. Confirmed: no agents table in packages/db/src/schema and no agents module in apps/api/src/modules. 'Describe anything to create' and Create with AI are built (create-menu-ai.mjs).
+
+*To close:* Depends on row-852's Super Agents build. Once that exists, a create-menu entry that opens 'Create Agent' is small.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The create menu has no Super Agent entry and Rundesk has no agents at all. This is an unbuilt feature that depends on row-852, not a defect. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 13 October*, with `ledger-rows/row-852`: the Create menu's footer makes a Super Agent, opening the AI hub's new-agent page with the builder and the form (`create-footer-super-agent`; not for a guest, who has no agents). `super-agents.mjs`: "the Create menu makes a Super Agent: it opens the new-agent page" (`sa-28`).
+
 ## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
 
 Moved here by the triage of 5 October, at the owner's request: these are not open defects and are not in the
 counts. Each says what it is in its heading, with the status it had before. Their full evidence is in
 `docs/triage-2026-10-05.md`.
 
-#### Features and ClickUp gaps — 7
+#### Features and ClickUp gaps — 5
 
 ### `found-13-oct/importers-by-sign-in-unbuilt` — feature, not counted (found closing `commit-log/log-601eacc-2`, 13 October)
 
@@ -11305,27 +11339,7 @@ counts. Each says what it is in its heading, with the status it had before. Thei
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). There are still no agents (no table, module or route; every agents route is a 404 on lane 6), no hub nav or Ask|Agents toggle, no composer '+', no artifacts and no image generation, but the task-header Brain² button (row 743) and the '+' menu Brain (row 751) are now built. Evidence: `docs/triage-2026-10-05.md`.
 
-### `ledger-rows/row-770` — feature, not counted (triage, 5 October; was: open, large)
-
-**Create-menu 'Super Agent' — still absent**
-
-*Evidence:* reaudit.md:770 (P): 'Super Agent stays open and is blocked, not pending: Rundesk has no agents'. Confirmed: no agents table in packages/db/src/schema and no agents module in apps/api/src/modules. 'Describe anything to create' and Create with AI are built (create-menu-ai.mjs).
-
-*To close:* Depends on row-852's Super Agents build. Once that exists, a create-menu entry that opens 'Create Agent' is small.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The create menu has no Super Agent entry and Rundesk has no agents at all. This is an unbuilt feature that depends on row-852, not a defect. Evidence: `docs/triage-2026-10-05.md`.
-
-### `ledger-rows/row-852` — feature, not counted (triage, 5 October; was: partly-fixed, large)
-
-**Brain² hub row is still M as a whole, but its main column exists at /app/:ws/ai; only Super Agents, Ask|Agents, nav shape and onboarding are absent**
-
-*Evidence:* reaudit.md:852 is `| M | Brain² hub, /ai/brain, AI-scoped left nav, Ask|Agents toggle, Super Agents |`. The ledger's own read at reaudit.md:6500-6550 says the main column is 'largely built' and that the hub lives at /app/:workspaceId/ai. Tree: routes/app.$workspaceId.ai.tsx → workspace-ai-page.tsx:123 and :188-235 have seven tabs (chat, knowledge, commands, generate, notes, writing, analytics); the shell AI dock is at routes/app.tsx:168-190. There is still no agents table, module or route: packages/db/src/schema lists none, and apps/api/src/modules has no agents module. skills.ts:1-29 separates Skills (built) from ClickUp's Super Agents (instructions, triggers, skills, knowledge, memory). The 16:25 'Personalize Brain²' onboarding appears in no row except inside the Brain² decision (reaudit.md:2774).
-
-*To close:* Split the row. Mark the hub's main column B, then build Super Agents (Create / All / My) plus the Ask|Agents toggle from ClickUp research. Parts to reuse: `skills` (instructions), AutomationsService.fire() (triggers, automations.service.ts:209-236), COMMAND_TOOLS including create_list/create_folder (ai-command.ts), and the model stub lanes (RUNDESK_LANE_MODEL, ad00a7c) to measure it. The /ai/brain URL and left-nav shape are cosmetic.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The Brain hub's main column exists at /app/:ws/ai. Super Agents, the Ask|Agents toggle, the AI-scoped nav, /ai/brain and the onboarding are all still unbuilt features, not defects. Evidence: `docs/triage-2026-10-05.md`.
-
-*12 October:* `ledger-rows/row-869`'s My Agent Performance is carried here: it is the performance of Super Agents, and is built with them.
+*13 October:* the agent runtime it waited for is built — Super Agents (`ledger-rows/row-852`, `ledger-rows/row-770`, the Agents half of `ledger-rows/row-745`). Left: @Brain in comments (row-745's other half) and the composer's '+' with generated artifacts (`ledger-rows/row-853`).
 
 ### `ledger-rows/row-853` — feature, not counted (triage, 5 October; was: open, large)
 
@@ -11348,6 +11362,8 @@ counts. Each says what it is in its heading, with the status it had before. Thei
 *To close:* @Brain: research how ClickUp's @Brain answers in a comment thread, then build it on ai.service + comment create, measured on a model-stub lane. Agents: wait for row-852's Super Agents.
 
 *Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The @ picker has six sections and no Brain or Agents section. @Brain could be built on the existing AI service, but Agents cannot be built until Super Agents (row-852) exists. Evidence: `docs/triage-2026-10-05.md`.
+
+*13 October:* the Agents half is built with `ledger-rows/row-852`: the comment @ picker has an Agents tab listing the agents the reader may use, and Chat's picker an Agents section, each inserting a mention the agent answers in the thread (`super-agents.mjs`, `sa-29`, `sa-30`). The Brain section — @Brain answering in a comment thread — is what is left.
 
 #### Settled by the owner: reverted or superseded, 5 October — 7
 

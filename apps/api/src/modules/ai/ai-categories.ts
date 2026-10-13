@@ -134,12 +134,16 @@ export const FEATURE_CATEGORY: Readonly<Record<string, AiCategory>> = {
   'meeting.notes':          'docs',
   'meeting.transcript':     'docs',
   'skill.propose':          'docs',
+  // The Super Agent builder drafts a profile's instructions (`ledger-rows/row-852`).
+  'agent.build':            'docs',
 
   // Comments or chats sent
   'chat.mention':           'comments',
   'comment.reply':          'comments',
   'chat.title':             'comments',
   'chat':                   'comments',
+  // A Super Agent's run answers as a comment or a message (`ledger-rows/row-852`).
+  'agent.run':              'comments',
 
   // Summaries or updates generated
   'summarize':              'summaries',

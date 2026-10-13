@@ -756,7 +756,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Task header **"Created `<date>`" chip** — the API returned it all along |
 | B | Task header **"Brain²"** — frame `03:40` draws it straight after the Created chip. Closed 29 September by `brain-entry-points.mjs`, 9 of its 14 checks (`ledger-rows/row-743`). This row said *"deliberate: the hub does not exist"*, and the reason was stale: what the frame's button opens is Brain beside the task and scoped to it, and the shell's AI dock already sent a view the server writes into the model's context. It opens the dock pointed at the task (a chip names it, and every turn names it to the server by title and id), beside the sheet rather than under it; closing the task hands the dock back to the page. The dock did not read the task's description or comments when this row closed — `POST /ai/chat` took no task id — and does since the same day: the turn carries the id, and the server reads the task into the context after checking the reader may open it (`found-29-sep/ai-chat-takes-no-task`, checks 15–16 of the same suite) |
 | B | @ picker People/Tasks/Docs; "Does not have access to task" |
-| P | @ picker **Whiteboards / Locations / Channels closed** by `task-mentions.mjs`, 17 checks (frames `04:00`/`04:11`). Still open, and blocked rather than pending: **Brain section** and **Agents**, both of which address the Brain² hub that does not exist (see §3). The Locations check asserts a request LEFT THE PAGE carrying the typed word and exactly the three location types — filtering the sidebar's cached tree in the browser finds nothing for a space created this minute and calls it "no matches" |
+| P | @ picker **Whiteboards / Locations / Channels closed** by `task-mentions.mjs`, 17 checks (frames `04:00`/`04:11`). **Agents** closed 13 October (`ledger-rows/row-852`): the picker's Agents tab lists the agents the reader may use (`super-agents.mjs`). Still open: the **Brain section** — @Brain answering in the comment's thread (`ledger-rows/row-745`). The Locations check asserts a request LEFT THE PAGE carrying the typed word and exactly the three location types — filtering the sidebar's cached tree in the browser finds nothing for a space created this minute and calls it "no matches" |
 | B | Per-@-type keyboard hint footer — closed by `task-mentions.mjs`, 17 checks. Frame `04:00` draws `'@' People | '@@' Tasks | '@@@' Docs | '@@@@' Whiteboards | '@/' Locations | '#' Channels`; Rundesk had no footer at all |
 | B | Voice note, Transcribe, Insert as text, inline player, **locale→speech language** |
 | B | "Attach as audio file" tooltip — closed by `comment-recording.mjs`, 32 checks |
@@ -781,7 +781,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Related Items — one panel, Relationships \| References, single entry point |
 | B | Right-rail "Related Items" icon + tooltip — closed by `task-attachments.mjs`, 13 checks (frames `06:05`–`06:08`) |
 | B | Sidebar Direct Messages — closed by `sidebar-dms.mjs`, 14 checks. The data had been there the whole time and the surface was not: `chat_channels.is_dm` is a real column and `workspace-chat-page.tsx` has split `publicChannels` from `dmChannels` since it was written. The Channels section filters DMs out on purpose — `+ Add Channel` takes a name and `+ New message` takes a person, so one button cannot be both — and filtering them out without giving them a home left them reachable only from the page you had to already be on to know you had any |
-| P | Create-menu search **"Describe anything to create" and Create with AI closed** by `create-menu-ai.mjs`, 23 checks (frame `06:40`). **Super Agent** stays open and is blocked, not pending: Rundesk has no agents, and the Brain²/Super Agents hub is recorded in §3. The check asserts the row in Postgres across BOTH doors — a list made from a space with no project lands in that space's hidden default container, which `getProjectsBySpace` excludes on purpose, so walking the visible projects could never find it |
+| B | Create-menu search **"Describe anything to create" and Create with AI closed** by `create-menu-ai.mjs`, 23 checks (frame `06:40`). **Super Agent** closed 13 October: the Create menu opens the AI hub's new-agent page (`ledger-rows/row-770`, `super-agents.mjs`). The check asserts the row in Postgres across BOTH doors — a list made from a space with no project lands in that space's hidden default container, which `getProjectsBySpace` excludes on purpose, so walking the visible projects could never find it |
 | B | **Form in the create menu** — frame `08:00` puts it beside Doc · Dashboard · Whiteboard, and the module had been complete for a long time (builder, public submit page, uploads, routing) and reachable only from the Forms rail. Closed by `space-create-menu.mjs`, **28 checks**. `form` is a ninth `CreateKind`, so the menu and the quick-create strip both gain it from one list. Its creator asks which list submissions file into **and refuses without one**, because `FormsService.createTaskForSubmission` returns early when a form has neither a `targetListId` nor a routing field — a form made with no destination takes replies and produces nothing, on a page nobody revisits. **Three defects came out of building it.** `GET /lists/space/:id` does not return a space's lists: `getListsBySpace` resolves the space's hidden default container and returns that project's, so the picker said "This Space has no Lists yet" over a project page drawing one — the endpoint is left alone (the sidebar, `list-under-space` and `space-presets` all depend on the narrow meaning) and the picker reads `GET /lists/workspace/:id`, which carries `spaceId` per row. A space with no lists left the button **disabled in silence**, which is `[21:49]`'s dead end again; it still refuses and now says why. And `['lists', projectId]` is not a prefix of the other list keys, so a list created through the List tab was missing from this picker for thirty seconds — both create paths invalidate the bare `['lists']` prefix now |
 | B | Create-a-Space: icon+name, description, **Default permission**, Make Private |
 | B | Space dialog footer "Use Templates" — closed by `space-wizard.mjs`, 23 checks (frame `06:52`) |
@@ -865,11 +865,11 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 | M | "Add to ›" — frame `15:35` draws the row and its chevron; **no frame opens the submenu and the transcript never speaks the item**, so what it adds a task TO is unspecified. The gloss this row carried for six weeks — *"a task in more than one list"* — is ClickUp's real product, not anything in the video, and it is what kept the row on the buildable side. Blocked on the reference, not on Rundesk. See §6 |
 | B | Assignee picker: search box, **Me** first, invite-by-email |
 | B | "⚡ Assign with AI" — the ranking closed by `ai-assign.mjs`, 23 checks. The ranking is the feature: the suite adds work to the first pick and requires the suggestion to **name somebody else**, with no escape hatch — the subject's list is the run's own, so every candidate starts at `inList = 0` and only load moved. It recommends and does not assign, which is asserted by re-reading the task. Until 29 September no page asked it; the picker's footer, where frame `15:45` draws it, now does, and assigns on confirm (`assign-with-ai-picker.mjs`, 2 checks) |
-| — | Agents / "+ Create Agent" — excluded: Rundesk has no agents (see §3) |
+| B | Agents / "+ Create Agent" — excluded until 13 October, when Rundesk had no agents; Super Agents are built (`ledger-rows/row-852`), New Super Agent is the hub's first row, and the row is counted. Closed by `super-agents.mjs`. |
 | B | **assign → "Add to priorities?" prompt → toast → planner rail** — the whole chain |
 | B | **Add to a COLLEAGUE's priorities** — closed by `assign-to-priorities.mjs`, 22 checks (`ledger-rows/row-850`). ClickUp lets Members, Admins and Owners add to other people's priorities, and guests cannot, so assigning a colleague asks "Add this task to <name>'s priorities?". The toast opens their panel, and their rail and panel say who added each row. Both of them must be able to open the task |
 | B | Live focus countdown in the header — `FocusBlockPill` in `app-topbar.tsx`, frame `15:20`'s moon glyph and *"Work on … 2h 56m left"* right of the workspace switcher. It reads `useRunningFocusBlock`, sharing its fetch, its choice of block and its one-second clock with the tab-title writer, so there is no second countdown in the file. Testid `focus-block-pill`, measured by `test/e2e/focus-pill.mjs` |
-| M | Brain² hub, `/ai/brain`, AI-scoped left nav, Ask\|Agents toggle, Super Agents |
+| B | Brain² hub, `/ai/brain`, AI-scoped left nav, Ask\|Agents toggle, Super Agents — built 13 October as ClickUp's Super Agents work (`ledger-rows/row-852`): the hub is the AI page (`/app/:ws/ai`), whose Ask \| Agents switch opens the agents hub with its own left nav — New Super Agent, All Agents, My Agents, Activity and the recently run; an agent is made from the builder or a form, started by an @mention, a DM, an assignment, its schedule or an Automation, and acts with the rights of whoever started it. Closed by `super-agents.mjs`, **39** checks, with a model and without one. |
 | M | Credit meter; rotating placeholder; composer "+"; generated artifacts / slide deck. *(29 September: the rotating placeholder is built and measured on a lane with a model — `commit-log/log-4ad25f6-1`, `ai-answer-rendering`; the row stays `M` for the credit meter, the composer "+" and the generated artefacts.)* |
 | B | Skills; Recent Chats with auto-derived names |
 
@@ -915,7 +915,7 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 
 ## 4. Counts
 
-**173 rows: 162 built · 5 partial · 6 missing.**
+**174 rows: 165 built · 4 partial · 5 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -951,9 +951,16 @@ rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 123 | 4 | 5 | 132 |
+| §2, the sections table | 126 | 3 | 4 | 133 |
 | §5, recovered from the frame observations | 39 | 1 | 1 | 41 |
-| **consolidated** | **162** | **5** | **6** | **173** |
+| **consolidated** | **165** | **4** | **5** | **174** |
+
+SUPER AGENTS ARE BUILT, 13 OCTOBER, AND THE TOTAL ROSE BY ONE: §2's
+Brain² hub row moves from `M` to `B`, the Create menu's from `P` to `B`, and
+the Agents row that was excluded because Rundesk had no agents is counted —
+the one movement that may raise the total, a row that could not be built
+becoming one that is (`ledger-rows/row-852`). §2 to `126 · 3 · 4`, 133 rows;
+the whole to `165 · 4 · 5`, 174.
 
 THE VIEW TYPES ROW IS `B`, 13 OCTOBER: §2's row for the eleven view types
 (`ledger-rows/row-777`) went from `P` to `B` when the five ClickUp has and
@@ -1046,7 +1053,7 @@ AI works through a person's own connections (`ai-connected-apps.mjs`, 11
 checks; `ledger-rows/row-2294`). So §5 moves `38 · 1 · 2` → `39 · 1 · 1`, and
 the total stays 174.
 
-§2's 123 built includes the one marked `B*` — built, but the row also records
+§2's 126 built includes the one marked `B*` — built, but the row also records
 something the frame asks for that is not there. It is counted as built
 because that is what it is; the asterisk is where the remainder is written
 down. This read "the four" until 29 September while §2 held six: the two that

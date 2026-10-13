@@ -96,3 +96,28 @@ export function startOfDayIn(timeZone: string, now: Date = new Date()): Date {
     return utc
   }
 }
+
+/**
+ * The instant a wall-clock time in `timeZone` names — `naiveUtcMs` is that
+ * local date and time read as if it were UTC (`Date.UTC(y, m, d, h, min)`).
+ * The same two-pass correction as `startOfDayIn`, so a DST changeover lands on
+ * the right side. Unrecognised zones read as UTC.
+ */
+export function instantOfLocal(timeZone: string, naiveUtcMs: number): Date {
+  try {
+    let guess = naiveUtcMs - offsetMsAt(timeZone, new Date(naiveUtcMs))
+    guess = naiveUtcMs - offsetMsAt(timeZone, new Date(guess))
+    return new Date(guess)
+  } catch {
+    return new Date(naiveUtcMs)
+  }
+}
+
+/** `at` as the wall clock in `timeZone` reads it, as a naive-UTC millisecond count (see `instantOfLocal`). */
+export function localNaiveMs(timeZone: string, at: Date): number {
+  try {
+    return at.getTime() + offsetMsAt(timeZone, at)
+  } catch {
+    return at.getTime()
+  }
+}

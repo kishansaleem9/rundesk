@@ -29,6 +29,7 @@ import {
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import {
+  Bot,
   ImageIcon,
   Maximize2,
   Minimize2,
@@ -171,6 +172,7 @@ import { DateBox, DateTimeBox, DayBox } from './date-time-box'
 import { TaskSheetSkeleton } from './loading-skeletons'
 import { InlineSkeleton } from './loading-skeletons'
 import { useTaskSearch } from '../lib/use-task-search'
+import { useSuperAgents } from './super-agents/super-agents-hub'
 
 /**
  * Stream a task/project summary from the SSE endpoint (Plan §7.5), invoking
@@ -328,7 +330,7 @@ type MentionDocLite = { id: string; title: string; updatedAt?: string }
  * Agent filter for exactly that reason. Adding either as a seventh row would be
  * a picker section with nothing behind it.
  */
-type MentionTab = 'people' | 'tasks' | 'docs' | 'whiteboards' | 'locations' | 'channels'
+type MentionTab = 'people' | 'agents' | 'tasks' | 'docs' | 'whiteboards' | 'locations' | 'channels'
 type MentionSimpleLite = { id: string; title: string; hint?: string }
 
 /**
@@ -3799,6 +3801,7 @@ function OverviewPanel({
             workspaceId={workspaceId}
             taskId={taskId}
             members={availableMembers}
+            assignedIds={assignedIds}
             currentUserId={currentUserId}
             onPick={(userId) => addAssignee.mutate(userId)}
             pending={addAssignee.isPending}
@@ -3902,6 +3905,7 @@ function AssigneePicker({
   workspaceId,
   taskId,
   members,
+  assignedIds,
   currentUserId,
   onPick,
   pending,
@@ -3909,6 +3913,8 @@ function AssigneePicker({
   workspaceId: string
   taskId: string
   members: WorkspaceMemberLite[]
+  /** Who has it already, so an agent on it is not offered twice. */
+  assignedIds: Set<string>
   currentUserId: string
   onPick: (userId: string) => void
   pending: boolean
@@ -3918,6 +3924,12 @@ function AssigneePicker({
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const { isManagerOrAbove } = useWorkspaceRole(workspaceId)
+  /*
+   * ClickUp lists Super Agents among the people a task can go to, marked as
+   * agents (`ledger-rows/row-852`): given the task, the agent starts on it. The
+   * ones this reader may use and that are switched on; none for a guest.
+   */
+  const agentsQuery = useSuperAgents(workspaceId, { enabled: open })
 
   const invite = useMutation({
     mutationFn: (email: string) =>
@@ -4015,6 +4027,35 @@ function AssigneePicker({
           </li>
         ))}
       </ul>
+      {(() => {
+        const agents = (agentsQuery.data ?? []).filter(
+          (a) => a.isActive && !assignedIds.has(a.userId) && (!needle || a.name.toLowerCase().includes(needle)),
+        )
+        if (agents.length === 0) return null
+        return (
+          <div className="mt-1 border-t border-border/60 pt-1" data-testid="assignee-agents">
+            <p className="px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('superAgents.pickerSection')}</p>
+            {agents.slice(0, 8).map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                data-testid={`assign-agent-${a.userId}`}
+                disabled={pending}
+                onClick={() => {
+                  onPick(a.userId)
+                  setOpen(false)
+                  setQuery('')
+                }}
+                className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[12px] hover:bg-muted/60 disabled:opacity-50"
+              >
+                <Bot className="h-3.5 w-3.5 text-violet-600" />
+                <span className="truncate">{a.name}</span>
+                <span className="ml-auto shrink-0 text-[10px] text-muted-foreground" data-testid="assign-agent-mark">{t('superAgents.agentMark')}</span>
+              </button>
+            ))}
+          </div>
+        )
+      })()}
       {hidden > 0 && (
         <p className="px-2 pt-1 text-[10px] text-muted-foreground" data-testid="assignee-more-hidden">
           {tCount('taskDetail.assignMoreHidden', hidden)}
@@ -7016,6 +7057,16 @@ function CommentsPanel({
   const channelMentionCandidates: MentionSimpleLite[] = (mentionChannelsQuery.data ?? [])
     .filter((c) => (c.name ?? '').toLowerCase().includes(mentionQuery))
     .map((c) => ({ id: c.id, title: c.name, hint: c.isPrivate ? 'private' : undefined }))
+  /*
+   * ClickUp's @ picker lists Super Agents in their own section
+   * (`ledger-rows/row-745`, `ledger-rows/row-852`): the ones this reader may
+   * use, switched on. Mentioned, an agent answers in the comment's thread.
+   * Nothing for a guest, who has no agents — the server refuses the list.
+   */
+  const mentionAgentsQuery = useSuperAgents(workspaceId, { enabled: mentionToken !== null })
+  const agentMentionCandidates: WorkspaceMemberLite[] = (mentionAgentsQuery.data ?? [])
+    .filter((a) => a.isActive && a.name.toLowerCase().includes(mentionQuery))
+    .map((a) => ({ userId: a.userId, displayName: a.name, email: '' }) as WorkspaceMemberLite)
   const showMentions = mentionToken !== null
   const namesById = useMemo(
     () => Object.fromEntries((membersQuery.data ?? []).map((m) => [m.userId, m.displayName || m.email])),
@@ -7373,6 +7424,8 @@ function CommentsPanel({
   const activeCandidates: Array<unknown> =
     mentionTab === 'people'
       ? mentionCandidates
+      : mentionTab === 'agents'
+        ? agentMentionCandidates
       : mentionTab === 'tasks'
         ? taskMentionCandidates
         : mentionTab === 'docs'
@@ -7787,6 +7840,7 @@ function CommentsPanel({
             } else if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
               if (mentionTab === 'people' && activeMention) insertMention(activeMention)
+              if (mentionTab === 'agents' && agentMentionCandidates[mentionIndex]) insertMention(agentMentionCandidates[mentionIndex])
               if (mentionTab === 'tasks' && taskMentionCandidates[mentionIndex]) insertTaskMention(taskMentionCandidates[mentionIndex])
               if (mentionTab === 'docs' && docMentionCandidates[mentionIndex]) insertDocMention(docMentionCandidates[mentionIndex])
               if (mentionTab === 'whiteboards' && whiteboardMentionCandidates[mentionIndex]) {
@@ -7823,6 +7877,7 @@ function CommentsPanel({
             <div className="px-2 pt-2 pb-1 border-b border-border/70 flex flex-wrap items-center gap-1">
               {([
                 ['people', 'taskDetail.mentionPeople'],
+                ['agents', 'superAgents.pickerSection'],
                 ['tasks', 'taskDetail.mentionTasks'],
                 ['docs', 'taskDetail.mentionDocs'],
                 ['whiteboards', 'taskDetail.mentionWhiteboards'],
@@ -7895,6 +7950,31 @@ function CommentsPanel({
                     </div>
                   </button>
                 ))}
+              </div>
+            )}
+            {mentionTab === 'agents' && (
+              <div className="max-h-40 overflow-auto" data-testid="mention-list-agents">
+                {agentMentionCandidates.length === 0 ? (
+                  <div className="px-3 py-3 text-xs text-muted-foreground" data-testid="mention-agents-empty">
+                    {mentionAgentsQuery.isPending ? <InlineSkeleton /> : t('superAgents.pickerEmpty')}
+                  </div>
+                ) : (
+                  agentMentionCandidates.slice(0, 8).map((agent, idx) => (
+                    <button
+                      key={agent.userId}
+                      type="button"
+                      data-testid="mention-agents-row"
+                      data-user-id={agent.userId}
+                      className={cn('w-full px-2.5 py-2 text-left text-xs flex items-center gap-2', idx === mentionIndex ? 'bg-muted' : 'hover:bg-muted/70')}
+                      onMouseEnter={() => setMentionIndex(idx)}
+                      onClick={() => insertMention(agent)}
+                    >
+                      <Bot className="h-4 w-4 text-violet-600" />
+                      <span className="font-medium truncate">{agent.displayName}</span>
+                      <span className="ml-auto text-[10px] text-muted-foreground">{t('superAgents.agentMark')}</span>
+                    </button>
+                  ))
+                )}
               </div>
             )}
             {mentionTab === 'tasks' && (

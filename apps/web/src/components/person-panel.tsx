@@ -622,6 +622,7 @@ export function PersonPanel() {
   const profile = query.data
   const openPanelFor = usePersonPanel((s) => s.open)
   const navigate = useNavigate()
+  const qc = useQueryClient()
 
   /*
    * The one action the chat page's member card had that this panel needs.
@@ -633,11 +634,16 @@ export function PersonPanel() {
    */
   const startDm = useMutation({
     mutationFn: () =>
+      // The route reads `peerUserId`; `{ userId }` was refused 400 and Message opened nothing (`found-13-oct/person-panel-message-sends-the-wrong-field`).
       api<{ id: string }>(`/workspaces/${workspaceId}/chat/dms`, {
         method: 'POST',
-        body: { userId },
+        body: { peerUserId: userId },
       }),
-    onSuccess: (channel) => {
+    onSuccess: async (channel) => {
+      // Chat falls back to #general for a channel its list does not hold, and a DM
+      // made a moment ago is not in it until it is read again — as the sidebar's own
+      // "new message" does (`found-13-oct/person-panel-message-sends-the-wrong-field`).
+      await qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] })
       close()
       navigate({
         to: '/app/$workspaceId/chat',

@@ -509,7 +509,9 @@ export class NotificationsService {
      */
     deferPush?: boolean
   }) {
-    const { prefs, timezone, dndUntil, role } = await this.getUserNotificationContext(data.userId)
+    const { prefs, timezone, dndUntil, role, isAgent } = await this.getUserNotificationContext(data.userId)
+    // A Super Agent's account reads no Inbox and is mailed nothing: what reaches it are its triggers (`super-agents.runner.ts`).
+    if (isAgent) return { row: null as any, delivered: false }
     const eventKey = this.mapTypeToEventKey(data.type)
     const matrix = prefs.events[eventKey]
     /*
@@ -1542,6 +1544,7 @@ export class NotificationsService {
     dndUntil: Date | null
     /** The account's role: a super_admin reads every item, as in every guard (`notification-reach.ts`). */
     role: string | null
+    isAgent: boolean
   }> {
     const [row] = await this.db
       .select({
@@ -1551,6 +1554,7 @@ export class NotificationsService {
         // scheduled quiet hours in the prefs blob, and both can be true.
         dndUntil: users.dndUntil,
         role: users.role,
+        isAgent: users.isAgent,
       })
       .from(users)
       .where(eq(users.id, userId))
@@ -1561,6 +1565,7 @@ export class NotificationsService {
       timezone: row?.timezone || 'UTC',
       dndUntil: row?.dndUntil ?? null,
       role: (row?.role as string | undefined) ?? null,
+      isAgent: !!row?.isAgent,
     }
   }
 

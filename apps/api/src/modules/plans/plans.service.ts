@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
 import { and, eq, sql } from 'drizzle-orm'
-import { workspaces, workspaceMembers, projects, spaces, planFeatureUses } from '@rundesk/db'
+import { workspaces, workspaceMembers, projects, spaces, planFeatureUses, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import {
@@ -141,10 +141,12 @@ export class PlansService {
   }
 
   async countMembers(workspaceId: string): Promise<number> {
+    // People: a Super Agent's account is a member so it can be mentioned and assigned, and takes no one's place.
     const [row] = await this.db
       .select({ c: sql<number>`count(*)::int` })
       .from(workspaceMembers)
-      .where(eq(workspaceMembers.workspaceId, workspaceId))
+      .innerJoin(users, eq(users.id, workspaceMembers.userId))
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(users.isAgent, false)))
     return row?.c ?? 0
   }
 

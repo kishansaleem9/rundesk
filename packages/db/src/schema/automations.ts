@@ -9,7 +9,8 @@ import { users } from './users'
 //                task.comment_added | task.assignee_changed | task.overdue
 //
 // Action types: change_status | assign_member | set_priority |
-//               send_notification | create_subtask | post_to_channel
+//               send_notification | create_subtask | post_to_channel |
+//               run_super_agent (agentId, instructions — `ledger-rows/row-852`)
 
 export const automations = pgTable('automations', {
   id:          uuid('id').primaryKey().defaultRandom(),

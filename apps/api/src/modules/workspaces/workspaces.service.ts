@@ -844,7 +844,9 @@ export class WorkspacesService {
       .from(workspaceMembers)
       .innerJoin(users, eq(users.id, workspaceMembers.userId))
       .innerJoin(workspaces, eq(workspaces.id, workspaceMembers.workspaceId))
-      .where(eq(workspaceMembers.workspaceId, workspaceId))
+      // A Super Agent's account is a member so it can be mentioned, assigned and messaged, but it is not a person
+      // on the roster: pickers list agents from `/super-agents`, where who may see a private one is asked.
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(users.isAgent, false)))
 
     // Provenance is a separate read rather than a join: someone re-invited after
     // a removal has more than one accepted invitation, and joining would fan the

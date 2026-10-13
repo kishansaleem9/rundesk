@@ -2056,6 +2056,19 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # Super Agents as ClickUp has them (`ledger-rows/row-852`, `row-770`, the
+      # Agents half of `row-745`): an agent is its own account, started by an
+      # @mention, a DM, an assignment, its schedule or an Automation, acting with
+      # the rights of whoever started it. No model answers here, so each check
+      # reads the run written down as refused and nothing answered; a lane with
+      # the model stub reads the answers.
+      - name: Super Agents, as ClickUp has them
+        timeout-minutes: 15
+        run: node test/e2e/super-agents.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §P frame `18:39` — the integration error card carries the PROVIDER'S own
       # message. A card rendering a constant string is the facade defect.
       - name: Integration error card

@@ -1061,10 +1061,12 @@ export class AiService {
     const plan = resolvePlanConfig(ws?.plan, (ws?.planLimits ?? null) as PlanLimitsOverride | null)
     const perMember = plan.limits.aiCreditsPerMember
     const [[members], [bought], [used]] = await Promise.all([
+      // People, not Super Agents: an agent's account is a member, and a member's share of credits is a person's.
       this.db
         .select({ n: sql<number>`count(*)::int` })
         .from(workspaceMembers)
-        .where(and(eq(workspaceMembers.workspaceId, workspaceId), ne(workspaceMembers.role, 'guest'))),
+        .innerJoin(users, eq(users.id, workspaceMembers.userId))
+        .where(and(eq(workspaceMembers.workspaceId, workspaceId), ne(workspaceMembers.role, 'guest'), eq(users.isAgent, false))),
       this.db
         .select({ n: sql<number>`coalesce(sum(${aiCreditPurchases.credits}), 0)::int` })
         .from(aiCreditPurchases)
@@ -4009,6 +4011,126 @@ ${spaceCatalog || '(none)'}`
     // Deterministic plan (Plan §7.6): honest summary + resolved actions built
     // purely from the collected tool calls, so the preview never over-claims.
     return planFromToolCalls(collected, planCtx)
+  }
+
+  /**
+   * ONE TURN OF A SUPER AGENT (`ledger-rows/row-852`).
+   *
+   * The command assistant's own loop, tools and plan, with three differences an
+   * agent makes. Its system prompt is its profile — who it is, its instructions,
+   * what started it, what it remembers. Its tools are its Skills: only the ones
+   * it was given are offered, so an agent with none can only answer. And it
+   * ACTS: what it asks for is returned as a plan to carry out, not a preview —
+   * the caller executes it, under the rights of the person the agent is acting
+   * for (`SuperAgentsRunner`), never its own. Metered, rate-limited and refused
+   * in words like every call here.
+   */
+  async agentTurn(
+    workspaceId: string,
+    turn: {
+      system: string
+      message: string
+      tools: string[]
+      /** Its Knowledge, as the lists it covers: it finds and makes work there only. None means all its reader may read. */
+      listIds?: string[] | null
+    },
+    ctx: AiCtx,
+  ): Promise<{ text: string; plan: CommandPlan | null }> {
+    await this.assertAvailable('agent.run', ctx)
+    const planCtx = await this.loadCommandContext(workspaceId, ctx.userId ?? '')
+    planCtx.workspaceId = workspaceId
+    if (turn.listIds) {
+      const inScope = new Set(turn.listIds)
+      planCtx.lists = planCtx.lists.filter((l) => inScope.has(l.id))
+      planCtx.tasks = planCtx.tasks.filter((t) => inScope.has(t.listId))
+    }
+    const offered = new Set(turn.tools)
+    const tools = COMMAND_TOOLS.filter((t) => offered.has(t.name) && t.name !== CONNECTED_SEARCH_TOOL)
+    const listCatalog = planCtx.lists
+      .slice(0, 60)
+      .map((l) => `- ${l.id}: ${l.path}`)
+      .join('\n')
+    const system = `${turn.system}
+Today's date is ${planCtx.today}.${tools.length ? `
+To change work, call your tools; what you call is carried out, so call only what you were asked or are instructed to do. Find tasks with search_tasks before changing them, and pick a listId from these lists when you make a task:
+${listCatalog || '(none)'}` : ''}`
+    const messages: Anthropic.Messages.MessageParam[] = [{ role: 'user', content: turn.message }]
+    const collected: ToolCall[] = []
+    const texts: string[] = []
+    for (let step = 0; step < 5; step++) {
+      const response = await this.complete('agent.run', ctx, {
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        system,
+        ...(tools.length ? { tools } : {}),
+        messages,
+      })
+      for (const block of response.content) if (block.type === 'text' && block.text.trim()) texts.push(block.text.trim())
+      const toolUses = response.content.filter(
+        (block): block is Anthropic.Messages.ToolUseBlock => block.type === 'tool_use' && offered.has(block.name),
+      )
+      if (toolUses.length === 0) break
+      messages.push({ role: 'assistant', content: response.content })
+      const results: Anthropic.Messages.ToolResultBlockParam[] = []
+      let acted = false
+      for (const toolUse of toolUses) {
+        const input = (toolUse.input ?? {}) as Record<string, unknown>
+        collected.push({ name: toolUse.name, input })
+        if (toolUse.name === 'search_tasks') {
+          const found = searchTasksInContext(input, planCtx)
+            .slice(0, 25)
+            .map((t) => ({ id: t.id, title: t.title, status: t.status, dueDate: t.dueDate, assigneeEmails: t.assigneeEmails }))
+          results.push({ type: 'tool_result', tool_use_id: toolUse.id, content: JSON.stringify(found) })
+        } else {
+          acted = true
+          results.push({ type: 'tool_result', tool_use_id: toolUse.id, content: 'Done.' })
+        }
+      }
+      messages.push({ role: 'user', content: results })
+      if (acted) break
+    }
+    const acting = collected.some((c) => c.name !== 'search_tasks')
+    return { text: texts.join('\n\n'), plan: acting ? planFromToolCalls(collected, planCtx) : null }
+  }
+
+  /**
+   * THE SUPER AGENT BUILDER (`ledger-rows/row-852`): ClickUp's "describe the
+   * agent you want" box. The model drafts a profile — name, description,
+   * instructions, which of the offered Skills, which triggers — and nothing is
+   * made from it here: the caller checks every field as a typed one is
+   * checked, and the person keeps or changes it before it is saved.
+   */
+  async draftAgent(description: string, skills: readonly string[], ctx: AiCtx): Promise<Record<string, unknown>> {
+    await this.assertAvailable('agent.build', ctx)
+    const system = `You draft a Super Agent's profile for Rundesk from what a person says it should do.
+A Super Agent is a teammate made of instructions: it is @mentioned, messaged, assigned tasks or run on a schedule, and acts with its skills.
+Respond ONLY with valid JSON of this exact shape:
+{
+  "name": "string, at most 40 characters",
+  "description": "one sentence: what it is for",
+  "instructions": "what it does, step by step, in the second person",
+  "skills": [one or more of: ${skills.map((k) => `"${k}"`).join(', ')}],
+  "triggers": {
+    "mention": { "on": boolean }, "dm": { "on": boolean }, "assign": { "on": boolean },
+    "schedule": { "on": boolean, "every": "hourly" | "daily" | "weekly" | "monthly", "at": "HH:MM" }
+  }
+}`
+    const response = await this.complete('agent.build', ctx, {
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      system,
+      messages: [{ role: 'user', content: description }],
+    })
+    const text = response.content.find((b) => b.type === 'text')?.text ?? ''
+    const found = text.match(/\{[\s\S]+\}/)
+    if (!found) throw new HttpException('The builder did not draft a Super Agent — describe it again', HttpStatus.BAD_GATEWAY)
+    try {
+      const draft = JSON.parse(found[0])
+      if (!draft || typeof draft !== 'object' || Array.isArray(draft)) throw new Error('not an object')
+      return draft as Record<string, unknown>
+    } catch {
+      throw new HttpException('The builder did not draft a Super Agent — describe it again', HttpStatus.BAD_GATEWAY)
+    }
   }
 
   /**

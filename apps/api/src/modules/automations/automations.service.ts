@@ -21,6 +21,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { readableTaskIds } from '../../common/permissions/read-access'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
+import { agentTriggers } from '../../common/agents/agent-triggers'
 
 type TriggerContext = {
   taskId?: string
@@ -402,6 +403,25 @@ export class AutomationsService {
         const template = typeof action.params.message === 'string' ? action.params.message : ''
         if (!channelId) break
         await this.postToChannel(channelId, template, ctx, authorHint)
+        break
+      }
+
+      /*
+       * RUN A SUPER AGENT (`ledger-rows/row-852`): ClickUp's Automation action
+       * that hands the task to an agent with instructions of the action's own.
+       * Said on the agents' seam — the agents module answers through Tasks, which
+       * imports this one — and run under the rights of whoever set the rule off.
+       */
+      case 'run_super_agent': {
+        const agentId = typeof action.params.agentId === 'string' ? action.params.agentId : ''
+        if (!agentId || !ctx.taskId) break
+        agentTriggers.automation({
+          workspaceId: ctx.workspaceId,
+          agentId,
+          taskId: ctx.taskId,
+          instructions: typeof action.params.instructions === 'string' ? action.params.instructions.slice(0, 2000) : '',
+          actorId: ctx.userId ?? authorHint ?? null,
+        })
         break
       }
 

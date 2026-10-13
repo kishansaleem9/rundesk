@@ -135,6 +135,7 @@ import { planLabelsByName, uniqueLabelNames, type LabelByName } from './task-val
 import { CustomFieldsService, fieldIsOnTask } from '../custom-fields/custom-fields.service'
 import { guestMayRead, guestReachesList } from '../../common/permissions/guest-reach'
 import { likeContaining } from '../../common/sql/like'
+import { agentTriggers } from '../../common/agents/agent-triggers'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 // Custom statuses per List replaced the fixed enum, so we accept any string
@@ -5125,6 +5126,8 @@ export class TasksService {
     }
     // §G10-6 — and everybody watching hears who it moved to.
     void this.notifyWatchersOfAssigneeChange({ taskId, actorId, subjectId: assigneeId, added: true })
+    // A Super Agent given the task starts on it (`ledger-rows/row-852`).
+    agentTriggers.assigned({ taskId, userId: assigneeId, actorId })
   }
 
   /**
@@ -5392,7 +5395,8 @@ export class TasksService {
           })
           .from(workspaceMembers)
           .innerJoin(users, eq(users.id, workspaceMembers.userId))
-          .where(eq(workspaceMembers.workspaceId, row.workspaceId))
+          // People only: Super Agents are offered in the picker's Agents section, which asks who may see a private one.
+          .where(and(eq(workspaceMembers.workspaceId, row.workspaceId), eq(users.isAgent, false)))
       : []
 
     /*
@@ -6298,9 +6302,16 @@ export class TasksService {
      * envelope is written with it, before anybody is told there is a comment,
      * so the thread never draws an email without who it went to.
      */
-    opts: { email?: Omit<typeof taskCommentEmails.$inferInsert, 'commentId'> } = {},
+    opts: {
+      email?: Omit<typeof taskCommentEmails.$inferInsert, 'commentId'>
+      /**
+       * A Super Agent answering in a thread (`super-agents.runner.ts`): it writes as itself, where the person it
+       * answers for may comment. Never set from a route — a route's author is the one signed in.
+       */
+      actingForId?: string
+    } = {},
   ) {
-    await this.assertMayComment(taskId, authorId)
+    await this.assertMayComment(taskId, opts.actingForId ?? authorId)
 
     /*
      * §V2-05 — a comment with no words is allowed IF it carries a file.
@@ -6357,6 +6368,15 @@ export class TasksService {
     // Fire comment + mention notifications (best-effort). A wordless voice note
     // gets described by what it is rather than emailed as a blank quote.
     void this.notifyComment(taskId, authorId, body.trim() ? body : describeAttachments(linkable), finalMentions)
+    // An agent it names answers in the thread (`ledger-rows/row-852`); an agent's own comment starts nothing.
+    agentTriggers.comment({
+      taskId,
+      commentId: comment.id,
+      threadId: parentCommentId || comment.id,
+      authorId,
+      body,
+      mentionedUserIds: finalMentions.map((m) => m.userId),
+    })
 
     // Fire the "Comment is added to task" automation trigger (best-effort).
     void (async () => {

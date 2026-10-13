@@ -79,6 +79,7 @@ import { ChatMessageBody } from '../components/chat/chat-message-body'
 import { ChatAttachmentList } from '../components/chat/chat-attachments'
 import { InlineSkeleton, ListSkeleton } from '../components/loading-skeletons'
 import { useTaskSearch } from '../lib/use-task-search'
+import { useSuperAgents } from '../components/super-agents/super-agents-hub'
 
 type Channel = {
   id: string
@@ -443,7 +444,7 @@ export function ChatPage() {
   // Action item attached to the next sent message (§A3.5).
   const [actionItem, setActionItem] = useState<{ assigneeId: string; dueAt: string } | null>(null)
   // Mention picker tab (§A3.6). '#' jumps straight to channels.
-  const [mentionTab, setMentionTab] = useState<'people' | 'tasks' | 'docs' | 'channels'>('people')
+  const [mentionTab, setMentionTab] = useState<'people' | 'agents' | 'tasks' | 'docs' | 'channels'>('people')
   const [emojiUploading, setEmojiUploading] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -520,6 +521,10 @@ export function ChatPage() {
   const mentionQuery = mentionTrigger?.query ?? ''
   const mentionCandidates = (membersQuery.data ?? []).filter((m) =>
     (m.displayName || m.email).toLowerCase().includes(mentionQuery),
+  )
+  const agentsQueryForPicker = useSuperAgents(workspaceId, { enabled: !!mentionTrigger })
+  const agentMentionCandidates = (agentsQueryForPicker.data ?? []).filter(
+    (a) => a.isActive && a.name.toLowerCase().includes(mentionQuery),
   )
   const mentionTasksQuery = useTaskSearch<MentionTask>(workspaceId, mentionQuery, {
     key: 'chat-mention-tasks',
@@ -819,9 +824,19 @@ export function ChatPage() {
     return membersQuery.data ?? []
   }, [selectedChannel, channelMembersQuery.data, membersQuery.data, me])
 
+  /*
+   * Super Agents (`ledger-rows/row-852`): mentioned from the picker's Agents
+   * tab, and named in the messages that mention them or that they write — an
+   * agent's account is not on the members roster, so its name comes from here.
+   */
+  const agentsQuery = useSuperAgents(workspaceId)
+  const agentUserIds = useMemo(() => new Set((agentsQuery.data ?? []).map((a) => a.userId)), [agentsQuery.data])
   const namesById = useMemo(
-    () => Object.fromEntries((membersQuery.data ?? []).map((m) => [m.userId, m.displayName || m.email])),
-    [membersQuery.data],
+    () => ({
+      ...Object.fromEntries((agentsQuery.data ?? []).map((a) => [a.userId, a.name])),
+      ...Object.fromEntries((membersQuery.data ?? []).map((m) => [m.userId, m.displayName || m.email])),
+    }),
+    [membersQuery.data, agentsQuery.data],
   )
   // Mentioning someone who isn't in the channel is a dead end unless we say so
   // (§A3.6) — offer to add them instead of silently notifying nobody.
@@ -830,10 +845,11 @@ export function ChatPage() {
     const memberIds = new Set((channelMembersQuery.data ?? []).map((m) => m.userId))
     if (memberIds.size === 0) return []
     const ids = [...new Set([...input.matchAll(/<@([0-9a-fA-F-]{36})>/g)].map((m) => m[1]))]
+    // An agent answers for whoever mentions it, member or not: it is never offered to be added.
     return ids
-      .filter((id) => !memberIds.has(id))
+      .filter((id) => !memberIds.has(id) && !agentUserIds.has(id))
       .map((id) => ({ userId: id, name: namesById[id] ?? t('chat.unknownUser') }))
-  }, [input, selectedChannel, channelMembersQuery.data, namesById, t])
+  }, [input, selectedChannel, channelMembersQuery.data, namesById, agentUserIds, t])
 
   const addChannelMembersMutation = useMutation({
     mutationFn: ({ channelId, userIds }: { channelId: string; userIds: string[] }) =>
@@ -3392,6 +3408,7 @@ export function ChatPage() {
                 <div className="flex items-center gap-1 border-b border-border/60 px-2 py-1">
                   {([
                     ['people', t('chat.mentionPeople')],
+                    ['agents', t('superAgents.pickerSection')],
                     ['tasks', t('chat.mentionTasks')],
                     ['docs', t('chat.mentionDocs')],
                     ['channels', t('chat.mentionChannels')],
@@ -3457,6 +3474,26 @@ export function ChatPage() {
                       )}
                     </>
                   )}
+                  {mentionTab === 'agents' &&
+                    (agentMentionCandidates.length === 0 ? (
+                      <div className="px-3 py-3 text-[12px] text-muted-foreground" data-testid="chat-mention-agents-empty">
+                        {t('superAgents.pickerEmpty')}
+                      </div>
+                    ) : (
+                      agentMentionCandidates.slice(0, 6).map((agent) => (
+                        <button
+                          key={agent.id}
+                          type="button"
+                          data-testid="chat-mention-agent"
+                          data-user-id={agent.userId}
+                          className={rowClass}
+                          onClick={() => insertMentionToken(`<@${agent.userId}>`)}
+                        >
+                          <span className="font-medium text-foreground">{agent.name}</span>
+                          <span className="ml-2 text-muted-foreground">{t('superAgents.agentMark')}</span>
+                        </button>
+                      ))
+                    ))}
                   {mentionTab === 'tasks' &&
                     (taskMentionCandidates.length === 0 ? (
                       <div className="px-3 py-3 text-[12px] text-muted-foreground">{t('chat.noMatchingTasks')}</div>

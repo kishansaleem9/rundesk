@@ -100,6 +100,30 @@ const SCRIPTS = [
     when: /You fill (?:the Categorize field|a custom AI dropdown field) of a task/,
     text: (system) => (/as written, and nothing else: ([^|.]+)/.exec(system)?.[1] ?? 'no options').trim(),
   },
+  /*
+   * A SUPER AGENT'S TURN (`ledger-rows/row-852`): it answers in its own name,
+   * read from the profile the product sends, and says what started it — so a
+   * suite can tell which agent answered, and to what, from the words alone.
+   */
+  {
+    when: /You are (.+?), a Super Agent in Rundesk/,
+    text: (system) => {
+      const name = /You are (.+?), a Super Agent in Rundesk/.exec(system)?.[1] ?? 'an agent'
+      const started = /What started you: ([^.\n]+)/.exec(system)?.[1] ?? 'something'
+      return `${name} here, started by ${started}.`
+    },
+  },
+  // The builder drafts a profile (`AiService.draftAgent`).
+  {
+    when: /You draft a Super Agent's profile for Rundesk/,
+    text: JSON.stringify({
+      name: 'Stub Triage Agent',
+      description: 'Finds overdue work and says who owns it.',
+      instructions: 'List the overdue tasks and name their owners.',
+      skills: ['search_tasks', 'not_a_skill'],
+      triggers: { mention: { on: true }, dm: { on: false }, assign: { on: true }, schedule: { on: true, every: 'weekly', at: '08:30' } },
+    }),
+  },
 ]
 // Staged by `POST /__control/next`, consumed by the call it answers.
 let staged = null

@@ -23,6 +23,12 @@ export const users = pgTable('users', {
   passwordHash:  text('password_hash'),
   emailVerified: boolean('email_verified').notNull().default(false),
   isActive:      boolean('is_active').notNull().default(true),
+  /**
+   * A Super Agent's own account (`ledger-rows/row-852`): what it is mentioned,
+   * assigned, messaged and answers as, as ClickUp's agents are workspace
+   * members you @mention, assign and DM. It has no password and never signs in.
+   */
+  isAgent:       boolean('is_agent').notNull().default(false),
   // Failed-login lockout (driven by per-workspace security policy). Counter
   // resets to 0 on any successful login; lockedUntil is a short auto-releasing
   // window, never a permanent ban.
