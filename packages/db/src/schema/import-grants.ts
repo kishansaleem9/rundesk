@@ -2,6 +2,7 @@ import { pgTable, uuid, text, timestamp, jsonb, uniqueIndex, check } from 'drizz
 import { sql } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { users } from './users'
+import { sealedText } from './sealed-text'
 
 /**
  * A PERSON'S GRANT TO READ ANOTHER TOOL FOR AN IMPORT (`commit-log/log-601eacc-2`).
@@ -25,8 +26,8 @@ export const importGrants = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     provider: text('provider').notNull(),
-    accessToken: text('access_token'),
-    refreshToken: text('refresh_token'),
+    accessToken: sealedText('access_token', 'import_grants.access_token'),
+    refreshToken: sealedText('refresh_token', 'import_grants.refresh_token'),
     tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
     account: jsonb('account').$type<Record<string, unknown>>().notNull().default({}),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

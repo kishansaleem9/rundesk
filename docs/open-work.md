@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 554 items: 1 open · 0 partly fixed · 542 closed, and 11 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 555 items: 0 open · 0 partly fixed · 544 closed, and 11 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 90, each reproduced
+## Found by the triage, 5 October, and since — 91, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10438,13 +10438,22 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 
 *Closed, 13 October.* `usableGrant` gives the grant, or its refusal as a 502 in the provider's words, for a send and a draft alike; an IMAP password that no longer opens goes the same way (`found-12-oct/task-email-imap-unbuilt`). After, lane 9 on batch 41's tree: the same send, **502** "Gmail refused it (400): Token has been expired or revoked." `task-email-imap.mjs` reads it on an IMAP mailbox ("…the send is refused in words (502, not 500)…"), and `tei-20` throws the refusal as it came again.
 
-### `found-13-oct/provider-grants-kept-in-the-clear` — **open** (security, medium; found building `found-12-oct/task-email-imap-unbuilt`) · reproduced 13 October
+### `found-13-oct/provider-grants-kept-in-the-clear` — **closed** (security, medium; found building `found-12-oct/task-email-imap-unbuilt`) · reproduced 13 October
 
 **The tokens kept for Google, Microsoft and the other providers are kept in plain text, and a schema comment says the TOTP secret is encrypted when it is not**
 
 *Evidence, 13 October:* `access_token` and `refresh_token` are plain `text` columns in `email_accounts`, `integration_connections`, `calendar_accounts`, `import_grants` and `user_search_connections`, written and read as the provider gave them. A refresh token is a lasting grant to somebody's mailbox, calendar or drive, so whoever reads the database — a backup, a replica, a dump — holds every one. `oauth.service.ts` states the rule ("reintroduce them encrypted at rest — e.g. AES-256-GCM with TOKEN_ENCRYPTION_KEY — rather than in plaintext") and nothing follows it. `security.ts` comments the TOTP secret's column "encrypted at rest"; `security.service.ts` writes and reads it as base32.
 
 *To close:* keep each through the secret box batch 41 added (`common/security/secret-box.ts`): sealed whenever `TOKEN_ENCRYPTION_KEY` is set, read either way so the rows kept before still work, and sealed when next written; the TOTP secret too; and a check that a kept row holds no token in the clear.
+
+*Measured before, 13 October:* lane 9 on batch 41's tree, `secrets-at-rest.mjs` 2 of 5: a Gmail linked through Google's consent was kept with `access_token` the token itself, a TOTP secret as its base32, and a webhook's signing secret as made.
+
+*Closed, 13 October (batch 42).* Each such column is a sealed one (`packages/db/src/schema/sealed-text.ts`): what is written is sealed under `TOKEN_ENCRYPTION_KEY` (the secret box batch 41 added, moved beside the schema), with the column's name as associated data, so a value moved to another column does not open there; what is read is given back in the clear, so nothing above the schema changed; a value kept before the key is read as it is; one that no longer opens reads as empty, which the provider refuses and the grant is asked for again. The columns: the access and refresh tokens of `email_accounts`, `workspace_integration_connections`, `user_calendar_accounts`, `import_grants`, `user_search_connections` and `oauth_accounts`, the TOTP secret, the OIDC client secret and the webhook secret; still `text`, so no migration. At each start the server seals whatever is still kept in the clear (`SecretsAtRestService`), and without a key it says so, once.
+- After, lane 9: `secrets-at-rest.mjs` 5 of 5 — "a Gmail linked through Google’s consent keeps both its tokens sealed — neither holds the token — and its email is sent with the token they open to (read by SQL)", "a TOTP secret is kept sealed, not as the base32 its column said was encrypted, and a code from the secret shown at setup still verifies (read by SQL)", "a webhook’s signing secret is shown once, kept sealed, and listed after only as there being one (read by SQL)", "a grant kept in the clear before the key was set is still read: its email goes with the token it holds", "what the Email settings give back holds neither a token nor a sealed one".
+- The start's sealing, measured on lane 9: a Gmail's two tokens, a TOTP secret and a webhook secret written in the clear by SQL were sealed when the API next started ("sealed 3 secret(s) kept in the clear"), each opening to what was written.
+- Unit `secrets-at-rest.test.ts`, 3, one of them a gate: no column whose name holds a token or a secret is left out of the sealed ones, and it reads the schema rather than a list (it fails on nothing found).
+- The suites that read a kept token by SQL open it now (`test/e2e/lib/sealed.mjs`, with the lanes' key): `task-email-accounts` 19 of 19, `connected-search` 11 of 11, `task-email-imap` 14 of 14 on lane 9.
+- Patches `sar-1` to `sar-7` and the unit `sar-u1` and `sar-u2`: their runs are owed.
 
 ### `found-13-oct/task-mentions-reads-six-tabs-after-agents` — **closed** (test tooling, small; found by batch 40b's regression sweep) · reproduced 13 October
 
@@ -10472,6 +10481,14 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 *Evidence, 13 October:* `bcd-13`, `-15`, `-16`, `-17`, `-19`, `-20`, `-22`, `-29`, `-33` and `-34` claimed checks whose names hold `"+"`, `"What’s new in Brain²?"`, `"4 slides"`, `"Brain² — Ask, Build, Create"`, `"+ Create Agent"` and `"Made by {name}"`, written inside the claim's own quotes unescaped. The reader (`scripts/lib/claim-match.mjs`) takes `\"` inside a claim and ends one at a bare `"`, so preflight 3's "break patches name a real check" found ten claims no suite has (0 → 10, against its baseline).
 
 *Closed, 13 October.* The inner quotes are escaped, and the gate reads all ten as the checks they name.
+
+### `found-13-oct/task-email-accounts-reads-the-old-refusal` — **closed** (test tooling, small; found measuring batch 42) · reproduced 13 October
+
+**Batch 41 reworded the refusal of a provider that is not a mailbox, and `task-email-accounts` still read the old words**
+
+*Evidence, 13 October:* batch 41 changed "Only Gmail or Outlook is linked to send email" to say that any other mailbox is linked by its IMAP and SMTP servers. `task-email-accounts.mjs` kept its own copy of the old sentence, so on lane 9 it ended 18 of 19: "a guest links no mailbox and reads no Email settings (403, in words), and only Gmail or Outlook is linked to send from (400)". Batch 41's runs had not included the suite.
+
+*Closed, 13 October.* The suite reads the new words: 19 of 19 on lane 9.
 
 ## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 45
 

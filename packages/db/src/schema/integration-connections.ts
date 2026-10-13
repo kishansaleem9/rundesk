@@ -2,6 +2,7 @@ import { pgTable, uuid, text, timestamp, unique, jsonb } from 'drizzle-orm/pg-co
 import { relations } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { users } from './users'
+import { sealedText } from './sealed-text'
 
 export const workspaceIntegrationConnections = pgTable(
   'workspace_integration_connections',
@@ -15,8 +16,8 @@ export const workspaceIntegrationConnections = pgTable(
     scopes: text('scopes').array().notNull().default([]),
     externalAccountId: text('external_account_id'),
     externalAccountEmail: text('external_account_email'),
-    accessToken: text('access_token'),
-    refreshToken: text('refresh_token'),
+    accessToken: sealedText('access_token', 'workspace_integration_connections.access_token'),
+    refreshToken: sealedText('refresh_token', 'workspace_integration_connections.refresh_token'),
     tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
     metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
     /*

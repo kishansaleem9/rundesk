@@ -2,7 +2,8 @@
 # (`found-12-oct/task-email-imap-unbuilt`)
 # Reddens: unit: apps/api/src/modules/email-accounts/imap-mail.test.ts "a sealed password opens for its own row under its own key, and nowhere else"
 import io
-p = '/home/user/rundesk/apps/api/src/common/security/secret-box.ts'
+# Re-aimed 13 October: batch 42 moved the secret box beside the schema, which seals with it too.
+p = '/home/user/rundesk/packages/db/src/secret-box.ts'
 s = io.open(p, encoding='utf-8').read()
 for a, b in [
     ("  cipher.setAAD(Buffer.from(context, 'utf8'))\n",

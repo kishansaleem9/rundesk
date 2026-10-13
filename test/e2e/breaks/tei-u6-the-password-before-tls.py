@@ -1,6 +1,6 @@
 # REQUIRES SSL WITH NO STARTTLS OFFERED SIGNS IN IN THE CLEAR.
 # (`found-12-oct/task-email-imap-unbuilt`)
-# Reddens: unit: apps/api/src/modules/email-accounts/imap-mail.test.ts "a sign-in the server refuses is a refusal of the sign-in, in its words; and \"Requires SSL\" with no STARTTLS offered is refused before any password is sent"
+# Reddens: unit: apps/api/src/modules/email-accounts/imap-mail.test.ts "a sign-in the server refuses is a refusal of the sign-in, in its words; and “Requires SSL” with no STARTTLS offered is refused before any password is sent"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/email-accounts/imap.client.ts'
 s = io.open(p, encoding='utf-8').read()

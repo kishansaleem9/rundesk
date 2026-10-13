@@ -2,13 +2,16 @@ import { pgTable, text, timestamp, uuid, boolean, integer, jsonb, index } from '
 import { relations } from 'drizzle-orm'
 import { users } from './users'
 import { workspaces } from './workspaces'
+import { sealedText } from './sealed-text'
 
 // ─── 2FA / TOTP ───────────────────────────────────────────────────────────────
 
 export const userTotpSecrets = pgTable('user_totp_secrets', {
   id:          uuid('id').primaryKey().defaultRandom(),
   userId:      uuid('user_id').notNull().unique().references(() => users.id, { onDelete: 'cascade' }),
-  secret:      text('secret').notNull(),            // base32 TOTP secret (encrypted at rest)
+  // The base32 TOTP secret, sealed at rest (`sealed-text.ts`) — it was kept in the clear
+  // under a comment that said otherwise (`found-13-oct/provider-grants-kept-in-the-clear`).
+  secret:      sealedText('secret', 'user_totp_secrets.secret').notNull(),
   verified:    boolean('verified').notNull().default(false), // false until user verifies first code
   backupCodes: jsonb('backup_codes').$type<string[]>().default([]), // hashed backup codes
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

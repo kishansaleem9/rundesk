@@ -2,6 +2,7 @@ import { pgTable, text, timestamp, uuid, boolean, jsonb, index, unique } from 'd
 import { relations } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { users } from './users'
+import { sealedText } from './sealed-text'
 
 // ─── SSO Connections ────────────────────────────────────────────────────────
 //
@@ -25,7 +26,7 @@ export const ssoConnections = pgTable(
     // OIDC config
     oidcIssuer:       text('oidc_issuer'),
     oidcClientId:     text('oidc_client_id'),
-    oidcClientSecret: text('oidc_client_secret'),
+    oidcClientSecret: sealedText('oidc_client_secret', 'sso_connections.oidc_client_secret'),
     oidcScopes:       text('oidc_scopes').default('openid email profile'),
 
     // SAML config

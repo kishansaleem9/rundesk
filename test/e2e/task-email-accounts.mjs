@@ -33,6 +33,7 @@ import { apiAs as apiAsAt, madeWorkspace } from './lib/fixture.mjs'
 import { waitUntil } from './lib/wait.mjs'
 import { mailBase, mailTo, resetMailTo } from './lib/mail.mjs'
 import { calendarBase, seedConsentCode, seedMailbox, readMailbox, answerInMailbox, failMailbox } from './lib/calendar.mjs'
+import { openKept } from './lib/sealed.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -61,7 +62,8 @@ const chk = (cond, good, bad) => {
 // The API's own words (`email-plan.ts`, `email-accounts.service.ts`, `integration-connections.service.ts`).
 const SAID = {
   guest: 'Guests cannot send email from a task',
-  notAMailbox: 'Only Gmail or Outlook is linked to send email',
+  // Reworded with batch 41: a mailbox that is neither is linked by its servers (`found-12-oct/task-email-imap-unbuilt`).
+  notAMailbox: 'Gmail and Outlook are linked through their own sign-in; any other mailbox is linked by its IMAP and SMTP servers',
   pro: 'Pro includes one email account, and this workspace has linked it. Remove one, or upgrade, to link another.',
   notYours: 'Only whoever linked this email account changes it',
   mayNotSend: 'You may not send from this email account: whoever linked it chooses who may',
@@ -163,9 +165,9 @@ try {
   const olgaName = (olga.display_name ?? '').trim() || ADMIN.email.split('@')[0]
   chk(
     olgaLink.start.ok && /gmail\.send/.test(olgaLink.scope) && /gmail\.readonly/.test(olgaLink.scope) && olgaLink.back === 302 && olgaLink.landed.startsWith(`/app/${WS}/email?`) && olgaLink.landed.includes('connected=gmail')
-      && olgaRow?.provider === 'gmail' && olgaRow.owner_id === olga.id && olgaRow.status === 'connected' && olgaRow.access_token === OLGA_GM && olgaRow.sender_name === olgaName,
+      && olgaRow?.provider === 'gmail' && olgaRow.owner_id === olga.id && olgaRow.status === 'connected' && openKept(olgaRow.access_token, 'email_accounts.access_token') === OLGA_GM && olgaRow.sender_name === olgaName,
     'a Gmail is linked through Google’s consent, asked to send and read mail, and comes back to the Email settings — kept as the owner’s, under their name (read by SQL)',
-    JSON.stringify({ start: said(olgaLink.start), scope: olgaLink.scope, back: olgaLink.back, landed: olgaLink.landed, row: olgaRow && { ...olgaRow, access_token: olgaRow.access_token === OLGA_GM } }),
+    JSON.stringify({ start: said(olgaLink.start), scope: olgaLink.scope, back: olgaLink.back, landed: olgaLink.landed, row: olgaRow && { ...olgaRow, access_token: openKept(olgaRow.access_token, 'email_accounts.access_token') === OLGA_GM } }),
   )
 
   // Pro has room for one mailbox: the second is refused before the provider is asked.

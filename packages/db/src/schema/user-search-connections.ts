@@ -2,6 +2,7 @@ import { pgTable, uuid, text, timestamp, unique } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { users } from './users'
+import { sealedText } from './sealed-text'
 
 /**
  * ONE PERSON'S OWN CONNECTED SEARCH (`found-23-sep/connected-search-per-person`).
@@ -29,8 +30,8 @@ export const userSearchConnections = pgTable(
     status: text('status').notNull().default('connected'),
     scopes: text('scopes').array().notNull().default([]),
     externalAccountEmail: text('external_account_email'),
-    accessToken: text('access_token'),
-    refreshToken: text('refresh_token'),
+    accessToken: sealedText('access_token', 'user_search_connections.access_token'),
+    refreshToken: sealedText('refresh_token', 'user_search_connections.refresh_token'),
     tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

@@ -2,6 +2,7 @@ import { pgTable, text, timestamp, uuid, boolean, index, uniqueIndex, check } fr
 import { relations, sql } from 'drizzle-orm'
 import { users } from './users'
 import { workspaces } from './workspaces'
+import { sealedText } from './sealed-text'
 
 /**
  * §V2-14 — a person's connected calendars. More than one, and theirs.
@@ -47,8 +48,8 @@ export const userCalendarAccounts = pgTable(
      * an explicit column list for that reason — `select()` with no argument on
      * this table would put a refresh token in a JSON response.
      */
-    accessToken:     text('access_token'),
-    refreshToken:    text('refresh_token'),
+    accessToken:     sealedText('access_token', 'user_calendar_accounts.access_token'),
+    refreshToken:    sealedText('refresh_token', 'user_calendar_accounts.refresh_token'),
     tokenExpiresAt:  timestamp('token_expires_at', { withTimezone: true }),
     scopes:          text('scopes').array().notNull().default([]),
     status:          text('status').notNull().default('connected'),

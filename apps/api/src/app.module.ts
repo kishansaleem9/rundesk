@@ -65,6 +65,7 @@ import { RealtimeModule } from './modules/realtime/realtime.module'
 import { HealthModule } from './modules/health/health.module'
 import { DashboardsModule } from './modules/dashboards/dashboards.module'
 import { DatabaseModule } from './common/database/database.module'
+import { SecretsAtRestModule } from './common/security/secrets-at-rest'
 import { StorageModule } from './common/storage/storage.module'
 import { ClipsModule } from './modules/clips/clips.module'
 import { CanvasesModule } from './modules/canvases/canvases.module'
@@ -96,6 +97,8 @@ import { TenantDatabasesModule } from './modules/tenant-databases/tenant-databas
     }),
     ScheduleModule.forRoot(),
     DatabaseModule,
+    // Seals at start whatever secret is still kept in the clear (`found-13-oct/provider-grants-kept-in-the-clear`).
+    SecretsAtRestModule,
     StorageModule,
     RealtimeModule,
     SearchModule,

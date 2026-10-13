@@ -2214,6 +2214,15 @@ jobs:
         timeout-minutes: 15
         run: node test/e2e/task-email-imap.mjs --api 3011 --dist apps/web/dist
 
+      # `found-13-oct/provider-grants-kept-in-the-clear` — the secrets Rundesk
+      # keeps are kept sealed under TOKEN_ENCRYPTION_KEY (set for the API above):
+      # a Gmail's tokens through Google's consent (the calendar stub), a TOTP
+      # secret that still verifies, a webhook's signing secret shown once; a
+      # grant kept in the clear before is still read; nothing is given back.
+      - name: The secrets Rundesk keeps are kept sealed
+        timeout-minutes: 15
+        run: node test/e2e/secrets-at-rest.mjs --api 3011
+
       # `ledger-rows/row-2294` — the AI acts in the asker's own connected apps, as
       # ClickUp's does: an event in their calendar, inviting people; a draft in a
       # mailbox they linked; a search of their own Drive, Gmail and SharePoint —

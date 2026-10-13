@@ -4,6 +4,7 @@ import { relations, sql } from 'drizzle-orm'
 import { userRoleEnum, oauthProviderEnum } from './enums'
 import { workspaceMembers } from './workspaces'
 import { sessions } from './auth'
+import { sealedText } from './sealed-text'
 
 export const users = pgTable('users', {
   id:            uuid('id').primaryKey().defaultRandom(),
@@ -218,8 +219,8 @@ export const oauthAccounts = pgTable('oauth_accounts', {
   userId:       uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   provider:     oauthProviderEnum('provider').notNull(),
   providerId:   text('provider_id').notNull(),
-  accessToken:  text('access_token'),
-  refreshToken: text('refresh_token'),
+  accessToken:  sealedText('access_token', 'oauth_accounts.access_token'),
+  refreshToken: sealedText('refresh_token', 'oauth_accounts.refresh_token'),
   expiresAt:    timestamp('expires_at', { withTimezone: true }),
   createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })

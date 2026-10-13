@@ -30,6 +30,7 @@ import { signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
 import { calendarBase, seedSearchAccount, searchesAsked, seedConsentCode } from './lib/calendar.mjs'
+import { openKept } from './lib/sealed.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -187,9 +188,9 @@ try {
   const [{ n: wsRows }] = await sql`select count(*)::int as n from workspace_integration_connections where workspace_id = ${WS}`
   chk(
     (start.status === 200 || start.status === 201) && !!state && back?.status === 302 && landed.includes(`/app/${WS}/search`) && landed.includes('connected=gmail')
-      && row?.provider === 'gmail' && row?.status === 'connected' && row?.access_token === MIA_GMAIL && wsRows === 3,
+      && row?.provider === 'gmail' && row?.status === 'connected' && openKept(row?.access_token, 'user_search_connections.access_token') === MIA_GMAIL && wsRows === 3,
     'a member connects their own Gmail: the consent comes back to search, and her own connection is kept — the workspace’s untouched (read by SQL)',
-    JSON.stringify({ start: start.status, state: !!state, back: back?.status, landed: landed.replace(B, ''), row: row ? { ...row, access_token: row.access_token === MIA_GMAIL } : null, wsRows }),
+    JSON.stringify({ start: start.status, state: !!state, back: back?.status, landed: landed.replace(B, ''), row: row ? { ...row, access_token: openKept(row.access_token, 'user_search_connections.access_token') === MIA_GMAIL } : null, wsRows }),
   )
   const miaMail = await hits(M, `${TAG} quarterly`, 'gmail')
   const maxMail = await hits(X, `${TAG} quarterly`, 'gmail')

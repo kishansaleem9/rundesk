@@ -2,6 +2,7 @@ import { pgTable, text, timestamp, uuid, boolean, integer, jsonb } from 'drizzle
 import { relations } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { users } from './users'
+import { sealedText } from './sealed-text'
 
 // Outbound webhooks — fire HTTP requests on platform events
 
@@ -11,7 +12,7 @@ export const webhooks = pgTable('webhooks', {
   createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
   name:        text('name').notNull(),
   url:         text('url').notNull(),
-  secret:      text('secret'),        // HMAC signing secret
+  secret:      sealedText('secret', 'webhooks.secret'),        // HMAC signing secret, sealed at rest
   isEnabled:   boolean('is_enabled').notNull().default(true),
   // events: ['task.created', 'task.status_changed', 'comment.created', ...]
   events:      jsonb('events').notNull().$type<string[]>().default([]),

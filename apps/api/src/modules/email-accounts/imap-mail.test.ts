@@ -191,7 +191,7 @@ test('the client signs in, searches, fetches and appends as RFC 3501 has it; a p
   }
 })
 
-test('a sign-in the server refuses is a refusal of the sign-in, in its words; and "Requires SSL" with no STARTTLS offered is refused before any password is sent', async () => {
+test('a sign-in the server refuses is a refusal of the sign-in, in its words; and “Requires SSL” with no STARTTLS offered is refused before any password is sent', async () => {
   const refusing = await scripted((line, say) => {
     const [tag, cmd] = line.split(' ')
     if (cmd === 'CAPABILITY') say(`* CAPABILITY IMAP4rev1\r\n${tag} OK done\r\n`)

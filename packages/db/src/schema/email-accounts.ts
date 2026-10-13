@@ -4,6 +4,7 @@ import { workspaces } from './workspaces'
 import { users } from './users'
 import { tasks } from './tasks'
 import { taskComments } from './comments'
+import { sealedText } from './sealed-text'
 
 /**
  * A MAILBOX A PERSON LINKED, TO SEND A TASK'S EMAIL FROM
@@ -33,8 +34,8 @@ export const emailAccounts = pgTable(
     /** The mailbox's own address, as the provider says it, in lower case. */
     address: text('address').notNull(),
     senderName: text('sender_name').notNull(),
-    accessToken: text('access_token'),
-    refreshToken: text('refresh_token'),
+    accessToken: sealedText('access_token', 'email_accounts.access_token'),
+    refreshToken: sealedText('refresh_token', 'email_accounts.refresh_token'),
     tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
     scopes: text('scopes').array().notNull().default([]),
     /*
