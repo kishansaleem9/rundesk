@@ -10560,7 +10560,7 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 
 *Evidence, 13 October:* rehearsal 15's browser job at `0eba332`, "Loading states are never blank", 25 of 26: "no visible "Loading…" copy is wired to a surface (4 such strings exist, none referenced) — artifacts.loading="Loading…"". Batch 40b's Artifacts list (the AI page's Artifacts tab) and its deck viewer showed `artifacts.loading` while their request was out. The suite holds every surface to shapes rather than the word; batch 40b's lane runs had not included it.
 
-*Closed, 13 October.* The list draws the inline skeleton and the viewer the panel's, as the other surfaces do (`brain-artifacts.tsx`), and the unused string is gone from the four catalogs.
+*Closed, 13 October.* The list draws the inline skeleton and the viewer the panel's, as the other surfaces do (`brain-artifacts.tsx`), and the unused string is gone from the four catalogs. `loading-states`, run here on the fix: 26 of 26, "no visible "Loading…" copy is wired to a surface (3 such strings exist, none referenced)".
 
 ### `found-13-oct/lane-admin-meets-the-hourly-ai-cap` — **closed** (test tooling, small; found by batch 40b's break runs) · reproduced 13 October
 
