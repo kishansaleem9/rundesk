@@ -11530,7 +11530,7 @@ Patches for both rows, `bcd-1` to `bcd-34`, on lane 2 with the model stub (basel
 - the eight that ended short there (`found-13-oct/bcd-stops-where-a-check-should-fail`), at `77eb42e`: `bcd-3`, `-12`, `-13`, `-14` and `-30` 28 of 29, `bcd-19` 26 of 29;
 - the three the lanes' AI cap spoiled (`found-13-oct/lane-admin-meets-the-hourly-ai-cap`), at `0e01918`: `bcd-29`, `-31` and `-33` 28 of 29.
 
-`bcd-32`, which only a lane without a model reddens, 28 of 29 on lane 2 at `70c1d8f`. The unit `bcd-u1` and `bcd-u2` are measured by the preflight's unit claims.
+`bcd-32`, which only a lane without a model reddens, 28 of 29 on lane 2 at `70c1d8f`. The unit `bcd-u1` and `bcd-u2` each reddened its test (preflight 4).
 
 ### `commit-log/log-214dac0-1` — **closed** (feature, large; was not counted, a feature; triage, 5 October; was: open, large) · reproduced 13 October
 
