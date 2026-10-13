@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 546 items: 0 open · 0 partly fixed · 531 closed, and 15 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 547 items: 0 open · 0 partly fixed · 532 closed, and 15 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 82, each reproduced
+## Found by the triage, 5 October, and since — 83, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10383,6 +10383,19 @@ Checks: `check-ledger-ids-cases.mjs` 11 → 13: "a day's find of another month, 
 *Evidence, 13 October:* preflight 2 of `4a9203c` failed "and the unit claims redden too": 551 reddened, 6 did not — `sfl-1` to `sfl-6`, each "sheet-file.test.ts still passed with the patch applied". Each patches `apps/web/src/lib/sheet-file.ts` and names the web's `sheet-file.test.ts`; `check-unit-claims.mjs` found a test file by its NAME with `findInTree`, which returns the first of a name in the walk, and batch 38 (`ledger-rows/row-816`) had put a second `sheet-file.test.ts` under `apps/api/…/clickup-import/`, which the walk reaches first. So six claims on the web's test ran the API's, which a patch to the web never touches, and read green; `imp-u6` and `imp-u12`, on the API's, were right only by the same accident.
 
 *Closed, 13 October.* A claim may name its test file by its path (`# Reddens: unit: apps/web/src/lib/sheet-file.test.ts "…"`), and a name that more than one file has is refused — listed as `TWO?` with both paths, and the gate fails — never guessed between (`findAllInTree` in `scripts/lib/find-in-tree.mjs`, which passes over a nested checkout as `findInTree` does). The eight claims on the two `sheet-file.test.ts` name theirs by path, and all eight redden (`UNIT_CLAIMS_ONLY='^(sfl-|imp-u6-|imp-u12-)'`, a filter added for measuring a few: 8 reddened, 0 did not). `check-find-in-tree.mjs --mutate` plants a second file of the name and requires both and not the nested checkout's copy, and a walk without the rule to find three.
+
+### `found-13-oct/break-set-named-by-file-runs-without-its-model` — **closed** (test tooling, small; found starting batch 40a's break runs) · reproduced 13 October
+
+**A break set named by its files ran without the model its patches said they need**
+
+*Evidence, 13 October:* batch 40a's set was started as `wt-break.sh 2 super-agents sa-1-a-guest-has-agents.py …`, the 38 names as `ls test/e2e/breaks/` prints them. Every one of the patches says "Reddens only where a model answers" in its header, and the log said `-- model: off`, with no "needed by". The runner's loop reads `sa-1-x`, `sa-1-x.py` and `test/e2e/breaks/sa-1-x.py` as one patch. The three header readers in `lane-env.sh` did not: `patches_needing_model`, `patches_needing_no_model` and `patches_needing_search` looked for `$dir/$p.py` as given (`sa-1-x.py.py`) and found no header. So a set named by file ran every patch on a lane without the model, the index or the absence of a model that the patch asks for, and its verdicts were about the wrong lane. It is `found-24-sep/model-patches-measured-without-a-model` again, by another spelling. Measured: given as files, the readers named neither `sa-1` nor `sa-2` before the fix, and both after. The run was stopped in its first build, before its baseline, and nothing it measured is kept.
+
+*Closed, 13 October.* A patch's name has one rule, `patch_stem` in `lane-env.sh`, and the three header readers and the runner's loop all ask it. `check-model-lanes.sh` asks each reader for a set named by file and by path, and checks that the runner's loop asks the same rule. Its `--mutate` catches 5 of 5 new mutations:
+- the rule keeps the name as given;
+- the model reader does not ask the rule;
+- the no-model reader does not ask it;
+- the search reader does not ask it;
+- the loop reads the name its own way.
 
 ### `found-8-oct/folder-template-lists-in-any-order` — **closed** (visible bug, small; found by the CI rehearsal of `4d37f9a`) · reproduced 8 October
 

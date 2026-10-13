@@ -13,6 +13,8 @@
 #   the runner        asks every patch of the set, adds the lane when one needs
 #                     it, and stamps and compares what the lane serves, not the
 #                     revision alone
+#   the name          a patch named by its file or by its path is the same
+#                     patch, to every header reader and to the runner's loop
 #
 # `found-24-sep/model-patches-measured-without-a-model`: the second drifted plan
 # ran `wra-11` and `wra-12` with no model, and both read as reddening nothing.
@@ -54,6 +56,18 @@ cases () {
   # And the other way round (`found-29-sep/no-model-patches-run-with-a-model`).
   out=$(bash -c ". '$env'; patches_needing_no_model '$TMP/breaks' plain-1 needs-1 none-1 absent-1")
   [ "$out" = "none-1" ] || fail "the no-model header: named '$(echo "$out" | tr '\n' ' ')', not 'none-1'"
+  # A set named by its files is the same set, to every header reader and to the
+  # runner's loop (`found-13-oct/break-set-named-by-file-runs-without-its-model`:
+  # `super-agents`'s 38 patches, named by file, started on a lane with no model).
+  out=$(bash -c ". '$env'; patches_needing_model '$TMP/breaks' plain-1.py needs-1.py none-1.py test/e2e/breaks/absent-1.py")
+  [ "$out" = "needs-1" ] || fail "the header, the set named by file: named '$(echo "$out" | tr '\n' ' ')', not 'needs-1'"
+  out=$(bash -c ". '$env'; patches_needing_model '$TMP/breaks' test/e2e/breaks/needs-1.py")
+  [ "$out" = "needs-1" ] || fail "the header, the patch named by its path: named '$out', not 'needs-1'"
+  out=$(bash -c ". '$env'; patches_needing_no_model '$TMP/breaks' needs-1.py test/e2e/breaks/none-1.py")
+  [ "$out" = "none-1" ] || fail "the no-model header, named by file: named '$(echo "$out" | tr '\n' ' ')', not 'none-1'"
+  out=$(bash -c ". '$env'; patches_needing_search '$TMP/breaks' needs-1.py test/e2e/breaks/search-1.py")
+  [ "$out" = "search-1" ] || fail "the search header, named by file: named '$(echo "$out" | tr '\n' ' ')', not 'search-1'"
+  grep -q '^  b=$(patch_stem "$b")$' "$runner" || fail 'the runner: its loop reads a name its own way, not as the header readers do'
 
   out=$(env -u RUNDESK_LANE_MODEL bash -c ". '$env'; lane_model_add 7; echo \"\$RUNDESK_LANE_MODEL\"")
   [ "$out" = "7" ] || fail "the lane list, none before: '$out'"
@@ -267,4 +281,39 @@ if [ "$scaught" = "${#S_WHICH[@]}" ]; then
   echo "ok $scaught of ${#S_WHICH[@]} mutations of the search-lane wiring are caught"
 else
   echo "not ok only $scaught of ${#S_WHICH[@]} search mutations are caught"; exit 1
+fi
+
+# THE NAME MUTATIONS, the same way (`found-13-oct/break-set-named-by-file-runs-
+# without-its-model`): a set named by its files is the same set to every header
+# reader and to the runner's loop.
+NL=$'\n'
+N_WHICH=(); N_FROM=(); N_TO=(); N_WHAT=()
+nmut () { N_WHICH+=("$1"); N_WHAT+=("$2"); N_FROM+=("$3"); N_TO+=("$4"); }
+nmut env 'a name is kept as given, its directory and .py and all' \
+  "  printf '%s\\n' \"\${p%.py}\"" "  printf '%s\\n' \"\$1\""
+nmut env 'the model header reader takes the name as given' \
+  "    p=\$(patch_stem \"\$p\")${NL}    grep -q '^# Reddens only where a model answers'" "    grep -q '^# Reddens only where a model answers'"
+nmut env 'the no-model header reader takes the name as given' \
+  "    p=\$(patch_stem \"\$p\")${NL}    grep -q '^# Reddens only where no model answers'" "    grep -q '^# Reddens only where no model answers'"
+nmut env 'the search header reader takes the name as given' \
+  "    p=\$(patch_stem \"\$p\")${NL}    grep -q '^# Reddens only where Meilisearch answers'" "    grep -q '^# Reddens only where Meilisearch answers'"
+nmut runner "the runner's loop reads a name its own way" \
+  '  b=$(patch_stem "$b")' '  b="${b##*/}"'
+ncaught=0
+for i in "${!N_WHICH[@]}"; do
+  e="$ENV"; r="$RUNNER"
+  case "${N_WHICH[$i]}" in
+    env) src="$ENV"; dst="$TMP/n-env-$i.sh"; e="$dst" ;;
+    runner) src="$RUNNER"; dst="$TMP/n-runner-$i.sh"; r="$dst" ;;
+  esac
+  if ! found=$(replace_once "$src" "$dst" "${N_FROM[$i]}" "${N_TO[$i]}"); then
+    echo "  name mutation '${N_WHAT[$i]}' FOUND ITS TEXT ${found:-?} TIMES — it measures nothing"; continue
+  fi
+  if cases "$e" "$r" > /dev/null; then echo "  name mutation SURVIVED: ${N_WHAT[$i]}"
+  else ncaught=$((ncaught + 1)); fi
+done
+if [ "$ncaught" = "${#N_WHICH[@]}" ]; then
+  echo "ok $ncaught of ${#N_WHICH[@]} mutations of how a patch is named are caught"
+else
+  echo "not ok only $ncaught of ${#N_WHICH[@]} name mutations are caught"; exit 1
 fi

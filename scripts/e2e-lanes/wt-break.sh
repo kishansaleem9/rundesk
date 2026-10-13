@@ -444,7 +444,7 @@ for b in "$@"; do
   # were sitting right there. A whole break set reported as absent because the
   # argument was spelled the obvious way is the stale-reason defect wearing a
   # shell script: the message named a real condition and meant something else.
-  b="${b##*/}"; b="${b%.py}"
+  b=$(patch_stem "$b")
   # THIS ATTEMPT'S LOG OR NONE. It was only written when the patch got as far as
   # running the suite, so a patch that was missing, failed to apply, changed
   # nothing or did not build left the PREVIOUS run's log in place — and the

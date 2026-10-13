@@ -312,6 +312,17 @@ lane_has_model () {
   return 1
 }
 
+# A PATCH'S NAME, AS THE BREAK RUNNER READS IT: `sa-1-x`, `sa-1-x.py` and
+# `test/e2e/breaks/sa-1-x.py` are one patch. The runner's loop always took all
+# three, but the header readers below looked for `$dir/$p.py` as given, so a set
+# named by its files (`ls breaks/ | grep ...`) found no header: `super-agents`'s
+# 38 patches, every one saying it reddens only where a model answers, started
+# on a lane with none (`found-13-oct/break-set-named-by-file-runs-without-its-model`).
+patch_stem () {
+  local p="${1##*/}"
+  printf '%s\n' "${p%.py}"
+}
+
 # A PATCH THAT CAN REDDEN ONLY WHERE A MODEL ANSWERS says so in its header,
 #
 #     # Reddens only where a model answers: run it on a lane with ...
@@ -327,6 +338,7 @@ patches_needing_model () {
   local dir="$1" p
   shift
   for p in "$@"; do
+    p=$(patch_stem "$p")
     grep -q '^# Reddens only where a model answers' "$dir/$p.py" 2>/dev/null && echo "$p"
   done
   return 0
@@ -342,6 +354,7 @@ patches_needing_no_model () {
   local dir="$1" p
   shift
   for p in "$@"; do
+    p=$(patch_stem "$p")
     grep -q '^# Reddens only where no model answers' "$dir/$p.py" 2>/dev/null && echo "$p"
   done
   return 0
@@ -533,6 +546,7 @@ patches_needing_search () {
   local dir="$1" p
   shift
   for p in "$@"; do
+    p=$(patch_stem "$p")
     grep -q '^# Reddens only where Meilisearch answers' "$dir/$p.py" 2>/dev/null && echo "$p"
   done
   return 0
