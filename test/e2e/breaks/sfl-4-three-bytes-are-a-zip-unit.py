@@ -1,5 +1,5 @@
 # THE ZIP SIGNATURE IS READ LOOSER THAN IT IS (`found-5-oct/xlsx-read-as-text`): "PK" and a 03 with no 04 after it is a zip.
-# Reddens: unit: sheet-file.test.ts "the zip signature is “PK” and one of three pairs, nothing looser"
+# Reddens: unit: apps/web/src/lib/sheet-file.test.ts "the zip signature is “PK” and one of three pairs, nothing looser"
 import io
 p = '/home/user/rundesk/apps/web/src/lib/sheet-file.ts'
 s = io.open(p, encoding='utf-8').read()

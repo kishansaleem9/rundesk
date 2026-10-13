@@ -3,7 +3,7 @@
 # RE-AIMED (batch 38, `ledger-rows/row-816`): the page no longer refuses a workbook —
 # it uploads one (`sheetFileKind`: 'text', 'file' or null) — so the mutation is
 # the same question asked wrongly where the answer is now given.
-# Reddens: unit: sheet-file.test.ts "a legacy .xls under a CSV or text name is uploaded by its first bytes — the compound file’s eight"
+# Reddens: unit: apps/web/src/lib/sheet-file.test.ts "a legacy .xls under a CSV or text name is uploaded by its first bytes — the compound file’s eight"
 import io
 p = '/home/user/rundesk/apps/web/src/lib/sheet-file.ts'
 s = io.open(p, encoding='utf-8').read()

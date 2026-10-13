@@ -1,6 +1,6 @@
 # THE SERVER READS A ZIP AS DELIMITED TEXT (`found-5-oct/xlsx-read-as-text`): the routes ask the content nothing, so preview draws an
 # .xlsx's bytes as a column and the import runs on them. (Both tests go: an .xlsx's first line holds a NUL too.)
-# Reddens: imports: "the server refuses an .xlsx’s content too — preview and import answer 400 in the page’s words — and makes nothing: no job row, no space"
+# Reddens: imports: "the server refuses an .xlsx’s bytes sent as text — preview and import answer 400, saying to send the file itself — and makes nothing: no job row, no space"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/clickup-import/spreadsheet-import.service.ts'
 s = io.open(p, encoding='utf-8').read()

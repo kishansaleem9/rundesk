@@ -1,6 +1,6 @@
 # THE SERVER ASKS A FILE ONLY WHETHER IT IS A ZIP (`found-5-oct/xlsx-read-as-text`): a legacy .xls read as text, its first line full of
 # NULs, is previewed as columns of binary.
-# Reddens: imports: "the server refuses a legacy .xls’s content too — a NUL in its first line — preview and import answering 400 in the page’s words, and makes nothing"
+# Reddens: imports: "the server refuses a legacy .xls’s bytes sent as text too — a NUL in its first line — preview and import answering 400 in the same words, and makes nothing"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/clickup-import/spreadsheet-import.service.ts'
 s = io.open(p, encoding='utf-8').read()

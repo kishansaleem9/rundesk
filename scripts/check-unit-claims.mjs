@@ -26,11 +26,11 @@
  *   node scripts/check-unit-claims.mjs
  */
 import { readdirSync, readFileSync, writeFileSync, existsSync, statSync, utimesSync, rmSync } from 'node:fs'
-import { join, dirname, resolve } from 'node:path'
+import { join, dirname, resolve, relative } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { findInTree } from './lib/find-in-tree.mjs'
+import { findAllInTree } from './lib/find-in-tree.mjs'
 import { aimedAt, PATCHES_ROOT } from './lib/patch-root.mjs'
 import { treeState, treeMoved } from './lib/tree-state.mjs'
 
@@ -44,7 +44,22 @@ const BASELINE = { reddened: 4 }
 
 // This checkout's file of that name, never a nested checkout's copy
 // (`scripts/lib/find-in-tree.mjs`: the agents' worktrees under `.claude/`).
-const find = (name) => findInTree(name, ROOT)
+/*
+ * WHICH TEST FILE A CLAIM MEANS: the one at the path it gives, or the only file
+ * of the name it gives. Two of a name is refused, never guessed between
+ * (`found-13-oct/unit-claims-read-a-name-two-files-share`): six claims on the
+ * web's `sheet-file.test.ts` ran the API's, found first, and read green.
+ */
+const find = (file) => {
+  if (file.includes('/')) {
+    const p = join(ROOT, file)
+    return existsSync(p) ? { path: p } : { missing: `no file at ${file}` }
+  }
+  const all = findAllInTree(file, ROOT)
+  if (all.length === 0) return { missing: `no file named ${file} anywhere in the repository` }
+  if (all.length > 1) return { ambiguous: all.map((p) => relative(ROOT, p)).sort() }
+  return { path: all[0] }
+}
 
 // `# Reddens: unit: <file>.test.ts "<test name>"`, with the name possibly
 // wrapped onto the continuation line the rest of this audit uses.
@@ -57,7 +72,7 @@ const claimOf = (text) => {
     if (!/^#\s{2,}\S/.test(lines[j])) break
     block += ' ' + lines[j].replace(/^#\s+/, '')
   }
-  const file = block.match(/([A-Za-z0-9_.-]+\.test\.tsx?)/)?.[1] ?? null
+  const file = block.match(/([A-Za-z0-9_./-]+\.test\.tsx?)/)?.[1] ?? null
   const name = block.match(/"([^"]+)"/)?.[1] ?? null
   return file ? { file, name } : null
 }
@@ -95,6 +110,7 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
 }
 
 const unknown = []
+const ambiguous = []
 
 /*
  * THE MAIN CHECKOUT IS WATCHED FROM ANYWHERE ELSE. A patch runs aimed at this
@@ -118,18 +134,26 @@ const mainBefore = elsewhere ? mainStatus() : null
 let treeBefore = null
 try { treeBefore = treeState(ROOT) } catch { /* not a git checkout; the copies are still written back */ }
 
-for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
+// `UNIT_CLAIMS_ONLY=<regex>` measures only the patches whose names match — to check a few
+// re-aimed claims in seconds — and then says nothing about the baseline, which needs them all.
+const ONLY = process.env.UNIT_CLAIMS_ONLY ? new RegExp(process.env.UNIT_CLAIMS_ONLY) : null
+for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py') && (!ONLY || ONLY.test(x))).sort()) {
   const patch = join(BREAKS, f)
   const text = readFileSync(patch, 'utf8')
   const claim = claimOf(text)
   if (!claim) continue
   const name = f.slice(0, -3)
 
-  const testPath = find(claim.file)
-  if (!testPath) {
-    unknown.push(`${name} — no file named ${claim.file} anywhere in the repository`)
+  const found = find(claim.file)
+  if (found.ambiguous) {
+    ambiguous.push(`${name} — ${claim.file} is ${found.ambiguous.length} files (${found.ambiguous.join(', ')}): name the one it means by its path`)
     continue
   }
+  if (!found.path) {
+    unknown.push(`${name} — ${found.missing}`)
+    continue
+  }
+  const testPath = found.path
   // Which app owns it decides how it runs: `apps/api` has node:test suites and
   // `apps/web`'s are plain scripts, exactly as their own `test` scripts run them.
   const app = testPath.includes('/apps/api/') ? join(ROOT, 'apps/api') : join(ROOT, 'apps/web')
@@ -248,6 +272,14 @@ if (moved) {
   )
   bad = 1
 }
+if (ambiguous.length) {
+  for (const r of ambiguous) console.log(`  TWO?   ${r}`)
+  console.error(
+    `\n[unit-claims] ${ambiguous.length} claim(s) name a test file by a name more than one file has. ` +
+      'Which one would run is an accident of the walk; give its path.',
+  )
+  bad = 1
+}
 if (green.length) {
   console.error(
     `\n[unit-claims] ${green.length} patch(es) left their unit test passing. A claim whose test ` +
@@ -255,7 +287,7 @@ if (green.length) {
   )
   bad = 1
 }
-if (reddened.length < BASELINE.reddened) {
+if (!ONLY && reddened.length < BASELINE.reddened) {
   console.error(
     `\n[unit-claims] only ${reddened.length} of ${BASELINE.reddened} unit claims are measured. ` +
       'These are the cheapest claims here to check — a second each — so a fall means a patch ' +

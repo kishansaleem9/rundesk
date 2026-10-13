@@ -28,14 +28,17 @@ const NAME = 'claims.test.ts'
 
 const tree = fs.mkdtempSync(path.join(os.tmpdir(), 'find-in-tree-'))
 const own = path.join(tree, 'apps/api/src/claims.test.ts')
+// A second of the name in this tree: `findAllInTree` must give both, and the nested copy never.
+const ownWeb = path.join(tree, 'apps/web/src/claims.test.ts')
 const nested = path.join(tree, '.claude/worktrees/agent-1/apps/api/src/claims.test.ts')
-for (const f of [own, nested]) {
+for (const f of [own, ownWeb, nested]) {
   fs.mkdirSync(path.dirname(f), { recursive: true })
   fs.writeFileSync(f, '')
 }
 fs.writeFileSync(path.join(tree, '.claude/worktrees/agent-1/.git'), 'gitdir: /elsewhere\n')
 
 const findWith = async (libPath) => (await import(pathToFileURL(libPath).href + `?v=${Date.now()}`)).findInTree
+const findAllWith = async (libPath) => (await import(pathToFileURL(libPath).href + `?v=${Date.now()}`)).findAllInTree
 
 let failed = false
 try {
@@ -45,6 +48,42 @@ try {
     failed = true
   } else {
     console.log(`[find-in-tree] ok — ${NAME} is the tree's own, not the nested checkout's copy`)
+  }
+
+  // Every file of the name, for the reader that must refuse two (`found-13-oct/unit-claims-read-a-name-two-files-share`).
+  const all = ((await findAllWith(LIB))(NAME, tree) ?? []).map((p) => path.relative(tree, p)).sort()
+  const want = [own, ownWeb].map((p) => path.relative(tree, p)).sort()
+  if (JSON.stringify(all) !== JSON.stringify(want)) {
+    console.error(`[find-in-tree] not ok: every ${NAME} should be ${JSON.stringify(want)}, got ${JSON.stringify(all)}`)
+    failed = true
+  } else {
+    console.log(`[find-in-tree] ok — every ${NAME} is both of the tree's own, and not the nested checkout's`)
+  }
+
+  if (!failed && process.argv.includes('--mutate')) {
+    // The same rule in the walk that gathers them all: without it, the nested copy is a third.
+    const srcAll = fs.readFileSync(LIB, 'utf8')
+    const marker = 'export const findAllInTree'
+    const at = srcAll.indexOf(marker)
+    const mutantAll = at === -1 ? srcAll : srcAll.slice(0, at) + srcAll.slice(at).replace('if (isNestedCheckout(p, root)) continue', '')
+    if (mutantAll === srcAll) {
+      console.error('[find-in-tree] the mutation of findAllInTree found nothing to change — this check cannot say it bites')
+      failed = true
+    } else {
+      const copyAll = path.join(path.dirname(LIB), `.find-in-tree-all-mutant-${process.pid}.mjs`)
+      fs.writeFileSync(copyAll, mutantAll)
+      try {
+        const got = ((await findAllWith(copyAll))(NAME, tree) ?? []).length
+        if (got !== 3) {
+          console.error(`[find-in-tree] without the rule findAllInTree still found ${got} — the fixture proves nothing`)
+          failed = true
+        } else {
+          console.log('[find-in-tree] mutation bites: without the rule findAllInTree also finds the nested checkout\'s copy')
+        }
+      } finally {
+        fs.rmSync(copyAll, { force: true })
+      }
+    }
   }
 
   if (!failed && process.argv.includes('--mutate')) {

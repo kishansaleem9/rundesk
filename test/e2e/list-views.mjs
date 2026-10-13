@@ -308,7 +308,8 @@ try {
     `bars of the task on Mia’s row ${await bar(T1, mia.id).count()}, of the other list’s task ${await bar(ELSE).count()}`,
   )
   const DAY_W = 56
-  const box1 = await bar(T1, mia.id).boundingBox()
+  // Caught: no bar means no drag, and the check below reads the task's dates, which then stay put.
+  const box1 = await bar(T1, mia.id).boundingBox({ timeout: 10_000 }).catch(() => null)
   if (box1) {
     await page.mouse.move(box1.x + 10, box1.y + box1.height / 2)
     await page.mouse.down()
@@ -328,8 +329,8 @@ try {
   )
   // The bar where the list now draws it, two days on — not where it was when the drag began.
   await waitUntil(async () => (await bar(T1, mia.id).getAttribute('data-from').catch(() => null)) === dayOf(2), { timeoutMs: 10_000 })
-  const box2 = await bar(T1, mia.id).boundingBox()
-  const adminRow = await page.locator(`[data-testid="timeline-group"][data-group-key="${me.id}"] [data-testid="timeline-grid"]`).boundingBox()
+  const box2 = await bar(T1, mia.id).boundingBox({ timeout: 10_000 }).catch(() => null)
+  const adminRow = await page.locator(`[data-testid="timeline-group"][data-group-key="${me.id}"] [data-testid="timeline-grid"]`).boundingBox({ timeout: 10_000 }).catch(() => null)
   if (box2 && adminRow) {
     await page.mouse.move(box2.x + 10, box2.y + box2.height / 2)
     await page.mouse.down()

@@ -294,7 +294,7 @@ try {
   const htmlDoc = html.fileKey ? await A(`/workspaces/${WS}/docs/import`, { method: 'POST', body: { fileKey: html.fileKey, fileName: `handbook-${TAG}.html` } }) : { status: 0 }
   const htmlBlocks = htmlDoc.data?.content?.content ?? []
   chk(
-    htmlDoc.status < 300 && htmlDoc.data?.title === `Handbook ${TAG}` && htmlBlocks[0]?.type === 'heading' && htmlBlocks[0]?.attrs?.level === 2,
+    htmlDoc.ok && htmlDoc.data?.title === `Handbook ${TAG}` && htmlBlocks[0]?.type === 'heading' && htmlBlocks[0]?.attrs?.level === 2,
     'an .html page becomes a Doc titled by its <title>, its first heading not said twice',
     JSON.stringify({ status: htmlDoc.status, title: htmlDoc.data?.title, first: htmlBlocks[0] ?? null, message: htmlDoc.message ?? null }),
   )
@@ -332,7 +332,7 @@ try {
   const missingShown = Number(await page.getByTestId('import-confluence-missing').getAttribute('data-count').catch(() => -1))
   const confluenceError = (await readText(page.getByTestId('import-confluence-error').filter({ visible: true }), { timeoutMs: 1000 })) ?? null
   chk(
-    !!rootId && pagesShown === 3 && missingShown === 1 && ((await readText(page.getByTestId('import-confluence-open'))) ?? '') === SPACE,
+    !!rootId && pagesShown === 3 && missingShown === 1 && ((await readText(page.getByTestId('import-confluence-open').filter({ visible: true }))) ?? '') === SPACE,
     'the page reports the Doc it made, named for the space, with its three pages — and names the one page the export lacks',
     JSON.stringify({ rootId, pagesShown, missingShown, error: confluenceError }),
   )
@@ -422,7 +422,7 @@ try {
   )
   if (channel) await page.goto(`${B}/app/${WS}/chat?channel=${channel.id}`, { waitUntil: 'domcontentloaded' })
   const imported = await waitUntil(async () => (await page.getByTestId('chat-message-imported').count()) > 0, { timeoutMs: 20_000 })
-  const importedName = (await readText(page.getByTestId('chat-message-imported-author').first())) ?? ''
+  const importedName = (await readText(page.getByTestId('chat-message-imported-author').filter({ visible: true }).first())) ?? ''
   chk(
     imported && importedName.startsWith('Ben Okafor'),
     'in Chat, Ben’s message is drawn under his name and marked imported — not as the words of the person who imported it',
@@ -508,7 +508,7 @@ try {
   await page.goto(`${B}/app/${WS}/import?tab=basecamp&connected=basecamp`, { waitUntil: 'domcontentloaded' })
   await page.getByTestId('import-basecamp-connected').waitFor({ timeout: 20_000 }).catch(() => {})
   await page.getByTestId('import-basecamp-project-101').waitFor({ timeout: 20_000 }).catch(() => {})
-  const signedAs = (await readText(page.getByTestId('import-basecamp-connected'))) ?? ''
+  const signedAs = (await readText(page.getByTestId('import-basecamp-connected').filter({ visible: true }))) ?? ''
   await page.getByTestId('import-basecamp-project-101').check().catch(() => {})
   await page.getByTestId('import-basecamp-into-new').check().catch(() => {})
   await page.getByTestId('import-basecamp-start').click().catch(() => {})

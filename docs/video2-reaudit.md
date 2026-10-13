@@ -915,7 +915,7 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 
 ## 4. Counts
 
-**173 rows: 161 built · 6 partial · 6 missing.**
+**173 rows: 162 built · 5 partial · 6 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -951,9 +951,14 @@ rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 122 | 5 | 5 | 132 |
+| §2, the sections table | 123 | 4 | 5 | 132 |
 | §5, recovered from the frame observations | 39 | 1 | 1 | 41 |
-| **consolidated** | **161** | **6** | **6** | **173** |
+| **consolidated** | **162** | **5** | **6** | **173** |
+
+THE VIEW TYPES ROW IS `B`, 13 OCTOBER: §2's row for the eleven view types
+(`ledger-rows/row-777`) went from `P` to `B` when the five ClickUp has and
+Rundesk did not were built, and this table moved with it — §2 to `123 · 4 · 5`,
+the whole to `162 · 5 · 6` — which is the movement the guard above exists for.
 
 TWO ROWS THAT SAID THE SAME SUBMENU ARE ONE, 13 OCTOBER, AND THE TOTAL FELL BY
 ONE: a merge, not a build, which is the one movement that may lower it. §2 held
@@ -1041,7 +1046,7 @@ AI works through a person's own connections (`ai-connected-apps.mjs`, 11
 checks; `ledger-rows/row-2294`). So §5 moves `38 · 1 · 2` → `39 · 1 · 1`, and
 the total stays 174.
 
-§2's 122 built includes the one marked `B*` — built, but the row also records
+§2's 123 built includes the one marked `B*` — built, but the row also records
 something the frame asks for that is not there. It is counted as built
 because that is what it is; the asterisk is where the remainder is written
 down. This read "the four" until 29 September while §2 held six: the two that

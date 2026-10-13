@@ -38,3 +38,24 @@ export const findInTree = (name, root, dir = root) => {
   }
   return null
 }
+
+/*
+ * EVERY FILE OF A NAME IN THIS CHECKOUT, for a reader that must not guess
+ * between two (`found-13-oct/unit-claims-read-a-name-two-files-share`). The
+ * first of a name is the right answer only while the name is unique: batch 38
+ * gave the API a `sheet-file.test.ts` beside the web's, the walk reached
+ * `apps/api` first, and six claims on the web's test were measured against the
+ * API's — which a patch to the web never touches — and read "still passed".
+ * Nested checkouts are passed over as above.
+ */
+export const findAllInTree = (name, root, dir = root, out = []) => {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (SKIPPED.includes(e.name)) continue
+    const p = join(dir, e.name)
+    if (e.isDirectory()) {
+      if (isNestedCheckout(p, root)) continue
+      findAllInTree(name, root, p, out)
+    } else if (e.name === name) out.push(p)
+  }
+  return out
+}

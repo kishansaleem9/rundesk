@@ -2,6 +2,7 @@
 # RE-AIMED 6 October: the start asks for text before it asks whether the file is empty (`found-6-oct/import-start-answers-500-to-non-text`); the mistake is the same.
 # Reddens: unit: spreadsheet-import.service.test.ts "an .xlsx read as text is refused in the page’s words, and no job row is written (found-5-oct/xlsx-read-as-text)"
 #   or "and its preview is refused the same way, before any column is drawn"
+#
 # The preview and the start read the sheet through one `tableOf` since batch 38
 # (`ledger-rows/row-816`), so this line is both doors; `iss-2`, which took the
 # preview's own copy of it, is retired.

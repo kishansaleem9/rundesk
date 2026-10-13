@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-12.md`** (12 October; the 9 October handoff before it) — 544 items: 0 open · 0 partly fixed · 527 closed, and 17 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-12.md`** (12 October; the 9 October handoff before it) — 545 items: 0 open · 0 partly fixed · 528 closed, and 17 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 80, each reproduced
+## Found by the triage, 5 October, and since — 81, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10367,6 +10367,14 @@ Checks: `check-ledger-ids-cases.mjs` 11 → 13: "a day's find of another month, 
 *Evidence, 12 October:* the rehearsal of `02929fb` failed "Workspace export and import ask their keys", 8 of 9: "a guest granted workspace.import by a custom role is refused the sample data, 403 “Guests cannot import data into a workspace”, and the workspace stays empty" read the refusal right — 403, in its words — and "1 space(s) in the empty workspace after". Batch 30 gave every workspace a personal space for its members' Personal Lists (`spaces.is_personal`), made when one of them first opens the workspace, and the suite's members open it just before; the check counted every space. The same on lane 2, alone: 8 of 9. It is the first rehearsal since batch 30, which went with `[skip ci]`.
 
 *Closed, 12 October:* the check counts the spaces a seed would make — `not is_personal`. 9 of 9 on lane 2.
+
+### `found-13-oct/unit-claims-read-a-name-two-files-share` — **closed** (test tooling, small; found by preflight 2 of batches 38 and 39) · reproduced 13 October
+
+**The unit-claims gate ran the first test file of a name, and batch 38 gave the API a `sheet-file.test.ts` beside the web's**
+
+*Evidence, 13 October:* preflight 2 of `4a9203c` failed "and the unit claims redden too": 551 reddened, 6 did not — `sfl-1` to `sfl-6`, each "sheet-file.test.ts still passed with the patch applied". Each patches `apps/web/src/lib/sheet-file.ts` and names the web's `sheet-file.test.ts`; `check-unit-claims.mjs` found a test file by its NAME with `findInTree`, which returns the first of a name in the walk, and batch 38 (`ledger-rows/row-816`) had put a second `sheet-file.test.ts` under `apps/api/…/clickup-import/`, which the walk reaches first. So six claims on the web's test ran the API's, which a patch to the web never touches, and read green; `imp-u6` and `imp-u12`, on the API's, were right only by the same accident.
+
+*Closed, 13 October.* A claim may name its test file by its path (`# Reddens: unit: apps/web/src/lib/sheet-file.test.ts "…"`), and a name that more than one file has is refused — listed as `TWO?` with both paths, and the gate fails — never guessed between (`findAllInTree` in `scripts/lib/find-in-tree.mjs`, which passes over a nested checkout as `findInTree` does). The eight claims on the two `sheet-file.test.ts` name theirs by path, and all eight redden (`UNIT_CLAIMS_ONLY='^(sfl-|imp-u6-|imp-u12-)'`, a filter added for measuring a few: 8 reddened, 0 did not). `check-find-in-tree.mjs --mutate` plants a second file of the name and requires both and not the nested checkout's copy, and a walk without the rule to find three.
 
 ### `found-8-oct/folder-template-lists-in-any-order` — **closed** (visible bug, small; found by the CI rehearsal of `4d37f9a`) · reproduced 8 October
 
