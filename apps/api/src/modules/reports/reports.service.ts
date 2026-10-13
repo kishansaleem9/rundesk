@@ -1,5 +1,5 @@
 import { Injectable, Inject, Optional, NotFoundException, BadRequestException } from '@nestjs/common'
-import { and, eq, gte, lte, sql, desc, asc, inArray, or } from 'drizzle-orm'
+import { and, eq, gte, lte, ne, sql, desc, asc, inArray, or } from 'drizzle-orm'
 import type { Column, SQL } from 'drizzle-orm'
 import {
   tasks,
@@ -23,6 +23,7 @@ import {
   timeOff,
   workspaces,
   workspaceHolidays,
+  taskLists,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -33,6 +34,7 @@ import { isUuid } from '../../common/validation/uuid'
 import { containerScopeCondition, taskReadFilterFor, viewerScopeOf, type ViewerScope } from '../../common/permissions/viewer-scope'
 import { renderReportPdf, tableToLines } from './pdf'
 import { AiService } from '../ai/ai.service'
+import { WORKLOAD_MEASURES, dayStart, spanOf, spread, measured, type WorkloadMeasure } from './workload-spread'
 
 function daysAgo(n: number): Date {
   const d = new Date()
@@ -874,9 +876,6 @@ export class ReportsService {
     const horizon = Math.min(Math.max(days, 1), 90)
     const start = new Date()
     start.setHours(0, 0, 0, 0)
-    const end = new Date(start)
-    end.setDate(end.getDate() + horizon - 1)
-    end.setHours(23, 59, 59, 999)
 
     const members = await this.db
       .select({
@@ -888,98 +887,39 @@ export class ReportsService {
       })
       .from(workspaceMembers)
       .innerJoin(users, eq(users.id, workspaceMembers.userId))
-      .where(eq(workspaceMembers.workspaceId, workspaceId))
+      // A guest has no capacity to load (`own-capacity`) and no row in the AI's
+      // workload either (`collectWorkloadLoads`): one roster for both.
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), ne(workspaceMembers.role, 'guest')))
 
-    // The workspace's own week, rather than an assumed Mon–Fri. A Sun–Thu team
-    // used to read as two days of overtime and two days idle.
-    const [wsRow] = await this.db
-      .select({ workDays: workspaces.workDays })
-      .from(workspaces)
-      .where(eq(workspaces.id, workspaceId))
-      .limit(1)
-    const workDays = new Set(wsRow?.workDays?.length ? wsRow.workDays : [1, 2, 3, 4, 5])
-    const holidayRows = await this.db
-      .select({ day: workspaceHolidays.day })
-      .from(workspaceHolidays)
-      .where(eq(workspaceHolidays.workspaceId, workspaceId))
-    const holidays = new Set(holidayRows.map((h) => h.day))
-    const isWorkDay = (d: Date) => isWorkingWeekday(d, workDays)
+    const { workDays, holidays, isWorkDay, isoDay, daysOffByUser } = await this.workloadCalendar(workspaceId, start, horizon)
 
-    // §A4.10 — someone on leave should not absorb planned load. Leave that
-    // straddles the window still counts, so the query is an overlap test.
-    // Local calendar day, not toISOString(): the horizon starts at local
-    // midnight, and a UTC render would shift a day off by one for anyone west
-    // of Greenwich.
-    const isoDay = (d: Date) =>
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    const timeOffRows = await this.db
-      .select({ userId: timeOff.userId, startsOn: timeOff.startsOn, endsOn: timeOff.endsOn })
-      .from(timeOff)
-      .where(
-        and(
-          eq(timeOff.workspaceId, workspaceId),
-          gte(timeOff.endsOn, isoDay(start)),
-          lte(timeOff.startsOn, isoDay(end)),
-        ),
-      )
-    const daysOffByUser = new Map<string, Set<string>>()
-    for (const entry of timeOffRows) {
-      const set = daysOffByUser.get(entry.userId) ?? new Set<string>()
-      for (let offset = 0; offset < horizon; offset++) {
-        const day = new Date(start)
-        day.setDate(day.getDate() + offset)
-        const iso = isoDay(day)
-        if (iso >= entry.startsOn && iso <= entry.endsOn) set.add(iso)
-      }
-      daysOffByUser.set(entry.userId, set)
-    }
-
-    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
-    const assignments = await this.db
-      .select({
-        userId: taskAssignees.userId,
-        timeEstimate: tasks.timeEstimate,
-        startDate: tasks.startDate,
-        dueDate: tasks.dueDate,
-        status: tasks.status,
-      })
-      .from(taskAssignees)
-      .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
-      .innerJoin(lists, eq(lists.id, tasks.listId))
-      .innerJoin(projects, eq(projects.id, lists.projectId))
-      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), sql`${tasks.status} != 'done'`, visFilter))
+    const assignments = await this.workloadAssignments(workspaceId, actor)
 
     const dayCount = horizon
     const perUser = new Map<string, number[]>()
+    const unestimatedByUser = new Map<string, number>()
+    const unscheduledByUser = new Map<string, number>()
     for (const member of members) {
       perUser.set(member.userId, Array.from({ length: dayCount }, () => 0))
     }
 
-    const toDayStart = (value: Date) => {
-      const next = new Date(value)
-      next.setHours(0, 0, 0, 0)
-      return next
-    }
-
+    // One rule for every reader of the workload (`workload-spread.ts`): the
+    // estimate over the task's own days, nothing for a task with no estimate or
+    // no date — those are counted aside and said, not given hours.
     for (const assignment of assignments) {
       const dailyLoads = perUser.get(assignment.userId)
       if (!dailyLoads) continue
-
-      const estimateHours = Math.max(0.5, Math.round(((assignment.timeEstimate ?? 4 * 3600) / 3600) * 10) / 10)
-      const rawStart = assignment.startDate ? toDayStart(new Date(assignment.startDate)) : start
-      const rawEnd = assignment.dueDate ? toDayStart(new Date(assignment.dueDate)) : rawStart
-      const rangeStart = rawStart < start ? start : rawStart
-      const rangeEnd = rawEnd > end ? end : rawEnd
-      const spanDays = Math.max(1, Math.floor((rangeEnd.getTime() - rangeStart.getTime()) / 86400000) + 1)
-      const perDay = estimateHours / spanDays
-
-      for (let offset = 0; offset < dayCount; offset++) {
-        const current = new Date(start)
-        current.setDate(current.getDate() + offset)
-        const within = current >= rangeStart && current <= rangeEnd
-        if (within) dailyLoads[offset] += perDay
+      if (!spanOf(assignment)) {
+        unscheduledByUser.set(assignment.userId, (unscheduledByUser.get(assignment.userId) ?? 0) + 1)
+        continue
       }
+      if (!measured(assignment, 'hours')) {
+        unestimatedByUser.set(assignment.userId, (unestimatedByUser.get(assignment.userId) ?? 0) + 1)
+        continue
+      }
+      spread(assignment, start, dayCount, 'hours').forEach((load, offset) => {
+        dailyLoads[offset] += load
+      })
     }
 
     // A5.14 — without actual hours the view compares plan against plan, so it
@@ -989,6 +929,7 @@ export class ReportsService {
     // (`trackedWindowDays`) rather than blended into the daily loads.
     const trackedFrom = new Date(start)
     trackedFrom.setDate(trackedFrom.getDate() - (horizon - 1))
+    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
     const trackedRows = await this.db
       .select({
         userId: timeEntries.userId,
@@ -1044,8 +985,117 @@ export class ReportsService {
         trackedHours: Math.round(((trackedByUser.get(member.userId) ?? 0) / 3600) * 10) / 10,
         windowCapacityHours: Math.round(dailyCapacity * trackedWorkdays * 10) / 10,
         trackedWindowDays: horizon,
+        // Assigned and open, but loading no day: said beside the heat map, not hidden in it.
+        unestimatedTasks: unestimatedByUser.get(member.userId) ?? 0,
+        unscheduledTasks: unscheduledByUser.get(member.userId) ?? 0,
       }
     })
+  }
+
+  /**
+   * The working calendar a workload is measured against: the workspace's own
+   * week, its holidays, and each person's time off inside the window.
+   */
+  private async workloadCalendar(workspaceId: string, start: Date, horizon: number) {
+    const last = new Date(start)
+    last.setDate(last.getDate() + horizon - 1)
+    // The workspace's own week, rather than an assumed Mon–Fri. A Sun–Thu team
+    // used to read as two days of overtime and two days idle.
+    const [wsRow] = await this.db
+      .select({ workDays: workspaces.workDays })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1)
+    const workDays = new Set(wsRow?.workDays?.length ? wsRow.workDays : [1, 2, 3, 4, 5])
+    const holidayRows = await this.db
+      .select({ day: workspaceHolidays.day })
+      .from(workspaceHolidays)
+      .where(eq(workspaceHolidays.workspaceId, workspaceId))
+    const holidays = new Set(holidayRows.map((h) => h.day))
+    const isWorkDay = (d: Date) => isWorkingWeekday(d, workDays)
+
+    // §A4.10 — someone on leave should not absorb planned load. Leave that
+    // straddles the window still counts, so the query is an overlap test.
+    // Local calendar day, not toISOString(): the horizon starts at local
+    // midnight, and a UTC render would shift a day off by one for anyone west
+    // of Greenwich.
+    const isoDay = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const timeOffRows = await this.db
+      .select({ userId: timeOff.userId, startsOn: timeOff.startsOn, endsOn: timeOff.endsOn })
+      .from(timeOff)
+      .where(
+        and(
+          eq(timeOff.workspaceId, workspaceId),
+          gte(timeOff.endsOn, isoDay(start)),
+          lte(timeOff.startsOn, isoDay(last)),
+        ),
+      )
+    const daysOffByUser = new Map<string, Set<string>>()
+    for (const entry of timeOffRows) {
+      const set = daysOffByUser.get(entry.userId) ?? new Set<string>()
+      for (let offset = 0; offset < horizon; offset++) {
+        const day = new Date(start)
+        day.setDate(day.getDate() + offset)
+        const iso = isoDay(day)
+        if (iso >= entry.startsOn && iso <= entry.endsOn) set.add(iso)
+      }
+      daysOffByUser.set(entry.userId, set)
+    }
+
+    return { workDays, holidays, isWorkDay, isoDay, daysOffByUser }
+  }
+
+  /**
+   * The open assignments every workload reader counts: tasks not archived and
+   * not closed by their status CATEGORY — a preset space closes as "complete",
+   * and testing the word 'done' left those loading people for ever — under the
+   * reader's own read rule, optionally narrowed to one list (its own tasks and
+   * the ones added to it).
+   */
+  private async workloadAssignments(
+    workspaceId: string,
+    actor?: { id: string; role?: string | null },
+    scope?: { listId: string },
+  ) {
+    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
+    return this.db
+      .select({
+        taskId: tasks.id,
+        title: tasks.title,
+        userId: taskAssignees.userId,
+        timeEstimate: tasks.timeEstimate,
+        startDate: tasks.startDate,
+        dueDate: tasks.dueDate,
+        status: tasks.status,
+        statusCategory: tasks.statusCategory,
+        priority: tasks.priority,
+        listId: lists.id,
+        listName: lists.name,
+        projectId: projects.id,
+        projectName: projects.name,
+        spaceId: spaces.id,
+        spaceName: spaces.name,
+      })
+      .from(taskAssignees)
+      .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(
+        and(
+          eq(spaces.workspaceId, workspaceId),
+          eq(tasks.isArchived, false),
+          ne(tasks.statusCategory, 'closed'),
+          visFilter,
+          scope
+            ? or(
+                eq(tasks.listId, scope.listId),
+                inArray(tasks.id, this.db.select({ id: taskLists.taskId }).from(taskLists).where(eq(taskLists.listId, scope.listId))),
+              )
+            : undefined,
+        ),
+      )
   }
 
   /**
@@ -1065,66 +1115,23 @@ export class ReportsService {
     const horizon = Math.min(Math.max(days, 1), 90)
     const start = new Date()
     start.setHours(0, 0, 0, 0)
-    const end = new Date(start)
-    end.setDate(end.getDate() + horizon - 1)
-    end.setHours(0, 0, 0, 0)
 
     const target = new Date(dateStr)
     if (Number.isNaN(target.getTime())) return []
     target.setHours(0, 0, 0, 0)
 
-    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
-    const rows = await this.db
-      .select({
-        id: tasks.id,
-        title: tasks.title,
-        status: tasks.status,
-        statusCategory: tasks.statusCategory,
-        priority: tasks.priority,
-        startDate: tasks.startDate,
-        dueDate: tasks.dueDate,
-        timeEstimate: tasks.timeEstimate,
-        listId: lists.id,
-        listName: lists.name,
-        projectId: projects.id,
-        projectName: projects.name,
-        spaceId: spaces.id,
-        spaceName: spaces.name,
-      })
-      .from(taskAssignees)
-      .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
-      .innerJoin(lists, eq(lists.id, tasks.listId))
-      .innerJoin(projects, eq(projects.id, lists.projectId))
-      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(
-        and(
-          eq(spaces.workspaceId, workspaceId),
-          eq(taskAssignees.userId, userId),
-          eq(tasks.isArchived, false),
-          sql`${tasks.status} != 'done'`,
-          visFilter,
-        ),
-      )
-
-    const toDayStart = (value: Date) => {
-      const next = new Date(value)
-      next.setHours(0, 0, 0, 0)
-      return next
-    }
+    const rows = (await this.workloadAssignments(workspaceId, actor)).filter((r) => r.userId === userId)
 
     const prioRank: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 }
     const result = []
+    const offset = Math.round((target.getTime() - start.getTime()) / 86400000)
     for (const task of rows) {
-      const estimateHours = Math.max(0.5, Math.round(((task.timeEstimate ?? 4 * 3600) / 3600) * 10) / 10)
-      const rawStart = task.startDate ? toDayStart(new Date(task.startDate)) : start
-      const rawEnd = task.dueDate ? toDayStart(new Date(task.dueDate)) : rawStart
-      const rangeStart = rawStart < start ? start : rawStart
-      const rangeEnd = rawEnd > end ? end : rawEnd
-      if (target < rangeStart || target > rangeEnd) continue
-      const spanDays = Math.max(1, Math.floor((rangeEnd.getTime() - rangeStart.getTime()) / 86400000) + 1)
-      const perDay = estimateHours / spanDays
+      // The same share the heat map drew in this cell, from the same rule.
+      if (offset < 0 || offset >= horizon) continue
+      const perDay = spread(task, start, horizon, 'hours')[offset]
+      if (!perDay) continue
       result.push({
-        id: task.id,
+        id: task.taskId,
         title: task.title,
         status: task.status,
         statusCategory: task.statusCategory,
@@ -1145,6 +1152,188 @@ export class ReportsService {
         (prioRank[a.priority ?? 'normal'] ?? 2) - (prioRank[b.priority ?? 'normal'] ?? 2) || b.hours - a.hours,
     )
     return result
+  }
+
+  /**
+   * A LIST'S WORKLOAD VIEW (`commit-log/log-68bc188-1`, `ledger-rows/row-777`).
+   *
+   * ClickUp's Workload is a row per assignee over a scale of days, measured in
+   * Time estimates (the default), Tasks or Sprint points, coloured against each
+   * person's capacity, with a Backlog of the tasks it cannot place: unscheduled,
+   * overdue, unassigned, and — under Time estimates — unestimated. Here it is
+   * the workspace workload's own rule (`workload-spread.ts`, the calendar of
+   * `workloadCalendar`), narrowed to the tasks this list draws and read as the
+   * caller may read them. Capacity is in hours, so only Time estimates carries
+   * one; Tasks and Sprint points are counts beside it.
+   */
+  async getListWorkload(
+    listId: string,
+    opts: { days?: number; start?: string; measure?: string },
+    actor: { id: string; role?: string | null },
+  ) {
+    const [home] = await this.db
+      .select({ workspaceId: spaces.workspaceId })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(lists.id, listId))
+      .limit(1)
+    if (!home) throw new NotFoundException('List not found')
+    const workspaceId = home.workspaceId
+    const measure = (opts.measure ?? 'hours') as WorkloadMeasure
+    if (!WORKLOAD_MEASURES.includes(measure)) throw new BadRequestException('measure must be hours, tasks or points')
+    const horizon = Math.min(Math.max(Math.trunc(opts.days ?? 14) || 14, 1), 42)
+    let start = dayStart(new Date())
+    if (opts.start) {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(opts.start)
+      if (!m) throw new BadRequestException('start must be a day, YYYY-MM-DD')
+      start = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+    }
+    const today = dayStart(new Date())
+
+    const [assignments, unassignedRows, calendar] = await Promise.all([
+      this.workloadAssignments(workspaceId, actor, { listId }),
+      this.workloadUnassigned(workspaceId, actor, listId),
+      this.workloadCalendar(workspaceId, start, horizon),
+    ])
+    const taskIds = [...new Set([...assignments.map((a) => a.taskId), ...unassignedRows.map((r) => r.taskId)])]
+    const pointsOf = new Map<string, number>()
+    if (measure === 'points' && taskIds.length) {
+      const rows = await this.db
+        .select({ taskId: sprintTasks.taskId, points: sql<number>`max(${sprintTasks.storyPoints})` })
+        .from(sprintTasks)
+        .where(inArray(sprintTasks.taskId, taskIds))
+        .groupBy(sprintTasks.taskId)
+      for (const r of rows) if (r.points != null) pointsOf.set(r.taskId, Number(r.points))
+    }
+
+    const people = await this.db
+      .select({
+        userId: users.id,
+        name: users.displayName,
+        email: users.email,
+        avatarUrl: users.avatarUrl,
+        role: workspaceMembers.role,
+        weeklyCapacityHours: workspaceMembers.weeklyCapacityHours,
+      })
+      .from(workspaceMembers)
+      .innerJoin(users, eq(users.id, workspaceMembers.userId))
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), ne(workspaceMembers.role, 'guest')))
+    const personOf = new Map(people.map((p) => [p.userId, p]))
+
+    const zero = () => Array.from({ length: horizon }, () => 0)
+    const round = (n: number) => Math.round(n * 100) / 100
+    type Contribution = { taskId: string; title: string; loads: number[] }
+    const rows = new Map<string, { loads: number[]; tasks: Contribution[] }>()
+    const noEstimate = new Map<string, { taskId: string; title: string; assigneeIds: string[] }>()
+    const unscheduled = new Map<string, { taskId: string; title: string }>()
+    const overdue = new Map<string, { taskId: string; title: string; dueDate: Date | string | null }>()
+
+    const place = (key: string, task: { taskId: string; title: string; startDate: Date | string | null; dueDate: Date | string | null; timeEstimate: number | null }, assigneeIds: string[]) => {
+      const span = spanOf(task)
+      if (!span) {
+        unscheduled.set(task.taskId, { taskId: task.taskId, title: task.title })
+        return
+      }
+      if (span.to < today) overdue.set(task.taskId, { taskId: task.taskId, title: task.title, dueDate: task.dueDate })
+      const input = { ...task, points: pointsOf.get(task.taskId) ?? null }
+      if (!measured(input, measure)) {
+        if (measure !== 'tasks') {
+          const seen = noEstimate.get(task.taskId)
+          if (seen) seen.assigneeIds.push(...assigneeIds.filter((id) => !seen.assigneeIds.includes(id)))
+          else noEstimate.set(task.taskId, { taskId: task.taskId, title: task.title, assigneeIds: [...assigneeIds] })
+        }
+        return
+      }
+      const loads = spread(input, start, horizon, measure)
+      if (!loads.some(Boolean)) return
+      const row = rows.get(key) ?? { loads: zero(), tasks: [] }
+      loads.forEach((v, i) => {
+        row.loads[i] += v
+      })
+      row.tasks.push({ taskId: task.taskId, title: task.title, loads: loads.map(round) })
+      rows.set(key, row)
+    }
+
+    for (const a of assignments) {
+      // A guest's assignment is counted nowhere, as on the workspace page.
+      if (!personOf.has(a.userId)) continue
+      place(a.userId, a, [a.userId])
+    }
+    for (const r of unassignedRows) place('unassigned', r, [])
+
+    const withLoad = [...new Set(assignments.map((a) => a.userId))].filter((id) => personOf.has(id))
+    const members = withLoad
+      .map((userId) => {
+        const p = personOf.get(userId)!
+        const weekly = p.weeklyCapacityHours ?? 40
+        const daily = Math.max(1, Math.round((weekly / calendar.workDays.size) * 10) / 10)
+        const daysOff = calendar.daysOffByUser.get(userId) ?? new Set<string>()
+        const capacities = Array.from({ length: horizon }, (_, offset) => {
+          const day = new Date(start)
+          day.setDate(day.getDate() + offset)
+          const iso = calendar.isoDay(day)
+          if (!calendar.isWorkDay(day) || calendar.holidays.has(iso) || daysOff.has(iso)) return 0
+          return daily
+        })
+        const row = rows.get(userId)
+        const loads = (row?.loads ?? zero()).map(round)
+        return {
+          userId,
+          name: p.name ?? p.email,
+          email: p.email,
+          avatarUrl: p.avatarUrl,
+          weeklyCapacityHours: weekly,
+          // Capacity is hours; a count of tasks or points has none to measure against.
+          dailyCapacities: measure === 'hours' ? capacities : null,
+          daysOff: [...daysOff].sort(),
+          dailyLoads: loads,
+          total: round(loads.reduce((sum, v) => sum + v, 0)),
+          tasks: row?.tasks ?? [],
+        }
+      })
+      .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
+    const un = rows.get('unassigned')
+    const unLoads = (un?.loads ?? zero()).map(round)
+    return {
+      start: calendar.isoDay(start),
+      days: horizon,
+      measure,
+      members,
+      unassigned: { dailyLoads: unLoads, total: round(unLoads.reduce((sum, v) => sum + v, 0)), tasks: un?.tasks ?? [] },
+      noEstimate: [...noEstimate.values()],
+      backlog: {
+        unscheduled: [...unscheduled.values()],
+        overdue: [...overdue.values()],
+        unassigned: unassignedRows.map((r) => ({ taskId: r.taskId, title: r.title })),
+      },
+    }
+  }
+
+  /** The list's open tasks nobody is assigned to, as its workload reader may see them. */
+  private async workloadUnassigned(workspaceId: string, actor: { id: string; role?: string | null }, listId: string) {
+    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
+    return this.db
+      .select({
+        taskId: tasks.id,
+        title: tasks.title,
+        timeEstimate: tasks.timeEstimate,
+        startDate: tasks.startDate,
+        dueDate: tasks.dueDate,
+      })
+      .from(tasks)
+      .where(
+        and(
+          or(
+            eq(tasks.listId, listId),
+            inArray(tasks.id, this.db.select({ id: taskLists.taskId }).from(taskLists).where(eq(taskLists.listId, listId))),
+          ),
+          eq(tasks.isArchived, false),
+          ne(tasks.statusCategory, 'closed'),
+          visFilter,
+          sql`not exists (select 1 from ${taskAssignees} where ${taskAssignees.taskId} = ${tasks.id})`,
+        ),
+      )
   }
 
   /**

@@ -1002,6 +1002,9 @@ jobs:
           # And the AI's images (`ledger-rows/row-870`), from the same stub in OpenAI's shape.
           IMAGES_API_URL: http://127.0.0.1:${{ env.E2E_MEDIA_PORT }}/openai/v1
           IMAGES_API_KEY: lane-images
+          # And a map's geocoder and tiles (`ledger-rows/row-777`), from the same stub in OpenStreetMap's shapes.
+          GEOCODER_URL: http://127.0.0.1:${{ env.E2E_MEDIA_PORT }}/geocode
+          MAP_TILES_URL: http://127.0.0.1:${{ env.E2E_MEDIA_PORT }}/tiles/{z}/{x}/{y}.svg
           # The mail server started above — the five variables `lane_mail_env`
           # exports. Not a credential: the stub takes this one sign-in.
           SMTP_HOST: 127.0.0.1
@@ -2036,6 +2039,19 @@ jobs:
       - name: The importers ClickUp has, for every row of the Imports menu
         timeout-minutes: 15
         run: node test/e2e/importers.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # Frame `07:10`'s other five list views, as ClickUp has them (`commit-log/log-68bc188-1`,
+      # `ledger-rows/row-777`): Activity (the list's feed, its filters and pages), Workload
+      # (one spread rule with the workspace page; a status of its own name closes), Timeline
+      # (bars by group, dragged along and across), Mind Map (subtasks made and re-parented,
+      # what the server refuses left as it was) and Map (a Location placed by the media
+      # stub's geocoder, its tiles asked). The space's view settings decide the tabs.
+      - name: The list views ClickUp has, all eleven
+        timeout-minutes: 15
+        run: node test/e2e/list-views.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

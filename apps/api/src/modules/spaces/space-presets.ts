@@ -28,9 +28,19 @@ import { PLAN_TIERS, planIncludes, type PlanId } from '../plans/plans.constants'
  * cannot drift into disagreeing about what "Marketing Teams" means.
  */
 
-/** The list views Rundesk can actually render. Not ClickUp's eleven. */
-export const SPACE_VIEW_KEYS = ['list', 'board', 'table', 'calendar', 'gantt', 'team'] as const
+/**
+ * The list views, ClickUp's eleven (frame `07:10`, "Default settings for views"):
+ * each one a tab a list draws (`commit-log/log-68bc188-1`, `ledger-rows/row-777`).
+ */
+export const SPACE_VIEW_KEYS = ['list', 'board', 'table', 'calendar', 'gantt', 'team', 'activity', 'workload', 'timeline', 'mindmap', 'map'] as const
 export type SpaceViewKey = (typeof SPACE_VIEW_KEYS)[number]
+
+/**
+ * The views a space shows when it has chosen none: the six it always showed.
+ * The other five are a space's to turn on, in its wizard or its Views settings,
+ * so no space already in use wakes to eleven tabs.
+ */
+export const DEFAULT_SPACE_VIEWS: readonly SpaceViewKey[] = ['list', 'board', 'table', 'calendar', 'gantt', 'team']
 
 /**
  * The per-space feature switches — ClickApps, frame `07:19`.

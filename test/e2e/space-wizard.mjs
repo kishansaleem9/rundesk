@@ -130,7 +130,8 @@ const PRESETS = {
       features: ['priority', 'wipLimits'], seedLists: ['Roadmap'] },
   ],
   features: ['priority', 'tags', 'customFields', 'milestones', 'wipLimits', 'listEmail'],
-  views: ['list', 'board', 'table', 'calendar', 'gantt', 'team'],
+  // All eleven of frame `07:10`, as the server serves them (`ledger-rows/row-777`).
+  views: ['list', 'board', 'table', 'calendar', 'gantt', 'team', 'activity', 'workload', 'timeline', 'mindmap', 'map'],
 }
 
 /**

@@ -667,6 +667,9 @@ lane_media_env () {
   # And images made to order (`ledger-rows/row-870`): OpenAI's images shape, from the same stub.
   export IMAGES_API_URL="http://127.0.0.1:$(lane_media_port "$1")/openai/v1"
   export IMAGES_API_KEY="lane-images"
+  # And a map's geocoder and tiles (`ledger-rows/row-777`): OpenStreetMap's shapes, from the same stub.
+  export GEOCODER_URL="http://127.0.0.1:$(lane_media_port "$1")/geocode"
+  export MAP_TILES_URL="http://127.0.0.1:$(lane_media_port "$1")/tiles/{z}/{x}/{y}.svg"
 }
 
 lane_media_up () {

@@ -33,6 +33,17 @@
  * place in the answer, so the same prompt draws the same pictures and two
  * pictures of one answer differ.
  *
+ * AND A MAP'S TWO OUTSIDE SERVICES (`commit-log/log-68bc188-1`, `ledger-rows/row-777`):
+ * ClickUp's Map view places a task by its Location field's address, which the
+ * API turns into coordinates through a geocoder at GEOCODER_URL, and draws the
+ * map from a tile server at MAP_TILES_URL. In OpenStreetMap's shapes:
+ *   GET /geocode?q=&format=json&limit=1     Nominatim's search: [{ lat, lon, display_name }],
+ *                                           [] for an address it cannot place
+ *   GET /tiles/:z/:x/:y.svg                 one 256-pixel tile, drawn here
+ * The places are FIXED: a known address always lands on the same point, so a
+ * suite can say where a marker must be; any other address lands on a point
+ * drawn from its words, and one naming "nowhere" is not found.
+ *
  * THE CONTROL SEAM, for suites and for `check-media-stub.mjs`:
  *   GET  /__control/photos/downloads      the downloads triggered, in order
  *   POST /__control/photos/fail {status, count}   the next `count` calls answer `status`
@@ -40,6 +51,8 @@
  *   GET  /__control/images/requests       the image requests made, in order
  *   POST /__control/images/fail {status, count}   the next `count` image requests answer `status`
  *   POST /__control/images/reset          forget them and any failure
+ *   GET  /__control/geocode/requests      the addresses asked, in order
+ *   POST /__control/geocode/reset         forget them
  *   GET  /__control/version               which source this process runs
  *
  * NOT FOR PRODUCTION. Binds loopback, and refuses to start without
@@ -166,6 +179,21 @@ const downloads = []
 let failure = null // { status, left }
 const imageRequests = []
 let imageFailure = null // { status, left }
+const geocodeRequests = []
+
+/** The places every lane knows, by a word of their address. */
+const PLACES = [
+  { match: 'eiffel tower', lat: 48.8584, lon: 2.2945, name: 'Eiffel Tower, Paris, France' },
+  { match: 'big ben', lat: 51.5007, lon: -0.1246, name: 'Big Ben, London, United Kingdom' },
+  { match: 'sydney opera house', lat: -33.8568, lon: 151.2153, name: 'Sydney Opera House, Sydney, Australia' },
+  { match: 'empire state building', lat: 40.7484, lon: -73.9857, name: 'Empire State Building, New York, United States' },
+  { match: 'brandenburg gate', lat: 52.5163, lon: 13.3777, name: 'Brandenburg Gate, Berlin, Germany' },
+]
+/** Any other address: a point drawn from its words, the same every time. */
+const pointFor = (q) => {
+  const h = createHash('sha256').update(q.toLowerCase()).digest()
+  return { lat: ((h.readUInt32BE(0) / 0xffffffff) * 120 - 60).toFixed(4), lon: ((h.readUInt32BE(4) / 0xffffffff) * 360 - 180).toFixed(4) }
+}
 
 const json = (res, status, body) => {
   const s = JSON.stringify(body)
@@ -218,6 +246,34 @@ const server = createServer(async (req, res) => {
     }
     failure = { status, left: count }
     return json(res, 200, { failing: failure })
+  }
+
+  if (path === '/__control/geocode/requests' && req.method === 'GET') return json(res, 200, { requests: geocodeRequests })
+  if (path === '/__control/geocode/reset' && req.method === 'POST') {
+    geocodeRequests.length = 0
+    return json(res, 200, { reset: true })
+  }
+
+  // Nominatim's search, as a geocoder answers an address.
+  if (path === '/geocode' && req.method === 'GET') {
+    const q = (url.searchParams.get('q') ?? '').trim()
+    geocodeRequests.push({ q, at: new Date().toISOString() })
+    if (!q || /\bnowhere\b/i.test(q)) return json(res, 200, [])
+    const known = PLACES.find((p) => q.toLowerCase().includes(p.match))
+    if (known) return json(res, 200, [{ lat: String(known.lat), lon: String(known.lon), display_name: known.name }])
+    const at = pointFor(q)
+    return json(res, 200, [{ lat: at.lat, lon: at.lon, display_name: q }])
+  }
+
+  // One map tile: a square of the world, drawn with its own address so a page shows which it asked.
+  const tile = /^\/tiles\/(\d{1,2})\/(\d+)\/(\d+)\.svg$/.exec(path)
+  if (tile && req.method === 'GET') {
+    const [z, x, y] = tile.slice(1).map(Number)
+    if (x >= 2 ** z || y >= 2 ** z) return json(res, 404, { error: 'no such tile' })
+    const shade = (x + y) % 2 ? '#e8f0e4' : '#eef4ea'
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"><rect width="256" height="256" fill="${shade}"/><path d="M0 0H256V256" fill="none" stroke="#c9d6c3"/><text x="8" y="20" font-family="sans-serif" font-size="11" fill="#7a8a74">${z}/${x}/${y}</text></svg>`
+    res.writeHead(200, { 'content-type': 'image/svg+xml', 'content-length': Buffer.byteLength(svg), 'cache-control': 'public, max-age=3600', 'access-control-allow-origin': '*' })
+    return res.end(svg)
   }
 
   // The photograph itself: what an <img> on a cover or a result loads. No key, as Unsplash's image host asks none.

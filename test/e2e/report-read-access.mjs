@@ -84,7 +84,8 @@ try {
     const list = await make('/lists', { projectId: project, name: `${side === 'hidden' ? WORD : TAG} ${side} list` }, `the ${side} list`)
     const tasks = []
     for (let i = 0; i < count; i++) {
-      tasks.push(await make('/tasks', { listId: list, title: `${side === 'hidden' ? WORD : TAG} ${side} task ${i}`, assigneeIds: [adminId], dueDate: tomorrow }, `a ${side} task`))
+      // An estimate, so each loads the workload: a task with none adds no hours, as ClickUp's Workload counts (`ledger-rows/row-777`).
+      tasks.push(await make('/tasks', { listId: list, title: `${side === 'hidden' ? WORD : TAG} ${side} task ${i}`, assigneeIds: [adminId], dueDate: tomorrow, timeEstimate: 2 * 3600 }, `a ${side} task`))
     }
     return { project, list, tasks }
   }

@@ -18,6 +18,7 @@ import { PlansService } from '../plans/plans.service'
 import { PLAN_TIERS, type PlanId } from '../plans/plans.constants'
 import {
   SPACE_VIEW_KEYS,
+  DEFAULT_SPACE_VIEWS,
   SPACE_FEATURE_KEYS,
   CLICK_APP_MIN_PLAN,
   clickAppsForPlan,
@@ -52,8 +53,8 @@ function normalizeViewConfig(
   if (vc.enabledViews !== undefined) {
     if (!Array.isArray(vc.enabledViews)) throw new BadRequestException('enabledViews must be an array')
     const enabled = vc.enabledViews.filter((v): v is SpaceViewKey => SPACE_VIEW_KEYS.includes(v as SpaceViewKey))
-    // Never let a space end up with zero views — fall back to all.
-    out.enabledViews = enabled.length ? Array.from(new Set(enabled)) : [...SPACE_VIEW_KEYS]
+    // Never let a space end up with zero views — fall back to the six it shows by default.
+    out.enabledViews = enabled.length ? Array.from(new Set(enabled)) : [...DEFAULT_SPACE_VIEWS]
   }
   if (vc.defaultView !== undefined) {
     if (!SPACE_VIEW_KEYS.includes(vc.defaultView as SpaceViewKey)) {

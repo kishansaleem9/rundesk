@@ -1317,6 +1317,13 @@
       "when": 1900000134050,
       "tag": "0187_importers",
       "breakpoints": true
+    },
+    {
+      "idx": 188,
+      "version": "7",
+      "when": 1900000135050,
+      "tag": "0188_view_types",
+      "breakpoints": true
     }
   ]
 }

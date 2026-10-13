@@ -160,6 +160,7 @@ import { Markdown } from './markdown'
 import { formatMentionsPlain } from '../lib/mentions'
 import { COMPOSER_BLOCKS, applyBlockAtCaret, matchBlocks } from '../lib/composer-blocks'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { activityActionName, activitySentence } from '../lib/activity-actions'
 import { useDateFormat } from '../lib/date-format'
 import {
   carriesTime,
@@ -232,39 +233,6 @@ const STATUS_LABEL_KEYS: Record<string, TranslationKey> = {
   in_review: 'taskDetail.status.inReview',
   done: 'taskDetail.status.done',
   cancelled: 'taskDetail.status.cancelled',
-}
-/** Known task-activity actions (see apps/api tasks.service.ts logActivity calls). */
-const ACTIVITY_ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
-  created: 'taskDetail.activity.created',
-  updated: 'taskDetail.activity.updated',
-  archived: 'taskDetail.activity.archived',
-  // §V2-08 frame `15:32` — Delete is its own action, so the feed has to be able
-  // to say so. `deleted` has been in the activity enum since the beginning and
-  // nothing ever wrote it, because nothing ever deleted a task.
-  deleted: 'taskDetail.activity.deleted',
-  restored: 'taskDetail.activity.restored',
-  moved: 'taskDetail.activity.moved',
-  assigned: 'taskDetail.activity.assigned',
-  unassigned: 'taskDetail.activity.unassigned',
-  commented: 'taskDetail.activity.commented',
-  subtask_added: 'taskDetail.activity.subtaskAdded',
-  attachment_added: 'taskDetail.activity.attachmentAdded',
-  attachment_removed: 'taskDetail.activity.attachmentRemoved',
-  status_changed: 'taskDetail.activity.statusChanged',
-  priority_changed: 'taskDetail.activity.priorityChanged',
-  due_date_changed: 'taskDetail.activity.dueDateChanged',
-  label_added: 'taskDetail.activity.labelAdded',
-  label_removed: 'taskDetail.activity.labelRemoved',
-  checklist_item_toggled: 'taskDetail.activity.checklistItemToggled',
-  checklist_item_added: 'taskDetail.activity.checklistItemAdded',
-  dependency_added: 'taskDetail.activity.dependencyAdded',
-  dependency_removed: 'taskDetail.activity.dependencyRemoved',
-  // §V2-08 — merging leaves an entry on both tasks.
-  merged_in: 'taskDetail.activity.mergedIn',
-  merged_away: 'taskDetail.activity.mergedAway',
-  // `commit-log/log-713a611-1` — Tasks in Multiple Lists.
-  list_added: 'taskDetail.activity.listAdded',
-  list_removed: 'taskDetail.activity.listRemoved',
 }
 /** Custom-field type identifiers → display labels (the raw type stays canonical). */
 const FIELD_TYPE_LABEL_KEYS: Record<string, TranslationKey> = {
@@ -8901,36 +8869,9 @@ function ActivityPanel({ taskId, listId }: { taskId: string; listId?: string | n
   const ACTIVITY_PREVIEW = 10
   const shown = showAllActivity ? entries : entries.slice(0, ACTIVITY_PREVIEW)
   const hidden = entries.length - shown.length
-  // Map known actions to localized phrasing; fall back to a humanized raw string.
-  //
-  // Frame `02:47` — "You added item task required to checklist Checklist". The
-  // checklist entries carry the item and the list in their meta, and a task
-  // with three checklists cannot use "toggled a checklist item" for any of
-  // them. When the meta is there the named phrasing wins; older rows written
-  // before the meta existed still fall back to the plain label.
-  const actionLabel = (a: ActivityEntry) => {
-    const meta = a.meta as { content?: unknown; checklist?: unknown; isDone?: unknown } | null | undefined
-    const item = typeof meta?.content === 'string' ? meta.content : null
-    const checklist = typeof meta?.checklist === 'string' ? meta.checklist : null
-    if (item && checklist) {
-      if (a.action === 'checklist_item_added') {
-        return t('taskDetail.activity.checklistItemAddedDetail', { item, checklist })
-      }
-      if (a.action === 'checklist_item_toggled') {
-        return t(
-          meta?.isDone
-            ? 'taskDetail.activity.checklistItemCheckedDetail'
-            : 'taskDetail.activity.checklistItemUncheckedDetail',
-          { item, checklist },
-        )
-      }
-    }
-    const key = ACTIVITY_ACTION_LABEL_KEYS[a.action]
-    if (key) return t(key)
-    return a.action
-      .replace(/_/g, ' ')
-      .replace(/\b\w/g, (c) => c.toUpperCase())
-  }
+  // Map known actions to localized phrasing; fall back to a humanized raw string
+  // (`lib/activity-actions.ts`, shared with the list's Activity view).
+  const actionLabel = (a: ActivityEntry) => activitySentence(t, a)
   const iconForAction = (action: string) => {
     if (action.includes('assigned')) return '👤'
     if (action.includes('comment')) return '💬'
@@ -8979,10 +8920,7 @@ function ActivityPanel({ taskId, listId }: { taskId: string; listId?: string | n
   }
 
   const knownActions = actionsQuery.data ?? []
-  const actionOptionLabel = (action: string) => {
-    const key = ACTIVITY_ACTION_LABEL_KEYS[action]
-    return key ? t(key) : action.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-  }
+  const actionOptionLabel = (action: string) => activityActionName(t, action)
 
   /*
    * The header renders WHETHER OR NOT anything matched. A filter you cannot

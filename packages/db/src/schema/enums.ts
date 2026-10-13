@@ -170,6 +170,13 @@ export const viewTypeEnum = pgEnum('view_type', [
   'table',
   // §V2-13, frames `07:10` / `07:40` / `09:25` — work by the person doing it.
   'team',
+  // The other five of frame `07:10`'s eleven, each a tab a list draws
+  // (`commit-log/log-68bc188-1`, `ledger-rows/row-777`, migration 0188).
+  'activity',
+  'workload',
+  'timeline',
+  'mindmap',
+  'map',
 ])
 
 // Container-level (space / project) membership role and visibility.

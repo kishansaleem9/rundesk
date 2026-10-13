@@ -59,16 +59,23 @@ import type { TranslationKey } from './i18n'
  * Deliberately NOT the frame's eleven. A view that can be ticked in the wizard
  * and that no surface draws is the mirror defect — a stored value no reader
  * honours — and it is worse than an absent tick-box, because the database then
- * holds evidence for a view that does not exist. The five no list can draw as
- * a view (Map, Activity, Mind Map, Timeline, Workload) are not offered. Three
- * of them exist as WORKSPACE pages — `/app/:workspaceId/workload`, `/timeline`
- * and `/mindmaps` — and none of the three is a tab a list renders, so the tick
- * would still be a value no reader honours; Map and Activity exist in neither
- * form. Offering one is building its list view, not adding its key here
- * (`docs/clickup-research.md`, clickup-other, items 2a to 2e).
+ * holds evidence for a view that does not exist. So the five frame `07:10`
+ * lists beyond the first six (Map, Activity, Mind Map, Timeline, Workload) went
+ * unoffered until each was a tab a list draws — built, not keyed here
+ * (`commit-log/log-68bc188-1`, `ledger-rows/row-777`; `docs/clickup-research.md`,
+ * clickup-other, items 2a to 2e).
  */
-export const SPACE_VIEW_KEYS = ['list', 'board', 'table', 'calendar', 'gantt', 'team'] as const
+export const SPACE_VIEW_KEYS = ['list', 'board', 'table', 'calendar', 'gantt', 'team', 'activity', 'workload', 'timeline', 'mindmap', 'map'] as const
 export type SpaceViewKey = (typeof SPACE_VIEW_KEYS)[number]
+
+/**
+ * ALL ELEVEN ARE DRAWN NOW (`commit-log/log-68bc188-1`, `ledger-rows/row-777`):
+ * Activity, Workload, Timeline, Mind Map and Map are tabs a list renders, as
+ * ClickUp's are. A space that has chosen no views shows the six it always
+ * showed (`DEFAULT_SPACE_VIEWS`, the server's too); the other five are turned
+ * on in its wizard or its Views settings.
+ */
+export const DEFAULT_SPACE_VIEWS: readonly SpaceViewKey[] = ['list', 'board', 'table', 'calendar', 'gantt', 'team']
 
 /**
  * One label per view, and the type is the point: omit `team` and this file does
@@ -84,6 +91,11 @@ export const SPACE_VIEW_LABEL: Record<SpaceViewKey, TranslationKey> = {
   calendar: 'list.viewCalendar',
   gantt: 'list.viewGantt',
   team: 'list.viewTeam',
+  activity: 'list.viewActivity',
+  workload: 'list.viewWorkload',
+  timeline: 'list.viewTimeline',
+  mindmap: 'list.viewMindMap',
+  map: 'list.viewMap',
 }
 
 export function isSpaceViewKey(value: string): value is SpaceViewKey {

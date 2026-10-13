@@ -32,6 +32,7 @@ import {
   FormulaError,
   FORMULA_NUMERIC_TYPES,
 } from './formula'
+import { geocode, type Point } from '../../common/geo/geocoder'
 
 /**
  * THE ONE LIST OF FIELD TYPES, taken from the column that stores them.
@@ -1018,11 +1019,23 @@ export class CustomFieldsService {
      * stated once. Whatever it answers is what is stored.
      */
     value = await this.checkValue(workspaceId, taskId, def, value)
+    /*
+     * A LOCATION IS PLACED AS IT IS SAVED (`ledger-rows/row-777`): its address
+     * is asked of the geocoder and the point kept beside it, `{ v, lat, lng }`,
+     * so the Map draws it without asking again. Every other reader reads `v`.
+     * With no geocoder, or an address it cannot place, the address is kept and
+     * placed nowhere.
+     */
+    if (def.type === 'location' && typeof value === 'string' && value.trim()) {
+      const at = await geocode(value)
+      return this.upsertValue(taskId, fieldId, value, at ?? undefined)
+    }
     return this.upsertValue(taskId, fieldId, value)
   }
 
   /** The value of a field on a task, written whether or not a row held one. */
-  private async upsertValue(taskId: string, fieldId: string, value: FieldValue) {
+  private async upsertValue(taskId: string, fieldId: string, value: FieldValue, place?: Point) {
+    const stored = place ? { v: value, lat: place.lat, lng: place.lng } : { v: value }
     // Upsert (taskId, fieldId) is unique
     const existing = await this.db
       .select()
@@ -1033,7 +1046,7 @@ export class CustomFieldsService {
     if (existing[0]) {
       const [row] = await this.db
         .update(customFieldValues)
-        .set({ value: { v: value }, updatedAt: new Date() })
+        .set({ value: stored, updatedAt: new Date() })
         .where(eq(customFieldValues.id, existing[0].id))
         .returning()
       /*
@@ -1048,7 +1061,7 @@ export class CustomFieldsService {
     }
     const [row] = await this.db
       .insert(customFieldValues)
-      .values({ taskId, fieldId, value: { v: value } })
+      .values({ taskId, fieldId, value: stored })
       .returning()
     return row
   }

@@ -12,7 +12,8 @@ import { ChecklistTemplatesController } from './checklist-templates.controller'
 import { ChecklistTemplatesService } from './checklist-templates.service'
 import { TaskTypesController } from './task-types.controller'
 import { TaskTypesService } from './task-types.service'
-import { TaskActivityController, ProjectActivityController } from './activity.controller'
+import { TaskActivityController, ProjectActivityController, ListActivityController } from './activity.controller'
+import { ListMapController } from './map.controller'
 import { TaskDependenciesController } from './dependencies.controller'
 import { TaskExternalLinksController } from './external-links.controller'
 import { TaskMeetingsController } from './meetings.controller'
@@ -61,6 +62,8 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
     TaskTypesController,
     TaskActivityController,
     ProjectActivityController,
+    ListActivityController,
+    ListMapController,
     TaskDependenciesController,
     TaskExternalLinksController,
     TaskMeetingsController,

@@ -127,7 +127,8 @@ export const customFieldValues = pgTable(
     // No row is ever written for `progress_auto` or `formula` — both are
     // derived on read, and both refuse a write rather than accept one they
     // would then ignore.
-    value:          jsonb('value').$type<{ v: string | number | boolean | string[] | null }>().notNull(),
+    // A Location keeps the point its address was placed at beside it, `lat`/`lng`, where a geocoder found one (`ledger-rows/row-777`).
+    value:          jsonb('value').$type<{ v: string | number | boolean | string[] | null; lat?: number; lng?: number }>().notNull(),
     updatedAt:      timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

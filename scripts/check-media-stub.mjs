@@ -50,6 +50,7 @@ const chk = (cond, good, bad) => {
 const PROBE = `
 import { searchPhotos, trackPhotoUse, photoLibraryConfig, PhotoLibraryFailed, PHOTOS_PER_PAGE } from './src/modules/cover-photos/photo-library'
 import { generateImages, imagesConfig, ImagesFailed } from './src/modules/ai/image-generation'
+import { geocode, geocoderConfigured, mapTilesTemplate } from './src/common/geo/geocoder'
 const BASE = 'http://127.0.0.1:${PORT}'
 const cfg = { base: BASE + '/unsplash', key: 'lane-photos' }
 const control = (path: string, body?: unknown) =>
@@ -136,6 +137,30 @@ await step('imagesConfig', async () => [
   imagesConfig({ OPENAI_API_KEY: 'o' }),
   imagesConfig({ OPENAI_API_KEY: 'o', IMAGES_API_KEY: 'i', IMAGES_API_URL: 'http://x.test/v1/', IMAGES_MODEL: 'm' }),
 ])
+await step('geocode', async () => {
+  const env = { GEOCODER_URL: BASE + '/geocode' } as NodeJS.ProcessEnv
+  await control('/__control/geocode/reset', {})
+  const known = await geocode('Eiffel Tower, Paris', env)
+  const again = await geocode('12 Some Street, Springfield', env)
+  const twice = await geocode('12 Some Street, Springfield', env)
+  const lost = await geocode('Nowhere Lane 1', env)
+  const unset = await geocode('Eiffel Tower, Paris', {} as NodeJS.ProcessEnv)
+  const held = (await control('/__control/geocode/requests')) as { requests: { q: string }[] }
+  return {
+    known, again, same: JSON.stringify(again) === JSON.stringify(twice), lost, unset,
+    held: held.requests.map((r) => r.q),
+    configured: [geocoderConfigured({} as NodeJS.ProcessEnv), geocoderConfigured(env)],
+  }
+})
+await step('tiles', async () => {
+  const one = await fetch(BASE + '/tiles/2/1/1.svg')
+  const off = await fetch(BASE + '/tiles/2/9/1.svg')
+  return {
+    one: [one.status, one.headers.get('content-type')],
+    off: off.status,
+    template: [mapTilesTemplate({} as NodeJS.ProcessEnv), mapTilesTemplate({ MAP_TILES_URL: BASE + '/tiles/{z}/{x}/{y}.svg' } as NodeJS.ProcessEnv), mapTilesTemplate({ MAP_TILES_URL: BASE + '/tiles' } as NodeJS.ProcessEnv)],
+  }
+})
 await step('config', async () => [
   photoLibraryConfig({}),
   photoLibraryConfig({ UNSPLASH_ACCESS_KEY: 'k' }),
@@ -244,6 +269,26 @@ if (out.none !== undefined) {
     'with no key images are not set up; OpenAI’s address and model unless others are given, and IMAGES_API_KEY before OPENAI_API_KEY',
     `read ${JSON.stringify(out.imagesConfig)}`,
   )
+  // A map's two services (`ledger-rows/row-777`): the product's geocoder client and the tiles, against the stub.
+  const g = out.geocode ?? {}
+  chk(
+    same(g.known, { lat: 48.8584, lng: 2.2945 }) && g.again && g.same === true && g.lost === null &&
+      same(g.held, ['Eiffel Tower, Paris', '12 Some Street, Springfield', '12 Some Street, Springfield', 'Nowhere Lane 1']),
+    'the geocoder answers in Nominatim’s shape: a known place at its point, any other address at the same point every time, “nowhere” not found — and every address asked is kept',
+    `answered ${JSON.stringify(g)}`,
+  )
+  chk(
+    g.unset === null && same(g.configured, [false, true]),
+    'and with no GEOCODER_URL nothing is asked and nothing is placed',
+    `answered ${JSON.stringify({ unset: g.unset, configured: g.configured })}`,
+  )
+  const t = out.tiles ?? {}
+  chk(
+    same(t.one, [200, 'image/svg+xml']) && t.off === 404 &&
+      same(t.template, [null, 'http://127.0.0.1:' + PORT + '/tiles/{z}/{x}/{y}.svg', null]),
+    'a tile inside the world is drawn and one outside it is not; MAP_TILES_URL is taken only as a {z}/{x}/{y} template',
+    `answered ${JSON.stringify(t)}`,
+  )
 }
 
 if (process.argv.includes('--mutate')) {
@@ -265,6 +310,9 @@ if (process.argv.includes('--mutate')) {
     ['every picture of an answer the same', "  const h = createHash('sha1').update(`${prompt}#${index}`).digest()", "  const h = createHash('sha1').update(`${prompt}#${index * 0}`).digest()"],
     ['a staged image failure never runs out', '      imageFailure.left -= 1\n', ''],
     ['an image request is answered and not kept', "    imageRequests.push({ model: body.model ?? null, prompt, n, size: body.size ?? null, at: new Date().toISOString() })\n", ''],
+    ['nowhere is somewhere', "    if (!q || /\\bnowhere\\b/i.test(q)) return json(res, 200, [])\n", "    if (!q) return json(res, 200, [])\n"],
+    ['a known place lands where its words say', "    const known = PLACES.find((p) => q.toLowerCase().includes(p.match))\n", "    const known = undefined\n"],
+    ['a tile outside the world is drawn', "    if (x >= 2 ** z || y >= 2 ** z) return json(res, 404, { error: 'no such tile' })\n", ''],
   ]
   console.log('\n▶ and each mutation of the stub reddens a case')
   for (const [label, from, to] of MUTATIONS) {

@@ -14,13 +14,13 @@
 # `is labelled with the frame's own word` now, so the iteration this patch
 # reddens can be named.
 #
-# PREDICTED ONE, the `team` iteration of six.
+# PREDICTED ONE, the `team` iteration of eleven.
 #
 # Reddens: space-wizard-views, the `team` iteration of
 #   "row is labelled with the frame's own word"
 import io
 p='/home/user/rundesk/apps/web/src/lib/space-views.ts'
 s=io.open(p,encoding='utf-8').read()
-a="  gantt: 'list.viewGantt',\n  team: 'list.viewTeam',\n}"
+a="  gantt: 'list.viewGantt',\n  team: 'list.viewTeam',\n"
 assert s.count(a)==1
-io.open(p,'w',encoding='utf-8').write(s.replace(a,"  gantt: 'list.viewGantt',\n}"))
+io.open(p,'w',encoding='utf-8').write(s.replace(a,"  gantt: 'list.viewGantt',\n"))

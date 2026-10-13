@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
 import { eq, and, or, asc, desc, gte, ilike, inArray, isNull, isNotNull, notInArray, sql, type SQL } from 'drizzle-orm'
 import {
+  activityActionEnum,
   taskTypes,
   taskViewEvents,
   tasks,
@@ -52,6 +53,7 @@ import { toXlsx } from '../../common/export/xlsx'
 import { zipStream, type ZipEntry } from '../../common/export/zip-stream'
 import { uniqueEntryNames } from '../../common/export/zip-names'
 import { isUuid } from '../../common/validation/uuid'
+import { geocoderConfigured, mapTilesTemplate } from '../../common/geo/geocoder'
 import {
   ATTACHMENTS_ZIP_MAX_BYTES,
   LINKS_ENTRY_NAME,
@@ -7159,6 +7161,192 @@ export class TasksService {
       taskTitle: r.taskTitle,
       actor: r.actorId ? { id: r.actorId, displayName: r.actorName, email: r.actorEmail } : null,
     }))
+  }
+
+  /**
+   * A LIST'S ACTIVITY VIEW (`commit-log/log-68bc188-1`, `ledger-rows/row-777`).
+   *
+   * ClickUp's Activity view is every change in its location, newest first, with
+   * a task filter and an activity filter that both narrow it, a search, Me Mode
+   * (only the tasks assigned to the viewer) and a Subtasks switch (help centre,
+   * "Intro to Activity view", read through search excerpts, 13 October). Here:
+   * the entries of the tasks this list's own views draw — its own and the ones
+   * added to it (Tasks in Multiple Lists) — under the list read's own rule
+   * (`taskVisibilityFilterForList`), narrowed in SQL before the limit, so a
+   * filter never searches only the page it happened to hold. Paged by entry:
+   * `before` is the id of the last entry of the page before, and the next page
+   * is everything older than it by (time, id). A timestamp would not do: rows
+   * written in one transaction share `now()`, and Postgres keeps microseconds a
+   * JavaScript date drops, so a page cut between two of them would lose the rest.
+   */
+  async listListActivity(
+    listId: string,
+    actor: { id: string; role?: string },
+    opts: { q?: string; actions?: string[]; me?: boolean; subtasks?: boolean; before?: string; limit?: number } = {},
+  ) {
+    const limit = Math.min(Math.max(1, Math.trunc(opts.limit ?? 50)), 100)
+    const where = await this.listActivityWhere(listId, actor, opts)
+    const before = typeof opts.before === 'string' && opts.before ? opts.before : null
+    if (before && !isUuid(before)) throw new BadRequestException('before must be the id of an entry')
+    const rows = await this.db
+      .select({
+        id: taskActivity.id,
+        action: taskActivity.action,
+        meta: taskActivity.meta,
+        createdAt: taskActivity.createdAt,
+        taskId: taskActivity.taskId,
+        taskTitle: tasks.title,
+        parentTaskId: tasks.parentTaskId,
+        actorId: users.id,
+        actorName: users.displayName,
+        actorEmail: users.email,
+        actorAvatar: users.avatarUrl,
+      })
+      .from(taskActivity)
+      .innerJoin(tasks, eq(tasks.id, taskActivity.taskId))
+      .leftJoin(users, eq(users.id, taskActivity.actorId))
+      .where(
+        and(
+          where,
+          before
+            ? sql`(${taskActivity.createdAt}, ${taskActivity.id}) < (select c.created_at, c.id from task_activity c where c.id = ${before})`
+            : undefined,
+        ),
+      )
+      .orderBy(desc(taskActivity.createdAt), desc(taskActivity.id))
+      .limit(limit + 1)
+    const page = rows.slice(0, limit)
+    return {
+      items: page.map((r) => ({
+        id: r.id,
+        action: r.action,
+        meta: r.meta,
+        createdAt: r.createdAt,
+        taskId: r.taskId,
+        taskTitle: r.taskTitle,
+        isSubtask: !!r.parentTaskId,
+        actor: r.actorId ? { id: r.actorId, displayName: r.actorName, email: r.actorEmail, avatarUrl: r.actorAvatar } : null,
+      })),
+      // One more than asked for says whether there is an older page, without counting the whole feed.
+      nextBefore: rows.length > limit ? page[page.length - 1].id : null,
+    }
+  }
+
+  /** The activity filter's choices: each action this list's feed holds under the other filters, with its count. */
+  async listListActivityActions(
+    listId: string,
+    actor: { id: string; role?: string },
+    opts: { q?: string; me?: boolean; subtasks?: boolean } = {},
+  ) {
+    const where = await this.listActivityWhere(listId, actor, { ...opts, actions: [] })
+    const rows = await this.db
+      .select({ action: sql<string>`${taskActivity.action}::text`, count: sql<number>`count(*)::int` })
+      .from(taskActivity)
+      .innerJoin(tasks, eq(tasks.id, taskActivity.taskId))
+      .leftJoin(users, eq(users.id, taskActivity.actorId))
+      .where(where)
+      .groupBy(taskActivity.action)
+      .orderBy(desc(sql`count(*)`))
+    return rows.map((r) => ({ action: r.action, count: Number(r.count) }))
+  }
+
+  private async listActivityWhere(
+    listId: string,
+    actor: { id: string; role?: string },
+    opts: { q?: string; actions?: string[]; me?: boolean; subtasks?: boolean },
+  ): Promise<SQL | undefined> {
+    const visFilter = await this.taskVisibilityFilterForList(listId, actor)
+    const actions = (opts.actions ?? []).filter(Boolean)
+    const known = new Set<string>(activityActionEnum.enumValues)
+    const unknown = actions.filter((a) => !known.has(a))
+    if (unknown.length) throw new BadRequestException(`Unknown activity: ${unknown.join(', ')}`)
+    const q = (opts.q ?? '').trim()
+    const pattern = q ? likeContaining(q) : null
+    return and(
+      or(eq(tasks.listId, listId), inArray(tasks.id, this.db.select({ id: taskLists.taskId }).from(taskLists).where(eq(taskLists.listId, listId)))),
+      visFilter,
+      actions.length ? inArray(sql`${taskActivity.action}::text`, actions) : undefined,
+      // Me Mode: only the tasks assigned to the viewer.
+      opts.me ? inArray(tasks.id, this.db.select({ id: taskAssignees.taskId }).from(taskAssignees).where(eq(taskAssignees.userId, actor.id))) : undefined,
+      opts.subtasks === false ? isNull(tasks.parentTaskId) : undefined,
+      pattern
+        ? or(
+            ilike(tasks.title, pattern),
+            ilike(sql`coalesce(${taskActivity.meta}::text, '')`, pattern),
+            ilike(sql`coalesce(${users.displayName}, '')`, pattern),
+          )
+        : undefined,
+    )
+  }
+
+  /**
+   * A LIST'S MAP VIEW (`commit-log/log-68bc188-1`, `ledger-rows/row-777`).
+   *
+   * ClickUp's Map places each task of the location by a Location field the
+   * view picks, and lists the tasks with no location in its sidebar. Here: the
+   * Location fields this list's tasks have (the project's, and those limited
+   * to this list), the one asked for or the first, and for each task the list
+   * draws (its own and those added to it, under the list read's own rule) the
+   * point its address was placed at when it was saved — or, unplaced, the
+   * address alone. Whether a geocoder and tiles are set is said, so the view
+   * can say why nothing is placed rather than draw an empty world.
+   */
+  async listMap(listId: string, actor: { id: string; role?: string }, fieldId?: string) {
+    const [home] = await this.db
+      .select({ projectId: lists.projectId })
+      .from(lists)
+      .where(eq(lists.id, listId))
+      .limit(1)
+    if (!home) throw new NotFoundException('List not found')
+    const fields = await this.db
+      .select({ id: customFieldDefinitions.id, name: customFieldDefinitions.name })
+      .from(customFieldDefinitions)
+      .where(
+        and(
+          eq(customFieldDefinitions.projectId, home.projectId),
+          eq(customFieldDefinitions.type, 'location'),
+          or(isNull(customFieldDefinitions.listId), eq(customFieldDefinitions.listId, listId)),
+        ),
+      )
+      .orderBy(asc(customFieldDefinitions.position), asc(customFieldDefinitions.createdAt))
+    if (fieldId && !fields.some((f) => f.id === fieldId)) {
+      throw new BadRequestException('That is not a Location field of this list')
+    }
+    const field = fieldId ?? fields[0]?.id ?? null
+    const visFilter = await this.taskVisibilityFilterForList(listId, actor)
+    const rows = await this.db
+      .select({ taskId: tasks.id, title: tasks.title, value: customFieldValues.value })
+      .from(tasks)
+      .leftJoin(
+        customFieldValues,
+        and(eq(customFieldValues.taskId, tasks.id), field ? eq(customFieldValues.fieldId, field) : sql`false`),
+      )
+      .where(
+        and(
+          or(eq(tasks.listId, listId), inArray(tasks.id, this.db.select({ id: taskLists.taskId }).from(taskLists).where(eq(taskLists.listId, listId)))),
+          eq(tasks.isArchived, false),
+          visFilter,
+        ),
+      )
+      .orderBy(asc(tasks.title))
+    const markers: Array<{ taskId: string; title: string; address: string; lat: number; lng: number }> = []
+    const unplaced: Array<{ taskId: string; title: string; address: string | null }> = []
+    for (const r of rows) {
+      const v = r.value as { v?: unknown; lat?: unknown; lng?: unknown } | null
+      const address = typeof v?.v === 'string' && v.v.trim() ? v.v : null
+      const lat = typeof v?.lat === 'number' ? v.lat : null
+      const lng = typeof v?.lng === 'number' ? v.lng : null
+      if (address && lat !== null && lng !== null) markers.push({ taskId: r.taskId, title: r.title, address, lat, lng })
+      else unplaced.push({ taskId: r.taskId, title: r.title, address })
+    }
+    return {
+      fields,
+      fieldId: field,
+      geocoder: geocoderConfigured(),
+      tiles: mapTilesTemplate(),
+      markers,
+      unplaced,
+    }
   }
 
   // --- Time entries --------------------------------------------------------

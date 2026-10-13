@@ -105,7 +105,12 @@ import {
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { carriesTime, toDateInput, withDatePart, shownDay } from '../lib/task-dates'
 import { GanttChart, type DatePatch, type GanttGroup, type GanttLink, type GanttTask } from '../components/gantt-chart'
-import { SPACE_VIEW_KEYS, type SpaceViewKey } from '../lib/space-views'
+import { DEFAULT_SPACE_VIEWS, SPACE_VIEW_KEYS, type SpaceViewKey } from '../lib/space-views'
+import { ActivityView } from '../components/list-views/activity-view'
+import { MindMapView } from '../components/list-views/mindmap-view'
+import { TimelineView } from '../components/list-views/timeline-view'
+import { WorkloadView } from '../components/list-views/workload-view'
+import { MapView } from '../components/list-views/map-view'
 import { TaskDetailSheet } from '../components/task-detail-sheet'
 import { DayBox } from '../components/date-time-box'
 import { FreshnessControls, useRefreshInterval } from '../components/freshness-controls'
@@ -516,6 +521,8 @@ function buildCreateTaskBody(input: {
   startDate?: string
   /** §V2-S13 `10:52` — set when the group being added to IS an assignee. */
   assigneeIds?: string[]
+  /** A subtask made from its parent's node on the Mind Map (`ledger-rows/row-777`). */
+  parentTaskId?: string
 }): Record<string, unknown> {
   const body: Record<string, unknown> = {
     listId: input.listId,
@@ -524,6 +531,7 @@ function buildCreateTaskBody(input: {
   }
   if (input.status) body.status = input.status
   if (input.assigneeIds?.length) body.assigneeIds = input.assigneeIds
+  if (input.parentTaskId) body.parentTaskId = input.parentTaskId
   const dueDate = dateInputToIso(input.dueDate ?? '')
   if (dueDate) body.dueDate = dueDate
   const startDate = dateInputToIso(input.startDate ?? '')
@@ -1638,7 +1646,7 @@ function ListDetail() {
       ? (spaceViewConfig.enabledViews.filter((v) =>
           (SPACE_VIEW_KEYS as readonly string[]).includes(v),
         ) as Array<SpaceViewKey>)
-      : [...SPACE_VIEW_KEYS]
+      : [...DEFAULT_SPACE_VIEWS]
   // Keep a ref in sync so the keyboard 'v' cycler reads the live enabled set
   // without re-subscribing its listener each time the config changes.
   const enabledViewsRef = useRef(enabledViews)
@@ -2835,6 +2843,12 @@ function ListDetail() {
         { id: 'gantt', label: t('list.viewGantt') },
         // §V2-13, frames `07:40` / `09:25` — work by the person doing it.
         { id: 'team', label: t('list.viewTeam') },
+        // `commit-log/log-68bc188-1`, `ledger-rows/row-777` — the five more frame `07:10` lists.
+        { id: 'activity', label: t('list.viewActivity') },
+        { id: 'workload', label: t('list.viewWorkload') },
+        { id: 'timeline', label: t('list.viewTimeline') },
+        { id: 'mindmap', label: t('list.viewMindMap') },
+        { id: 'map', label: t('list.viewMap') },
       ] as { id: typeof activeView; label: string }[]
     )
       .filter((tb) => enabledViews.includes(tb.id))
@@ -3876,6 +3890,39 @@ function ListDetail() {
             onUnlock={() => requireFeature(TEAM_VIEW_GATE)}
             freeUses={freeUsesOf(plan, 'teamView')}
           />
+        ) : activeView === 'activity' ? (
+          <ActivityView listId={listId} stamp={dataUpdatedAt} onOpenTask={(id) => setSelectedTaskId(id)} />
+        ) : activeView === 'workload' ? (
+          <WorkloadView workspaceId={workspaceId} listId={listId} stamp={dataUpdatedAt} onOpenTask={(id) => setSelectedTaskId(id)} />
+        ) : activeView === 'timeline' ? (
+          <TimelineView
+            workspaceId={workspaceId}
+            tasks={visibleTasks}
+            statuses={boardStatuses}
+            onOpenTask={(id) => setSelectedTaskId(id)}
+            onChanged={refetch}
+          />
+        ) : activeView === 'mindmap' ? (
+          <MindMapView
+            tasks={visibleTasks}
+            listName={listMeta?.name ?? t('list.defaultListName')}
+            mayAdd={listAccess.add}
+            onOpenTask={(id) => setSelectedTaskId(id)}
+            onCreate={async (title, parentTaskId) => {
+              try {
+                await api('/tasks', {
+                  method: 'POST',
+                  body: JSON.stringify(buildCreateTaskBody({ listId, title, ...(parentTaskId ? { parentTaskId } : {}) })),
+                })
+              } catch (err) {
+                toast.error(err instanceof ApiError ? err.message : t('list.mindmap.createFailed'))
+              }
+              await refetch()
+            }}
+            onReparent={(taskId, parentTaskId) => patchTaskSaying(taskId, { parentTaskId })}
+          />
+        ) : activeView === 'map' ? (
+          <MapView listId={listId} stamp={dataUpdatedAt} onOpenTask={(id) => setSelectedTaskId(id)} />
         ) : (
           <Card className="p-4" data-testid="list-calendar" data-calendar-period={calendarPeriodKey}>
             <div className="flex items-center justify-between mb-3">

@@ -16,10 +16,13 @@
  *   Timeline · off
  *   Workload · off
  *
- * Rundesk renders SIX of the eleven: list, board, table, calendar, gantt, team.
- * (A correction worth writing down: Table is one of the six — it has a view
- * tab, a column panel and its own e2e coverage. The five Rundesk genuinely does
- * not have are Map, Activity, Mind Map, Timeline and Workload.)
+ * Rundesk renders all ELEVEN now (`commit-log/log-68bc188-1`,
+ * `ledger-rows/row-777`): the six it always had — list, board, table, calendar,
+ * gantt, team — and Activity, Workload, Timeline, Mind Map and Map, each a tab a
+ * list draws (`list-views.mjs` measures them). Until they were drawn, the five
+ * were neither offered nor storable, which is the rule this suite keeps for
+ * the views ClickUp has that a Rundesk list still does not draw as a tab:
+ * Chat, Form and Embed.
  *
  * THE TWO THINGS THIS SUITE IS FOR.
  *
@@ -29,7 +32,7 @@
  *    List, and both of them toggled something real, so nothing looked broken.
  *
  *    Every check of the form "the row has a label" PASSES ON THAT BUG. So this
- *    suite asserts the SPECIFIC text of each of the six rows, one check each,
+ *    suite asserts the SPECIFIC text of each of the eleven rows, one check each,
  *    and separately asserts that no two rows say the same thing — which is the
  *    exact shape the defect had.
  *
@@ -59,7 +62,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure. */
-const EXPECTED_CHECKS = 15
+const EXPECTED_CHECKS = 20
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -67,8 +70,8 @@ const REPO = path.resolve(import.meta.dirname, '../..')
 /** Everything this run makes carries the tag, and nothing else is looked at. */
 const TAG = `swv-${Date.now()}`
 
-/** The six Rundesk renders, in the order the server serves them. */
-const EXPECTED_VIEWS = ['list', 'board', 'table', 'calendar', 'gantt', 'team']
+/** The eleven Rundesk renders, in the order the server serves them. */
+const EXPECTED_VIEWS = ['list', 'board', 'table', 'calendar', 'gantt', 'team', 'activity', 'workload', 'timeline', 'mindmap', 'map']
 /** One specific word per row. The whole suite turns on these being distinct. */
 const EXPECTED_LABEL = {
   list: 'List',
@@ -77,10 +80,15 @@ const EXPECTED_LABEL = {
   calendar: 'Calendar',
   gantt: 'Gantt',
   team: 'Team',
+  activity: 'Activity',
+  workload: 'Workload',
+  timeline: 'Timeline',
+  mindmap: 'Mind Map',
+  map: 'Map',
 }
-/** On the frame, absent from Rundesk. Neither offered nor storable. */
-const FRAME_ONLY = ['map', 'activity', 'mindMap', 'timeline', 'workload']
-const FRAME_ONLY_LABELS = ['Map', 'Activity', 'Mind Map', 'Timeline', 'Workload']
+/** ClickUp's, and no tab a Rundesk list draws. Neither offered nor storable. */
+const FRAME_ONLY = ['chat', 'form', 'embed']
+const FRAME_ONLY_LABELS = ['Chat', 'Form', 'Embed']
 
 let stack = null
 let B = (process.env.BASE ?? '').replace(/\/$/, '')
@@ -130,7 +138,7 @@ page.on('request', (r) => {
 })
 
 try {
-  console.log('\n▶ the server offers the six Rundesk can render, and only those')
+  console.log('\n▶ the server offers the eleven Rundesk can render, and only those')
   const presets = await api('/space-presets')
   /*
    * `status` explicitly. The fixture's apiClient NEVER THROWS — it returns
@@ -151,7 +159,7 @@ try {
    */
   const withGhost = await makeSpace({
     name: `ghost views ${TAG}`,
-    viewConfig: { enabledViews: ['list', 'team', 'workload', 'mindMap'], defaultView: 'team' },
+    viewConfig: { enabledViews: ['list', 'team', 'chat', 'form'], defaultView: 'team' },
   })
   const storedViews = withGhost.data?.viewConfig?.enabledViews ?? []
   chk(
@@ -164,13 +172,13 @@ try {
 
   const ghostDefault = await api('/spaces', {
     method: 'POST',
-    body: { workspaceId: WS, name: `ghost default ${TAG}`, viewConfig: { defaultView: 'workload' } },
+    body: { workspaceId: WS, name: `ghost default ${TAG}`, viewConfig: { defaultView: 'chat' } },
   })
   if (ghostDefault.data?.id) madeSpaces.push(ghostDefault.data.id)
   chk(
     ghostDefault.status === 400,
     'and asking for one as the DEFAULT view is refused outright (400)',
-    `POST /spaces with defaultView=workload answered ${ghostDefault.status} — a space would open on a view it has no tab for`,
+    `POST /spaces with defaultView=chat answered ${ghostDefault.status} — a space would open on a view it has no tab for`,
   )
 
   console.log('\n▶ the Required-views panel, as frame `07:12` draws it')
@@ -228,7 +236,7 @@ try {
    * ONE CHECK PER ROW, NAMING THE WORD. Not "the row has a label": the defect
    * this replaces produced a labelled row with the WRONG label, and a presence
    * check passes on it. If `team` ever loses its entry again, exactly one of
-   * the six below goes red and it says which word it expected.
+   * the eleven below goes red and it says which word it expected.
    */
   const labelOf = async (view) =>
     (await page.getByTestId(`space-wizard-viewlabel-${view}`).first().filter({ visible: true }).innerText().catch(() => '')).trim()
@@ -279,7 +287,7 @@ try {
   )
 
   /*
-   * The five the frame shows and Rundesk cannot draw. Checked by testid AND by
+   * ClickUp's views no Rundesk list draws as a tab. Checked by testid AND by
    * the words themselves, because a row could be drawn under some other key and
    * still be a tick-box that leads nowhere.
    */
@@ -296,7 +304,7 @@ try {
   const ghostWords = FRAME_ONLY_LABELS.filter((w) => new RegExp(`\\b${w}\\b`, 'i').test(panelText))
   chk(
     offeredGhosts.length === 0 && ghostWords.length === 0,
-    'none of Map, Activity, Mind Map, Timeline or Workload is offered — Rundesk cannot render them',
+    'none of Chat, Form or Embed is offered — a list draws no such tab',
     `the panel offered ${JSON.stringify([...offeredGhosts, ...ghostWords])}, which no view surface draws`,
   )
 
