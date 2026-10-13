@@ -64,9 +64,12 @@ chk "$([ $RC = 2 ] && echo yes)" "a database that cannot be read is not a pass" 
 # from here, it is still this one's.
 MAIN_KEY=$(cat /tmp/claude-0/schema-ref.key 2>/dev/null)
 T=$(mktemp -d /tmp/claude-0/schema-ref-probe.XXXXXX)
-mkdir -p "$T/scripts/e2e-lanes" "$T/packages/db/src"
+mkdir -p "$T/scripts/e2e-lanes" "$T/packages/db"
 cp /home/user/rundesk/scripts/e2e-lanes/lane-env.sh "$T/scripts/e2e-lanes/"
-cp -r /home/user/rundesk/packages/db/src/schema /home/user/rundesk/packages/db/src/migrations "$T/packages/db/src/"
+# All of `src`, not its schema and migrations alone: the schema imports what
+# sits beside it (`sealed-text.ts` reads `../secret-box`), and a probe without
+# it could not build a reference at all (`found-13-oct/drift-probe-misses-what-the-schema-imports`).
+cp -r /home/user/rundesk/packages/db/src "$T/packages/db/"
 cp /home/user/rundesk/packages/db/drizzle.config.ts /home/user/rundesk/packages/db/package.json "$T/packages/db/"
 ln -s /home/user/rundesk/packages/db/node_modules "$T/packages/db/node_modules"
 sed -i "s|^    index('meetings_task_idx').on(t.taskId),$|&\n    index('idx_meetings_probe_title').on(t.title),|" "$T/packages/db/src/schema/meetings.ts"

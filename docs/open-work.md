@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 561 items: 0 open · 0 partly fixed · 551 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 562 items: 0 open · 0 partly fixed · 552 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 97, each reproduced
+## Found by the triage, 5 October, and since — 98, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10543,7 +10543,16 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
   - `acr-16` (asked inside `chatStream` again): 16 of 17 on lane 2 with a model ("201 data: {"step":"workspace"}") and on lane 3 without one ("503").
   - `acr-17` (asked after the 503) and `acr-18` (the summary's credits asked only where a model answers), each only where no model answers: 17 of 18 on lane 3 at `33f61ce`, each on its own check ("503").
   - `acr-u4` reddened both refusal tests, `acr-u5` the stream's end.
+- `acc-11` and `bep-17` anchored on the route's lines as they read before; re-aimed, the refusal and the read they take away are the same, and their runs are below.
 - Regression on lane 2 with a model at `33f61ce`, the nine other suites that use the chat or the streamed summary, all green: `brain-comments-and-decks` 29, `ai-answer-rendering` 52, `ai-assign` 24, `ai-create-containers` 33, `ai-task-reads` 4, `brain-entry-points` 20, `private-list-reach` 13, `workspace-read-access` 30 and `video-regression` 94.
+
+### `found-13-oct/drift-probe-misses-what-the-schema-imports` — **closed** (test tooling, small; found by preflight 4) · reproduced 13 October
+
+**The schema-drift self-check's planted checkout could not build a reference, because the schema now imports a file beside it**
+
+*Evidence, 13 October:* preflight 4's "a drifted lane database is caught" (`schema-drift-selfcheck.sh`) failed 2 of 10: "a checkout of its own builds its own reference, under its own name, with its own index in it — not-built", and the drift read that stands on it. The probe plants a checkout with a copy of `packages/db/src/schema` and `migrations` and nothing else. Batch 42's `sealed-text.ts` imports `../secret-box`, which the copy left out, so the planted checkout's schema push failed (rc 2). A worktree is a whole checkout and builds its reference as before; only the probe was short. Preflight 3 ran before batch 42.
+
+*Closed, 13 October.* The probe copies all of `packages/db/src`: 10 of 10.
 
 ### `found-13-oct/lane-admin-meets-the-hourly-ai-cap` — **closed** (test tooling, small; found by batch 40b's break runs) · reproduced 13 October
 
