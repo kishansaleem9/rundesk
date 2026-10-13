@@ -10543,6 +10543,7 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
   - `acr-16` (asked inside `chatStream` again): 16 of 17 on lane 2 with a model ("201 data: {"step":"workspace"}") and on lane 3 without one ("503").
   - `acr-17` (asked after the 503) and `acr-18` (the summary's credits asked only where a model answers), each only where no model answers: 17 of 18 on lane 3 at `33f61ce`, each on its own check ("503").
   - `acr-u4` reddened both refusal tests, `acr-u5` the stream's end.
+- Regression on lane 2 with a model at `33f61ce`, the nine other suites that use the chat or the streamed summary, all green: `brain-comments-and-decks` 29, `ai-answer-rendering` 52, `ai-assign` 24, `ai-create-containers` 33, `ai-task-reads` 4, `brain-entry-points` 20, `private-list-reach` 13, `workspace-read-access` 30 and `video-regression` 94.
 
 ### `found-13-oct/lane-admin-meets-the-hourly-ai-cap` — **closed** (test tooling, small; found by batch 40b's break runs) · reproduced 13 October
 
