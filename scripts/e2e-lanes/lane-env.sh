@@ -447,6 +447,13 @@ lane_model_env () {
   # suite can sit through; a lane with a model waits seconds.
   export AI_FIELD_AUTOFILL_SECONDS=1
   export AI_FIELD_REFRESH_SECONDS=3
+  # The lanes' admin asks the model in every suite that needs one, and a break
+  # set runs one suite thirty-odd times an hour. The product's cap of 200 AI
+  # calls an hour for one person (`AI_HOURLY_LIMIT`) was met mid-set, and every
+  # run after it read the cap, not its patch, until the hour drained
+  # (`found-13-oct/lane-admin-meets-the-hourly-ai-cap`). A lane's admin is not a
+  # person; the refusal itself is held by `chat-trace.test.ts`.
+  export AI_HOURLY_LIMIT=100000
 }
 
 lane_model_up () {

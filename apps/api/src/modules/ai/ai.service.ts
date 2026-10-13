@@ -944,6 +944,22 @@ export function openSseStream(res: Response): SseStream {
   return raw as SseStream
 }
 
+/**
+ * A STREAM THAT CANNOT GO ON ENDS, AND SAYS SO. Once `openSseStream` has
+ * hijacked the reply, an exception thrown past it is sent to nobody, and the
+ * client waits on an open response until it gives up
+ * (`found-13-oct/a-refused-chat-turn-never-ends`). A refusal goes down it in
+ * its own words; anything else as "AI request failed", since what a failed
+ * read says is not the person's to act on.
+ */
+export function endSseWithError(stream: SseStream, err: unknown) {
+  const raw = stream as SseStream & { writableEnded?: boolean }
+  if (raw.writableEnded) return
+  const message = err instanceof HttpException ? err.message : 'AI request failed'
+  raw.write(`data: ${JSON.stringify({ error: message })}\n\n`)
+  raw.end()
+}
+
 @Injectable()
 export class AiService {
   private client: Anthropic | null = null
@@ -1898,8 +1914,11 @@ Write one reply in plain text, one to three sentences, answering the most recent
      */
     agent?: { workspaceId: string; userId: string },
   ): Promise<void> {
-    // Enforce rate limits before we hijack the reply for streaming.
-    await this.assertWithinRateLimit(ctx, new Date(), 'chat')
+    // Enforce rate limits before we hijack the reply for streaming. A caller
+    // that opened the stream itself asked them before it did, as the chat route
+    // does: asked here, after the open, a refusal reached nobody
+    // (`found-13-oct/a-refused-chat-turn-never-ends`).
+    if (!opened) await this.assertWithinRateLimit(ctx, new Date(), 'chat')
     const model = modelForTier(tier)
 
     /*

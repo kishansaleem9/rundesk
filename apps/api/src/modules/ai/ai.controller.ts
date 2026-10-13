@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, Patch, Post, Put, Query, Res, UseGuards, HttpException, HttpStatus } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
-import { AiService, openSseStream, type AiRunStatus } from './ai.service'
+import { AiService, endSseWithError, openSseStream, type AiRunStatus } from './ai.service'
 import { SkillsService } from '../skills/skills.service'
 import { BEST_MODELS_VISIBLE, MODEL_TIERS, UNROUTABLE_PROVIDERS, splitPickerModels } from './model-tiers'
 import { isStarterSurface } from './ai-starters'
@@ -487,10 +487,22 @@ export class AiController {
       focusText = await this.ai.focusContext(body.workspaceId, { id: user.id, role: user.role }, body.focus)
     }
     const files = readComposerFiles(body.files)
+    /*
+     * AND WHETHER THIS TURN MAY BE ASKED AT ALL, before the stream opens: the
+     * hour's limits and the month's credits, the credits whatever the server
+     * has, as `assertAvailable` asks them. They were asked inside `chatStream`,
+     * after the stream below had opened — and an open stream is a hijacked
+     * reply, so the 429 or 402 they threw was sent to nobody. The turn stood on
+     * a 201 with no frame until its client gave up, five minutes for a fetch,
+     * and the composer said Brain was answering all the while
+     * (`found-13-oct/a-refused-chat-turn-never-ends`).
+     */
+    const asker = { userId: user.id, workspaceId: body.workspaceId }
+    await this.ai.assertWithinRateLimit(asker, new Date(), 'chat')
     if (!this.ai.isAvailable()) {
       // §V2-11 — recorded before the 503, like `assertAvailable`. This route
       // owns its own response (it streams), so it sends rather than throws.
-      await this.ai.recordFailure('chat', 'none', { userId: user.id, workspaceId: body.workspaceId }, 'not_configured', 'AI features are not configured')
+      await this.ai.recordFailure('chat', 'none', asker, 'not_configured', 'AI features are not configured')
       res.status(503).send({ error: 'AI features are not configured' })
       return
     }
@@ -547,57 +559,63 @@ export class AiController {
     const stream = openSseStream(res)
     const step = (name: string) => stream.write(`data: ${JSON.stringify({ step: name })}\n\n`)
 
-    let context: string
-    if (body.workspaceId) {
-      step('workspace')
-      context = await this.ai.buildWorkspaceContext(body.workspaceId, user.id, {
-        currentView: body.currentView,
-      })
-    } else {
-      context = body.workspaceContext ?? ''
+    // Past this line nothing may throw unsaid: the reply is hijacked, and an
+    // exception would reach nobody (`found-13-oct/a-refused-chat-turn-never-ends`).
+    try {
+      let context: string
+      if (body.workspaceId) {
+        step('workspace')
+        context = await this.ai.buildWorkspaceContext(body.workspaceId, user.id, {
+          currentView: body.currentView,
+        })
+      } else {
+        context = body.workspaceContext ?? ''
+      }
+
+      // ClickUp's Brain opened from a task reads that task: its description,
+      // status, recent activity, open subtasks and blockers, and comments — the
+      // input Summarize already builds, under a heading that says what it is.
+      if (body.taskId) {
+        step('task')
+        const taskInput = await this.ai.buildTaskSummaryInput(body.taskId)
+        context = `${context}\n\nThe task this conversation is about:\n${taskInput}`
+      }
+
+      // What the "+" pointed Brain at, under headings that say what each one is.
+      if (focusText) {
+        step('focus')
+        context = `${context}\n\n${focusText}`
+      }
+      if (files.length) step('files')
+
+      // The trace still names the skill, in the place it always appeared. It
+      // reports work already done rather than announcing work about to start —
+      // the one step here that does, because a refusal has to be answerable with
+      // a status code and that has to happen before anything is written.
+      if (skillPrompt) step('skill')
+
+      /*
+       * §V2-S16 `[17:44]`–`[18:48]` — the actor the container tools act as.
+       *
+       * Passed ONLY when the request names a workspace, because a tool that
+       * writes has to write somewhere and a chat turn with a pasted context names
+       * nothing. `chatStream` refuses the tools again on its own side when a
+       * skill is answering; both checks are cheap and the cost of getting this
+       * one wrong is a container created by a turn nobody could see the steps of.
+       */
+      await this.ai.chatStream(
+        withComposerFiles(body.messages, files),
+        context,
+        res as any,
+        { userId: user.id, workspaceId: body.workspaceId },
+        skillPrompt,
+        body.tier,
+        stream,
+        body.workspaceId ? { workspaceId: body.workspaceId, userId: user.id } : undefined,
+      )
+    } catch (err) {
+      endSseWithError(stream, err)
     }
-
-    // ClickUp's Brain opened from a task reads that task: its description,
-    // status, recent activity, open subtasks and blockers, and comments — the
-    // input Summarize already builds, under a heading that says what it is.
-    if (body.taskId) {
-      step('task')
-      const taskInput = await this.ai.buildTaskSummaryInput(body.taskId)
-      context = `${context}\n\nThe task this conversation is about:\n${taskInput}`
-    }
-
-    // What the "+" pointed Brain at, under headings that say what each one is.
-    if (focusText) {
-      step('focus')
-      context = `${context}\n\n${focusText}`
-    }
-    if (files.length) step('files')
-
-    // The trace still names the skill, in the place it always appeared. It
-    // reports work already done rather than announcing work about to start —
-    // the one step here that does, because a refusal has to be answerable with
-    // a status code and that has to happen before anything is written.
-    if (skillPrompt) step('skill')
-
-    /*
-     * §V2-S16 `[17:44]`–`[18:48]` — the actor the container tools act as.
-     *
-     * Passed ONLY when the request names a workspace, because a tool that
-     * writes has to write somewhere and a chat turn with a pasted context names
-     * nothing. `chatStream` refuses the tools again on its own side when a
-     * skill is answering; both checks are cheap and the cost of getting this
-     * one wrong is a container created by a turn nobody could see the steps of.
-     */
-    await this.ai.chatStream(
-      withComposerFiles(body.messages, files),
-      context,
-      res as any,
-      { userId: user.id, workspaceId: body.workspaceId },
-      skillPrompt,
-      body.tier,
-      stream,
-      body.workspaceId ? { workspaceId: body.workspaceId, userId: user.id } : undefined,
-    )
   }
 
   /**

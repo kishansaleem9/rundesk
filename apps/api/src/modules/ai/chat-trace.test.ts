@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { HttpException, HttpStatus } from '@nestjs/common'
 import { AiController } from './ai.controller'
 import { AiService } from './ai.service'
 
@@ -38,12 +39,13 @@ import { AiService } from './ai.service'
 function recordingRes(timeline: string[]) {
   return {
     res: {
-      hijack: () => {},
+      // Recorded: once the reply is hijacked, a thrown refusal reaches nobody.
+      hijack: () => timeline.push('hijack'),
       raw: {
         setHeader: () => {},
         flushHeaders: () => {},
         write: (chunk: string) => timeline.push(`write ${chunk.trim()}`),
-        end: () => {},
+        end: () => timeline.push('end'),
       },
     },
   }
@@ -69,10 +71,19 @@ function stepsIn(timeline: string[]): string[] {
  * can compare the frame order against the call order rather than trusting a
  * hand-written expectation of both.
  */
-function harness(opts: { available?: boolean; skillThrows?: boolean } = {}) {
+function harness(opts: { available?: boolean; skillThrows?: boolean; refuse?: HttpException; readThrows?: boolean } = {}) {
   const timeline: string[] = []
   const ai = {
     isAvailable: () => opts.available !== false,
+    /*
+     * The hour's limits and the month's credits, which refuse with a 429 or a
+     * 402 (`found-13-oct/a-refused-chat-turn-never-ends`). On the timeline,
+     * because what matters is that they are asked before anything is written.
+     */
+    assertWithinRateLimit: async (_ctx: unknown, _now: unknown, feature: string) => {
+      timeline.push(`ask limits ${feature}`)
+      if (opts.refuse) throw opts.refuse
+    },
     /*
      * §V2-11 — "not configured" is a FAILED RUN and is written down as one
      * (migration 0150), so the route records before it refuses. On the timeline
@@ -85,6 +96,7 @@ function harness(opts: { available?: boolean; skillThrows?: boolean } = {}) {
     },
     buildWorkspaceContext: async () => {
       timeline.push('call buildWorkspaceContext')
+      if (opts.readThrows) throw new Error('connection terminated unexpectedly')
       return 'Workspace: Acme'
     },
     chatStream: async (
@@ -269,8 +281,58 @@ describe('G13-10 — the assistant says what it is reading', () => {
      */
     assert.deepEqual(
       timeline,
-      ['record failure chat'],
+      ['ask limits chat', 'record failure chat'],
       `a refused-because-unconfigured run was not written down — timeline: ${JSON.stringify(timeline)}`,
     )
+  })
+
+  /*
+   * `found-13-oct/a-refused-chat-turn-never-ends` — the hour's limit and the
+   * month's credits were asked inside `chatStream`, after the stream had
+   * opened. An open stream is a hijacked reply, so the 429 they threw was sent
+   * to nobody: the turn stood on a 201 with no frame until its client gave up.
+   */
+  it('refuses a turn past the hour\'s limit with a status code, having written nothing', async () => {
+    const limit = new HttpException('AI hourly rate limit reached (200/hour). Try again later.', HttpStatus.TOO_MANY_REQUESTS)
+    const { controller, timeline, res } = harness({ refuse: limit })
+    await assert.rejects(
+      () => controller.chat(USER as never, { messages: MESSAGES, workspaceId: 'ws1' }, res as never),
+      (e: unknown) => e === limit,
+      'the refusal was swallowed, so the caller cannot have been given a status',
+    )
+    assert.deepEqual(
+      timeline,
+      ['ask limits chat'],
+      `the stream was already open when the limit refused the turn — timeline: ${JSON.stringify(timeline)}`,
+    )
+  })
+
+  it('refuses a turn in a workspace whose credits are spent in the same words, whatever the server has', async () => {
+    // As `assertAvailable` asks them: a paused workspace is paused before it is unconfigured.
+    const paused = new HttpException('AI is paused for this workspace until 1 November', HttpStatus.PAYMENT_REQUIRED)
+    const { controller, timeline } = harness({ refuse: paused, available: false })
+    let status: number | undefined
+    const res = { status: (code: number) => { status = code; return { send: () => {} } } }
+    await assert.rejects(
+      () => controller.chat(USER as never, { messages: MESSAGES, workspaceId: 'ws1' }, res as never),
+      (e: unknown) => e === paused,
+      'a paused workspace was told the server has no model instead',
+    )
+    assert.equal(status, undefined, 'and no 503 went out before it')
+    assert.deepEqual(timeline, ['ask limits chat'])
+  })
+
+  it('ends the stream, and says so, when what it reads throws after it opened', async () => {
+    /*
+     * Past the open, a throw is a hijacked reply's: it reaches nobody unless the
+     * route says it down the stream and ends it. What failed is not the
+     * person's to act on, so the frame carries the house line, not the error.
+     */
+    const { controller, timeline, res } = harness({ readThrows: true })
+    await controller.chat(USER as never, { messages: MESSAGES, workspaceId: 'ws1' }, res as never)
+    const failed = timeline.indexOf(`write data: ${JSON.stringify({ error: 'AI request failed' })}`)
+    assert.ok(failed > called(timeline, 'buildWorkspaceContext'), `no error frame after the failed read — timeline: ${JSON.stringify(timeline)}`)
+    assert.equal(timeline.at(-1), 'end', `the stream was left open — timeline: ${JSON.stringify(timeline)}`)
+    assert.equal(called(timeline, 'chatStream'), -1, 'and nothing was asked of the model')
   })
 })

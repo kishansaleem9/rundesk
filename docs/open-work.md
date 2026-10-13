@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 559 items: 0 open · 0 partly fixed · 549 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 561 items: 0 open · 0 partly fixed · 551 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 95, each reproduced
+## Found by the triage, 5 October, and since — 97, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10521,9 +10521,39 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 *Evidence, 13 October:* batch 40b's model set on lane 2 at `83eef2f` (baseline 29 of 29): each of the 33 patches reddened a check, but eight runs ended short.
 - `bcd-19` (17 of 29) and `bcd-33` (28 of 29) stopped on "locator.click: Timeout 15000ms exceeded": the suite pressed the control the patch takes away, with nothing to catch it — steps `found-13-oct/batch-40-suites-throw-and-read-hidden-text` had not reached.
 - `bcd-3`, `-12`, `-13`, `-14`, `-30` and `-31` stopped at 14 of 29 on "threw: terminated": the streamed answer to the composer's question was cut, and the suite read its body with nothing to catch that.
-- In five of those six Brain had answered no comment either ("0 answer(s)"), and none of the five patches touches that path. The re-runs on the fixed suite say whether the lane or the product cut them.
+- In five of those six Brain had answered no comment either ("0 answer(s)"), and none of the five patches touches that path. Both were the lane and the product together: the lanes' admin had met the hourly AI cap (`found-13-oct/lane-admin-meets-the-hourly-ai-cap`), and a chat turn the cap refused was left open, so its answer was cut at the client's five minutes (`found-13-oct/a-refused-chat-turn-never-ends`).
 
-*Closed, 13 October.* Every step a patch can take away is bounded and caught, and a cut answer is read as that check's failure ("the answer was cut: …"). The eight re-runs are owed on it.
+*Closed, 13 October.* Every step a patch can take away is bounded and caught, and a cut answer is read as that check's failure ("the answer was cut: …"). On it, lane 2 at `77eb42e`, all eight ran the whole suite: `bcd-3`, `-12`, `-13`, `-14` and `-30` 28 of 29, `bcd-19` 26 of 29, each reddening the check it names; `bcd-31` (21 of 29) and `bcd-33` (15 of 29) ran in the cap's third window, and their runs on the raised cap are below.
+
+### `found-13-oct/a-refused-chat-turn-never-ends` — **closed** (visible bug, small; found by batch 40b's break runs) · reproduced 13 October
+
+**A chat turn refused by the hour's AI limit or the month's credits was never answered: a 201, no word, and the composer said Brain was answering until the client gave up**
+
+*Evidence, 13 October:*
+- The chat route opens its stream first (`openSseStream`, which hijacks the reply), to report what it reads. Only then does it call `chatStream`, which asked the hour's limits and the month's credits as its first act. A refusal there was thrown to a hijacked reply: no 429 or 402 was sent, no frame was written, and the response was never ended.
+- So the request stood on a 201 until its client gave up: five minutes for the suites' fetch, read as "terminated" (`found-13-oct/bcd-stops-where-a-check-should-fail`), and in the composer, Brain answering.
+- Lane 2's `ai_usage` shows the cycle: in every run the cap refused, a `chat` refusal, and a second one five minutes later.
+- Without a model the route said "AI features are not configured" (503) to a workspace whose credits are spent. `assertAvailable` answers 402 for every other feature, the credits "whatever the server has".
+- Measured with the check below, on the lanes' trees before the fix: lane 2 (with a model, `77eb42e`), "201 (left open: The operation was aborted due to timeout)"; lane 3 (without one, `6848104`), "503 {"error":"AI features are not configured"}".
+
+*Closed, 13 October.* The chat route asks the hour's limits and the month's credits before its stream opens, before the 503, so a refusal is a 429 or a 402 in words, which the composer already shows (`ai.controller.ts`). `chatStream` asks them itself only where it opens its own stream. Past the open, whatever throws is said down the stream, and the stream is ended (`endSseWithError`).
+- `ai-credits.mjs`: "and a chat turn is refused the same way, before anything streams and whatever the server has — not left open (402)".
+- Unit `chat-trace.test.ts`: refused past the hour's limit, and in a spent workspace, before the reply is hijacked; a read that throws past the open ends the stream with an error frame. On the old route all three failed.
+- Patches `acr-16` (asked inside `chatStream` again), `acr-17` (asked after the 503; only where no model answers), `acr-u4` and `acr-u5`. On the tree: `acr-u4` reddened both refusal tests, `acr-u5` the stream's end.
+
+### `found-13-oct/lane-admin-meets-the-hourly-ai-cap` — **closed** (test tooling, small; found by batch 40b's break runs) · reproduced 13 October
+
+**The lanes' admin met the product's hourly AI cap mid-set, and every model run after it read the cap instead of its patch**
+
+*Evidence, 13 October:*
+- The suites ask the model as the lanes' admin, and a break set runs one suite thirty-odd times an hour. The product caps one person at 200 AI calls an hour (`AI_HOURLY_LIMIT`).
+- On lane 2 the admin was refused "AI hourly rate limit reached (200/hour)" from 15:58 to 16:35, from 17:04 to 17:41 and from 18:21: three windows across the `brain-comments-and-decks` model set at `83eef2f` and its re-run at `77eb42e`.
+- Every run in them read Brain silent:
+  - `bcd-12`, `-13`, `-14`, `-29`, `-3`, `-30` and `-31` at `83eef2f`;
+  - `bcd-31` and `-33` at `77eb42e`: 15 of 29 for `bcd-33`, its own check among 14 failures. In the same runs Mia, a fresh account, was answered.
+- `ai_usage` shows the cap refusing the same admin on earlier days as well.
+
+*Closed, 13 October.* A lane with a model raises the cap to 100,000 calls an hour (`lane_model_env`, `lane-env.sh`). A lane's admin is not a person, and the refusal itself is held by `chat-trace.test.ts`. The runs it spoiled are re-run on it.
 
 ## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 46
 

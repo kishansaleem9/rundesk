@@ -40,7 +40,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 16
+const EXPECTED_CHECKS = 17
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -85,7 +85,7 @@ try {
     const signed = await signUpApi(API, { fullName: `${who} ${stamp}`, email, password: PASSWORD, organizationName: `Credits ${who} ${stamp}`, organizationSlug: `credits-${who}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
     if (!added.ok) throw new Error(`could not add ${who}: ${said(added)}`)
-    return { email, id: signed.user.id, api: apiAs(signed.accessToken) }
+    return { email, id: signed.user.id, token: signed.accessToken, api: apiAs(signed.accessToken) }
   }
   const mia = await person('mia', 'member')
   const max = await person('max', 'member')
@@ -192,6 +192,26 @@ try {
       && refusedRow?.status === 'failed' && refusedRow?.error_code === 'out_of_credits' && refusedRow?.credits === 0,
     'with the month’s credits used, AI pauses: a call is refused in words with when they renew (402), written down as a refusal that cost nothing (read by SQL)',
     JSON.stringify({ state: paused.data?.state, refused: said(refused), code: refused.error?.details?.code, row: refusedRow }),
+  )
+  // A chat turn streams, and was refused only after its stream had opened: nobody was told, and
+  // the turn stood on a 201 with no frame until its client gave up (`found-13-oct/a-refused-chat-turn-never-ends`).
+  // Read raw and bounded, so a turn left open fails here rather than waiting it out.
+  const turn = await fetch(`${API}/ai/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${mia.token}` },
+    body: JSON.stringify({ workspaceId: WS, messages: [{ role: 'user', content: `What is due for ${TAG}?` }] }),
+    signal: AbortSignal.timeout(15_000),
+  }).catch((e) => ({ status: 0, cut: String(e?.message ?? e) }))
+  const turnBody = turn.text ? await turn.text().catch((e) => `(left open: ${e?.message ?? e})`) : `(no answer: ${turn.cut})`
+  let turnSaid = ''
+  try {
+    const parsed = JSON.parse(turnBody)
+    turnSaid = String(typeof parsed?.error === 'string' ? parsed.error : parsed?.error?.message ?? '')
+  } catch {}
+  chk(
+    turn.status === 402 && turnSaid.includes('paused') && turnSaid.includes(renewWords),
+    'and a chat turn is refused the same way, before anything streams and whatever the server has — not left open (402)',
+    `${turn.status} ${turnBody.slice(0, 200)}`,
   )
 
   // ══ 5. THE COMPOSER SAYS IT IS PAUSED ═══════════════════════════════════════
