@@ -232,7 +232,8 @@ try {
       ],
     }),
   })
-  const streamText = await streamed.text()
+  // A cut stream is this check's failure, not the run's end (`found-13-oct/bcd-stops-where-a-check-should-fail`).
+  const streamText = await streamed.text().catch((e) => `(the answer was cut: ${e?.message ?? e})`)
   const call = MODEL_ON ? await callAsking(`What is in the brief and my notes ${TAG}?`) : null
   chk(
     MODEL_ON
@@ -259,7 +260,7 @@ try {
     headers: { 'content-type': 'application/json', authorization: `Bearer ${auth.accessToken}` },
     body: JSON.stringify({ workspaceId: WS, messages: [{ role: 'user', content: `What’s new in Brain²? ${TAG}` }] }),
   })
-  const askedText = await asked.text()
+  const askedText = await asked.text().catch((e) => `(the answer was cut: ${e?.message ?? e})`)
   const madeEvent = /"artifact":\{"id":"([0-9a-f-]{36})"/.exec(askedText)
   const [made] = await sql`select a.id::text as id, a.created_by_id::text as by, a.current_version as v, (select jsonb_array_length(slides) from ai_artifact_versions where artifact_id = a.id and version = 1) as n
                            from ai_artifacts a where a.workspace_id = ${WS}`
@@ -302,15 +303,16 @@ try {
   await page.goto(`${B}/app/${WS}/ai`, { waitUntil: 'domcontentloaded' })
   await page.getByRole('button', { name: /^Accept$/ }).click({ timeout: 2000 }).catch(() => {})
 
-  await page.getByTestId('ai-composer-plus').click({ timeout: 25_000 })
+  // Each step a patch can take away is bounded and caught: what is missing fails its check, not the run.
+  await page.getByTestId('ai-composer-plus').click({ timeout: 25_000 }).catch(() => {})
   const offers = [await page.getByTestId('ai-plus-context').filter({ visible: true }).count(), await page.getByTestId('ai-plus-upload').filter({ visible: true }).count()]
-  await page.getByTestId('ai-plus-context').click()
-  await page.getByTestId('ai-context-search').fill(`Launch brief ${TAG}`)
+  await page.getByTestId('ai-plus-context').click({ timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('ai-context-search').fill(`Launch brief ${TAG}`, { timeout: 10_000 }).catch(() => {})
   const result = page.locator(`[data-testid="ai-context-result"][data-kind="task"][data-id="${BRIEF}"]`)
   await result.waitFor({ timeout: 15_000 }).catch(() => {})
   await result.click().catch(() => {})
   const chip = page.locator(`[data-testid="ai-context-chip"][data-kind="task"][data-id="${BRIEF}"]`)
-  await page.getByTestId('ai-file-input').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from(`My notes ${TAG}`) })
+  await page.getByTestId('ai-file-input').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from(`My notes ${TAG}`) }, { timeout: 10_000 }).catch(() => {})
   const fileChip = page.locator('[data-testid="ai-file-chip"][data-name="notes.txt"]')
   await fileChip.waitFor({ timeout: 10_000 }).catch(() => {})
   chk(
@@ -321,7 +323,7 @@ try {
   if (MODEL_ON) {
     await stub('reset')
     await page.getByTestId('ai-composer-input').fill(`Summarise these ${TAG}`, { timeout: 10_000 }).catch(() => {})
-    await page.getByTestId('ai-composer-input').press('Enter')
+    await page.getByTestId('ai-composer-input').press('Enter', { timeout: 10_000 }).catch(() => {})
     await page.getByTestId('ai-message-attached').filter({ visible: true }).first().waitFor({ timeout: 15_000 }).catch(() => {})
     await settle(async () => (await callAsking(`Summarise these ${TAG}`)).user.includes('notes.txt'), 15_000)
   }
@@ -340,7 +342,7 @@ try {
     await settle(async () => ((await stub('seen'))?.calls ?? []).some((c) => JSON.stringify(c.system ?? '').includes('Name this conversation')), 10_000)
     await stub('next', { content: [{ type: 'text', text: 'I made you a quick overview. 4 slides.' }, { type: 'tool_use', name: 'create_slide_deck', input: { title: `Overview on screen ${TAG}`, slides: SLIDES } }] })
     await page.getByTestId('ai-composer-input').fill(`What’s new in Brain²? on screen ${TAG}`, { timeout: 10_000 }).catch(() => {})
-    await page.getByTestId('ai-composer-input').press('Enter')
+    await page.getByTestId('ai-composer-input').press('Enter', { timeout: 10_000 }).catch(() => {})
   }
   const card = page.getByTestId('artifact-card').filter({ hasText: `Overview on screen ${TAG}` })
   if (MODEL_ON) await card.waitFor({ timeout: 20_000 }).catch(() => {})
@@ -352,7 +354,7 @@ try {
   )
 
   // The deck, opened from the Artifacts list — Brain's, or the one written for it.
-  await page.getByTestId('ai-tab-artifacts').click()
+  await page.getByTestId('ai-tab-artifacts').click({ timeout: 15_000 }).catch(() => {})
   const row = page.locator(`[data-testid="ai-artifact-row"][data-artifact-id="${deckId}"]`)
   await row.waitFor({ timeout: 15_000 }).catch(() => {})
   await row.click().catch(() => {})
@@ -373,8 +375,8 @@ try {
     `listed ${await row.count()}; ${[c1, c2, c3, c4].join(' → ')}`,
   )
 
-  await page.getByTestId('artifact-ask').fill('add a slide on risks')
-  await page.getByTestId('artifact-ask-send').click()
+  await page.getByTestId('artifact-ask').fill('add a slide on risks', { timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('artifact-ask-send').click({ timeout: 10_000 }).catch(() => {})
   if (MODEL_ON) await page.getByTestId('artifact-viewer-version').filter({ hasText: 'Version 2' }).waitFor({ timeout: 15_000 }).catch(() => {})
   else await page.waitForTimeout(1500)
   const [afterAsk] = await sql`select current_version as v, (select count(*)::int from ai_artifact_versions where artifact_id = ${deckId}) as n from ai_artifacts where id = ${deckId}`
@@ -440,10 +442,10 @@ try {
   // ══ 5. THE COMMENT PICKER ═══════════════════════════════════════════════════
   const TASK_URL = `${B}/app/${WS}/${space.id}/${project.id}/${L}?task=${T}`
   await page.goto(TASK_URL, { waitUntil: 'domcontentloaded' })
-  await page.getByTestId('task-tab-comments').click({ timeout: 25_000 })
+  await page.getByTestId('task-tab-comments').click({ timeout: 25_000 }).catch(() => {})
   const box = page.getByTestId('comment-input')
-  await box.waitFor({ timeout: 15_000 })
-  await box.fill('@')
+  await box.waitFor({ timeout: 15_000 }).catch(() => {})
+  await box.fill('@', { timeout: 10_000 }).catch(() => {})
   const brainRow = page.getByTestId('mention-brain')
   await brainRow.waitFor({ timeout: 10_000 }).catch(() => {})
   const brainDisabled = await brainRow.isDisabled().catch(() => true)
@@ -454,15 +456,15 @@ try {
     MODEL_ON ? `offered, enabled ${!brainDisabled}` : `where no model answers it is offered disabled and says why: disabled ${brainDisabled}, note ${await page.getByTestId('mention-brain-unavailable').count()}`,
   )
   if (MODEL_ON) {
-    await brainRow.click()
-    await box.click()
-    await box.press('End')
-    await box.type(`what is next ${TAG}?`)
+    await brainRow.click({ timeout: 10_000 }).catch(() => {})
+    await box.click({ timeout: 10_000 }).catch(() => {})
+    await box.press('End', { timeout: 10_000 }).catch(() => {})
+    await box.type(`what is next ${TAG}?`, { timeout: 10_000 }).catch(() => {})
   } else {
-    await box.fill(`@Brain what is next ${TAG}?`)
+    await box.fill(`@Brain what is next ${TAG}?`, { timeout: 10_000 }).catch(() => {})
   }
   const typed = await box.inputValue().catch(() => '')
-  await page.getByTestId('comment-post').click()
+  await page.getByTestId('comment-post').click({ timeout: 10_000 }).catch(() => {})
   const badgesBefore = await page.getByTestId('comment-brain-badge').count()
   if (MODEL_ON) {
     // Answering, then answered: the note stays until Brain's reply to THIS comment lands in its thread.
@@ -480,9 +482,9 @@ try {
     'picked, it writes @Brain; posted, the thread shows Brain answering and then its reply, marked as Brain’s',
     MODEL_ON ? `typed "${typed}"; badges ${badgesBefore} → ${await page.getByTestId('comment-brain-badge').count()}, still answering ${await page.getByTestId('brain-answering').count()}` : `where no model answers the composer says why nothing will come: typed "${typed}", note ${await page.getByTestId('brain-unavailable').count()}`,
   )
-  await box.fill('@')
-  await page.getByTestId('mention-tab-agents').click()
-  await page.getByTestId('mention-agents-create').click()
+  await box.fill('@', { timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('mention-tab-agents').click({ timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('mention-agents-create').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForURL(/hub=agents/, { timeout: 15_000 }).catch(() => {})
   chk(/hub=agents/.test(page.url()) && /agent=new/.test(page.url()), 'the picker’s Agents section ends in frame 04:00’s "+ Create Agent", which opens a new Super Agent', page.url())
 

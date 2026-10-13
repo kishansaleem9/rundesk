@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 558 items: 0 open · 0 partly fixed · 548 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 559 items: 0 open · 0 partly fixed · 549 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 94, each reproduced
+## Found by the triage, 5 October, and since — 95, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10513,6 +10513,17 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 *Evidence, 13 October:* batch 41's set on lane 3 (`33d6c4f`), baseline 14 of 14: 27 of its 28 patches reddened, and `tei-7` (any whole number is a port) stayed 14 of 14. Its check, "the form is refused field by field, in words: the address, the password, each server and port, and whether SSL is required (400)", typed SMTP port 0. `mailPortOf` gives `null` for a number out of range, and the service refuses a port that is `null` or 0 alike (`if (!smtpPort)`), so 0 read the same with the range taken away.
 
 *Closed, 13 October.* The check types 70000, which only the range refuses: 14 of 14 on lane 9 at batch 43's tree; `tei-7` reddens it now, 13 of 14 on lane 4 at `6848104`.
+
+### `found-13-oct/bcd-stops-where-a-check-should-fail` — **closed** (test tooling, small; found by batch 40b's break runs) · reproduced 13 October
+
+**`brain-comments-and-decks` ended its run at a cut answer or a missing control, so eight patches' runs read only part of the suite**
+
+*Evidence, 13 October:* batch 40b's model set on lane 2 at `83eef2f` (baseline 29 of 29): each of the 33 patches reddened a check, but eight runs ended short.
+- `bcd-19` (17 of 29) and `bcd-33` (28 of 29) stopped on "locator.click: Timeout 15000ms exceeded": the suite pressed the control the patch takes away, with nothing to catch it — steps `found-13-oct/batch-40-suites-throw-and-read-hidden-text` had not reached.
+- `bcd-3`, `-12`, `-13`, `-14`, `-30` and `-31` stopped at 14 of 29 on "threw: terminated": the streamed answer to the composer's question was cut, and the suite read its body with nothing to catch that.
+- In five of those six Brain had answered no comment either ("0 answer(s)"), and none of the five patches touches that path. The re-runs on the fixed suite say whether the lane or the product cut them.
+
+*Closed, 13 October.* Every step a patch can take away is bounded and caught, and a cut answer is read as that check's failure ("the answer was cut: …"). The eight re-runs are owed on it.
 
 ## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 46
 
