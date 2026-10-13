@@ -17,6 +17,7 @@ import {
 import { ChevronLeft, ChevronRight, Globe, History, Presentation, Trash2, Wand2 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { InlineSkeleton, PanelSkeleton } from './loading-skeletons'
 
 /**
  * WHAT BRAIN MAKES, AS CLICKUP'S ARTIFACTS (`ledger-rows/row-853`, frame `16:50`):
@@ -198,7 +199,7 @@ export function DeckViewer({ artifactId, onClose }: { artifactId: string | null;
             {errorText(query.error)}
           </div>
         ) : !deck ? (
-          <div className="text-sm text-muted-foreground">{t('artifacts.loading')}</div>
+          <PanelSkeleton className="p-0" />
         ) : (
           <div className="space-y-4">
             <DeckPager slides={deck.slides} resetKey={deck.version} />
@@ -296,7 +297,9 @@ export function ArtifactsList({ workspaceId, onOpen }: { workspaceId: string; on
     <div data-testid="ai-artifacts" className="space-y-1">
       <div className="px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t('artifacts.navTitle')}</div>
       {query.isPending ? (
-        <div className="px-2 text-xs text-muted-foreground">{t('artifacts.loading')}</div>
+        <div className="px-2 text-xs">
+          <InlineSkeleton />
+        </div>
       ) : query.isError ? (
         <div data-testid="ai-artifacts-error" className="px-2 text-xs text-destructive">
           {errorText(query.error)}
