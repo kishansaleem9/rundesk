@@ -206,12 +206,15 @@ try {
     '',
     /*
      * §V2-S16 `18:48`'s own sentence, in the shape `describeContainerResult`
-     * writes it. `mindmap` is deliberate: it is a view key this build cannot
+     * writes it. `hologram` is deliberate: it is a view key this build cannot
      * render at all, so it exercises the degrade path without touching the
-     * space's shared view config — which every other suite reads.
+     * space's shared view config — which every other suite reads. It was
+     * `mindmap` until batch 39 drew the Mind Map view (`ledger-rows/row-777`),
+     * and a key that names a view the build draws cannot stand for one it
+     * does not (`found-13-oct/ai-answer-rendering-names-a-drawn-view-undrawn`).
      */
     `Use [[view:${listId}:list]] for task details or [[view:${listId}:board]] to manage work by status.`,
-    `[[view:${listId}:mindmap]] is a view this build does not draw.`,
+    `[[view:${listId}:hologram]] is a view this build does not draw.`,
   ].join('\n')
   const QUESTION = 'What is my **project status** right now?'
 
@@ -446,9 +449,9 @@ try {
    * THE VIEW THIS BUILD CANNOT DRAW. `enabledViewsFor` filters unknown keys
    * out, so the chip degrades to the list it belongs to rather than linking to
    * a tab the page will not render. Both halves are asserted: that it did NOT
-   * become a mindmap link, and that it still goes somewhere real.
+   * become a hologram link, and that it still goes somewhere real.
    */
-  const ghostView = page.getByTestId(`ai-ref-view-${listId}-mindmap`)
+  const ghostView = page.getByTestId(`ai-ref-view-${listId}-hologram`)
   const ghostEnabled = await attrOf(ghostView, 'data-view-enabled')
   const ghostHref = await attrOf(ghostView, 'href')
   chk(

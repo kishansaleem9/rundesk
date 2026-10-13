@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 547 items: 0 open · 0 partly fixed · 532 closed, and 15 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 548 items: 0 open · 0 partly fixed · 533 closed, and 15 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 83, each reproduced
+## Found by the triage, 5 October, and since — 84, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10396,6 +10396,14 @@ Checks: `check-ledger-ids-cases.mjs` 11 → 13: "a day's find of another month, 
 - the no-model reader does not ask it;
 - the search reader does not ask it;
 - the loop reads the name its own way.
+
+### `found-13-oct/ai-answer-rendering-names-a-drawn-view-undrawn` — **closed** (test tooling, small; found by rehearsal 14 of `7c454f4`) · reproduced 13 October
+
+**`ai-answer-rendering` used the Mind Map view as its example of a view this build does not draw, and batch 39 drew it**
+
+*Evidence, 13 October:* rehearsal 14 of `7c454f4` failed one step of `postgres-harnesses`, "AI answer rendering", 51 of 52. The failing check was "a view this build does not draw degrades to the list instead of linking to a missing tab". It read `data-view-enabled="true"` and an href ending `?view=mindmap`. The suite stands for an undrawn view with `[[view:<list>:mindmap]]`. Batch 39 (`ledger-rows/row-777`) drew the Mind Map view, so the server now lists `mindmap` among the list's views and the chip rightly links to it. The product is right, and the check's example went stale. Measured on lane 9: 51 of 52 before the fix, the same failure, which batch 39's regression sweep did not include.
+
+*Closed, 13 October.* The suite names a view key that no build draws (`hologram`) and says why `mindmap` stopped being one. It now passes 52 of 52 on lane 9. Patch `aar-16` aims at the same check and its comment names the new key.
 
 ### `found-8-oct/folder-template-lists-in-any-order` — **closed** (visible bug, small; found by the CI rehearsal of `4d37f9a`) · reproduced 8 October
 

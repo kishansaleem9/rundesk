@@ -1,5 +1,5 @@
 # A view the space does not have, offered anyway. The chip claims a tab, the link
-# carries `?view=mindmap`, and the page opens on whatever it falls back to — a
+# carries `?view=hologram`, and the page opens on whatever it falls back to — a
 # destination that is not the one the chip named.
 # Reddens: ai-answer-rendering: "a view this build does not draw degrades to the list instead of linking to a missing tab"
 import io
