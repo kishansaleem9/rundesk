@@ -47,6 +47,10 @@ export interface EventToWrite {
   end: Date
   allDay: boolean
   description?: string
+  /** Where, as the invite says it (`ledger-rows/row-2294`); a planner block has none. */
+  location?: string
+  /** Who is invited, by address: the provider sends each an invitation. A planner block invites nobody. */
+  attendees?: string[]
 }
 
 export function calendarBases(): { google: string; graph: string } {
@@ -212,6 +216,8 @@ export function googleBody(e: EventToWrite) {
   return {
     summary: e.title,
     ...(e.description !== undefined ? { description: e.description } : {}),
+    ...(e.location !== undefined ? { location: e.location } : {}),
+    ...(e.attendees?.length ? { attendees: e.attendees.map((email) => ({ email })) } : {}),
     start: e.allDay ? { date: dayOf(e.start.toISOString()) } : { dateTime: e.start.toISOString() },
     end: e.allDay ? { date: dayOf(e.end.toISOString()) } : { dateTime: e.end.toISOString() },
   }
@@ -223,6 +229,8 @@ export function graphBody(e: EventToWrite) {
   return {
     subject: e.title,
     ...(e.description !== undefined ? { body: { contentType: 'text', content: e.description } } : {}),
+    ...(e.location !== undefined ? { location: { displayName: e.location } } : {}),
+    ...(e.attendees?.length ? { attendees: e.attendees.map((address) => ({ emailAddress: { address }, type: 'required' })) } : {}),
     isAllDay: e.allDay,
     start: { dateTime: at(e.start), timeZone: 'UTC' },
     end: { dateTime: at(e.end), timeZone: 'UTC' },
@@ -239,8 +247,10 @@ export async function writeEvent(
   signal?: AbortSignal,
 ): Promise<string> {
   const { google, graph } = calendarBases()
+  // Google sends the invitations only when asked to; Graph sends them with the event.
+  const invite = provider === 'gcal' && e.attendees?.length ? '?sendUpdates=all' : ''
   const url = provider === 'gcal'
-    ? `${google}/calendars/${encodeURIComponent(calendarId || 'primary')}/events${eventId ? `/${encodeURIComponent(eventId)}` : ''}`
+    ? `${google}/calendars/${encodeURIComponent(calendarId || 'primary')}/events${eventId ? `/${encodeURIComponent(eventId)}` : ''}${invite}`
     : `${graph}/me/events${eventId ? `/${encodeURIComponent(eventId)}` : ''}`
   const res = await answer(
     await fetch(url, {

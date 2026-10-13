@@ -779,10 +779,10 @@ export function IntegrationsMarketplacePage() {
 
         WHAT IT DOES NOT DO, and why that is the honest build. Registering an
         MCP server means storing a URL and a credential for the AI to call, and
-        `COMMAND_TOOLS` in `apps/api/src/modules/ai/ai-command.ts` has no tool
-        that reaches outside this product at all — `ai-categories.ts` says so
-        itself, marking `externalActions` and `externalSearches` unsupported.
-        A form that stored a server nobody would ever call is the mirror defect:
+        `COMMAND_TOOLS` in `apps/api/src/modules/ai/ai-command.ts` reaches
+        outside this product only through a person's own connected calendar,
+        mailbox and Connected Search (`ledger-rows/row-2294`) — no tool calls a
+        server a workspace registers. A form that stored a server nobody would ever call is the mirror defect:
         rows in Postgres standing as evidence for a feature that does not exist,
         and a person who pointed their AI at a tool and watched it be ignored.
 

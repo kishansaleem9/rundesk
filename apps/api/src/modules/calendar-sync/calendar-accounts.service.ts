@@ -474,7 +474,11 @@ export class CalendarAccountsService {
     return row ?? null
   }
 
-  /** Write a planner block into the account as an event, or change the one it became; the event's id. */
+  /**
+   * Write a planner block into the account as an event, or change the one it
+   * became; the event's id. And an event the AI was confirmed to make, with whom
+   * it invites (`ledger-rows/row-2294`), written the same way.
+   */
   async writeBlockEvent(account: AccountRow, e: EventToWrite, eventId: string | null): Promise<string> {
     return this.withToken(account, (token) =>
       writeEvent(account.provider as Provider, token, account.externalCalendarId, e, eventId, AbortSignal.timeout(CALENDAR_TIMEOUT_MS)),

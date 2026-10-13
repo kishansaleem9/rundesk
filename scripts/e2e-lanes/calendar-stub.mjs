@@ -18,6 +18,7 @@
  *           PATCH  /google/calendar/v3/calendars/:id/events/:eventId
  *           DELETE /google/calendar/v3/calendars/:id/events/:eventId
  *           POST   /google/calendar/v3/freeBusy
+ *           (a write is kept with its query: `sendUpdates=all` is what makes Google invite an event's attendees)
  *   Graph   GET    /graph/v1.0/me/calendarView               (startDateTime, endDateTime, $top, $skiptoken)
  *           POST   /graph/v1.0/me/events
  *           PATCH  /graph/v1.0/me/events/:eventId
@@ -34,6 +35,7 @@
  * AND A MAILBOX TO SEND A TASK'S EMAIL FROM (`found-9-oct/task-email-sends-from-the-server`),
  * a bearer token each, its messages kept with which way they went:
  *   Gmail   POST   /gmail/v1/users/me/messages/send            ({raw, threadId}: the whole message, base64url)
+ *           POST   /gmail/v1/users/me/drafts                   ({message: {raw}}: a draft left in Drafts, `ledger-rows/row-2294`)
  *           GET    /gmail/v1/users/me/messages/:id             (format=metadata: its headers)
  *           GET    /gmail/v1/users/me/threads/:id              (format=full: every message, its words a part)
  *   Graph   GET    /graph/v1.0/me                              (whose mailbox; after a consent, whose grant)
@@ -453,7 +455,11 @@ const server = createServer(async (req, res) => {
     })
   }
   const box = mailboxes.get(bearer)
-  const gmailMail = path === '/gmail/v1/users/me/messages/send' || path.startsWith('/gmail/v1/users/me/threads/') || (path.startsWith('/gmail/v1/users/me/messages/') && !!box)
+  const gmailMail =
+    path === '/gmail/v1/users/me/messages/send' ||
+    path === '/gmail/v1/users/me/drafts' ||
+    path.startsWith('/gmail/v1/users/me/threads/') ||
+    (path.startsWith('/gmail/v1/users/me/messages/') && !!box)
   const graphMail = path === '/graph/v1.0/me/messages' || path.startsWith('/graph/v1.0/me/messages/')
   if (gmailMail || graphMail) {
     const provider = gmailMail ? 'gmail' : 'outlook'
@@ -487,6 +493,16 @@ const server = createServer(async (req, res) => {
         at: Date.now(),
       })
       return json(res, 200, { id, threadId: body.threadId || id, labelIds: ['SENT'] })
+    }
+    // A draft, left in Drafts (`ledger-rows/row-2294`): Gmail's `drafts.create`, its message kept as the mailbox's.
+    if (path === '/gmail/v1/users/me/drafts' && req.method === 'POST') {
+      const body = await readBody(req)
+      if (typeof body?.message?.raw !== 'string') return json(res, 400, { error: { code: 400, message: "'raw' RFC822 payload message string or uploading message via /upload/* URL required" } })
+      const read = readRaw(Buffer.from(body.message.raw, 'base64url').toString('utf8'))
+      const id = `gm-${randomUUID()}`
+      const draftId = `r${randomUUID().replace(/-/g, '').slice(0, 18)}`
+      box.messages.push({ id, draftId, threadId: id, internetMessageId: `<${id}@mail.gmail.test>`, ...read, from: box.address, direction: 'sent', isDraft: true, at: Date.now() })
+      return json(res, 200, { id: draftId, message: { id, threadId: id, labelIds: ['DRAFT'] } })
     }
     if (path.startsWith('/gmail/v1/users/me/messages/') && req.method === 'GET') {
       const m = box.messages.find((x) => x.id === decodeURIComponent(path.slice('/gmail/v1/users/me/messages/'.length)))
@@ -664,7 +680,8 @@ const server = createServer(async (req, res) => {
     return status === 401 ? refused(res, provider) : failed(res, provider, status)
   }
 
-  const record = (body) => cal.writes.push({ method: req.method, path, body, at: new Date().toISOString() })
+  // The query too: Google sends an event's invitations only when `sendUpdates` asks it to (`ledger-rows/row-2294`).
+  const record = (body) => cal.writes.push({ method: req.method, path, query: Object.fromEntries(url.searchParams), body, at: new Date().toISOString() })
 
   if (google) {
     const rest = path.slice('/google/calendar/v3'.length)

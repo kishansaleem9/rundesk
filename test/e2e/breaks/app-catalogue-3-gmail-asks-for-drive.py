@@ -5,10 +5,11 @@
 #
 # Re-aimed 12 October: the Gmail scope now also answers a person's own mailbox (send and read,
 # `found-9-oct/task-email-sends-from-the-server`); the App Center's search consent is the one taken to Drive here.
+# And again 13 October: the mailbox's consent asks to leave drafts too (`ledger-rows/row-2294`).
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/connections/integration-connections.service.ts'
-a = "      gmail: purpose === 'email' ? `${GMAIL_SEND_SCOPE} ${GMAIL_SEARCH_SCOPE}` : GMAIL_SEARCH_SCOPE,\n"
-b = "      gmail: purpose === 'email' ? `${GMAIL_SEND_SCOPE} ${GMAIL_SEARCH_SCOPE}` : DRIVE_SEARCH_SCOPE,\n"
+a = "      gmail: purpose === 'email' ? `${GMAIL_SEND_SCOPE} ${GMAIL_DRAFT_SCOPE} ${GMAIL_SEARCH_SCOPE}` : GMAIL_SEARCH_SCOPE,\n"
+b = "      gmail: purpose === 'email' ? `${GMAIL_SEND_SCOPE} ${GMAIL_DRAFT_SCOPE} ${GMAIL_SEARCH_SCOPE}` : DRIVE_SEARCH_SCOPE,\n"
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

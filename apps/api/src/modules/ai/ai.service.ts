@@ -120,6 +120,23 @@ import {
   type StatusCategory,
   type ToolCall,
 } from './ai-command'
+import {
+  CONNECTED_REFUSALS,
+  CONNECTED_SEARCH_TOOL,
+  checkedDraft,
+  checkedEvent,
+  commandUsageFeature,
+  isTimeZone,
+  providerName,
+  wallTime,
+  type ConnectedContext,
+  type ConnectedHit,
+  type ConnectedSearchResult,
+} from './ai-connected'
+import { CalendarAccountsService } from '../calendar-sync/calendar-accounts.service'
+import { CalendarFailed, CalendarRefused } from '../calendar-sync/calendar-events'
+import { EmailAccountsService } from '../email-accounts/email-accounts.service'
+import { SearchService } from '../search/search.service'
 
 export type AiCtx = { userId?: string; workspaceId?: string }
 
@@ -933,7 +950,8 @@ export class AiService {
      * retained for none (`grep "this.search"` returned nothing), and a reason
      * suppresses the investigation that would have found that. Removed rather
      * than left standing — when a connected-app search lands it can be injected
-     * by the code that calls it.
+     * by the code that calls it. It landed (`ledger-rows/row-2294`): injected
+     * again at the end of this list, and called by `searchConnectedApps`.
      */
     @Optional() private embeddings?: EmbeddingService,
     // §15.1 — used to hydrate attachment hits with their extracted text at
@@ -961,6 +979,15 @@ export class AiService {
     @Optional() private lists?: ListsService,
     @Optional() private folders?: FoldersService,
     @Optional() private roles?: CustomRolesService,
+    /*
+     * `ledger-rows/row-2294` — the AI acting in the asker's own connected apps:
+     * their calendar (the one the planner writes to), a mailbox they linked
+     * themselves, and Connected Search as it searches for them. @Optional like
+     * the rest; when absent, the tools refuse in words rather than pretend.
+     */
+    @Optional() private calendars?: CalendarAccountsService,
+    @Optional() private mailboxes?: EmailAccountsService,
+    @Optional() private search?: SearchService,
   ) {
     const apiKey = config.get<string>('ANTHROPIC_API_KEY')
     if (apiKey) {
@@ -1158,6 +1185,12 @@ export class AiService {
     feature: string,
     ctx: AiCtx,
     params: Anthropic.Messages.MessageCreateParamsNonStreaming,
+    /**
+     * `ledger-rows/row-2294` — what the call is filed under in `ai_usage`, read
+     * off its answer: a command turn that reached into a connected app is one of
+     * §V2-11's two external tiles. Still one row for one call; only the label moves.
+     */
+    opts: { recordAs?: (response: Anthropic.Messages.Message) => string } = {},
   ) {
     await this.assertWithinRateLimit(ctx, new Date(), feature)
     // Prompt caching: mark the (repeated) system prompt as a cache breakpoint.
@@ -1187,7 +1220,7 @@ export class AiService {
       )
       throw err
     }
-    void this.recordUsage(feature, params.model, ctx, response.usage?.input_tokens ?? 0, response.usage?.output_tokens ?? 0)
+    void this.recordUsage(opts.recordAs?.(response) ?? feature, params.model, ctx, response.usage?.input_tokens ?? 0, response.usage?.output_tokens ?? 0)
     return response
   }
 
@@ -3880,10 +3913,13 @@ Today is ${new Date().toISOString().split('T')[0]}.`,
   }
 
   async command(workspaceId: string, message: string, ctx: AiCtx = {}): Promise<CommandPlan> {
-    const [workspaceContext, planCtx] = await Promise.all([
+    const [workspaceContext, planCtx, connected] = await Promise.all([
       this.buildWorkspaceContext(workspaceId, ctx.userId ?? ''),
       this.loadCommandContext(workspaceId, ctx.userId ?? ''),
+      this.connectedContext(workspaceId, ctx.userId ?? ''),
     ])
+    planCtx.workspaceId = workspaceId
+    planCtx.connected = connected
 
     const listCatalog = planCtx.lists
       .slice(0, 60)
@@ -3901,6 +3937,9 @@ Use search_tasks (READ-ONLY) to locate task ids before proposing changes; refere
 For any change (create_task / set_task_status / reschedule_task / assign_task / bulk_reschedule / create_list / create_folder) call the matching tool. Changes are PREVIEWED for the user to confirm and are NOT executed until they confirm — do not claim you have already made a change.
 When creating a task, pick a listId from "Available lists". Resolve people by their email.
 When creating a list or a folder, name the space with spaceName or a spaceId from "Available spaces". If you cannot tell which space is meant, say so instead of choosing one.
+The user's own connected apps: for an event in their calendar call create_calendar_event; for an email call draft_email, which only saves a draft in their own mailbox for them to send; to look in their own Google Drive, Gmail or SharePoint call search_connected_apps (READ-ONLY). The event and the draft are previewed for the user to confirm, like every change.
+The user's time zone is ${connected.timeZone}, where today is ${wallTime(new Date(), connected.timeZone).slice(0, 10)}: give an event's start as their local time.
+Their calendar: ${connected.calendar ? `${providerName(connected.calendar.provider)}${connected.calendar.email ? ` (${connected.calendar.email})` : ''}` : 'none connected'}. Their mailbox for drafts: ${connected.mailbox ? `${connected.mailbox.address} (${providerName(connected.mailbox.provider)})` : 'none linked'}.
 
 Workspace context:
 ${workspaceContext}
@@ -3917,13 +3956,18 @@ ${spaceCatalog || '(none)'}`
     // Bounded agentic loop: keep going while the model only searches (so it can
     // act on the results), and stop as soon as it proposes any mutation.
     for (let turn = 0; turn < 5; turn++) {
-      const response = await this.complete('command', ctx, {
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1024,
-        system: systemPrompt,
-        tools: COMMAND_TOOLS,
-        messages,
-      })
+      const response = await this.complete(
+        'command',
+        ctx,
+        {
+          model: 'claude-sonnet-4-6',
+          max_tokens: 1024,
+          system: systemPrompt,
+          tools: COMMAND_TOOLS,
+          messages,
+        },
+        { recordAs: (answer) => commandUsageFeature(answer.content) },
+      )
 
       const toolUses = response.content.filter(
         (block): block is Anthropic.Messages.ToolUseBlock => block.type === 'tool_use',
@@ -3935,6 +3979,14 @@ ${spaceCatalog || '(none)'}`
       let hasMutation = false
       for (const toolUse of toolUses) {
         const input = (toolUse.input ?? {}) as Record<string, unknown>
+        if (toolUse.name === CONNECTED_SEARCH_TOOL) {
+          // Read-only, answered now so the model can act on it — and kept on the
+          // call, so the plan shows the person what the model was shown.
+          const found = await this.searchConnectedApps(workspaceId, ctx.userId ?? '', input)
+          collected.push({ name: toolUse.name, input, result: found })
+          toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: JSON.stringify(found) })
+          continue
+        }
         collected.push({ name: toolUse.name, input })
         if (toolUse.name === 'search_tasks') {
           const found = searchTasksInContext(input, planCtx)
@@ -3957,6 +4009,60 @@ ${spaceCatalog || '(none)'}`
     // Deterministic plan (Plan §7.6): honest summary + resolved actions built
     // purely from the collected tool calls, so the preview never over-claims.
     return planFromToolCalls(collected, planCtx)
+  }
+
+  /**
+   * `ledger-rows/row-2294` — WHAT THE ASKER HAS CONNECTED OF THEIR OWN, for the
+   * planner: the calendar new events are written to (their default one, as the
+   * planner writes to it), the first mailbox they linked themselves, and their
+   * time zone. Each is read on its own, so one that fails leaves only its own
+   * tool refused.
+   */
+  private async connectedContext(workspaceId: string, userId: string): Promise<ConnectedContext> {
+    const none = { mailbox: null, refusal: CONNECTED_REFUSALS.unavailable }
+    const [calendar, mailbox, zone] = await Promise.all([
+      this.calendars && userId
+        ? this.calendars
+            .defaultAccountWithTokens(userId, workspaceId)
+            .then((a) => (a ? { provider: a.provider as 'gcal' | 'outlook', email: a.externalAccountEmail ?? null } : null))
+            .catch(() => null)
+        : Promise.resolve(null),
+      this.mailboxes && userId ? this.mailboxes.ownMailbox(workspaceId, { id: userId }).catch(() => none) : Promise.resolve(none),
+      userId
+        ? this.db
+            .select({ timezone: users.timezone })
+            .from(users)
+            .where(eq(users.id, userId))
+            .limit(1)
+            .then(([u]) => u?.timezone ?? 'UTC')
+        : Promise.resolve('UTC'),
+    ])
+    return { calendar, mailbox: mailbox.mailbox, mailboxRefusal: mailbox.refusal, timeZone: isTimeZone(zone) ? zone : 'UTC' }
+  }
+
+  /**
+   * `ledger-rows/row-2294` — THE ASKER'S OWN CONNECTED APPS, SEARCHED AS
+   * CONNECTED SEARCH SEARCHES THEM FOR THAT PERSON: the sources it says they
+   * may search (their own connection, or the workspace's where that is theirs
+   * to use — `found-23-sep/connected-search-per-person`), and nothing else.
+   * Refused in words when they may search none of the three.
+   */
+  private async searchConnectedApps(workspaceId: string, userId: string, input: Record<string, unknown>): Promise<ConnectedSearchResult> {
+    const query = toolString(input.query).slice(0, 200)
+    if (!query) return { query: '', hits: [], refusal: 'nothing was asked for' }
+    if (!this.search || !userId) return { query, hits: [], refusal: CONNECTED_REFUSALS.unavailable }
+    const open: ConnectedHit['source'][] = []
+    for (const source of await this.search.listSources(workspaceId, userId)) {
+      if (!source.connected) continue
+      if (source.id === 'google-drive') open.push('drive')
+      else if (source.id === 'gmail' || source.id === 'sharepoint') open.push(source.id)
+    }
+    if (open.length === 0) return { query, hits: [], refusal: CONNECTED_REFUSALS.noSearchSource }
+    const found = await this.search.search(workspaceId, userId, query, 8, { types: [...open] })
+    const hits: ConnectedHit[] = found
+      .filter((hit) => (open as string[]).includes(hit.entityType))
+      .map((hit) => ({ source: hit.entityType as ConnectedHit['source'], title: hit.title, url: hit.url, snippet: (hit.content ?? '').slice(0, 200) }))
+    return { query, hits }
   }
 
   /**
@@ -4088,6 +4194,106 @@ ${spaceCatalog || '(none)'}`
             : undefined
         return { tool: action.tool, humanLabel: action.humanLabel, status, reason, affectedTaskIds: action.args.taskIds }
       }
+      /*
+       * `ledger-rows/row-2294` — the asker's own calendar and mailbox, written
+       * once they confirmed. Everything the action carries came back in the
+       * body, so it is checked again here, and the calendar and the mailbox are
+       * read as the person's own: a body naming somebody else's mailbox is
+       * refused by `draftAs`, and the calendar is looked up by who asked.
+       */
+      case 'create_calendar_event':
+        return this.writeConfirmedEvent(action, userId)
+      case 'draft_email':
+        return this.writeConfirmedDraft(action, userId)
+    }
+  }
+
+  private async writeConfirmedEvent(
+    action: Extract<PlanAction, { tool: 'create_calendar_event' }>,
+    userId: string,
+  ): Promise<CommandActionResult> {
+    const refused = (reason: string, message: string): CommandActionResult => ({
+      tool: action.tool,
+      humanLabel: action.humanLabel,
+      status: 'skipped',
+      reason,
+      message,
+    })
+    const args = (action.args ?? {}) as Partial<Extract<PlanAction, { tool: 'create_calendar_event' }>['args']>
+    if (!this.calendars) return refused('unavailable', CONNECTED_REFUSALS.unavailable)
+    const workspaceId = typeof args.workspaceId === 'string' ? args.workspaceId : ''
+    if (!isUuid(workspaceId) || !(await this.memberRole(workspaceId, userId))) return refused('no_permission', CONNECTED_REFUSALS.notMember)
+    const at = (v: unknown) => (typeof v === 'string' ? new Date(v) : null)
+    const checked = checkedEvent({ title: args.title, start: at(args.start), end: at(args.end), description: args.description, location: args.location, attendees: args.attendees })
+    if (!checked.ok) return refused('invalid', checked.message)
+    const account = await this.calendars.defaultAccountWithTokens(userId, workspaceId)
+    if (!account) return refused('no_calendar', CONNECTED_REFUSALS.noCalendar)
+    const e = checked.event
+    const name = providerName(account.provider)
+    try {
+      const id = await this.calendars.writeBlockEvent(
+        account,
+        {
+          title: e.title,
+          start: new Date(e.start),
+          end: new Date(e.end),
+          allDay: false,
+          ...(e.description ? { description: e.description } : {}),
+          ...(e.location ? { location: e.location } : {}),
+          attendees: e.attendees,
+        },
+        null,
+      )
+      return {
+        tool: action.tool,
+        humanLabel: action.humanLabel,
+        status: 'succeeded',
+        external: { kind: 'event', provider: account.provider, id, where: account.externalAccountEmail ?? name },
+      }
+    } catch (err) {
+      if (err instanceof CalendarRefused) return refused('reconnect', CONNECTED_REFUSALS.calendarRefused(name))
+      if (err instanceof CalendarFailed) {
+        return { tool: action.tool, humanLabel: action.humanLabel, status: 'failed', reason: 'provider_error', message: `${name} did not take the event (it answered ${err.status})` }
+      }
+      throw err
+    }
+  }
+
+  private async writeConfirmedDraft(action: Extract<PlanAction, { tool: 'draft_email' }>, userId: string): Promise<CommandActionResult> {
+    const refused = (reason: string, message: string): CommandActionResult => ({
+      tool: action.tool,
+      humanLabel: action.humanLabel,
+      status: 'skipped',
+      reason,
+      message,
+    })
+    const args = (action.args ?? {}) as Partial<Extract<PlanAction, { tool: 'draft_email' }>['args']>
+    if (!this.mailboxes) return refused('unavailable', CONNECTED_REFUSALS.unavailable)
+    const workspaceId = typeof args.workspaceId === 'string' ? args.workspaceId : ''
+    if (!isUuid(workspaceId) || !(await this.memberRole(workspaceId, userId))) return refused('no_permission', CONNECTED_REFUSALS.notMember)
+    const checked = checkedDraft({ to: args.to, cc: args.cc, subject: args.subject, body: args.body })
+    if (!checked.ok) return refused('invalid', checked.message)
+    const d = checked.draft
+    try {
+      const { account, draft } = await this.mailboxes.draftAs(workspaceId, typeof args.accountId === 'string' ? args.accountId : '', { id: userId }, {
+        to: d.to,
+        cc: d.cc,
+        subject: d.subject,
+        text: d.body,
+      })
+      return {
+        tool: action.tool,
+        humanLabel: action.humanLabel,
+        status: 'succeeded',
+        external: { kind: 'draft', provider: account.provider, id: draft.id, where: account.address },
+      }
+    } catch (err) {
+      // The mailbox service's refusals are already sentences a person reads.
+      if (err instanceof HttpException && err.getStatus() < 500) return refused(err.getStatus() === 403 ? 'no_permission' : 'refused', err.message)
+      if (err instanceof HttpException) {
+        return { tool: action.tool, humanLabel: action.humanLabel, status: 'failed', reason: 'provider_error', message: err.message }
+      }
+      throw err
     }
   }
 

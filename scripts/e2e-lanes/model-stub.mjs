@@ -205,6 +205,20 @@ const server = createServer(async (req, res) => {
    * cleared, as the status above is.
    */
   const delayMs = Math.min(Math.max(Number(staged?.delayMs ?? 0) || 0, 0), 30_000)
+  /*
+   * AND A TOOL CALL, WHEN ONE IS STAGED (`ledger-rows/row-2294`). A staging's
+   * `content` is the answer's content blocks as the Messages API gives them —
+   * `{type: 'tool_use', name, input}` among them — so a suite can say what the
+   * model asks for and measure everything the product does with it: the plan,
+   * the preview, what is written once it is confirmed. Answered only to a call
+   * that offered tools, and only one that is not streamed: a tool call nobody
+   * offered is not one a model can make. An id is given to a block without one.
+   * Read before the staging is cleared, as the status and the delay are.
+   */
+  const blocks =
+    Array.isArray(staged?.content) && Array.isArray(body.tools) && body.tools.length && body.stream !== true
+      ? staged.content.map((b, i) => (b?.type === 'tool_use' && !b.id ? { ...b, id: `toolu_stub_${seen.length}_${i}` } : b))
+      : null
   const scripted = SCRIPTS.find((s) => s.when.test(system))?.text
   const text = staged?.text ?? (typeof scripted === 'function' ? scripted(system) : scripted) ?? 'A stubbed reply.'
   staged = null
@@ -247,8 +261,8 @@ const server = createServer(async (req, res) => {
     type: 'message',
     role: 'assistant',
     model: body.model ?? 'claude-stub',
-    content: [{ type: 'text', text }],
-    stop_reason: 'end_turn',
+    content: blocks ?? [{ type: 'text', text }],
+    stop_reason: blocks?.some((b) => b?.type === 'tool_use') ? 'tool_use' : 'end_turn',
     stop_sequence: null,
     usage,
   })

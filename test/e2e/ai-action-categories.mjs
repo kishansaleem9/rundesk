@@ -54,7 +54,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure. */
-const EXPECTED_CHECKS = 30
+const EXPECTED_CHECKS = 29
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -76,7 +76,9 @@ const ORDER = [
   'summaries', 'assets', 'externalActions', 'externalSearches',
 ]
 // Images generated is filled since image generation (`ledger-rows/row-870`): `image.generate` runs.
-const UNSUPPORTED = ['externalActions', 'externalSearches']
+// And the connected apps' two since the AI acts and searches in them (`ledger-rows/row-2294`):
+// a command turn that reached for one is `command.connected_action` or `command.connected_search`.
+// No tile is one the product cannot fill now.
 
 /** Tags every row this run appends, so it can take exactly those away again. */
 const TAG = `e2e-cat-${Date.now()}`
@@ -139,20 +141,14 @@ try {
   )
   const unsupported = cats.filter((c) => !c.supported).map((c) => c.category).sort()
   chk(
-    unsupported.join(',') === [...UNSUPPORTED].sort().join(','),
-    'two are marked as something this product cannot do — the connected apps’ — and Images generated, which image generation fills, is not',
+    unsupported.length === 0,
+    'none is marked as something this product cannot do — the connected apps’ tiles count the AI’s runs in them, as Images generated counts image generation’s',
     `the unsupported ones were ${unsupported.join(', ') || '(none)'}`,
   )
   chk(
-    cats.filter((c) => !c.supported).every((c) => typeof c.reasonKey === 'string' && c.reasonKey) &&
-      cats.filter((c) => c.supported).every((c) => c.reasonKey === undefined),
-    'each of those says why, and none of the others pretends to',
+    cats.every((c) => c.reasonKey === undefined),
+    'and none carries a reason it cannot be filled',
     `reason keys were ${JSON.stringify(cats.map((c) => [c.category, c.reasonKey ?? null]))}`,
-  )
-  chk(
-    new Set(cats.filter((c) => !c.supported).map((c) => c.reasonKey)).size === 2,
-    'with a DIFFERENT reason each — one shared reason explains nothing',
-    `the two reasons were ${JSON.stringify(cats.filter((c) => !c.supported).map((c) => c.reasonKey))}`,
   )
 
   console.log('\n▶ seeded runs land in the right bucket, and only there')
@@ -217,9 +213,9 @@ try {
     `the Images tile moved by ${delta('images')}, not 2`,
   )
   chk(
-    UNSUPPORTED.every((c) => delta(c) === 0),
-    'the two unfillable tiles stay unfilled',
-    `unsupported tiles moved by ${UNSUPPORTED.map((c) => `${c}=${delta(c)}`).join(' ')}`,
+    delta('externalActions') === 0 && delta('externalSearches') === 0,
+    'and nothing of theirs lands in the connected apps’ tiles',
+    `the connected apps' tiles moved by actions=${delta('externalActions')} searches=${delta('externalSearches')}`,
   )
   /*
    * ELEVEN, NOT TWELVE. Twelve rows were inserted and one of them has no
@@ -269,6 +265,26 @@ try {
     (afterFailures.data?.runs ?? 0) - baselineRuns === 12,
     'while the twelve succeeded runs are all counted, mapped or not',
     `runs moved by ${(afterFailures.data?.runs ?? 0) - baselineRuns} against twelve seeded successes`,
+  )
+
+  console.log('\n▶ the AI acting in a connected app is counted in its own two tiles')
+  /*
+   * `ledger-rows/row-2294`. A command turn that reached for the asker's
+   * calendar or mailbox is `command.connected_action`, one that searched their
+   * Drive, Gmail or SharePoint `command.connected_search`; both are the command
+   * path, and neither is Tasks'. Seeded after the twelve, so every count above
+   * stands as it was.
+   */
+  const beforeConnected = runsByCategory((await value()).data)
+  await seed('command.connected_action', 2)
+  await seed('command.connected_search', 1)
+  const afterConnected = runsByCategory((await value()).data)
+  chk(
+    (afterConnected.externalActions ?? 0) - (beforeConnected.externalActions ?? 0) === 2
+      && (afterConnected.externalSearches ?? 0) - (beforeConnected.externalSearches ?? 0) === 1
+      && afterConnected.tasks === beforeConnected.tasks,
+    'two `command.connected_action` runs land in External app actions and one `command.connected_search` in External app searches — not in Tasks, though both are the command path',
+    `actions ${beforeConnected.externalActions} → ${afterConnected.externalActions}, searches ${beforeConnected.externalSearches} → ${afterConnected.externalSearches}, tasks ${beforeConnected.tasks} → ${afterConnected.tasks}`,
   )
 
   // ── On screen ────────────────────────────────────────────────────────────
@@ -360,45 +376,28 @@ try {
     `the tiles read ${rows.map((r) => r.map((b) => b.id).join('>')).join(' | ')}`,
   )
 
-  console.log('\n▶ "not available" is not the same answer as zero')
+  console.log('\n▶ no tile says the product cannot fill it')
   const unavailableTiles = page.locator('[data-testid^="ai-value-category-"][data-supported="false"]')
+  const unavailable = await page.locator('[data-testid^="ai-value-category-unavailable-"]').count()
   chk(
-    (await unavailableTiles.count()) === 2,
-    'two tiles admit the product cannot fill them',
-    `${await unavailableTiles.count()} tiles were marked unavailable`,
-  )
-  const reasons = []
-  for (const id of UNSUPPORTED) {
-    // `.catch` because `ac-3-hide-empty-tiles` removes the tiles these sentences
-    // live on: an empty string fails the check below on its own terms, where an
-    // unqualified `innerText` waited out the default timeout and ended the run
-    // at 25 of 29.
-    reasons.push(
-      (await page.getByTestId(`ai-value-category-reason-${id}`).filter({ visible: true }).innerText().catch(() => '')).trim(),
-    )
-  }
-  chk(
-    reasons.every((r) => r.length > 0) && new Set(reasons).size === 2,
-    'each with its own sentence, not one shared fallback',
-    `the two reasons read ${JSON.stringify(reasons)}`,
+    (await unavailableTiles.count()) === 0 && unavailable === 0,
+    'no tile admits the product cannot fill it — the connected apps’ two are filled like the rest',
+    `${await unavailableTiles.count()} tiles were marked unavailable, ${unavailable} said so`,
   )
   /*
-   * Hoisted out of the check so its marker is on a line of its own, and read only
-   * when the count holds, as the `&&` did. Unfiltered: the claim is that no digit
-   * is printed, and a hidden tile read whole is the stricter read
-   * (`found-29-sep/innertext-reads-hidden-leaves`).
+   * And the External app searches tile prints the server's count, as the Tasks
+   * tile is read below: the run seeded above is one, so a tile that still says
+   * "not available", or draws nothing, cannot pass.
    */
-  const unavailable = await page.locator('[data-testid^="ai-value-category-unavailable-"]').count()
-  const searchesTile = unavailable === 2 ? await page.getByTestId('ai-value-category-externalSearches').innerText().catch(() => '0') : '0' // text-read: absence — no digit anywhere on the tile
+  const shownSearches = await page
+    .getByTestId('ai-value-category-externalSearches')
+    .getAttribute('data-runs', { timeout: 8000 })
+    .catch(() => null)
+  const serverSearches = runsByCategory((await value()).data).externalSearches
   chk(
-    unavailable === 2 && !/\d/.test(searchesTile),
-    'and none of them prints a number a person could mistake for a count',
-    `the External app searches tile reads ${JSON.stringify(
-      (await page.getByTestId('ai-value-category-externalSearches').innerText().catch(() => '<no tile>')).replace(
-        /\s+/g,
-        ' ',
-      ),
-    )}`,
+    typeof shownSearches === 'string' && Number(shownSearches) === serverSearches && serverSearches >= 1,
+    'and the External app searches tile prints its runs, as the server counts them',
+    `the tile shows ${shownSearches} and the API says ${serverSearches}`,
   )
 
   console.log('\n▶ the tiles show what the server computed, not their own arithmetic')

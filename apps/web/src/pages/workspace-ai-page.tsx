@@ -25,6 +25,8 @@ import {
   RefreshCw,
   LineChart,
   Coins,
+  CalendarPlus,
+  Mail,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { AiPanel } from '../components/ai-panel'
@@ -438,17 +440,109 @@ type CommandSearchResult = {
   query: string
   tasks: Array<{ id: string; title: string; status: string; dueDate: string | null }>
 }
+/** What a search of the asker's own connected apps found (`ledger-rows/row-2294`). */
+type ConnectedSearchResult = {
+  query: string
+  hits: Array<{ source: 'drive' | 'gmail' | 'sharepoint'; title: string; url: string; snippet: string }>
+}
 type CommandPlan = {
   summary: string
   actions: CommandPlanAction[]
   readOnlyResults: CommandSearchResult[]
   warnings: string[]
+  connectedResults?: ConnectedSearchResult[]
 }
 type CommandActionResult = {
   tool: string
   humanLabel: string
   status: 'succeeded' | 'skipped' | 'failed'
   reason?: string
+  /** The refusal as a person reads it; `reason` is its code. */
+  message?: string
+  /** What a connected app now holds: the event, or the draft (`ledger-rows/row-2294`). */
+  external?: { kind: 'event' | 'draft'; provider: string; id: string; where: string }
+}
+
+const asText = (v: unknown): string => (typeof v === 'string' ? v : '')
+const asList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+
+/** An instant as the clock reads it in a zone: "2026-10-14 10:00". */
+function wallClock(iso: string, timeZone: string): string {
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return iso
+  try {
+    const p = Object.fromEntries(
+      new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+        .formatToParts(at)
+        .map((x) => [x.type, x.value]),
+    )
+    return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`
+  } catch {
+    return at.toISOString().slice(0, 16).replace('T', ' ')
+  }
+}
+
+/**
+ * THE DRAFT A PERSON CONFIRMS, DRAWN FROM WHAT WILL BE WRITTEN
+ * (`ledger-rows/row-2294`): an event's title, its time in the asker's own zone,
+ * whom it invites and where; an email's recipients, subject and words. Read
+ * from the action's own args, so the card cannot say something the write will
+ * not do.
+ */
+function ConnectedDraft({ action }: { action: CommandPlanAction }) {
+  const { t } = useTranslation()
+  const a = action.args ?? {}
+  if (action.tool === 'create_calendar_event') {
+    const zone = asText(a.timeZone) || 'UTC'
+    const start = wallClock(asText(a.start), zone)
+    const end = wallClock(asText(a.end), zone)
+    const attendees = asList(a.attendees)
+    return (
+      <div data-testid="ai-command-event-draft" className="mt-2 rounded-md bg-muted/40 px-3 py-2 space-y-1 text-xs">
+        <p className="flex items-center gap-1.5 font-medium text-muted-foreground">
+          <CalendarPlus className="h-3.5 w-3.5" /> {t('ai.commandEventHeading')}
+        </p>
+        <p data-testid="ai-command-event-title" className="text-sm font-medium text-foreground">{asText(a.title)}</p>
+        <p data-testid="ai-command-event-when">
+          {start} – {start.slice(0, 10) === end.slice(0, 10) ? end.slice(11) : end} ({zone})
+        </p>
+        {attendees.length > 0 && (
+          <p data-testid="ai-command-event-attendees">
+            <span className="text-muted-foreground">{t('ai.commandEventInvites')}:</span> {attendees.join(', ')}
+          </p>
+        )}
+        {asText(a.location) && (
+          <p>
+            <span className="text-muted-foreground">{t('ai.commandEventWhere')}:</span> {asText(a.location)}
+          </p>
+        )}
+        {asText(a.description) && <p className="whitespace-pre-wrap text-muted-foreground">{asText(a.description)}</p>}
+      </div>
+    )
+  }
+  if (action.tool === 'draft_email') {
+    const cc = asList(a.cc)
+    return (
+      <div data-testid="ai-command-draft" className="mt-2 rounded-md bg-muted/40 px-3 py-2 space-y-1 text-xs">
+        <p className="flex items-center gap-1.5 font-medium text-muted-foreground">
+          <Mail className="h-3.5 w-3.5" /> {t('ai.commandDraftHeading')}
+        </p>
+        <p data-testid="ai-command-draft-to">
+          <span className="text-muted-foreground">{t('ai.commandDraftTo')}:</span> {asList(a.to).join(', ')}
+        </p>
+        {cc.length > 0 && (
+          <p data-testid="ai-command-draft-cc">
+            <span className="text-muted-foreground">{t('ai.commandDraftCc')}:</span> {cc.join(', ')}
+          </p>
+        )}
+        <p data-testid="ai-command-draft-subject">
+          <span className="text-muted-foreground">{t('ai.commandDraftSubject')}:</span> {asText(a.subject)}
+        </p>
+        <p data-testid="ai-command-draft-body" className="whitespace-pre-wrap text-foreground">{asText(a.body)}</p>
+      </div>
+    )
+  }
+  return null
 }
 
 const COMMAND_SUGGESTION_KEYS = [
@@ -520,6 +614,7 @@ function CommandsTab({ workspaceId }: { workspaceId: string }) {
 
       <div className="space-y-2">
         <textarea
+          data-testid="ai-command-input"
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           placeholder={t('ai.commandPlaceholder')}
@@ -544,7 +639,7 @@ function CommandsTab({ workspaceId }: { workspaceId: string }) {
           </p>
         )}
         <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={() => preview.mutate()} disabled={!message.trim() || busy}>
+          <Button data-testid="ai-command-preview" onClick={() => preview.mutate()} disabled={!message.trim() || busy}>
             {preview.isPending ? (
               <><Loader2 className="h-4 w-4 animate-spin mr-1.5" /> {t('ai.commandPlanning')}</>
             ) : (
@@ -583,11 +678,11 @@ function CommandsTab({ workspaceId }: { workspaceId: string }) {
       </div>
 
       {error && (
-        <Card className="p-3 border-destructive/40 bg-destructive/5 text-sm text-destructive">{error}</Card>
+        <Card data-testid="ai-command-error" className="p-3 border-destructive/40 bg-destructive/5 text-sm text-destructive">{error}</Card>
       )}
 
       {plan && (
-        <Card className="p-4 space-y-4">
+        <Card data-testid="ai-command-plan" className="p-4 space-y-4">
           <div className="flex items-center gap-2 text-xs font-medium text-amber-700 dark:text-amber-300">
             <AlertTriangle className="h-3.5 w-3.5" />
             {t('ai.commandPreviewHeading')}
@@ -610,6 +705,7 @@ function CommandsTab({ workspaceId }: { workspaceId: string }) {
                           {tCount('ai.commandAffected', action.affectedTaskIds.length)}
                         </span>
                       )}
+                      <ConnectedDraft action={action} />
                     </div>
                   </li>
                 ))}
@@ -636,13 +732,42 @@ function CommandsTab({ workspaceId }: { workspaceId: string }) {
             </div>
           )}
 
+          {(plan.connectedResults ?? []).some((r) => r.hits.length > 0) && (
+            <div data-testid="ai-command-connected-results" className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                {t('ai.commandConnectedFound')}
+              </p>
+              <ul className="space-y-1">
+                {(plan.connectedResults ?? []).flatMap((r) => r.hits).slice(0, 20).map((hit, index) => (
+                  <li key={`${hit.url}-${index}`} data-testid="ai-command-connected-hit" data-source={hit.source}>
+                    <a
+                      href={hit.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="group flex items-start gap-2 text-sm rounded-md border border-border px-3 py-2 hover:bg-muted/50 transition-colors"
+                    >
+                      <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground shrink-0">
+                        {hit.source}
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block truncate group-hover:underline">{hit.title}</span>
+                        {hit.snippet && <span className="block truncate text-xs text-muted-foreground">{hit.snippet}</span>}
+                      </span>
+                      <ExternalLink className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {plan.warnings.length > 0 && (
             <div className="space-y-1">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 {t('ai.commandNotesLabel')}
               </p>
               {plan.warnings.map((warning, index) => (
-                <p key={index} className="text-xs text-amber-700 dark:text-amber-300">{warning}</p>
+                <p key={index} data-testid="ai-command-warning" className="text-xs text-amber-700 dark:text-amber-300">{warning}</p>
               ))}
             </div>
           )}
@@ -650,6 +775,7 @@ function CommandsTab({ workspaceId }: { workspaceId: string }) {
           <div className="flex items-center gap-2 pt-1">
             <Button
               size="sm"
+              data-testid="ai-command-confirm"
               onClick={() => execute.mutate()}
               disabled={busy || plan.actions.length === 0}
             >
@@ -659,7 +785,7 @@ function CommandsTab({ workspaceId }: { workspaceId: string }) {
                 <><CheckCircle2 className="h-3.5 w-3.5 mr-1.5" /> {t('ai.commandConfirm')}</>
               )}
             </Button>
-            <Button variant="ghost" size="sm" onClick={cancelPlan} disabled={busy}>
+            <Button data-testid="ai-command-cancel" variant="ghost" size="sm" onClick={cancelPlan} disabled={busy}>
               {t('ai.commandCancel')}
             </Button>
           </div>
@@ -674,7 +800,7 @@ function CommandsTab({ workspaceId }: { workspaceId: string }) {
           ) : (
             <ul className="space-y-1.5">
               {results.map((res, index) => (
-                <li key={index} className="flex items-start gap-2 text-sm">
+                <li key={index} data-testid="ai-command-result" data-status={res.status} className="flex items-start gap-2 text-sm">
                   {res.status === 'succeeded' ? (
                     <CheckCircle2 className="h-4 w-4 mt-0.5 text-emerald-500 shrink-0" />
                   ) : res.status === 'skipped' ? (
@@ -684,14 +810,21 @@ function CommandsTab({ workspaceId }: { workspaceId: string }) {
                   )}
                   <div className="flex-1">
                     <span>{res.humanLabel}</span>
-                    <span className="ml-2 text-xs text-muted-foreground">
+                    <span data-testid="ai-command-result-said" className="ml-2 text-xs text-muted-foreground">
                       {res.status === 'succeeded'
-                        ? t('ai.commandDone')
-                        : res.status === 'skipped'
-                          ? res.reason === 'no_permission'
-                            ? t('ai.commandNoPermission')
-                            : `${t('ai.commandSkipped')}${res.reason ? ` — ${res.reason}` : ''}`
-                          : `${t('ai.commandFailed')}${res.reason ? ` — ${res.reason}` : ''}`}
+                        ? res.external
+                          ? res.external.kind === 'event'
+                            ? t('ai.commandAddedToCalendar', { where: res.external.where })
+                            : t('ai.commandSavedDraft', { where: res.external.where })
+                          : t('ai.commandDone')
+                        : res.message
+                          ? // The refusal in its own words, which the code beside it only names.
+                            `${res.status === 'skipped' ? t('ai.commandSkipped') : t('ai.commandFailed')} — ${res.message}`
+                          : res.status === 'skipped'
+                            ? res.reason === 'no_permission'
+                              ? t('ai.commandNoPermission')
+                              : `${t('ai.commandSkipped')}${res.reason ? ` — ${res.reason}` : ''}`
+                            : `${t('ai.commandFailed')}${res.reason ? ` — ${res.reason}` : ''}`}
                     </span>
                   </div>
                 </li>

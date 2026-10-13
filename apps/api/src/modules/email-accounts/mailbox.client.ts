@@ -133,6 +133,34 @@ export async function sendFromMailbox(
   return { threadId: draft.conversationId, providerMessageId: draft.id, internetMessageId: draft.internetMessageId ?? null }
 }
 
+/**
+ * A DRAFT, LEFT IN THE MAILBOX'S OWN DRAFTS (`ledger-rows/row-2294`): Gmail's
+ * `drafts.create`; on Graph a message made and not sent, which is what a draft
+ * is there. Its id, and the id of the message the draft is.
+ */
+export async function draftInMailbox(grant: MailboxGrant, mail: OutgoingMail): Promise<{ id: string; messageId: string }> {
+  if (grant.provider === 'gmail') {
+    const raw = toBase64Url(buildMime(mail))
+    const res = await call(grant, `${gmailBase()}/users/me/drafts`, { method: 'POST', body: JSON.stringify({ message: { raw } }) })
+    const draft = (await res.json()) as { id?: string; message?: { id?: string } }
+    if (!draft.id) throw new MailboxRefused('Gmail did not say what it saved', false)
+    return { id: draft.id, messageId: draft.message?.id ?? draft.id }
+  }
+  const res = await call(grant, `${graphBase()}/me/messages`, {
+    method: 'POST',
+    body: JSON.stringify({
+      subject: mail.subject,
+      body: { contentType: 'Text', content: mail.text },
+      toRecipients: graphRecipients(mail.to),
+      ccRecipients: graphRecipients(mail.cc),
+      bccRecipients: graphRecipients(mail.bcc),
+    }),
+  })
+  const draft = (await res.json()) as { id?: string }
+  if (!draft.id) throw new MailboxRefused('Outlook did not say what it saved', false)
+  return { id: draft.id, messageId: draft.id }
+}
+
 /** Every message of a thread (Gmail) or conversation (Graph), oldest first. */
 export async function readMailboxThread(grant: MailboxGrant, threadId: string): Promise<ThreadMessage[]> {
   if (grant.provider === 'gmail') {

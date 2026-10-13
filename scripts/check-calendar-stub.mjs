@@ -50,9 +50,11 @@ const chk = (cond, good, bad) => {
  */
 const PROBE = `
 import { readGoogle, readGraph, writeEvent, deleteEvent, CalendarRefused } from './src/modules/calendar-sync/calendar-events'
+import { draftInMailbox } from './src/modules/email-accounts/mailbox.client'
 const BASE = 'http://127.0.0.1:${PORT}'
 process.env.GOOGLE_CALENDAR_API_URL = BASE + '/google/calendar/v3'
 process.env.MS_GRAPH_API_URL = BASE + '/graph/v1.0'
+process.env.GMAIL_API_URL = BASE + '/gmail/v1'
 const control = (path: string, body: unknown) =>
   fetch(BASE + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json())
 const held = (token: string) => fetch(BASE + '/__control/calendar?token=' + token).then((r) => r.json())
@@ -90,6 +92,21 @@ async function main() {
     const graphId = await writeEvent('outlook', 'o', 'primary', block, null)
     const graphMade = (await held('o')).events.find((e: any) => e.id === graphId)
     return { made: made && [made.start, made.end, made.title], moved: moved && [moved.start, moved.end], kept, again, graph: graphMade && [Date.parse(graphMade.start), Date.parse(graphMade.end)] }
+  })
+  // An invite (\`ledger-rows/row-2294\`): Google is asked to send it, and the write is kept as it was asked.
+  await step(out, 'invite', async () => {
+    const e = { title: 'Review', start: new Date('2026-10-08T11:00:00Z'), end: new Date('2026-10-08T11:30:00Z'), allDay: false, location: 'Room 4', attendees: ['ann@x.test'] }
+    const id = await writeEvent('gcal', 'g', 'primary', e, null)
+    const w = (await held('g')).writes.filter((x: any) => x.method === 'POST').pop()
+    return { id: typeof id === 'string', sendUpdates: w?.query?.sendUpdates ?? null, attendees: w?.body?.attendees ?? null, location: w?.body?.location ?? null }
+  })
+  // And a Gmail draft, left in Drafts and not sent.
+  await control('/__control/mailbox', { token: 'mb', provider: 'gmail', address: 'me@x.test' })
+  await step(out, 'draft', async () => {
+    const d = await draftInMailbox({ provider: 'gmail', accessToken: 'mb' }, { fromName: 'Me', fromAddress: 'me@x.test', to: ['ann@x.test'], cc: [], bcc: [], subject: 'Notes', text: 'The notes.', attachments: [] })
+    const box = await fetch(BASE + '/__control/mailbox?token=mb').then((r) => r.json())
+    const m = box.messages[0]
+    return { id: typeof d.id === 'string' && d.id.length > 0, count: box.messages.length, isDraft: m?.isDraft ?? null, to: m?.to ?? null, subject: m?.subject ?? null, text: m?.text ?? null }
   })
   const many = Array.from({ length: 300 }, (_, i) => ({ id: 'm' + i, title: 'M' + i, start: '2026-10-08T10:00:00Z', end: '2026-10-08T10:30:00Z' }))
   await control('/__control/calendar', { token: 'gm', provider: 'gcal', events: many })
@@ -199,6 +216,16 @@ if (out.none !== undefined) {
     `wrote ${JSON.stringify(w)}`,
   )
   chk(
+    same(out.invite, { id: true, sendUpdates: 'all', attendees: [{ email: 'ann@x.test' }], location: 'Room 4' }),
+    'an event that invites people is written with them, its place, and Google asked to send the invitations — kept with the query it came with',
+    `wrote ${JSON.stringify(out.invite)}`,
+  )
+  chk(
+    same(out.draft, { id: true, count: 1, isDraft: true, to: ['ann@x.test'], subject: 'Notes', text: 'The notes.' }),
+    'a Gmail draft is kept in the mailbox as a draft — its recipients, subject and words — and nothing is sent',
+    `kept ${JSON.stringify(out.draft)}`,
+  )
+  chk(
     same(out.pages, { google: [300, false], graph: [300, false] }),
     'three hundred events come in pages, Google’s by page token and Graph’s by its own next link, and every one is read',
     `read ${JSON.stringify(out.pages)}`,
@@ -231,6 +258,8 @@ if (process.argv.includes('--mutate')) {
     ['a delete is answered and not done', '      cal.events.delete(eventId)\n      record(null)\n      return empty(res, 204)\n    }\n    return json(res, 405', '      record(null)\n      return empty(res, 204)\n    }\n    return json(res, 405'],
     ['any refresh token is taken', "if (form.get('grant_type') !== 'refresh_token' || !cal || cal.provider !== provider) {", "if (form.get('grant_type') !== 'refresh_token' || !cal && false) {"],
     ['a staged failure never runs out', 'cal.fail.left -= 1\n', ''],
+    ['a write forgets the query it came with', 'query: Object.fromEntries(url.searchParams), ', ''],
+    ['a Gmail draft is kept as sent', "direction: 'sent', isDraft: true, at: Date.now() })\n      return json(res, 200, { id: draftId", "direction: 'sent', isDraft: false, at: Date.now() })\n      return json(res, 200, { id: draftId"],
   ]
   console.log('\n▶ and each mutation of the stub reddens a case')
   for (const [label, from, to] of MUTATIONS) {

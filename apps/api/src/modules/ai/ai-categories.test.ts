@@ -10,6 +10,7 @@ import {
   isSupportedCategory,
   rollUpByCategory,
 } from './ai-categories'
+import { COMMAND_USAGE_FEATURES, commandUsageFeature } from './ai-connected'
 
 /**
  * §V2-11 — the eight tiles of frames `18:53`/`18:56`/`18:59`.
@@ -33,12 +34,19 @@ function workspaceRoot(from: string): string {
 }
 const SERVICE = join(workspaceRoot(process.cwd()), 'apps/api/src/modules/ai/ai.service.ts')
 
-/** Every literal handed to `complete(` or `recordUsage(` as its feature name. */
+/**
+ * Every literal handed to `complete(` or `recordUsage(` as its feature name —
+ * and, where the command path files a turn by what it reached for
+ * (`recordAs: … commandUsageFeature`, `ledger-rows/row-2294`), the names that
+ * can come back from it. Only when the service really passes it: a list of
+ * names nothing records would read as features that exist.
+ */
 function featuresInSource(): string[] {
   const src = readFileSync(SERVICE, 'utf8')
   const found = new Set<string>()
   for (const m of src.matchAll(/this\.complete\(\s*'([^']+)'/g)) found.add(m[1])
   for (const m of src.matchAll(/this\.recordUsage\(\s*\n?\s*'([^']+)'/g)) found.add(m[1])
+  if (/recordAs:\s*\(\w+\)\s*=>\s*commandUsageFeature\(/.test(src)) for (const f of COMMAND_USAGE_FEATURES) found.add(f)
   return [...found].sort()
 }
 
@@ -71,14 +79,11 @@ describe('§V2-11 AI action categories', () => {
     }
   })
 
-  it('names the three the product cannot fill, and only those', () => {
-    // If somebody wires up image generation and forgets to drop it from here,
-    // a real count would be hidden behind "not available" — the same defect in
-    // the other direction.
-    assert.deepEqual(
-      Object.keys(UNSUPPORTED_CATEGORIES).sort(),
-      ['externalActions', 'externalSearches'],
-    )
+  it('marks none unsupported, now that every tile has a feature to count', () => {
+    // If somebody wires up a feature and forgets to drop its tile from here, a
+    // real count is hidden behind "not available" — the same defect in the
+    // other direction. The two external tiles were the last (`ledger-rows/row-2294`).
+    assert.deepEqual(Object.keys(UNSUPPORTED_CATEGORIES).sort(), [])
     for (const category of Object.keys(UNSUPPORTED_CATEGORIES)) {
       const contributors = Object.entries(FEATURE_CATEGORY).filter(([, c]) => c === category)
       assert.deepEqual(
@@ -131,12 +136,22 @@ describe('§V2-11 AI action categories', () => {
       'an unmapped feature was folded into a category, which hides the gap')
   })
 
-  it('carries a reason on the three it cannot fill', () => {
+  it('carries a reason on any it cannot fill, and none on the rest', () => {
     const { categories } = rollUpByCategory({})
     for (const c of categories) {
       if (c.supported) assert.equal(c.reasonKey, undefined)
       else assert.ok(c.reasonKey, `${c.category} is unsupported with no reason to show`)
     }
+  })
+
+  it('files a command turn by what it reached for, so the external tiles count only those', () => {
+    assert.equal(commandUsageFeature([{ type: 'text' }]), 'command')
+    assert.equal(commandUsageFeature([{ type: 'tool_use', name: 'create_task' }]), 'command')
+    assert.equal(commandUsageFeature([{ type: 'tool_use', name: 'search_connected_apps' }]), 'command.connected_search')
+    assert.equal(commandUsageFeature([{ type: 'tool_use', name: 'create_calendar_event' }]), 'command.connected_action')
+    assert.equal(commandUsageFeature([{ type: 'tool_use', name: 'draft_email' }, { type: 'tool_use', name: 'search_connected_apps' }]), 'command.connected_action')
+    assert.equal(categoryOf('command.connected_action'), 'externalActions')
+    assert.equal(categoryOf('command.connected_search'), 'externalSearches')
   })
 
   it('does not invent a category for an unknown string', () => {

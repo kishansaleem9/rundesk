@@ -94,6 +94,18 @@ async function main() {
     // And it does not latch: the call after it is scripted again, not STAGED.
     const after = await client.messages.create({ model: 'claude-stub-1', max_tokens: 256, system: sys, messages: [{ role: 'user', content: 'again' }] })
     out.afterStaged = after.content[0]?.type === 'text' ? after.content[0].text : null
+    // A staged TOOL CALL (\`ledger-rows/row-2294\`) answers a call that offered tools as a tool_use block, as a model asks for one.
+    await fetch(BASE + '/__control/next', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: [{ type: 'tool_use', name: 'create_calendar_event', input: { title: 'Stub event', start: '2026-10-14T10:00' } }] }) })
+    const tooled = await client.messages.create({
+      model: 'claude-stub-1', max_tokens: 64, system: 'x',
+      tools: [{ name: 'create_calendar_event', input_schema: { type: 'object', properties: {} } }],
+      messages: [{ role: 'user', content: 'book it' }],
+    })
+    const use = tooled.content.find((b) => b.type === 'tool_use')
+    out.toolName = use?.type === 'tool_use' ? use.name : null
+    out.toolTitle = use?.type === 'tool_use' ? (use.input as { title?: string }).title : null
+    out.toolId = use?.type === 'tool_use' ? use.id : null
+    out.toolStop = tooled.stop_reason
     // A staging may hold its answer back, as a real model takes seconds; the call after it is not held.
     await fetch(BASE + '/__control/next', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'SLOW', delayMs: 600 }) })
     let t0 = Date.now()
@@ -248,6 +260,11 @@ if (out.none !== undefined) {
     'the staged reply latched and answered twice',
   )
   chk(
+    out.toolName === 'create_calendar_event' && out.toolTitle === 'Stub event' && /^toolu_/.test(String(out.toolId)) && out.toolStop === 'tool_use',
+    'a staged tool call answers a call that offered tools as a tool_use block, with an id and its input, the turn stopped for it',
+    `the call came back as ${JSON.stringify({ name: out.toolName, title: out.toolTitle, id: out.toolId, stop: out.toolStop })}`,
+  )
+  chk(
     out.slowText === 'SLOW' && Number(out.slowMs) >= 550 && Number(out.fastMs) < 400,
     'a staged delay holds that answer back as long as it says, and the next answer is not held',
     `the staged answer ${JSON.stringify(out.slowText)} took ${out.slowMs} ms; the next took ${out.fastMs} ms`,
@@ -310,6 +327,8 @@ if (process.argv.includes('--mutate')) {
     // `found-29-sep/model-stub-never-streams`: a streamed call answered as JSON.
     ['a streamed call is answered as JSON', 'if (body.stream === true) {', 'if (false) {'],
     ['the streamed reply goes out in one delta', 'const per = Math.max(1, Math.ceil(words.length / 3))', 'const per = words.length || 1'],
+    // `ledger-rows/row-2294`: a staged tool call answered as the fallback's words.
+    ['a staged tool call is answered as text', "content: blocks ?? [{ type: 'text', text }],", "content: [{ type: 'text', text }],"],
   ]
   console.log('\n▶ and each mutation of the stub reddens a case')
   for (const [label, from, to] of MUTATIONS) {

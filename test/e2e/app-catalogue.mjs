@@ -613,10 +613,12 @@ try {
   await page.waitForSelector('[data-testid="integrations-mcp-dialog"]', { timeout: 10_000 }).catch(() => {})
   const limitation = await readText(page.getByTestId('integrations-mcp-limitation').filter({ visible: true }))
   chk(
-    limitation.length > 0 && /cannot call an external tool yet/i.test(limitation),
+    // Since the AI acts in a person's own connected apps (`ledger-rows/row-2294`), what it
+    // cannot do is call a server a workspace registers — and the panel says that, not "nothing".
+    limitation.length > 0 && /cannot call a custom MCP server yet/i.test(limitation) && /connected calendar, mailbox and Connected Search/i.test(limitation),
     'it opens, and says plainly what the AI cannot do yet',
     `the panel said ${JSON.stringify(limitation)} — a URL field over an assistant that ` +
-      'can call nothing would store rows as evidence for a feature that does not exist',
+      'can call no such server would store rows as evidence for a feature that does not exist',
   )
   await page.getByTestId('integrations-mcp-request').click({ timeout: 8000 }).catch(() => {})
   let mcpRequested = false

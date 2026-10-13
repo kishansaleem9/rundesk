@@ -2091,6 +2091,17 @@ jobs:
       - name: A task's email goes from the writer's own Gmail or Outlook
         timeout-minutes: 15
         run: node test/e2e/task-email-accounts.mjs --api 3011 --dist apps/web/dist
+
+      # `ledger-rows/row-2294` — the AI acts in the asker's own connected apps, as
+      # ClickUp's does: an event in their calendar, inviting people; a draft in a
+      # mailbox they linked; a search of their own Drive, Gmail and SharePoint —
+      # each previewed on the Commands tab and written once confirmed. No model
+      # answers here, so this run reads the preview's refusal and what a confirm
+      # writes (through the execute route, which asks no model); a lane's stub
+      # reads the whole path.
+      - name: The AI acts in the asker's own calendar, mailbox and Drive
+        timeout-minutes: 15
+        run: node test/e2e/ai-connected-apps.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

@@ -19,7 +19,7 @@ import { EMAIL_ACCOUNT_REFUSALS, IntegrationConnectionsService } from '../integr
 import { PlansService } from '../plans/plans.service'
 import { EMAIL_PLANS, EMAIL_PLAN_REFUSALS, type EmailPlan } from './email-plan'
 import type { OutgoingMail } from './mail-message'
-import { MailboxRefused, readMailboxThread, refreshMailboxGrant, sendFromMailbox, type SentMail, type ThreadMessage } from './mailbox.client'
+import { draftInMailbox, MailboxRefused, readMailboxThread, refreshMailboxGrant, sendFromMailbox, type SentMail, type ThreadMessage } from './mailbox.client'
 
 type Actor = { id: string; role?: string | null }
 type AccountRow = typeof emailAccounts.$inferSelect
@@ -43,7 +43,22 @@ export const EMAIL_ACCOUNTS_REFUSALS = {
   notYourTemplate: 'Only whoever made this template, or an owner or admin, changes it',
   signatureNotFound: 'That signature is not yours',
   templateNotFound: 'That template is not one you may use',
+  notYourDrafts: 'A draft is written only in a mailbox you linked yourself',
+  draftNeedsRelink: (address: string) => `${address} was linked before Rundesk asked to write drafts in it: link it again in Email settings`,
 } as const
+
+/**
+ * MAY RUNDESK WRITE DRAFTS IN THIS MAILBOX? Gmail's `drafts.create` wants
+ * `gmail.compose` (or a scope that holds it), which a mailbox linked only to send
+ * and read was not asked for; Graph makes a draft with `Mail.ReadWrite`.
+ */
+export function mayDraftIn(a: { provider: string; scopes: string[] | null }): boolean {
+  const scopes = (a.scopes ?? []).map((x) => x.toLowerCase())
+  if (a.provider === 'gmail') {
+    return scopes.some((x) => x === 'https://mail.google.com/' || x.endsWith('/gmail.compose') || x.endsWith('/gmail.modify'))
+  }
+  return scopes.some((x) => x === 'mail.readwrite' || x.endsWith('/mail.readwrite'))
+}
 
 export type EmailAccountView = {
   id: string
@@ -280,6 +295,58 @@ export class EmailAccountsService {
       return { account: { id: a.id, address: a.address, senderName: a.senderName }, sent }
     } catch (err) {
       await this.db.update(emailAccounts).set({ uses: sql`greatest(${emailAccounts.uses} - 1, 0)` }).where(eq(emailAccounts.id, a.id))
+      if (err instanceof MailboxRefused) {
+        await this.markRefused(a.id, err)
+        throw new BadGatewayException(err.said)
+      }
+      throw err
+    }
+  }
+
+  /**
+   * THE MAILBOX THE AI WRITES THIS PERSON'S DRAFTS IN (`ledger-rows/row-2294`):
+   * the first one they linked themselves that is connected — never a teammate's
+   * shared with them, whose Drafts are not theirs to read. Null, with why, when
+   * there is none they may use: Email off, a guest, or none linked.
+   */
+  async ownMailbox(workspaceId: string, actor: Actor): Promise<{ mailbox: { id: string; provider: 'gmail' | 'outlook'; address: string } | null; refusal: string | null }> {
+    try {
+      await this.gate(workspaceId, actor)
+    } catch (err) {
+      if (err instanceof ForbiddenException) return { mailbox: null, refusal: err.message }
+      throw err
+    }
+    const [a] = await this.db
+      .select({ id: emailAccounts.id, provider: emailAccounts.provider, address: emailAccounts.address })
+      .from(emailAccounts)
+      .where(and(eq(emailAccounts.workspaceId, workspaceId), eq(emailAccounts.ownerId, actor.id), eq(emailAccounts.status, 'connected')))
+      .orderBy(asc(emailAccounts.createdAt))
+      .limit(1)
+    return { mailbox: a ? { id: a.id, provider: a.provider as 'gmail' | 'outlook', address: a.address } : null, refusal: null }
+  }
+
+  /**
+   * A DRAFT, WRITTEN IN THIS PERSON'S OWN MAILBOX AND LEFT THERE
+   * (`ledger-rows/row-2294`): for them to read, change and send from their own
+   * Drafts. Theirs alone — a mailbox shared with them sends for them, but its
+   * Drafts are its owner's. Nothing is sent, so no use is taken. A grant the
+   * provider refused marks the mailbox to link again, as a send does.
+   */
+  async draftAs(
+    workspaceId: string,
+    accountId: string,
+    actor: Actor,
+    mail: { to: string[]; cc: string[]; subject: string; text: string },
+  ): Promise<{ account: { id: string; address: string; provider: 'gmail' | 'outlook' }; draft: { id: string; messageId: string } }> {
+    await this.gate(workspaceId, actor)
+    const a = await this.accountIn(workspaceId, accountId)
+    if (a.ownerId !== actor.id) throw new ForbiddenException(EMAIL_ACCOUNTS_REFUSALS.notYourDrafts)
+    if (!mayDraftIn(a)) throw new ConflictException(EMAIL_ACCOUNTS_REFUSALS.draftNeedsRelink(a.address))
+    const grant = await this.grantOf(a)
+    try {
+      const draft = await draftInMailbox(grant, { ...mail, bcc: [], attachments: [], fromName: a.senderName, fromAddress: a.address })
+      return { account: { id: a.id, address: a.address, provider: a.provider as 'gmail' | 'outlook' }, draft }
+    } catch (err) {
       if (err instanceof MailboxRefused) {
         await this.markRefused(a.id, err)
         throw new BadGatewayException(err.said)

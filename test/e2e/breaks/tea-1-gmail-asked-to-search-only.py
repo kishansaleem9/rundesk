@@ -4,11 +4,13 @@
 #   or "the Email settings list the workspace’s mailboxes to its owner, and the sender name is changed there (read by SQL); Link Gmail goes to Google’s consent asking to send, and a refused consent is said on return"
 #
 # A mailbox is linked with the search scope, which cannot send.
+#
+# Re-aimed 13 October: the mailbox's consent asks to leave drafts too (`ledger-rows/row-2294`).
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/connections/integration-connections.service.ts'
 s = io.open(p, encoding='utf-8').read()
 for a, b in [
-    ("      gmail: purpose === 'email' ? `${GMAIL_SEND_SCOPE} ${GMAIL_SEARCH_SCOPE}` : GMAIL_SEARCH_SCOPE,",
+    ("      gmail: purpose === 'email' ? `${GMAIL_SEND_SCOPE} ${GMAIL_DRAFT_SCOPE} ${GMAIL_SEARCH_SCOPE}` : GMAIL_SEARCH_SCOPE,",
      '      gmail: GMAIL_SEARCH_SCOPE,'),
 ]:
     assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

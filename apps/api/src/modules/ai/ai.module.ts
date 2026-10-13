@@ -18,6 +18,8 @@ import { ListsModule } from '../lists/lists.module'
 import { FoldersModule } from '../folders/folders.module'
 import { CustomRolesModule } from '../custom-roles/custom-roles.module'
 import { CustomFieldsModule } from '../custom-fields/custom-fields.module'
+import { CalendarSyncModule } from '../calendar-sync/calendar-sync.module'
+import { EmailAccountsModule } from '../email-accounts/email-accounts.module'
 import { AiFieldsService } from './ai-fields.service'
 import { AiFieldsController } from './ai-fields.controller'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
@@ -54,6 +56,10 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
     // An AI field's value is a custom field's (`ledger-rows/row-719`); the
     // fields module imports nothing of this one, so there is no cycle.
     CustomFieldsModule,
+    // The asker's own calendar and mailbox, which the AI writes into when they
+    // confirm (`ledger-rows/row-2294`). Neither imports this module.
+    CalendarSyncModule,
+    EmailAccountsModule,
   ],
   controllers: [AiController, KnowledgeController, ChatThreadsController, AiFieldsController],
   // BriefingService owns the hourly @Cron that delivers daily briefings;

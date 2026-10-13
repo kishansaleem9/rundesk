@@ -7,6 +7,17 @@ import {
   type ContainerRefusal,
   type ContainerSpace,
 } from './ai-containers'
+import {
+  CONNECTED_SEARCH_TOOL,
+  CONNECTED_TOOLS,
+  connectedSearchOf,
+  planCalendarEvent,
+  planEmailDraft,
+  type CalendarEventArgs,
+  type ConnectedContext,
+  type ConnectedSearchResult,
+  type EmailDraftArgs,
+} from './ai-connected'
 
 /**
  * Agentic AI command capability (Plan §7.6 / §7.8): a bounded tool set the model
@@ -61,6 +72,14 @@ export type CommandContext = {
    * space can be resolved, which refuses rather than guesses.
    */
   spaces?: ContainerSpace[]
+  /**
+   * `ledger-rows/row-2294` — the workspace asked in, and what the asker has
+   * connected of their own: the calendar events go into, the mailbox drafts
+   * are written in, and their time zone. Optional for the same reason as
+   * `spaces`; absent, a connected-app tool is refused in words, never guessed.
+   */
+  workspaceId?: string
+  connected?: ConnectedContext
 }
 
 /**
@@ -124,6 +143,22 @@ export type PlanAction =
       args: { spaceId: string; name: string; color?: string }
       humanLabel: string
     }
+  /**
+   * `ledger-rows/row-2294` — an event in the asker's own calendar, and a draft
+   * in a mailbox they linked themselves (`./ai-connected`). The args are what
+   * the preview draws; the executor checks them again and reads the calendar
+   * and the mailbox as the person's own, whatever the body names.
+   */
+  | {
+      tool: 'create_calendar_event'
+      args: CalendarEventArgs
+      humanLabel: string
+    }
+  | {
+      tool: 'draft_email'
+      args: EmailDraftArgs
+      humanLabel: string
+    }
 
 export type CommandSearchResult = {
   query: string
@@ -144,6 +179,8 @@ export type CommandPlan = {
   readOnlyResults: CommandSearchResult[]
   /** Human-readable notes about tool calls that could not be turned into actions. */
   warnings: string[]
+  /** `ledger-rows/row-2294` — what searching the asker's own connected apps found, read-only. */
+  connectedResults: ConnectedSearchResult[]
 }
 
 export type CommandActionResult = {
@@ -164,12 +201,22 @@ export type CommandActionResult = {
    * `create_list` / `create_folder`, and carrying the id the database returned.
    */
   container?: { kind: 'list' | 'folder'; id: string; name: string; path: string; spaceId: string }
+  /**
+   * `ledger-rows/row-2294` — what the connected app now holds: the event in the
+   * asker's calendar, or the draft in their mailbox, by the id the provider
+   * gave back. Present only on a `succeeded` connected-app action.
+   */
+  external?: { kind: 'event' | 'draft'; provider: string; id: string; where: string }
 }
 
 export type CommandExecuteResult = { results: CommandActionResult[] }
 
-/** One tool call collected from the model: name + parsed input object. */
-export type ToolCall = { name: string; input: Record<string, unknown> }
+/**
+ * One tool call collected from the model: name + parsed input object, and —
+ * for a read the service answered during the turn (`search_connected_apps`) —
+ * what it answered, so the plan shows what the model was shown.
+ */
+export type ToolCall = { name: string; input: Record<string, unknown>; result?: unknown }
 
 /**
  * The bounded tool set exposed to the model. Only `search_tasks` is read-only;
@@ -272,6 +319,9 @@ export const COMMAND_TOOLS: Anthropic.Messages.Tool[] = [
   // `./ai-containers` with the resolution and refusal vocabulary they share
   // with the chat surface, which gets the same two tools.
   ...CONTAINER_TOOLS,
+  // `ledger-rows/row-2294` — an event in the asker's calendar, a draft in their
+  // mailbox, and a search of their own connected apps (`./ai-connected`).
+  ...CONNECTED_TOOLS,
 ]
 
 function normalize(value: unknown): string {
@@ -373,7 +423,7 @@ function alreadySaysNothingHappened(narrative: string): boolean {
   return /\bno changes\b|\bnothing (?:was |has been )?changed\b|\bdid ?n[o']t (?:make|change)\b/i.test(narrative)
 }
 
-function buildSummary(actions: PlanAction[], readOnly: CommandSearchResult[], narrative?: string): string {
+function buildSummary(actions: PlanAction[], readOnly: CommandSearchResult[], narrative?: string, connected: ConnectedSearchResult[] = []): string {
   const told = narrative?.trim()
 
   /*
@@ -389,13 +439,17 @@ function buildSummary(actions: PlanAction[], readOnly: CommandSearchResult[], na
    * leads and the model's account follows as explanation. The narrative is kept
    * rather than discarded because WHY it could not act is the useful half.
    */
-  if (actions.length === 0 && readOnly.length === 0) {
+  if (actions.length === 0 && readOnly.length === 0 && connected.length === 0) {
     if (!told) return NO_CHANGES_MADE
     return alreadySaysNothingHappened(told) ? told : `${NO_CHANGES_MADE} ${told}`
   }
 
   if (told) return told
   if (actions.length === 0) {
+    if (connected.length) {
+      const found = connected.reduce((n, r) => n + r.hits.length, 0)
+      return `Found ${found} result${found === 1 ? '' : 's'} in your connected apps. No changes were proposed.`
+    }
     return readOnly.length
       ? 'Found matching tasks. No changes were proposed.'
       : `${NO_CHANGES_MADE} Nothing in this request could be turned into a change.`
@@ -410,6 +464,8 @@ function buildSummary(actions: PlanAction[], readOnly: CommandSearchResult[], na
     bulk_reschedule: 'bulk reschedule',
     create_list: 'list creation',
     create_folder: 'folder creation',
+    create_calendar_event: 'calendar event',
+    draft_email: 'email draft',
   }
   const parts = [...counts.entries()].map(([tool, n]) => `${n} ${labels[tool]}${n > 1 ? 's' : ''}`)
   return `Proposed ${actions.length} change${actions.length > 1 ? 's' : ''}: ${parts.join(', ')}.`
@@ -429,6 +485,7 @@ export function planFromToolCalls(
   const actions: PlanAction[] = []
   const readOnlyResults: CommandSearchResult[] = []
   const warnings: string[] = []
+  const connectedResults: ConnectedSearchResult[] = []
   const taskById = new Map(ctx.tasks.map((t) => [t.id, t]))
   const listById = new Map(ctx.lists.map((l) => [l.id, l]))
 
@@ -622,10 +679,42 @@ export function planFromToolCalls(
         }
         break
       }
+      /*
+       * `ledger-rows/row-2294` — the connected apps. The two that write are
+       * planned as the task tools are, and refused in words where the asker has
+       * nothing connected to write into; the search was answered during the
+       * turn, and its answer rides on the call.
+       */
+      case 'create_calendar_event':
+      case 'draft_email': {
+        const planned =
+          call.name === 'create_calendar_event'
+            ? planCalendarEvent(input, ctx.workspaceId ?? '', ctx.connected)
+            : planEmailDraft(input, ctx.workspaceId ?? '', ctx.connected)
+        if ('warning' in planned) warnings.push(planned.warning)
+        else actions.push(planned.action)
+        break
+      }
+      case CONNECTED_SEARCH_TOOL: {
+        const found = connectedSearchOf(call.result)
+        if (!found) {
+          warnings.push('Skipped a search of your connected apps: it was not answered.')
+          break
+        }
+        if (found.refusal) warnings.push(`Did not search your connected apps: ${found.refusal}.`)
+        else connectedResults.push(found)
+        break
+      }
       default:
         warnings.push(`Ignored an unsupported tool: ${call.name}`)
     }
   }
 
-  return { summary: buildSummary(actions, readOnlyResults, narrative), actions, readOnlyResults, warnings }
+  return {
+    summary: buildSummary(actions, readOnlyResults, narrative, connectedResults),
+    actions,
+    readOnlyResults,
+    warnings,
+    connectedResults,
+  }
 }

@@ -37,17 +37,24 @@
  * frame's category names and counted in runs, and no string anywhere renames
  * one to the other.
  *
- * ── TWO CATEGORIES RUNDESK CANNOT FILL, SAID OUT LOUD ──────────────────────
+ * ── THE TWO CATEGORIES RUNDESK COULD NOT FILL, AND NOW DOES ────────────────
  *
- * `externalActions` and `externalSearches` have no contributing feature and
- * no code path that could produce one: every tool in `COMMAND_TOOLS` acts on this
- * product's own rows — §V2-S16 added `create_list` / `create_folder` to it and
- * neither reaches a connected app, so the reason below is re-checked rather
- * than assumed and still holds. A tile that can only ever render 0 is
- * indistinguishable from a true zero on screen — this audit's "confident zero"
- * — so those two carry `supported: false` and the surface prints the reason
- * instead of a number. A count of zero is a fact about your workspace; "not
- * available" is a fact about the product, and they must not look the same.
+ * `externalActions` and `externalSearches` had no contributing feature and no
+ * code path that could produce one: every tool in `COMMAND_TOOLS` acted on this
+ * product's own rows. A tile that can only ever render 0 is indistinguishable
+ * from a true zero on screen — this audit's "confident zero" — so the two
+ * carried `supported: false` and the surface printed the reason instead of a
+ * number. A count of zero is a fact about your workspace; "not available" is a
+ * fact about the product, and they must not look the same.
+ *
+ * `ledger-rows/row-2294` gave the command path three tools that reach the
+ * asker's own connected apps (`./ai-connected`): an event in their calendar, a
+ * draft in their mailbox, and a search of their Drive, Gmail and SharePoint. A
+ * command turn that reaches for one is filed under `command.connected_action`
+ * or `command.connected_search` (`commandUsageFeature`), so both tiles count
+ * runs now, and neither is marked unsupported. `UNSUPPORTED_CATEGORIES` stays,
+ * empty, with its reason-key plumbing: a category the product cannot fill again
+ * is said the same way.
  */
 
 /** The eight buckets frames `18:53`–`18:59` show, in the order they are drawn. */
@@ -71,10 +78,7 @@ export type AiCategory = (typeof AI_CATEGORIES)[number]
  * locales and an English string returned by the API appears untranslated in
  * three of them.
  */
-export const UNSUPPORTED_CATEGORIES: Readonly<Record<string, string>> = {
-  externalActions: 'aiValue.reasonNoConnectedAppActions',
-  externalSearches: 'aiValue.reasonNoConnectedAppSearch',
-}
+export const UNSUPPORTED_CATEGORIES: Readonly<Record<string, string>> = {}
 
 export function isSupportedCategory(c: AiCategory): boolean {
   return !(c in UNSUPPORTED_CATEGORIES)
@@ -93,10 +97,12 @@ export function isSupportedCategory(c: AiCategory): boolean {
  * The judgement calls, so the next reader can disagree with the reasoning
  * rather than guess at it:
  *
- *   · `command` is the tool-calling path, and every one of its six tools
- *     (`create_task`, `set_task_status`, `reschedule_task`, `assign_task`,
- *     `bulk_reschedule`, `search_tasks`) acts on tasks — so it is `tasks`, not
- *     a category of its own.
+ *   · `command` is the tool-calling path, and its task tools (`create_task`,
+ *     `set_task_status`, `reschedule_task`, `assign_task`, `bulk_reschedule`,
+ *     `search_tasks`) act on tasks — so it is `tasks`, not a category of its
+ *     own. A turn that reached for the asker's connected apps is filed apart
+ *     (`commandUsageFeature`): `command.connected_action` for an event or a
+ *     draft, `command.connected_search` for a search of them.
  *   · `workload.balance` and `automation.suggest` propose changes to tasks and
  *     to the rules that move tasks; they are `tasks` for the same reason.
  *   · `meeting.notes` and `meeting.transcript` produce a written artefact that
@@ -149,6 +155,10 @@ export const FEATURE_CATEGORY: Readonly<Record<string, AiCategory>> = {
   'help.answer':            'assets',
   'meetings.ask':           'assets',
   'skill.mine':             'assets',
+
+  // External app actions and searches — the asker's own connected apps (`ledger-rows/row-2294`)
+  'command.connected_action': 'externalActions',
+  'command.connected_search': 'externalSearches',
 }
 
 /**

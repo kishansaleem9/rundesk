@@ -4,6 +4,8 @@ import { DRIVE_SEARCH_SCOPE } from '../../search/drive-scope'
 import { GMAIL_SEARCH_SCOPE, SHAREPOINT_SEARCH_SCOPE } from '../../search/sources'
 /** Gmail's consent to send as the mailbox; reading its answers is `GMAIL_SEARCH_SCOPE`'s read-only. */
 const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send'
+/** And to leave a draft in it for its owner, which the AI does when it is asked to (`ledger-rows/row-2294`). */
+const GMAIL_DRAFT_SCOPE = 'https://www.googleapis.com/auth/gmail.compose'
 import { ConfigService } from '@nestjs/config'
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import { createHmac, timingSafeEqual } from 'node:crypto'
@@ -916,7 +918,7 @@ export class IntegrationConnectionsService {
     const googleScopes: Record<'gcal' | 'google-drive' | 'gmail', string> = {
       gcal: 'https://www.googleapis.com/auth/calendar.events',
       'google-drive': DRIVE_SEARCH_SCOPE,
-      gmail: purpose === 'email' ? `${GMAIL_SEND_SCOPE} ${GMAIL_SEARCH_SCOPE}` : GMAIL_SEARCH_SCOPE,
+      gmail: purpose === 'email' ? `${GMAIL_SEND_SCOPE} ${GMAIL_DRAFT_SCOPE} ${GMAIL_SEARCH_SCOPE}` : GMAIL_SEARCH_SCOPE,
     }
     const scopes = ['openid', 'email', 'profile', googleScopes[provider]]
 
