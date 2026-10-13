@@ -558,5 +558,9 @@ try {
   await sql?.end?.({ timeout: 2 }).catch?.(() => {})
 }
 
-console.log(`\n${passed} passed, ${failed} failed (${passed + failed} of ${EXPECTED_CHECKS} checks ran)`)
+console.log(`\n${passed} passed, ${failed} failed`)
+// Said only when it is so, as every suite says it: the break runner reads this line as a short run.
+if (passed + failed !== EXPECTED_CHECKS) {
+  console.log(`\n✗ ${passed + failed} of ${EXPECTED_CHECKS} checks ran — this run stopped early, so "0 failed" describes the part it reached.`)
+}
 if (failed > 0 || passed + failed !== EXPECTED_CHECKS) process.exitCode = 1
