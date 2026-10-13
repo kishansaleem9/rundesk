@@ -7,7 +7,7 @@ import { PUBLIC_ROUTE_LIMITS, RateLimit, RateLimitGuard } from '../../common/gua
 import { FeatureFlag } from '../../common/decorators/feature-flag.decorator'
 import { FLAGS } from '@rundesk/feature-flags'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { DocsService, DOC_SCOPES, type DocScope } from './docs.service'
+import { DocsService, DOC_SCOPES, DOC_IMPORT_ACCEPTS, docFileKind, type DocScope } from './docs.service'
 import { unknownDocUpdateFields } from './doc-update-fields'
 import type { CurrentUserPayload } from '../tasks/types'
 
@@ -159,13 +159,13 @@ export class DocsController {
   /**
    * §V2-S13 frame `12:05` — Imports › **Document files**.
    *
-   * The file arrives as TEXT in the body rather than as multipart, because the
-   * formats this accepts are text by definition and the browser has already
-   * read them: `attachment-text.ts` settled which formats those are for the
-   * knowledge indexer — `text/*`, and explicitly NOT PDF, Word, Excel or
-   * PowerPoint, which "would require a heavy parser dependency". Accepting a
-   * `.docx` here and producing a doc full of XML would be worse than refusing
-   * it, so the extension is checked and the refusal says which formats work.
+   * Two ways in. A file uploaded to the store and named by its key
+   * (`fileKey`, `import-files.ts`) is read as what its name says: Word
+   * (.docx), HTML or Markdown and text — ClickUp's Docs import reads the first
+   * three (`commit-log/log-601eacc-2`), and a .docx is a zip that does not
+   * survive being sent as text. Markdown or text sent AS TEXT (`markdown`) is
+   * read as it always was. A name of any other kind is refused in the words
+   * that say which kinds work.
    */
   @Post('workspaces/:workspaceId/docs/import')
   // WorkspaceMemberGuard, exactly as the `create` endpoint above carries it.
@@ -179,12 +179,15 @@ export class DocsController {
   importDoc(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { fileName?: string; markdown: string; spaceId?: string | null },
+    @Body() body: { fileName?: string; markdown?: string; fileKey?: string; spaceId?: string | null },
   ) {
     const name = body?.fileName ?? ''
+    if (body?.fileKey !== undefined) {
+      return this.docs.importDocFile(workspaceId, user.id, { fileKey: body.fileKey, fileName: name, spaceId: body?.spaceId ?? null })
+    }
     if (name && !/\.(md|markdown|txt)$/i.test(name)) {
       throw new BadRequestException(
-        `Rundesk imports Markdown and plain text (.md, .markdown, .txt). "${name}" is not one of those.`,
+        `Markdown and plain text are sent as text; ${docFileKind(name) ? 'upload this file and send its key' : `"${name}" is none of the kinds read`}. ${DOC_IMPORT_ACCEPTS}`,
       )
     }
     return this.docs.importDocFromMarkdown(workspaceId, user.id, {
@@ -192,6 +195,21 @@ export class DocsController {
       markdown: body?.markdown ?? '',
       spaceId: body?.spaceId ?? null,
     })
+  }
+
+  /**
+   * Imports › **Confluence**: a space's HTML export, uploaded to the store
+   * (`import-files.ts`), made into one Doc for the space with its pages inside
+   * it (`DocsService.importConfluence`, `commit-log/log-601eacc-2`).
+   */
+  @Post('workspaces/:workspaceId/docs/import/confluence')
+  @UseGuards(WorkspaceMemberGuard)
+  importConfluence(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { fileKey?: string; spaceId?: string | null },
+  ) {
+    return this.docs.importConfluence(workspaceId, user.id, { fileKey: body?.fileKey, spaceId: body?.spaceId ?? null })
   }
 
   @Patch('docs/:docId')

@@ -7,11 +7,13 @@ import { DatabaseModule } from '../../../common/database/database.module'
 import { StorageModule } from '../../../common/storage/storage.module'
 import { WorkspaceMemberGuard } from '../../auth/guards/workspace-member.guard'
 import { CustomRolesModule } from '../../custom-roles/custom-roles.module'
+import { ImportFilesModule } from './import-files.module'
 
 @Module({
   // StorageModule (R2Service) is global, but imported explicitly so the ClickUp
   // API enrichment path can re-upload attachment bytes even in isolated wiring.
-  imports: [DatabaseModule, StorageModule, CustomRolesModule],
+  // ImportFilesModule: a workbook is uploaded to the store and read from it (`import-files.ts`).
+  imports: [DatabaseModule, StorageModule, CustomRolesModule, ImportFilesModule],
   // §V2-S13 frame `12:08` — the generic spreadsheet importer rides in the same
   // module because it shares the job table, the poller and the progress shape.
   controllers: [ClickUpImportController, SpreadsheetImportController],

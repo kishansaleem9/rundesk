@@ -92,6 +92,13 @@ export const chatMessages = pgTable('chat_messages', {
    */
   callId:          uuid('call_id').references(() => calls.id, { onDelete: 'set null' }),
   body:            text('body').notNull(),
+  /**
+   * The name a message imported from Slack was written under, when its author
+   * is nobody in this workspace (`commit-log/log-601eacc-2`): kept under the
+   * person who imported it (`authorId`), and drawn under this name. Null for
+   * every message written here.
+   */
+  importedAuthor:  text('imported_author'),
   mentions:        jsonb('mentions').$type<Array<{ userId: string }>>(),
   editedAt:        timestamp('edited_at', { withTimezone: true }),
   pinnedAt:        timestamp('pinned_at', { withTimezone: true }),

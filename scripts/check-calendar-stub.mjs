@@ -51,7 +51,12 @@ const chk = (cond, good, bad) => {
 const PROBE = `
 import { readGoogle, readGraph, writeEvent, deleteEvent, CalendarRefused } from './src/modules/calendar-sync/calendar-events'
 import { draftInMailbox } from './src/modules/email-accounts/mailbox.client'
+import { BasecampClient, exchangeBasecampCode, basecampIdentity, refreshBasecampToken } from './src/modules/integrations/basecamp-import/basecamp-api'
 const BASE = 'http://127.0.0.1:${PORT}'
+process.env.BASECAMP_LAUNCHPAD_URL = BASE + '/basecamp/launchpad'
+process.env.BASECAMP_API_ORIGIN = BASE
+process.env.BASECAMP_CLIENT_ID = 'probe'
+process.env.BASECAMP_CLIENT_SECRET = 'probe-secret'
 process.env.GOOGLE_CALENDAR_API_URL = BASE + '/google/calendar/v3'
 process.env.MS_GRAPH_API_URL = BASE + '/graph/v1.0'
 process.env.GMAIL_API_URL = BASE + '/gmail/v1'
@@ -138,6 +143,41 @@ async function main() {
     let after = 'read'
     try { await readGoogle('g', 'primary', 'acc', from, to) } catch (err) { after = err instanceof CalendarRefused ? 'refused' : 'failed' }
     return { answers, after }
+  })
+  // Basecamp, signed in to and read for its import (\`commit-log/log-601eacc-2\`), by the importer's own client.
+  await step(out, 'basecamp', async () => {
+    await control('/__control/basecamp', { token: 'bc', refreshToken: 'bc-refresh', name: 'Ana Ruiz', email: 'ana@x.test', accounts: [{ id: '44', name: 'Studio', projects: [
+      { id: 1, name: 'Site', lists: [
+        { id: 10, name: 'Launch', todos: [
+          ...Array.from({ length: 16 }, (_, i) => ({ id: 100 + i, content: 'Open ' + i })),
+          { id: 200, content: 'Done one', completed: true },
+          { id: 201, content: 'Done two', completed: true, comments: [{ content: '<div>ok</div>', created_at: '2026-10-01T00:00:00Z', creator: { name: 'Sam', email_address: 'sam@x.test' } }] },
+        ], groups: [{ id: 11, name: 'Review', todos: [{ id: 300, content: 'In review' }] }] },
+      ] },
+      { id: 2, name: 'Off', todos: false },
+    ] }] })
+    await control('/__control/code', { code: 'bc-code', accessToken: 'bc', provider: 'basecamp' })
+    const token = await exchangeBasecampCode('bc-code', 'http://api.test/cb')
+    let reused = 'refused'
+    try { await exchangeBasecampCode('bc-code', 'http://api.test/cb'); reused = 'taken' } catch { reused = 'refused' }
+    let stranger = 'refused'
+    try { await exchangeBasecampCode('nobody-code', 'http://api.test/cb'); stranger = 'taken' } catch { stranger = 'refused' }
+    const who = await basecampIdentity(token.accessToken)
+    const client = new BasecampClient(token.accessToken)
+    const projects = await client.projects(who.accounts[0])
+    const lists = await client.todolists(projects[0])
+    const todos = await client.todos(lists[0].todos_url!)
+    const groups = await client.groups(lists[0])
+    const grouped = await client.todos(groups[0].todos_url!)
+    const done = todos.filter((t) => t.completed)
+    const comments = await client.comments(done.find((t) => t.content === 'Done two')!)
+    const off = await client.todolists(projects[1])
+    const fresh = await refreshBasecampToken('bc-refresh', 'http://api.test/cb')
+    return {
+      reused, stranger, name: who.name, accounts: who.accounts.length, projects: projects.map((p) => p.name),
+      lists: lists.map((l) => l.name), todos: todos.length, done: done.map((t) => t.content), grouped: grouped.map((t) => t.content),
+      comments: comments.map((c) => c.creator?.name), off: off.length, refreshed: fresh.accessToken === 'bc',
+    }
   })
   console.log('RESULT ' + JSON.stringify(out))
 }
@@ -237,6 +277,14 @@ if (out.none !== undefined) {
     `refreshed ${JSON.stringify(out.refresh)}`,
   )
   chk(
+    same(out.basecamp, {
+      reused: 'refused', stranger: 'refused', name: 'Ana Ruiz', accounts: 1, projects: ['Site', 'Off'], lists: ['Launch'],
+      todos: 18, done: ['Done one', 'Done two'], grouped: ['In review'], comments: ['Sam'], off: 0, refreshed: true,
+    }),
+    'Basecamp’s Launchpad exchanges a staged code once and no other, names the grant’s person and accounts and refreshes it; its API lists a project’s to-do lists, every page of a list’s eighteen to-dos — sixteen open over two pages — with the done ones asked apart, a group’s to-dos and a to-do’s comments, and no lists where the to-dos are off',
+    `read ${JSON.stringify(out.basecamp)}`,
+  )
+  chk(
     same(out.controls, { answers: ['failed', 'failed', 'read'], after: 'refused' }),
     'a staged failure answers as many calls as it was asked to, and a reset forgets the calendar',
     `answered ${JSON.stringify(out.controls)}`,
@@ -261,6 +309,9 @@ if (process.argv.includes('--mutate')) {
     ['a staged failure never runs out', 'cal.fail.left -= 1\n', ''],
     ['a write forgets the query it came with', 'query: Object.fromEntries(url.searchParams), ', ''],
     ['a Gmail draft is kept as sent', "direction: 'sent', isDraft: true, at: Date.now() })\n      return json(res, 200, { id: draftId", "direction: 'sent', isDraft: false, at: Date.now() })\n      return json(res, 200, { id: draftId"],
+    ['Basecamp never says there is another page', 'headers.link = `<${following.toString()}>; rel="next"`', ''],
+    ['Basecamp takes the same code twice', "codes.delete(q.get('code'))\n", "codes.delete('never')\n"],
+    ['Basecamp lists the done to-dos with the open ones', ".filter((t) => (t.completed === true) === done)", ".filter(() => true)"],
   ]
   console.log('\n▶ and each mutation of the stub reddens a case')
   for (const [label, from, to] of MUTATIONS) {

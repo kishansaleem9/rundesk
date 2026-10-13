@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Button, Card, Input, Progress, RadioGroup, RadioGroupItem, Badge, Skeleton } from '@rundesk/ui'
-import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Copy, Info, KeyRound, Table2, Ban } from 'lucide-react'
+import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Copy, Info, KeyRound, Table2, Ban, BookOpen, MessagesSquare, Tent } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import { usePermissions } from '../hooks/use-permissions'
@@ -14,12 +14,14 @@ import {
   fetchSheetSources,
   previewSheet,
   startSheetImport,
+  uploadImportFile,
   type ColumnMapping,
   type SheetField,
   type SheetJob,
   type SheetPreview,
 } from '../lib/imports-api'
-import { createPickTurns, isSheetFile } from '../lib/sheet-file'
+import { createPickTurns, sheetFileKind } from '../lib/sheet-file'
+import { BasecampImportPanel, ConfluenceImportPanel, SlackImportPanel } from './import-panels'
 
 type ConflictStrategy = 'skip' | 'create' | 'merge'
 
@@ -66,7 +68,8 @@ type Job = {
   result: ImportSummary | null
 }
 
-type ImportTab = 'clickup' | 'sheet' | 'doc'
+type ImportTab = 'clickup' | 'sheet' | 'doc' | 'confluence' | 'basecamp' | 'slack'
+const IMPORT_TABS: ImportTab[] = ['sheet', 'doc', 'confluence', 'basecamp', 'slack', 'clickup']
 
 /**
  * §V2-S13 frame `12:08` — Create › **Imports** ›.
@@ -84,7 +87,13 @@ type ImportTab = 'clickup' | 'sheet' | 'doc'
  */
 export function ImportPage() {
   const { t } = useTranslation()
-  const [tab, setTab] = useState<ImportTab>('sheet')
+  // A tab named in the address opens on it: Basecamp's sign-in comes back to `?tab=basecamp`.
+  const [landing] = useState(() => {
+    const q = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search)
+    const named = q.get('tab') as ImportTab | null
+    return { tab: named && IMPORT_TABS.includes(named) ? named : null, error: q.get('importError') }
+  })
+  const [tab, setTab] = useState<ImportTab>(landing.tab ?? 'sheet')
   const { workspaceId } = useParams({ from: '/app/$workspaceId/import' })
   // Importing a spreadsheet or a ClickUp export is `workspace.import`'s, an admin's by default
   // (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`); documents are anyone's.
@@ -125,6 +134,31 @@ export function ImportPage() {
           icon={<FileText className="h-4 w-4" />}
           label={t('import.tabDoc')}
         />
+        {/*
+          The frame's Confluence, Basecamp and Slack rows (`commit-log/log-601eacc-2`):
+          each the importer ClickUp has for it, not a sentence saying why not.
+        */}
+        <TabButton
+          testid="import-tab-confluence"
+          active={tab === 'confluence'}
+          onClick={() => setTab('confluence')}
+          icon={<BookOpen className="h-4 w-4" />}
+          label="Confluence"
+        />
+        <TabButton
+          testid="import-tab-basecamp"
+          active={tab === 'basecamp'}
+          onClick={() => setTab('basecamp')}
+          icon={<Tent className="h-4 w-4" />}
+          label="Basecamp"
+        />
+        <TabButton
+          testid="import-tab-slack"
+          active={tab === 'slack'}
+          onClick={() => setTab('slack')}
+          icon={<MessagesSquare className="h-4 w-4" />}
+          label="Slack"
+        />
         <TabButton
           testid="import-tab-clickup"
           active={tab === 'clickup'}
@@ -136,6 +170,8 @@ export function ImportPage() {
 
       {tab === 'doc' ? (
         <DocImportPanel />
+      ) : tab === 'confluence' ? (
+        <ConfluenceImportPanel />
       ) : guest ? (
         <p className="rounded-md border border-border/60 bg-card/40 p-4 text-sm text-muted-foreground" data-testid="import-not-for-guests">
           {t('import.guestsCannot')}
@@ -152,6 +188,10 @@ export function ImportPage() {
         </p>
       ) : tab === 'sheet' ? (
         <SpreadsheetImportPanel />
+      ) : tab === 'basecamp' ? (
+        <BasecampImportPanel signInError={landing.tab === 'basecamp' ? landing.error : null} />
+      ) : tab === 'slack' ? (
+        <SlackImportPanel />
       ) : (
         <ClickUpImportPanel />
       )}
@@ -217,6 +257,18 @@ function DocImportPanel() {
 
   const upload = useMutation({
     mutationFn: async (file: File) => {
+      /*
+       * A Word document is a zip and HTML can be large: both go up as the file
+       * itself and are named by their key (`commit-log/log-601eacc-2`).
+       * Markdown and plain text are sent as text, as they always were.
+       */
+      if (/\.(docx|html?|xhtml)$/i.test(file.name)) {
+        const fileKey = await uploadImportFile(workspaceId, file, 'doc')
+        return api<{ id: string; title: string }>(`/workspaces/${workspaceId}/docs/import`, {
+          method: 'POST',
+          body: { fileName: file.name, fileKey },
+        })
+      }
       const markdown = await file.text()
       return api<{ id: string; title: string }>(`/workspaces/${workspaceId}/docs/import`, {
         method: 'POST',
@@ -247,7 +299,7 @@ function DocImportPanel() {
 
         <input
           type="file"
-          accept=".md,.markdown,.txt,text/markdown,text/plain"
+          accept=".docx,.html,.htm,.md,.markdown,.txt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/html,text/markdown,text/plain"
           className="hidden"
           id="import-doc-file"
           data-testid="import-doc-file"
@@ -319,6 +371,11 @@ function SpreadsheetImportPanel() {
 
   const [preset, setPreset] = useState('generic')
   const [content, setContent] = useState('')
+  // A workbook or a JSON list, uploaded and named by its key (`ledger-rows/row-816`); null for text.
+  const [fileKey, setFileKey] = useState<string | null>(null)
+  const [fileSize, setFileSize] = useState(0)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
   const [filename, setFilename] = useState('')
   const [mapping, setMapping] = useState<ColumnMapping | null>(null)
   const [preview, setPreview] = useState<SheetPreview | null>(null)
@@ -336,10 +393,12 @@ function SpreadsheetImportPanel() {
     queryFn: () => fetchSheetSources(workspaceId),
   })
 
+  // What the server reads: the uploaded file, or the text the page read.
+  const source = fileKey ? { fileKey, fileName: filename } : { content }
   const previewMut = useMutation({
     mutationFn: (override?: { preset?: string; mapping?: ColumnMapping }) =>
       previewSheet(workspaceId, {
-        content,
+        ...source,
         preset: override?.preset ?? preset,
         mapping: override?.mapping ?? mapping ?? undefined,
         defaultListName: defaultListName.trim() || undefined,
@@ -347,13 +406,15 @@ function SpreadsheetImportPanel() {
     onSuccess: (data) => {
       setPreview(data)
       setMapping(data.mapping)
+      // A Monday board comes in as ClickUp brings one: under its own name, unless one was typed.
+      if (data.layout?.kind === 'board' && !projectName.trim()) setProjectName(data.layout.board)
     },
   })
 
   const importMut = useMutation({
     mutationFn: () =>
       startSheetImport(workspaceId, {
-        content,
+        ...source,
         preset,
         mapping: mapping ?? undefined,
         targetProjectName: projectName.trim() || undefined,
@@ -386,42 +447,64 @@ function SpreadsheetImportPanel() {
     setPreview(null)
     setMapping(null)
     setJobId(null)
-  }, [content])
+  }, [content, fileKey])
 
   const fieldLabel = (f: SheetField) =>
     t(`import.field.${f}` as Parameters<typeof t>[0]) as string
 
-  const accepted = catalogue.data?.acceptedExtensions ?? ['.csv', '.tsv', '.txt']
+  const accepted = catalogue.data?.acceptedExtensions ?? ['.csv', '.tsv', '.txt', '.xlsx', '.xls', '.json']
   const activeSource = useMemo(
     () => catalogue.data?.sources.find((s) => s.key === preset),
     [catalogue.data, preset],
   )
 
   /*
-   * A FILE THAT IS NOT DELIMITED TEXT IS REFUSED BEFORE IT IS READ
-   * (`found-5-oct/xlsx-read-as-text`): by its name and by its first bytes,
-   * in the words this card already shows under the picker. It was read with
-   * `readAsText` whatever it was — an .xlsx chosen through "All files" or
-   * dropped had its zip's bytes drawn as a column, offered for import, and
-   * failed. Refused, nothing of it is kept: no name, no content, no preview —
-   * and no earlier file's read that lands later either (`createPickTurns`).
+   * A FILE IS READ AS WHAT IT IS (`ledger-rows/row-816`), asked by its name
+   * and its first bytes before anything is read (`sheetFileKind`): delimited
+   * text is read by the page and sent as text, as it always was; a workbook —
+   * whatever it is called — or a JSON list is uploaded as it is and read by the
+   * server, since a workbook's bytes do not survive being read as text
+   * (`found-5-oct/xlsx-read-as-text`: read so, its zip was drawn as a column
+   * and its run failed). A file of no kind the import reads is refused in the
+   * words under the picker, and nothing of it is kept — nor any earlier file's
+   * read or upload that lands later (`createPickTurns`).
    */
   async function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const input = e.target
     const file = input.files?.[0]
     if (!file) return
     const turn = pickTurns.next()
-    const isSheet = await isSheetFile(file, accepted)
+    const kind = await sheetFileKind(file, accepted)
     if (!pickTurns.isLatest(turn)) return
-    if (!isSheet) {
+    setUploadError(null)
+    // The last file's refusal is not this one's.
+    previewMut.reset()
+    if (!kind) {
       setNotText(true)
       setFilename('')
       setContent('')
+      setFileKey(null)
       input.value = ''
       return
     }
     setNotText(false)
     setFilename(file.name)
+    setFileSize(file.size)
+    if (kind === 'file') {
+      setContent('')
+      setFileKey(null)
+      setUploading(true)
+      try {
+        const key = await uploadImportFile(workspaceId, file, 'sheet')
+        if (pickTurns.isLatest(turn)) setFileKey(key)
+      } catch (err) {
+        if (pickTurns.isLatest(turn)) setUploadError(err instanceof Error ? err.message : String(err))
+      } finally {
+        if (pickTurns.isLatest(turn)) setUploading(false)
+      }
+      return
+    }
+    setFileKey(null)
     const reader = new FileReader()
     reader.onload = () => {
       if (pickTurns.isLatest(turn)) setContent(typeof reader.result === 'string' ? reader.result : '')
@@ -434,7 +517,7 @@ function SpreadsheetImportPanel() {
     // Re-derive the mapping from the new preset rather than keeping the old
     // one: a preset that did not change the columns would be a dead control.
     setMapping(null)
-    if (content) previewMut.mutate({ preset: key, mapping: undefined })
+    if (content || fileKey) previewMut.mutate({ preset: key, mapping: undefined })
   }
 
   function setColumn(header: string, field: SheetField) {
@@ -509,29 +592,43 @@ function SpreadsheetImportPanel() {
           className="block w-full text-sm file:mr-4 file:rounded file:border-0 file:bg-primary file:px-4 file:py-2 file:text-primary-foreground file:font-medium hover:file:bg-primary/90"
         />
         <p className="text-xs text-muted-foreground" data-testid="import-sheet-accepted">
-          {t('import.sheetAccepted', { list: accepted.join(' · ') })} {t('import.sheetNoXlsx')}
+          {t('import.sheetAccepted', { list: accepted.join(' · ') })}
         </p>
         {notText && (
           <div data-testid="import-sheet-not-text" role="alert">
-            <ErrorBox message={`${t('import.sheetAccepted', { list: accepted.join(' · ') })} ${t('import.sheetNoXlsx')}`} />
+            <ErrorBox message={t('import.sheetAccepted', { list: accepted.join(' · ') })} />
           </div>
         )}
         {filename && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="import-sheet-filename">
-            <FileText className="h-4 w-4" />
-            {t('import.fileInfo', { name: filename, size: (content.length / 1024).toFixed(1) })}
+          <div
+            className="flex items-center gap-2 text-sm text-muted-foreground"
+            data-testid="import-sheet-filename"
+            data-uploaded={fileKey ? 'true' : 'false'}
+          >
+            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+            {t('import.fileInfo', { name: filename, size: ((fileKey || uploading ? fileSize : content.length) / 1024).toFixed(1) })}
+          </div>
+        )}
+        {uploadError && (
+          <div data-testid="import-sheet-upload-error" role="alert">
+            <ErrorBox message={uploadError} />
           </div>
         )}
         <Button
           data-testid="import-sheet-preview"
           onClick={() => previewMut.mutate(undefined)}
-          disabled={!content || previewMut.isPending}
+          disabled={(!content && !fileKey) || uploading || previewMut.isPending}
           variant="secondary"
         >
           {previewMut.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
           {t('import.preview')}
         </Button>
-        {previewMut.isError && <ErrorBox message={(previewMut.error as Error).message} />}
+        {previewMut.isError && (
+          // The server's words: a workbook it could not read says why.
+          <div data-testid="import-sheet-preview-error" role="alert">
+            <ErrorBox message={(previewMut.error as Error).message} />
+          </div>
+        )}
       </Card>
 
       {/* Step 3 — the column mapping */}
@@ -541,6 +638,30 @@ function SpreadsheetImportPanel() {
             <CheckCircle2 className="h-4 w-4 text-emerald-500" />
             {t('import.sheetStep2')}
           </div>
+          {/* A workbook: which of its sheets was read — its first visible one. */}
+          {(preview.format === 'xlsx' || preview.format === 'xls') && (
+            <p className="text-xs text-muted-foreground" data-testid="import-sheet-read-from" data-format={preview.format} data-sheet={preview.sheetName ?? ''}>
+              {t('import.sheetReadFrom', { sheet: preview.sheetName ?? '' })}
+            </p>
+          )}
+          {/* A source's own export, read in its own layout (`readExportLayout`): what it held beyond its table. */}
+          {preview.layout?.kind === 'board' && (
+            <p
+              className="text-xs text-muted-foreground"
+              data-testid="import-sheet-layout"
+              data-kind="board"
+              data-board={preview.layout.board}
+              data-groups={preview.layout.groups.length}
+              data-left-out={preview.layout.leftOut}
+            >
+              {t('import.sheetBoard', { board: preview.layout.board, groups: preview.layout.groups.join(', '), leftOut: preview.layout.leftOut })}
+            </p>
+          )}
+          {preview.layout?.kind === 'keyed' && (
+            <p className="text-xs text-muted-foreground" data-testid="import-sheet-layout" data-kind="keyed" data-repeated={preview.layout.repeated}>
+              {t('import.sheetKeyed', { repeated: preview.layout.repeated })}
+            </p>
+          )}
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <Stat testid="import-sheet-total" label={t('import.totalRows')} value={preview.totalRows} />

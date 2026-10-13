@@ -136,6 +136,7 @@ describe('buildDropdownOptions + dupKey + mappers', () => {
   it('maps ClickUp status/priority', () => {
     assert.equal(mapStatus('Complete'), 'done')
     assert.equal(mapStatus('in progress'), 'in_progress')
+    assert.equal(mapStatus('Working on it'), 'in_progress', 'Monday’s in-progress status')
     assert.equal(mapPriority('Urgent'), 'urgent')
     assert.equal(mapPriority('2'), 'high')
   })

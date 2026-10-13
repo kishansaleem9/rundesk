@@ -978,9 +978,9 @@ jobs:
           # sets it: `clip-links` waits one window out to show the clip's link
           # still plays after it (`resume-defects/resume-7`).
           CLIP_PLAYBACK_URL_SECONDS: 10
-          # The calendars started above — the eight variables `lane_calendar_env`
+          # The calendars started above — the variables `lane_calendar_env`
           # exports: Google's and Graph's addresses, their token addresses,
-          # search's three federated sources, and Google's profile.
+          # search's three federated sources, Google's profile, and Basecamp's.
           GOOGLE_CALENDAR_API_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/google/calendar/v3
           MS_GRAPH_API_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/graph/v1.0
           GOOGLE_TOKEN_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/google/token
@@ -989,6 +989,12 @@ jobs:
           GMAIL_API_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/gmail/v1
           MICROSOFT_GRAPH_API_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/graph/v1.0
           GOOGLE_USERINFO_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/google/userinfo
+          # And Basecamp, signed in to for its import (`commit-log/log-601eacc-2`): Launchpad
+          # and the account API on the same stub, as `lane_calendar_env` sets them. Names, not keys.
+          BASECAMP_LAUNCHPAD_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/basecamp/launchpad
+          BASECAMP_API_ORIGIN: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}
+          BASECAMP_CLIENT_ID: stub-basecamp
+          BASECAMP_CLIENT_SECRET: stub-basecamp-secret
           # The photo library started above — the two variables `lane_media_env`
           # exports. Not a credential: the stub takes this one key.
           UNSPLASH_API_URL: http://127.0.0.1:${{ env.E2E_MEDIA_PORT }}/unsplash
@@ -2016,6 +2022,20 @@ jobs:
       - name: Document import
         timeout-minutes: 15
         run: node test/e2e/doc-import.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # Frame `12:08`'s other rows, as ClickUp imports them (`commit-log/log-601eacc-2`,
+      # `ledger-rows/row-816`): an Excel workbook as it is downloaded (.xlsx and .xls,
+      # written by LibreOffice) and a JSON list; a Word document and an HTML page into
+      # Docs; a Confluence space's HTML export into one Doc with its pages; a Slack
+      # export's public channels into Chat; Basecamp signed in to (the calendar stub
+      # plays Launchpad and the API), its projects into Spaces or Folders. Each is read
+      # back by SQL.
+      - name: The importers ClickUp has, for every row of the Imports menu
+        timeout-minutes: 15
+        run: node test/e2e/importers.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

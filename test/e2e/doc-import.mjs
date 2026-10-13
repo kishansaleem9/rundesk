@@ -30,10 +30,10 @@
  *   · a write must not land in a workspace you do not belong to, which
  *     succeeds quietly — no error, no failing check, no log line.
  *
- * A REFUSAL HAS TO SAY WHICH FORMATS WORK. `attachment-text.ts` already
- * recorded that binary documents need "a heavy parser dependency" and are out
- * of scope, so a `.docx` is refused — and "unsupported file" would tell the
- * person holding one nothing about what to do next.
+ * A REFUSAL HAS TO SAY WHICH FORMATS WORK. A Word document and an HTML page
+ * are read now, as ClickUp's Docs import reads them (`commit-log/log-601eacc-2`,
+ * checked by `importers.mjs`); a PDF is not, and "unsupported file" would tell
+ * the person holding one nothing about what to do next.
  *
  *   DATABASE_URL=postgres://…/rundesk_v1 node test/e2e/doc-import.mjs --api 3021 --dist apps/web/dist [--search 9301]
  */
@@ -352,9 +352,13 @@ try {
   )
 
   console.log('\n▶ what it refuses, and whether it says why')
-  const docxPath = path.join(tmpdir(), `${TAG}.docx`)
-  writeFileSync(docxPath, 'PK\u0003\u0004 not really a docx')
-  await page.getByTestId('import-doc-file').setInputFiles(docxPath, { timeout: 10_000 }).catch(() => {})
+  /*
+   * A Word document is read now (`commit-log/log-601eacc-2`, `importers.mjs`):
+   * what a document import refuses is a file of no kind it reads, a PDF.
+   */
+  const pdfPath = path.join(tmpdir(), `${TAG}.pdf`)
+  writeFileSync(pdfPath, '%PDF-1.7\n%not a document this reads\n')
+  await page.getByTestId('import-doc-file').setInputFiles(pdfPath, { timeout: 10_000 }).catch(() => {})
   const refused = await waitUntil(
     () => page.getByTestId('import-doc-error').isVisible().catch(() => false),
     { timeoutMs: 20_000 },
@@ -365,12 +369,12 @@ try {
   chk(
     refused && refusal.length > 0,
     'a format it cannot read is refused out loud',
-    `choosing a .docx reported ${refused ? JSON.stringify(refusal) : 'nothing at all'}`,
+    `choosing a .pdf reported ${refused ? JSON.stringify(refusal) : 'nothing at all'}`,
   )
   chk(
     /\.md\b/.test(refusal) || /markdown/i.test(refusal),
     'and the refusal names the formats that DO work, rather than only saying no',
-    `the refusal read ${JSON.stringify(refusal)} — "unsupported" tells somebody holding a .docx nothing`,
+    `the refusal read ${JSON.stringify(refusal)} — "unsupported" tells somebody holding a .pdf nothing`,
   )
 
   console.log('\n▶ and what it refuses at the API, where the browser cannot help')
@@ -389,7 +393,7 @@ try {
    * a legacy .xls's, sent as a .md, answered 500 — the database refused their
    * NULs — and told the person nothing they could act on.
    */
-  const DOC_ACCEPTED = 'Accepts .md, .markdown and .txt. Word, PDF and Excel are not read — Rundesk has no parser for them.'
+  const DOC_ACCEPTED = 'Accepts Word (.docx), HTML (.html, .htm), Markdown (.md, .markdown) and plain text (.txt).'
   const XLSX_BYTES = 'PK\u0003\u0004\u0014\u0000\u0006\u0000\u0008\u0000\u0000\u0000!\u0000[Content_Types].xml'
   const XLS_BYTES = '\u00d0\u00cf\u0011\u00e0\u00a1\u00b1\u001a\u00e1' + '\u0000'.repeat(16) + '>\u0000\u0003\u0000'
   const binaries = {}

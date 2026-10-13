@@ -45,6 +45,18 @@
  *           POST   /graph/v1.0/me/messages/:id/send            (the draft sent: 202, no body)
  *           GET    /graph/v1.0/me/messages                     ($filter=conversationId eq '…')
  *
+ * AND BASECAMP 3, FOR ITS IMPORT (`commit-log/log-601eacc-2`): Launchpad's sign-in and the
+ * account's API, as `basecamp-api.ts` asks them (BASECAMP_LAUNCHPAD_URL and BASECAMP_API_ORIGIN
+ * point here on a lane), each list paged fifteen at a time with Basecamp's `Link` header:
+ *   Launchpad POST /basecamp/launchpad/authorization/token     (type=web_server&code=…, or type=refresh)
+ *             GET  /basecamp/launchpad/authorization.json      (whose grant, and its accounts)
+ *   API       GET  /basecamp/api/:account/projects.json
+ *             GET  /basecamp/api/:account/buckets/:p/todosets/:p.json
+ *             GET  /basecamp/api/:account/buckets/:p/todosets/:p/todolists.json
+ *             GET  /basecamp/api/:account/buckets/:p/todolists/:l/todos.json        (completed=true: the done ones)
+ *             GET  /basecamp/api/:account/buckets/:p/todolists/:l/groups.json
+ *             GET  /basecamp/api/:account/buckets/:p/recordings/:t/comments.json
+ *
  * A CALENDAR IS A BEARER TOKEN. Each request's `Authorization: Bearer <token>`
  * names the calendar it reads and writes, and a token nobody seeded is refused
  * 401, as a revoked grant is. So two suites on one lane never see each other's
@@ -72,6 +84,12 @@
  *                                                          with `on: "write"`, only its sends and drafts, not the
  *                                                          reads a poll for answers makes between them
  *        (a consent's code is answered at `/microsoft/token` too, and `GET /graph/v1.0/me` after)
+ *   POST /__control/basecamp {token, refreshToken, name, email, accounts: [{id, name, projects: [{id, name,
+ *        description, purpose, lists: [{id, name, description, todos, groups: [{id, name, todos}]}]}]}]}
+ *        seed (replace) a Basecamp sign-in; a to-do is {id, content, description, completed, due_on,
+ *        starts_on, assignees: [{name, email_address}], comments: [{content, created_at, creator}]}.
+ *        Its code is staged with POST /__control/code {code, accessToken: token, provider: 'basecamp'}.
+ *   GET  /__control/basecamp?token=                      what was asked of it, path by path
  *   GET  /__control/version                              which source this process runs
  *
  * NOT FOR PRODUCTION. Binds loopback, and refuses to start without
@@ -318,12 +336,157 @@ const failed = (res, provider, status) =>
     ? json(res, status, { error: { code: status === 429 ? 'TooManyRequests' : 'ErrorInternalServerError', message: `the stub was asked to answer ${status}` } })
     : json(res, status, { error: { code: status, message: `the stub was asked to answer ${status}` } })
 
+// ── Basecamp 3 (`commit-log/log-601eacc-2`) ──────────────────────────────────
+
+/** token → { name, email, accounts, asked: [path], refreshToken }; refresh token → token. */
+const basecampGrants = new Map()
+const basecampRefreshes = new Map()
+const BC_PAGE = 15
+
+/** One page of a list, and the `Link` to the next when there is one. */
+function bcPage(res, url, rows) {
+  const page = Math.max(1, Number(url.searchParams.get('page') ?? 1))
+  const slice = rows.slice((page - 1) * BC_PAGE, page * BC_PAGE)
+  const headers = { 'content-type': 'application/json' }
+  if (page * BC_PAGE < rows.length) {
+    const following = new URL(url)
+    following.searchParams.set('page', String(page + 1))
+    headers.link = `<${following.toString()}>; rel="next"`
+  }
+  const body = JSON.stringify(slice)
+  res.writeHead(200, { ...headers, 'content-length': Buffer.byteLength(body) })
+  res.end(body)
+}
+
+async function basecamp(req, res, url) {
+  const path = url.pathname
+  const base = `http://127.0.0.1:${PORT}`
+  if (path === '/basecamp/launchpad/authorization/token' && req.method === 'POST') {
+    const q = url.searchParams
+    if (q.get('type') === 'refresh') {
+      const token = basecampRefreshes.get(q.get('refresh_token') ?? '')
+      if (!token) return json(res, 400, { error: 'invalid_grant' })
+      return json(res, 200, { access_token: token, expires_in: 1209600 })
+    }
+    const grant = codes.get(q.get('code') ?? '')
+    if (q.get('type') !== 'web_server' || !grant || grant.provider !== 'basecamp' || !basecampGrants.has(grant.accessToken)) {
+      return json(res, 400, { error: 'invalid_grant' })
+    }
+    codes.delete(q.get('code'))
+    const g = basecampGrants.get(grant.accessToken)
+    return json(res, 200, { access_token: grant.accessToken, refresh_token: g.refreshToken ?? undefined, expires_in: 1209600 })
+  }
+  const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1] ?? ''
+  const g = basecampGrants.get(bearer)
+  if (!g) return json(res, 401, { error: 'OAuth token is invalid' })
+  g.asked.push(`${req.method} ${path}${url.search}`)
+  if (path === '/basecamp/launchpad/authorization.json' && req.method === 'GET') {
+    const [first, ...last] = String(g.name ?? 'Basecamp Person').split(' ')
+    return json(res, 200, {
+      expires_at: new Date(Date.now() + 1209600000).toISOString(),
+      identity: { id: 9000001, first_name: first, last_name: last.join(' '), email_address: g.email ?? null },
+      accounts: (g.accounts ?? []).map((a) => ({ product: 'bc3', id: Number(a.id), name: a.name, href: `${base}/basecamp/api/${a.id}`, app_href: `https://3.basecamp.test/${a.id}` })),
+    })
+  }
+  const m = /^\/basecamp\/api\/([^/]+)\/(.+)$/.exec(path)
+  if (!m || req.method !== 'GET') return json(res, 404, { error: 'not found' })
+  const account = (g.accounts ?? []).find((a) => String(a.id) === m[1])
+  if (!account) return json(res, 404, { error: 'not found' })
+  const api = `${base}/basecamp/api/${account.id}`
+  const rest = m[2]
+  const project = (id) => (account.projects ?? []).find((p) => String(p.id) === String(id))
+  if (rest === 'projects.json') {
+    return bcPage(res, url, (account.projects ?? []).map((p) => ({
+      id: Number(p.id),
+      status: 'active',
+      name: p.name,
+      description: p.description ?? '',
+      purpose: p.purpose ?? 'topic',
+      dock: [
+        { id: Number(p.id) * 10 + 1, title: 'Message Board', name: 'message_board', enabled: true, url: `${api}/buckets/${p.id}/message_boards/${p.id}.json` },
+        { id: Number(p.id), title: 'To-dos', name: 'todoset', enabled: p.todos !== false, url: `${api}/buckets/${p.id}/todosets/${p.id}.json` },
+      ],
+    })))
+  }
+  let r = /^buckets\/([^/]+)\/todosets\/([^/]+)\.json$/.exec(rest)
+  if (r && project(r[1])) return json(res, 200, { id: Number(r[2]), todolists_url: `${api}/buckets/${r[1]}/todosets/${r[2]}/todolists.json` })
+  r = /^buckets\/([^/]+)\/todosets\/([^/]+)\/todolists\.json$/.exec(rest)
+  if (r && project(r[1])) {
+    return bcPage(res, url, (project(r[1]).lists ?? []).map((l) => ({
+      id: Number(l.id), title: l.name, name: l.name, description: l.description ?? '', type: 'Todolist',
+      todos_url: `${api}/buckets/${r[1]}/todolists/${l.id}/todos.json`,
+      groups_url: `${api}/buckets/${r[1]}/todolists/${l.id}/groups.json`,
+    })))
+  }
+  const listOf = (pid, lid) => {
+    for (const l of project(pid)?.lists ?? []) {
+      if (String(l.id) === String(lid)) return l
+      for (const gr of l.groups ?? []) if (String(gr.id) === String(lid)) return gr
+    }
+    return null
+  }
+  const todo = (pid, t) => ({
+    id: Number(t.id),
+    type: 'Todo',
+    title: t.content,
+    content: t.content,
+    description: t.description ?? '',
+    completed: t.completed === true,
+    completion: t.completed ? { created_at: t.completed_at ?? '2026-10-01T09:00:00Z' } : undefined,
+    due_on: t.due_on ?? null,
+    starts_on: t.starts_on ?? null,
+    assignees: (t.assignees ?? []).map((a, n) => ({ id: n + 1, name: a.name, email_address: a.email_address })),
+    comments_count: (t.comments ?? []).length,
+    comments_url: `${api}/buckets/${pid}/recordings/${t.id}/comments.json`,
+  })
+  r = /^buckets\/([^/]+)\/todolists\/([^/]+)\/todos\.json$/.exec(rest)
+  if (r) {
+    const l = listOf(r[1], r[2])
+    if (!l) return json(res, 404, { error: 'not found' })
+    const done = url.searchParams.get('completed') === 'true'
+    return bcPage(res, url, (l.todos ?? []).filter((t) => (t.completed === true) === done).map((t) => todo(r[1], t)))
+  }
+  r = /^buckets\/([^/]+)\/todolists\/([^/]+)\/groups\.json$/.exec(rest)
+  if (r) {
+    const l = listOf(r[1], r[2])
+    if (!l) return json(res, 404, { error: 'not found' })
+    return bcPage(res, url, (l.groups ?? []).map((gr) => ({
+      id: Number(gr.id), title: gr.name, name: gr.name, type: 'Todolist::Group',
+      todos_url: `${api}/buckets/${r[1]}/todolists/${gr.id}/todos.json`,
+    })))
+  }
+  r = /^buckets\/([^/]+)\/recordings\/([^/]+)\/comments\.json$/.exec(rest)
+  if (r) {
+    for (const l of project(r[1])?.lists ?? []) {
+      for (const t of [...(l.todos ?? []), ...(l.groups ?? []).flatMap((gr) => gr.todos ?? [])]) {
+        if (String(t.id) === r[2]) {
+          return bcPage(res, url, (t.comments ?? []).map((c, n) => ({ id: Number(t.id) * 100 + n, content: c.content, created_at: c.created_at, creator: c.creator })))
+        }
+      }
+    }
+    return json(res, 404, { error: 'not found' })
+  }
+  return json(res, 404, { error: 'not found' })
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`)
   const path = url.pathname
 
   // ── control ────────────────────────────────────────────────────────────────
   if (path === '/__control/version' && req.method === 'GET') return json(res, 200, { source: SOURCE })
+  if (path === '/__control/basecamp' && req.method === 'POST') {
+    const body = await readBody(req)
+    if (!body?.token || !Array.isArray(body.accounts)) return json(res, 400, { error: 'token and accounts are required' })
+    basecampGrants.set(body.token, { name: body.name, email: body.email, accounts: body.accounts, refreshToken: body.refreshToken ?? null, asked: [] })
+    if (body.refreshToken) basecampRefreshes.set(body.refreshToken, body.token)
+    return json(res, 200, { seeded: body.token })
+  }
+  if (path === '/__control/basecamp' && req.method === 'GET') {
+    const g = basecampGrants.get(url.searchParams.get('token') ?? '')
+    return g ? json(res, 200, { asked: g.asked }) : json(res, 404, { error: 'no Basecamp grant for that token' })
+  }
+  if (path.startsWith('/basecamp/')) return basecamp(req, res, url)
   if (path === '/__control/calendar' && req.method === 'POST') {
     const body = await readBody(req)
     if (!body?.token || !['gcal', 'outlook'].includes(body.provider)) {

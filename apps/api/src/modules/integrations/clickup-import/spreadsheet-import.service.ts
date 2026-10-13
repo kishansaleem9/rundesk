@@ -25,7 +25,7 @@
  * number with the reason and the offending column.
  */
 
-import { Injectable, Inject, BadRequestException, NotFoundException } from '@nestjs/common'
+import { Injectable, Inject, Optional, BadRequestException, NotFoundException } from '@nestjs/common'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import {
   spaces,
@@ -46,6 +46,9 @@ import { dupKey } from './clickup-csv.util'
 import { assertImportTarget } from './import-target'
 import { undoRun as undoImportRun, type RunMade } from './run-undo'
 import { IMPORT_ACCESS, MAY_NOT_BE_ASSIGNED, writtenFields, type Importer } from './import-access'
+import { ImportFilesService } from './import-files'
+import { readExportLayout, readSheetFile } from './sheet-file'
+import { WorkbookReadError } from './xlsx-read'
 import {
   ACCEPTED_SHEET_EXTENSIONS,
   DEFAULT_STATUSES,
@@ -66,6 +69,7 @@ import {
   type MappedRow,
   type RowRejection,
   type SheetDelimiter,
+  type SheetTable,
 } from './spreadsheet-import.util'
 
 /** What the writers below need of a handle: the database, or a transaction in it. */
@@ -97,7 +101,15 @@ export const CLICKUP_SOURCE = 'clickup_csv'
 const MAX_STORED_ROW_ERRORS = 200
 
 export type SheetImportDto = {
-  content: string
+  /** Delimited text, as the page reads a CSV, TSV or text file. */
+  content?: string
+  /**
+   * Or the file itself, uploaded to the store (`import-files.ts`): a workbook
+   * (.xlsx, .xls) or a JSON list, which do not survive being read as text
+   * (`ledger-rows/row-816`). Its name says what text in it is.
+   */
+  fileKey?: string
+  fileName?: string
   delimiter?: SheetDelimiter
   preset?: string
   /** Explicit header → field mapping. Omitted → the preset's auto-mapping. */
@@ -132,7 +144,10 @@ export type SheetImportSummary = {
 
 @Injectable()
 export class SpreadsheetImportService {
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private db: Db,
+    @Optional() private readonly files?: ImportFilesService,
+  ) {}
 
   /** What an import asks of its importer (`import-access.ts`): who may import, which tasks it may match, and merge into. */
   access = IMPORT_ACCESS
@@ -153,10 +168,10 @@ export class SpreadsheetImportService {
        */
       unsupported: UNSUPPORTED_SOURCES.map((u) => ({ key: u.key, label: u.label, reason: u.reason })),
       /*
-       * No XLSX parser ships in this repo and none was added for this row, so
-       * the UI says "save it as CSV" — and refuses an .xlsx put in anyway, by
-       * its name and by its first bytes, as preview and import refuse its
-       * content here (`assertDelimitedText`).
+       * ClickUp's six (`ledger-rows/row-816`). The page sends delimited text as
+       * text and uploads a workbook or a JSON list (`tableOf`); anything else
+       * it refuses by its name and its first bytes, in the words under its
+       * picker, as the server refuses it too.
        */
       acceptedExtensions: [...ACCEPTED_SHEET_EXTENSIONS],
     }
@@ -177,6 +192,32 @@ export class SpreadsheetImportService {
     if (headerHoldsNul(content)) throw new BadRequestException(NOT_DELIMITED_TEXT)
   }
 
+  /**
+   * THE SHEET, FROM WHICHEVER WAY IT CAME: delimited text in the body, as the
+   * page sends a CSV, or the file itself, uploaded to the store under its
+   * importer's own key (`import-files.ts`) and read as what its bytes are — an
+   * Excel workbook, a legacy one, a JSON list or text (`sheet-file.ts`,
+   * `ledger-rows/row-816`). A file the readers cannot read is refused in their
+   * words, before anything is written. A source's own export is then read in
+   * its own layout — Monday's board, its groups and the rows of its own it
+   * adds; Wrike's lines repeating a task (`readExportLayout`).
+   */
+  private async tableOf(workspaceId: string, userId: string, dto: Pick<SheetImportDto, 'content' | 'fileKey' | 'fileName' | 'delimiter' | 'preset'>): Promise<SheetTable> {
+    if (dto.fileKey !== undefined && dto.fileKey !== null) {
+      if (!this.files) throw new BadRequestException('Files to import are not read on this server')
+      const bytes = await this.files.read(workspaceId, userId, dto.fileKey, 'sheet')
+      try {
+        return readExportLayout(readSheetFile(bytes, typeof dto.fileName === 'string' ? dto.fileName : String(dto.fileKey)), dto.preset)
+      } catch (e) {
+        if (e instanceof WorkbookReadError) throw new BadRequestException(e.message)
+        throw e
+      }
+    }
+    this.assertDelimitedText(dto.content)
+    if (!dto.content.trim()) throw new BadRequestException('The uploaded file is empty.')
+    return readExportLayout(parseSheet(dto.content, dto.delimiter), dto.preset)
+  }
+
   // ── preview ────────────────────────────────────────────────────────────────
   /**
    * Parse without writing. Returns the headers, the delimiter it found, the
@@ -193,12 +234,19 @@ export class SpreadsheetImportService {
   async previewSheet(
     workspaceId: string,
     importer: Importer,
-    dto: { content: string; delimiter?: SheetDelimiter; preset?: string; mapping?: ColumnMapping; defaultListName?: string },
+    dto: {
+      content?: string
+      fileKey?: string
+      fileName?: string
+      delimiter?: SheetDelimiter
+      preset?: string
+      mapping?: ColumnMapping
+      defaultListName?: string
+    },
   ) {
     await this.access.assertMayImport(this.db, { workspaceId, actorId: importer.id })
     const source = sourceByKey(dto.preset)
-    this.assertDelimitedText(dto.content)
-    const table = parseSheet(dto.content ?? '', dto.delimiter)
+    const table = await this.tableOf(workspaceId, importer.id, dto)
     if (table.headers.length === 0) {
       throw new BadRequestException('The file has no header row.')
     }
@@ -226,6 +274,11 @@ export class SpreadsheetImportService {
       preset: source.key,
       presetLabel: source.label,
       delimiter: table.delimiter,
+      // What the file was read as, and a workbook's sheet: the page says which sheet it read.
+      format: table.format ?? 'csv',
+      sheetName: table.sheetName ?? null,
+      // A source's export read in its own layout: Monday's board and groups, the rows left out; Wrike's repeated lines.
+      layout: table.layout ?? null,
       headers: table.headers,
       mapping,
       mappingError: problem,
@@ -254,9 +307,7 @@ export class SpreadsheetImportService {
     const userId = importer.id
     // Who imports, before what or where: a guest is refused, whatever a custom role grants them (`assertMayImport`).
     await this.access.assertMayImport(this.db, { workspaceId, actorId: userId })
-    this.assertDelimitedText(dto.content)
-    if (!dto.content.trim()) throw new BadRequestException('The uploaded file is empty.')
-    const table = parseSheet(dto.content, dto.delimiter)
+    const table = await this.tableOf(workspaceId, userId, dto)
     if (table.headers.length === 0) throw new BadRequestException('The file has no header row.')
     if (table.rows.length === 0) throw new BadRequestException('The file has a header but no data rows.')
 
@@ -280,7 +331,8 @@ export class SpreadsheetImportService {
       })
       .returning({ id: clickupImportJobs.id })
 
-    void this.processSheetImport(job.id, workspaceId, importer, dto).catch(() => undefined)
+    // The sheet as read here, so the run does not read the store again; the run removes its file when it ends.
+    void this.processSheetImport(job.id, workspaceId, importer, dto, table).catch(() => undefined)
     return { jobId: job.id }
   }
 
@@ -345,6 +397,7 @@ export class SpreadsheetImportService {
     workspaceId: string,
     importer: Importer,
     dto: SheetImportDto,
+    read?: SheetTable,
   ): Promise<SheetImportSummary> {
     const userId = importer.id
     const source = sourceByKey(dto.preset)
@@ -353,7 +406,7 @@ export class SpreadsheetImportService {
     const made: RunMade = { labelIds: [] }
 
     try {
-      const table = parseSheet(dto.content, dto.delimiter)
+      const table = read ?? (await this.tableOf(workspaceId, userId, dto))
       const mapping = this.resolveMapping(table.headers, dto.mapping, dto.preset)
       const problem = mappingError(mapping)
       if (problem) throw new BadRequestException(problem)
@@ -562,6 +615,9 @@ export class SpreadsheetImportService {
         .where(eq(clickupImportJobs.id, jobId))
         .catch(() => undefined)
       throw e
+    } finally {
+      // The uploaded file has served its run, whichever way it ended (`import-files.ts`).
+      if (dto.fileKey) await this.files?.discard(workspaceId, userId, dto.fileKey)
     }
   }
 

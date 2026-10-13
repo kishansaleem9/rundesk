@@ -1,4 +1,4 @@
-import { crc32, inflateRawSync } from 'node:zlib'
+import { crc32, deflateRawSync, inflateRawSync } from 'node:zlib'
 
 /**
  * Enough of a ZIP reader to open an .xlsx in a test, with no dependency.
@@ -126,4 +126,56 @@ export function xlsxRows(buf) {
     rows.push(cells)
   }
   return { xml, rows }
+}
+
+/**
+ * AND A ZIP WRITTEN, for a suite to hand an importer the archive another tool
+ * exports (`commit-log/log-601eacc-2`): Confluence's space export, Slack's
+ * workspace export. Deflated, UTF-8 names, no data descriptors — the shape
+ * `unzip` above and the API's own reader both take.
+ *
+ * @param {Record<string, string | Buffer>} entries name → contents
+ * @returns {Buffer}
+ */
+export function zip(entries) {
+  const locals = []
+  const centrals = []
+  let offset = 0
+  for (const [name, body] of Object.entries(entries)) {
+    const data = typeof body === 'string' ? Buffer.from(body, 'utf8') : body
+    const packed = deflateRawSync(data)
+    const nameBytes = Buffer.from(name, 'utf8')
+    const crc = crc32(data) >>> 0
+    const local = Buffer.alloc(30)
+    local.writeUInt32LE(LOC_SIG, 0)
+    local.writeUInt16LE(20, 4)
+    local.writeUInt16LE(0x0800, 6)
+    local.writeUInt16LE(8, 8)
+    local.writeUInt32LE(crc, 14)
+    local.writeUInt32LE(packed.length, 18)
+    local.writeUInt32LE(data.length, 22)
+    local.writeUInt16LE(nameBytes.length, 26)
+    const central = Buffer.alloc(46)
+    central.writeUInt32LE(CEN_SIG, 0)
+    central.writeUInt16LE(20, 4)
+    central.writeUInt16LE(20, 6)
+    central.writeUInt16LE(0x0800, 8)
+    central.writeUInt16LE(8, 10)
+    central.writeUInt32LE(crc, 16)
+    central.writeUInt32LE(packed.length, 20)
+    central.writeUInt32LE(data.length, 24)
+    central.writeUInt16LE(nameBytes.length, 28)
+    central.writeUInt32LE(offset, 42)
+    locals.push(local, nameBytes, packed)
+    centrals.push(central, nameBytes)
+    offset += local.length + nameBytes.length + packed.length
+  }
+  const cd = Buffer.concat(centrals)
+  const end = Buffer.alloc(22)
+  end.writeUInt32LE(EOCD_SIG, 0)
+  end.writeUInt16LE(Object.keys(entries).length, 8)
+  end.writeUInt16LE(Object.keys(entries).length, 10)
+  end.writeUInt32LE(cd.length, 12)
+  end.writeUInt32LE(offset, 16)
+  return Buffer.concat([...locals, cd, end])
 }

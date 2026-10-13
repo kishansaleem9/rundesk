@@ -132,6 +132,12 @@ type Message = {
   authorId: string
   authorName?: string | null
   authorAvatarUrl?: string | null
+  /**
+   * Set on a message imported from Slack whose author is nobody here
+   * (`commit-log/log-601eacc-2`): `authorName` is that name, and the message is
+   * kept under whoever imported it, who did not say it.
+   */
+  importedAuthor?: string | null
   body: string
   parentMessageId?: string | null
   /**
@@ -2465,7 +2471,8 @@ export function ChatPage() {
               {rootMessages.map((m, i) => {
                 const showAuthor = shouldShowMessageHeader(rootMessages, i)
                 const showDate = shouldShowDateDivider(rootMessages, i)
-                const mine = m.authorId === me?.id
+                // An imported message is not its importer's own words, whoever it is kept under.
+                const mine = m.authorId === me?.id && !m.importedAuthor
                 // Prefer the larger of the server's thread stats (§6.4) and any
                 // replies already loaded client-side (thread open / realtime).
                 const localReplies = repliesByParent.get(m.id) ?? []
@@ -2540,13 +2547,23 @@ export function ChatPage() {
                     <div className="flex-1 min-w-0">
                       {showAuthor && (
                         <div className="flex items-center gap-1.5 mb-0.5">
-                          <button
-                            type="button"
-                            className={cn('text-[14px] font-semibold hover:underline', mine ? 'text-violet-600 dark:text-violet-300' : 'text-foreground')}
-                            onClick={() => openPersonPanel(m.authorId)}
-                          >
-                            {m.authorName ?? t('chat.unknownUser')}
-                          </button>
+                          {m.importedAuthor ? (
+                            // Somebody who is not a member here: their name, and that it was imported — no person to open.
+                            <span className="text-[14px] font-semibold text-foreground" data-testid="chat-message-imported-author">
+                              {m.authorName ?? m.importedAuthor}
+                              <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] font-normal text-muted-foreground" data-testid="chat-message-imported">
+                                {t('chat.importedTag')}
+                              </span>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className={cn('text-[14px] font-semibold hover:underline', mine ? 'text-violet-600 dark:text-violet-300' : 'text-foreground')}
+                              onClick={() => openPersonPanel(m.authorId)}
+                            >
+                              {m.authorName ?? t('chat.unknownUser')}
+                            </button>
+                          )}
                           <span className="text-[10px] text-muted-foreground/90 tabular-nums">
                             {formatMessageTime(m.createdAt)}
                           </span>

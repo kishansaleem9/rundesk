@@ -615,6 +615,13 @@ lane_calendar_env () {
   export MICROSOFT_GRAPH_API_URL="$base/graph/v1.0"
   # And Google's profile, read when a connection is made, so a connect completes here.
   export GOOGLE_USERINFO_URL="$base/google/userinfo"
+  # And Basecamp, signed in to for its import (`commit-log/log-601eacc-2`): Launchpad and the
+  # account API both here, the API's origin the only one the importer follows. An application
+  # needs no keys at the stub, only names.
+  export BASECAMP_LAUNCHPAD_URL="$base/basecamp/launchpad"
+  export BASECAMP_API_ORIGIN="$base"
+  export BASECAMP_CLIENT_ID="${BASECAMP_CLIENT_ID:-stub-basecamp}"
+  export BASECAMP_CLIENT_SECRET="${BASECAMP_CLIENT_SECRET:-stub-basecamp-secret}"
 }
 
 lane_calendar_up () {

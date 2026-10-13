@@ -33,19 +33,26 @@ p = '/home/user/rundesk/apps/api/src/modules/docs/docs.service.ts'
 # `workspaceId`, so its follow-up lines are textually identical to the import's
 # and a shorter anchor matched both. `check-break-patches.py` refused it rather
 # than patching whichever came first.
+# RE-AIMED (batch 38, `commit-log/log-601eacc-2`): every import — Markdown or text, a
+# Word or HTML file, a Confluence page — now writes its doc through one
+# `insertImportedDoc`, so its follow-ups are there and nowhere else; the anchor
+# reaches into the doc comment of the method after it, which tells it apart
+# from `create` and the template path.
 a = """    await this.snapshotRevision(row, userId)
     this.realtime.emitToWorkspace(workspaceId, { type: 'doc.updated', docId: row.id, patch: { created: true } })
     void this.indexDocInSearch(row.id)
     return row
   }
 
-  /** Export a doc as a (line-based) PDF. Access-checked. */"""
+  /**
+   * A WORD, HTML, MARKDOWN OR TEXT FILE AS A DOC"""
 b = """    this.realtime.emitToWorkspace(workspaceId, { type: 'doc.updated', docId: row.id, patch: { created: true } })
     void this.indexDocInSearch(row.id)
     return row
   }
 
-  /** Export a doc as a (line-based) PDF. Access-checked. */"""
+  /**
+   * A WORD, HTML, MARKDOWN OR TEXT FILE AS A DOC"""
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor occurs {s.count(a)} times, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

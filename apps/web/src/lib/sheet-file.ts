@@ -1,34 +1,35 @@
 /**
- * IS THIS FILE ONE THE SPREADSHEET IMPORT READS? (`found-5-oct/xlsx-read-as-text`)
+ * HOW THE SPREADSHEET IMPORT READS THIS FILE, IF AT ALL (`ledger-rows/row-816`).
  *
- * The page asked for a CSV — "Accepted: .csv · .tsv · .txt. .xlsx is not read
- * — re-save the sheet as CSV first." — and its file input's `accept` is only a
- * hint to the picker: the dialog's "All files", or a drop, put an .xlsx in
- * anyway. The page read it with `readAsText` and offered it: a preview drew
- * the zip's bytes as a column name, mapping that column to Title enabled
- * Start, and the run failed, leaving an empty space, project and list.
+ * The import reads ClickUp's six — .csv, .tsv, .txt, .xlsx, .xls and .json —
+ * in two ways:
+ *   · `text`: delimited text, read by the page and sent as it always was;
+ *   · `file`: a workbook or a JSON list, uploaded as it is and read by the
+ *     server (`sheet-file.ts` there), since a workbook's bytes do not survive
+ *     being read as text (`found-5-oct/xlsx-read-as-text`: read so, a zip's
+ *     bytes were drawn as a column and its run failed).
  *
- * So the page asks two things before it reads a file, and refuses it in the
- * words it already shows under the picker:
+ * Two things are asked before the page reads anything:
  *   · its NAME — one of the extensions the server says it reads
- *     (`acceptedExtensions`);
- *   · its FIRST BYTES — a spreadsheet saved in a binary format, whatever it is
- *     called: a zip (an .xlsx, an .ods, a .numbers) starts "PK" and one of its
- *     three signatures (03 04, 05 06, 07 08), and a legacy .xls is an OLE2
- *     compound file, D0 CF 11 E0 A1 B1 1A E1. "PK" alone is not the test: a
+ *     (`acceptedExtensions`); anything else, a PDF or a Word document put in
+ *     through the picker's "All files", is refused (null);
+ *   · its FIRST BYTES — a zip (an .xlsx) starts "PK" and one of its three
+ *     signatures (03 04, 05 06, 07 08), and a legacy .xls is an OLE2 compound
+ *     file, D0 CF 11 E0 A1 B1 1A E1: whatever such a file is called, it is
+ *     uploaded and read as the workbook it is. "PK" alone is not the test: a
  *     sheet whose first column is "PK" is a CSV.
- *
- * The server asks the content's first bytes too (a zip, or a NUL in its first
- * line), so a file this missed is still refused there, in the same words.
  */
-export async function isSheetFile(
+const UPLOADED = ['.xlsx', '.xls', '.json']
+
+export async function sheetFileKind(
   file: Pick<Blob, 'slice'> & { name: string },
   accepted: readonly string[],
-): Promise<boolean> {
+): Promise<'text' | 'file' | null> {
   const name = file.name.toLowerCase()
-  if (!accepted.some((ext) => name.endsWith(ext.toLowerCase()))) return false
+  if (!accepted.some((ext) => name.endsWith(ext.toLowerCase()))) return null
   const head = new Uint8Array(await file.slice(0, 8).arrayBuffer())
-  return !isZipSignature(head) && !isCompoundFileSignature(head)
+  if (isZipSignature(head) || isCompoundFileSignature(head)) return 'file'
+  return UPLOADED.some((ext) => name.endsWith(ext)) ? 'file' : 'text'
 }
 
 /** "PK" and one of the three zip signatures, from a file's first four bytes. */

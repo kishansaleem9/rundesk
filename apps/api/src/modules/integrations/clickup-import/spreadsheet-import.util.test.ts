@@ -170,8 +170,11 @@ describe('a file that is not delimited text', () => {
     assert.equal(isZipContent(undefined), false)
   })
 
-  it('is refused in the words the page shows under its picker', () => {
-    assert.equal(NOT_DELIMITED_TEXT, 'Accepted: .csv · .tsv · .txt. .xlsx is not read — re-save the sheet as CSV first.')
+  it('is refused in words that say to send the file itself, and what the page reads', () => {
+    assert.equal(
+      NOT_DELIMITED_TEXT,
+      'This is a workbook or another binary file sent as text: upload the file itself and send its key, as the import page does. Accepted: .csv · .tsv · .txt · .xlsx · .xls · .json.',
+    )
   })
 
   it('is no zip when it is not a string at all — a number or an object from a client goes on to the parser', () => {

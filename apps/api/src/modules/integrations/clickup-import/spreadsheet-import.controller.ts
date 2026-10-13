@@ -43,7 +43,10 @@ export class SpreadsheetImportController {
     @CurrentUser() user: any,
     @Body()
     body: {
-      content: string
+      content?: string
+      /** Or a workbook or JSON list, uploaded first (`POST …/import/files`) and named by its key. */
+      fileKey?: string
+      fileName?: string
       delimiter?: SheetDelimiter
       preset?: string
       mapping?: ColumnMapping
@@ -51,7 +54,7 @@ export class SpreadsheetImportController {
     },
   ) {
     return this.svc.previewSheet(workspaceId, { id: user.id, role: user.role }, {
-      content: body.content ?? '',
+      ...(body?.fileKey !== undefined ? { fileKey: body.fileKey, fileName: body.fileName } : { content: body?.content ?? '' }),
       delimiter: body.delimiter,
       preset: body.preset,
       mapping: body.mapping,
@@ -70,7 +73,9 @@ export class SpreadsheetImportController {
     @CurrentUser() user: any,
     @Body()
     body: {
-      content: string
+      content?: string
+      fileKey?: string
+      fileName?: string
       delimiter?: SheetDelimiter
       preset?: string
       mapping?: ColumnMapping

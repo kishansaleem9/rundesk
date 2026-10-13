@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, ConflictException, ForbiddenException, BadRequestException } from '@nestjs/common'
+import { Injectable, Inject, Optional, NotFoundException, ConflictException, ForbiddenException, BadRequestException } from '@nestjs/common'
 import { eq, and, asc, isNull, desc, inArray, isNotNull, notInArray, sql } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
 import { docs, docComments, docRevisions, docTemplates, users, objectShares, spaces, workspaces, taskDocLinks, tasks } from '@rundesk/db'
@@ -19,6 +19,11 @@ import { NotificationsService } from '../notifications/notifications.service'
 import { tiptapToMarkdown, tiptapToPlainLines, splitTitleFromMarkdown } from './tiptap-markdown'
 import { renderReportPdf } from '../reports/pdf'
 import { downloadName } from '../../common/export/download-name'
+import { decodeText } from '../../common/import/text-decode'
+import { ImportFilesService } from '../integrations/clickup-import/import-files'
+import { docxToDoc, DocxReadError } from './docx-tiptap'
+import { htmlFileToDoc, type DocNode } from './html-tiptap'
+import { readConfluenceExport, ConfluenceReadError, MAX_CONFLUENCE_PAGES } from './confluence-export'
 
 type TiptapNode = { type: string; content?: TiptapNode[]; text?: string; attrs?: Record<string, unknown> }
 
@@ -37,8 +42,20 @@ function extractPlaintext(content: unknown): string {
   return ''
 }
 
-/** The import panel's own words (`import.docAccepted`), said when a file it cannot read is sent anyway. */
-export const DOC_IMPORT_ACCEPTS = 'Accepts .md, .markdown and .txt. Word, PDF and Excel are not read — Rundesk has no parser for them.'
+/**
+ * The import panel's own words (`import.docAccepted`), said when a file it
+ * cannot read is sent anyway. ClickUp's Docs import reads Word, HTML and
+ * Markdown (`commit-log/log-601eacc-2`), and so does this one, with plain text.
+ */
+export const DOC_IMPORT_ACCEPTS = 'Accepts Word (.docx), HTML (.html, .htm), Markdown (.md, .markdown) and plain text (.txt).'
+
+/** What a document file is, by its name: the readers below, one each. */
+export function docFileKind(name: string): 'docx' | 'html' | 'markdown' | null {
+  if (/\.docx$/i.test(name)) return 'docx'
+  if (/\.(html?|xhtml)$/i.test(name)) return 'html'
+  if (/\.(md|markdown|txt)$/i.test(name)) return 'markdown'
+  return null
+}
 
 @Injectable()
 export class DocsService {
@@ -47,6 +64,7 @@ export class DocsService {
     private realtime: RealtimeGateway,
     private search: SearchService,
     private notifications: NotificationsService,
+    @Optional() private readonly files?: ImportFilesService,
   ) {}
 
   private async indexDocInSearch(docId: string) {
@@ -470,36 +488,153 @@ export class DocsService {
     const { title, content } = splitTitleFromMarkdown(raw, opts.fileName ?? '')
     if (opts.spaceId) await this.assertDocSpace(opts.spaceId, workspaceId, userId)
     await this.assertMayMakeDocIn(workspaceId, opts.spaceId, userId)
+    return this.insertImportedDoc(workspaceId, userId, { spaceId: opts.spaceId ?? null, title, content })
+  }
 
+  /**
+   * AN IMPORTED DOC, WRITTEN AS `create` WRITES ONE: the row, and the three
+   * follow-ups `create` does — and leaving them out was a real gap rather than
+   * a tidiness point. Without them an imported doc:
+   *
+   *   · is NOT IN THE SEARCH INDEX — you import a document and then cannot
+   *     find it, which is the whole reason to import it;
+   *   · does not appear for anyone already looking at the workspace until
+   *     they reload;
+   *   · has no opening revision, so the first edit has nothing to diff
+   *     against and the document's history starts after its content.
+   *
+   * Found by reading `create` beside this rather than by any test: every one
+   * of these fails SILENTLY. The import returns the row and looks correct.
+   * Every import goes through here: a Markdown or text file, a Word or HTML
+   * file, and each page of a Confluence space.
+   */
+  private async insertImportedDoc(
+    workspaceId: string,
+    userId: string,
+    doc: { spaceId: string | null; title: string; content: { type: 'doc'; content: unknown[] }; parentDocId?: string | null; position?: number },
+  ) {
     const [row] = await this.db
       .insert(docs)
       .values({
         workspaceId,
-        spaceId: opts.spaceId ?? null,
-        title,
+        spaceId: doc.spaceId,
+        parentDocId: doc.parentDocId ?? null,
+        position: doc.position ?? 0,
+        title: doc.title,
         createdById: userId,
-        content: content as unknown as Record<string, unknown>,
-        plaintext: extractPlaintext(content),
+        content: doc.content as unknown as Record<string, unknown>,
+        plaintext: extractPlaintext(doc.content),
       })
       .returning()
-    /*
-     * THE SAME THREE FOLLOW-UPS `create` DOES, and leaving them out was a real
-     * gap rather than a tidiness point. Without them an imported doc:
-     *
-     *   · is NOT IN THE SEARCH INDEX — you import a document and then cannot
-     *     find it, which is the whole reason to import it;
-     *   · does not appear for anyone already looking at the workspace until
-     *     they reload;
-     *   · has no opening revision, so the first edit has nothing to diff
-     *     against and the document's history starts after its content.
-     *
-     * Found by reading `create` beside this rather than by any test: every one
-     * of these fails SILENTLY. The import returns the row and looks correct.
-     */
     await this.snapshotRevision(row, userId)
     this.realtime.emitToWorkspace(workspaceId, { type: 'doc.updated', docId: row.id, patch: { created: true } })
     void this.indexDocInSearch(row.id)
     return row
+  }
+
+  /**
+   * A WORD, HTML, MARKDOWN OR TEXT FILE AS A DOC, read from the file itself
+   * (`commit-log/log-601eacc-2`). ClickUp's Docs import reads .docx, HTML and
+   * Markdown; a Word document is a zip and cannot be sent as text, so the page
+   * uploads every file this way (`import-files.ts`) and names it by its key.
+   * Who may make the doc, and where, is asked before the file is read; the
+   * file is gone once it has been read, whatever came of it.
+   */
+  async importDocFile(
+    workspaceId: string,
+    userId: string,
+    opts: { fileKey: unknown; fileName?: string; spaceId?: string | null },
+  ) {
+    const name = typeof opts.fileName === 'string' ? opts.fileName : ''
+    const kind = docFileKind(name)
+    if (!kind) throw new BadRequestException(`${DOC_IMPORT_ACCEPTS} "${name}" is not one of those.`)
+    const files = this.files
+    if (!files) throw new BadRequestException('Files to import are not read on this server')
+    if (opts.spaceId) await this.assertDocSpace(opts.spaceId, workspaceId, userId)
+    await this.assertMayMakeDocIn(workspaceId, opts.spaceId, userId)
+    try {
+      const bytes = await files.read(workspaceId, userId, opts.fileKey, 'doc')
+      let doc: { title: string; content: { type: 'doc'; content: unknown[] } }
+      if (kind === 'docx') {
+        doc = docxToDoc(bytes, name)
+      } else {
+        const text = decodeText(bytes)
+        if (!text.trim()) throw new BadRequestException('The file is empty, so there is nothing to import')
+        // Not text, whatever it is called (`found-6-oct/doc-import-answers-500-to-a-binary-file`).
+        if (text.includes('\u0000')) throw new BadRequestException(DOC_IMPORT_ACCEPTS)
+        doc = kind === 'html' ? htmlFileToDoc(text, name) : splitTitleFromMarkdown(text, name)
+      }
+      return await this.insertImportedDoc(workspaceId, userId, { spaceId: opts.spaceId ?? null, title: doc.title, content: doc.content })
+    } catch (e) {
+      if (e instanceof DocxReadError) throw new BadRequestException(e.message)
+      throw e
+    } finally {
+      await files.discard(workspaceId, userId, opts.fileKey)
+    }
+  }
+
+  /**
+   * A CONFLUENCE SPACE, FROM ITS HTML EXPORT, AS ONE DOC WITH ITS PAGES IN IT
+   * (`commit-log/log-601eacc-2`). ClickUp makes the export a Doc in the Docs
+   * hub; here the Doc is named for the space and each page is a page of it
+   * (`parentDocId`), nested as the space's page tree nests them, in its order
+   * (`confluence-export.ts`). Asked as any doc import is: who may make a doc
+   * there, before the file is read. A page the export's tree names and its
+   * zip lacks is reported by name rather than made empty.
+   */
+  async importConfluence(
+    workspaceId: string,
+    userId: string,
+    opts: { fileKey: unknown; spaceId?: string | null },
+  ) {
+    const files = this.files
+    if (!files) throw new BadRequestException('Files to import are not read on this server')
+    if (opts.spaceId) await this.assertDocSpace(opts.spaceId, workspaceId, userId)
+    await this.assertMayMakeDocIn(workspaceId, opts.spaceId, userId)
+    try {
+      const bytes = await files.read(workspaceId, userId, opts.fileKey, 'confluence')
+      const space = readConfluenceExport(bytes)
+      if (!space.pages.length) throw new BadRequestException('The Confluence export holds no pages to import')
+      const spaceId = opts.spaceId ?? null
+      const root = await this.insertImportedDoc(workspaceId, userId, {
+        spaceId,
+        title: space.name.slice(0, 500),
+        content: { type: 'doc', content: [] as DocNode[] },
+      })
+      const byFile = new Map<string, string>()
+      const position = new Map<string, number>()
+      try {
+        for (const page of space.pages) {
+          const parentDocId = (page.parent && byFile.get(page.parent)) || root.id
+          const at = position.get(parentDocId) ?? 0
+          position.set(parentDocId, at + 1)
+          const row = await this.insertImportedDoc(workspaceId, userId, {
+            spaceId,
+            title: page.title,
+            content: page.content,
+            parentDocId,
+            position: at,
+          })
+          byFile.set(page.file, row.id)
+        }
+      } catch (e) {
+        // A space half imported is taken away whole: its pages go with the Doc they are in.
+        await this.db.delete(docs).where(eq(docs.id, root.id)).catch(() => undefined)
+        throw e
+      }
+      return {
+        doc: { id: root.id, title: root.title },
+        pagesImported: space.pages.length,
+        missing: space.missing,
+        // Said when the space was larger than one import takes.
+        limit: space.missing.length && space.pages.length >= MAX_CONFLUENCE_PAGES ? MAX_CONFLUENCE_PAGES : null,
+      }
+    } catch (e) {
+      if (e instanceof ConfluenceReadError) throw new BadRequestException(e.message)
+      throw e
+    } finally {
+      await files.discard(workspaceId, userId, opts.fileKey)
+    }
   }
 
   /** Export a doc as a (line-based) PDF. Access-checked. */

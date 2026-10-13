@@ -92,3 +92,18 @@ export const answerInMailbox = (base, { token, threadId, from, fromName, text, s
 /** The next `count` calls with this mailbox's token answer `status`. */
 /** The next `count` calls with a mailbox's token answer `status`; `on: 'write'` spares the reads a poll makes. */
 export const failMailbox = (base, token, status, count = 1, on = 'any') => post(base, '/__control/mailbox/fail', { token, status, count, on })
+
+/**
+ * BASECAMP, SIGNED IN TO FOR ITS IMPORT (`commit-log/log-601eacc-2`): seed
+ * (replace) the person, the accounts and the projects a token opens — each
+ * project's lists, their groups, to-dos and comments, in the stub's shape —
+ * and its consent's code with `seedConsentCode({ ..., provider: 'basecamp' })`.
+ */
+export const seedBasecamp = (base, { token, refreshToken, name, email, accounts }) =>
+  post(base, '/__control/basecamp', { token, refreshToken, name, email, accounts })
+
+/** What the importer asked of Basecamp with this token, request by request; null when nothing was seeded. */
+export async function basecampAsked(base, token) {
+  const res = await fetch(`${base}/__control/basecamp?token=${encodeURIComponent(token)}`)
+  return res.ok ? (await res.json()).asked : null
+}

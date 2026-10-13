@@ -834,8 +834,7 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 
 | | capability |
 |---|---|
-| P | Import — a real delimited-file parser with per-source column presets covers 7 of the 10 named tools. Basecamp needs its API; Confluence exports pages not task rows; Slack exports conversation JSON. Monday and Wrike default to .xlsx, which is not read |
-| B | Importers — frame `12:08`'s submenu has twelve rows: Spreadsheet files, Document files and ten named tools. **Spreadsheet import is built** — a real delimited-file importer with explicit column mapping — closed by `imports.mjs`, **20** checks — 19 until `imports-3-deadpreset` showed that a disabled Start was ending the run rather than reporting, and "the import reported a result" became a check of its own — **19/19 break-tested**. The ten named tools appear as column **PRESETS over that one importer**, which is a decision and is recorded as one: ten tiles opening a dialog that cannot import would be the facade defect at ten times scale, and `imports-1-ghosttile` exists to redden exactly that. The four rows with no preset are drawn as text with their reason and no control. **Document import is now built too** — `POST /workspaces/:id/docs/import`, `markdownToTiptap()` run against `tiptap-markdown.ts`'s existing exporter, closed by `doc-import.mjs`, **15 checks, 4/4 break-tested**. The check that makes it honest is the ROUND TRIP: export a doc, import the file back, and the doc must be the same — the shape a facade cannot pass. Scope is `.md`, `.markdown` and `.txt` by the decision `attachment-text.ts` already made for this repository (PDF, Word, Excel and PowerPoint "intentionally NOT parsed"), and a format it cannot read is refused in words naming the ones that work; `doc-import-3-any-format-accepted` reddens exactly that. So every row of frame `12:08`'s submenu is now either built or drawn with its reason and no control |
+| B | Importers — frame `12:08`'s submenu has twelve rows, and each is an importer as ClickUp's is (`commit-log/log-601eacc-2`, `ledger-rows/row-816`, 13 October). **Spreadsheet files** reads .xlsx, .xls, .csv, .tsv, .txt and a JSON list of tasks: a workbook is uploaded as the file it is and read by the server with no dependency, and the named tools' presets map their exports' columns — Monday's Excel export read as its board, each group a list, and Wrike's with a task it lists once per folder made once. **Document files** reads Word, HTML, Markdown and text into Docs; **Confluence** the space's HTML export, into one Doc with its pages nested as the space nests them; **Slack** the export's public channels, into Chat with their threads, reactions and mentions, an author who is no member drawn under their name and marked imported; **Basecamp** is signed in to, and its projects come in as Spaces or as Folders, their to-dos with notes, dates, assignees and comments, their groups as statuses; **ClickUp** reads its own export. Closed by `importers.mjs`, **25** checks, 0 of 25 before; `imports.mjs` (60) and `doc-import.mjs` (17) beside it. Asana, Jira, Monday, Notion, Todoist, Trello and Wrike come in from their exports, where ClickUp signs in to them — `found-13-oct/importers-by-sign-in-unbuilt`, a feature not counted. *(Until 13 October this row stood beside a `P` row, "Import — a real delimited-file parser … covers 7 of the 10 named tools … Monday and Wrike default to .xlsx, which is not read", the same submenu said two ways; they are one row now, and §4 counts one row fewer.)* |
 | B | Template Center — faceted browse with type, complexity, use-cases and categories, counted in SQL over the corpus rather than over the loaded page |
 | B | Planner onboarding screen — closed by `planner-onboarding.mjs`, 12 checks (frames `12:40`/`12:45`/`12:48`). The card titles are the frame's own words and one of them was not: the product shipped "Keep your meeting notes" in four locales where `12:45` draws **"Automate your meeting notes"**, so the check was green against copy the specification does not contain. Corrected. The Connect check asserts the browser LANDS on the URL the server hands back, not merely that it asked — `window.location.href = authUrl` is the convention in all three OAuth surfaces, so "it requested" and "it went there" are different facts and only the second is the feature |
 | B | Connect Google / Outlook; two-way scope; drag task → block; prefix applied |
@@ -916,7 +915,7 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 
 ## 4. Counts
 
-**174 rows: 161 built · 7 partial · 6 missing.**
+**173 rows: 161 built · 6 partial · 6 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -952,9 +951,18 @@ rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 122 | 6 | 5 | 133 |
+| §2, the sections table | 122 | 5 | 5 | 132 |
 | §5, recovered from the frame observations | 39 | 1 | 1 | 41 |
-| **consolidated** | **161** | **7** | **6** | **174** |
+| **consolidated** | **161** | **6** | **6** | **173** |
+
+TWO ROWS THAT SAID THE SAME SUBMENU ARE ONE, 13 OCTOBER, AND THE TOTAL FELL BY
+ONE: a merge, not a build, which is the one movement that may lower it. §2 held
+frame `12:08`'s Imports twice — a `P` row, "Import … covers 7 of the 10 named
+tools … Monday and Wrike default to .xlsx, which is not read", and the `B`
+*Importers* row under it — and `ledger-rows/row-816` asked for them to be
+merged. The importers ClickUp has are built (`commit-log/log-601eacc-2`,
+`importers.mjs`, 25 checks), so the two read as one `B` row. §2 moves
+`122 · 6 · 5` → `122 · 5 · 5`, 133 rows to 132, and the total is 173.
 
 FOUR ROWS MOVED FROM `P` TO `B` AND THE TOTAL DID NOT CHANGE, which is the
 only shape of movement this table should ever show for a build — and the fourth
@@ -6849,7 +6857,7 @@ the row claimed: *"the hint promises a gesture the composer does not honour."*
 | @ picker — Brain section, Agents | blocked | Holds; no agents table, module or route exists |
 | Create-menu — Super Agent | blocked | Holds, same absence |
 | View types — 6 of 11 | six offered | Exact: `SPACE_VIEW_KEYS` is `list · board · table · calendar · gantt · team` |
-| Import — Monday and Wrike default to .xlsx, "which is not read" | holds | The importer takes delimited text, and its own comment says "the UI says *save it as CSV* rather than accepting an .xlsx". Rundesk WRITES xlsx (`common/export/xlsx`); writing is not reading |
+| Import — Monday and Wrike default to .xlsx, "which is not read" | fixed, 13 October | It held until then: the importer took delimited text and told a person to save the sheet as CSV. It reads .xlsx and .xls now, Monday's board and Wrike's folder in their own layout (`commit-log/log-601eacc-2`, `importers.mjs`) |
 
 **One had its reason sharpened without changing status.** The sidebar row's
 `+ Add a new section` was "still open", which invites somebody to build it. It

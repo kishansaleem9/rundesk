@@ -196,17 +196,22 @@ try {
       : `drew ${drawn.length} of ${presetKeys.length} presets (${presetKeys.filter((k) => !drawn.includes(k)).join(', ') || 'none missing'})`,
   )
 
-  console.log('\n▶ …and says why each of the four is absent')
-  const reasons = []
-  for (const key of UNDRAWN) {
-    const el = page.getByTestId(`import-unsupported-${key}`)
-    // Drawn, and caught: a hidden reason reads '' and fails the check below in its own words.
-    reasons.push((await el.count()) ? ((await el.first().filter({ visible: true }).innerText().catch(() => '')) ?? '') : '')
-  }
+  /*
+   * …AND EACH OF THE FOUR HAS AN IMPORTER OF ITS OWN (`commit-log/log-601eacc-2`).
+   * They were listed here as words with a reason — Basecamp "needs the
+   * Basecamp API", Confluence "a document importer writing Docs", Slack "no
+   * task rows to map" — and each is now the importer the reason asked for, a
+   * tab of this page, as ClickUp has one for each. No row is left as text.
+   */
+  console.log('\n▶ …and each of the four has an importer of its own')
+  const TAB_OF = { basecamp: 'basecamp', confluence: 'confluence', slack: 'slack', documents: 'doc' }
+  const tabsFound = []
+  for (const key of UNDRAWN) if (await page.getByTestId(`import-tab-${TAB_OF[key]}`).count()) tabsFound.push(key)
+  const reasonsLeft = await page.getByTestId('import-unsupported').count()
   chk(
-    reasons.length === UNDRAWN.length && reasons.every((r) => r.trim().length > 40),
-    'each undrawn source is named with a reason, as text rather than as a control',
-    `the reasons read ${JSON.stringify(reasons.map((r) => r.slice(0, 30)))}`,
+    tabsFound.length === UNDRAWN.length && reasonsLeft === 0,
+    'each of the four is an importer of its own — a tab of this page — and none is left as a reason with no control',
+    `tabs for ${JSON.stringify(tabsFound)}; ${reasonsLeft} box(es) of reasons drawn`,
   )
 
   // ══ 2. THE FILE, THE PRESET, AND THE MAPPING ═══════════════════════════════
@@ -850,81 +855,97 @@ try {
    * list. The .xlsx here is a real one: this run's merge list, exported by the
    * product itself.
    */
-  console.log('\n▶ an .xlsx put into the spreadsheet import anyway')
+  console.log('\n▶ an .xlsx put into the spreadsheet import')
+  /*
+   * `found-5-oct/xlsx-read-as-text` began here: an .xlsx put in anyway was read
+   * as text, its zip's bytes drawn as a column, and its run failed. The page
+   * then refused it, by its name and its first bytes. Now the import READS it
+   * (`ledger-rows/row-816`): a workbook, whatever it is called, is uploaded as
+   * the file it is and read by the server; what the page refuses is a file of
+   * no kind the import reads. The .xlsx here is a real one: this run's merge
+   * list, exported by the product itself — its first column the export's Name.
+   */
   const exported = await fetch(`${API}/tasks/list/${mergeList.data.id}/export?format=xlsx`, { headers: { authorization: `Bearer ${auth.accessToken}` } })
   const XLSX = Buffer.from(await exported.arrayBuffer())
   if (exported.status !== 200 || XLSX.subarray(0, 2).toString('latin1') !== 'PK') {
     throw new Error(`could not export a real .xlsx to put in: ${exported.status}, ${XLSX.length} bytes`)
   }
-  /** What the page did with the file named `name`: refused it, or took it (its name on the file line). */
+  /** What the page did with the file named `name`: refused it, or took it — uploaded, or read as text. */
   const settledOn = async (name) => {
     await waitUntil(
       async () => (await page.getByTestId('import-sheet-not-text').count()) > 0 ||
-        ((await page.getByTestId('import-sheet-filename').filter({ visible: true }).innerText({ timeout: 1000 }).catch(() => '')) ?? '').includes(name),
-      { timeoutMs: 8000 },
+        (((await page.getByTestId('import-sheet-filename').filter({ visible: true }).innerText({ timeout: 1000 }).catch(() => '')) ?? '').includes(name) &&
+          (await page.getByTestId('import-sheet-preview').isEnabled({ timeout: 500 }).catch(() => false))),
+      { timeoutMs: 15_000 },
     )
     return {
       said: await page.getByTestId('import-sheet-not-text').filter({ visible: true }).innerText({ timeout: 3000 }).catch(() => ''),
       kept: await page.getByTestId('import-sheet-filename').count(),
+      uploaded: await page.getByTestId('import-sheet-filename').getAttribute('data-uploaded', { timeout: 3000 }).catch(() => null),
       preview: await page.getByTestId('import-sheet-preview').isEnabled({ timeout: 3000 }).catch(() => null),
     }
   }
-  const PAGE_WORDS = /Accepted: \.csv · \.tsv · \.txt\. \.xlsx is not read — re-save the sheet as CSV first\./
-  /** A real CSV between two files, so the refusal read next is that file's and not the last one's. */
+  /** Preview pressed, and what came back: the columns drawn, or the server's refusal. */
+  const previewOf = async () => {
+    const asked = page.waitForResponse((r) => r.url().includes('/import/spreadsheet/preview') && r.request().method() === 'POST', { timeout: 20_000 }).catch(() => null)
+    await page.getByTestId('import-sheet-preview').click({ timeout: 5000 }).catch(() => {})
+    const res = await asked
+    const body = res ? await res.json().catch(() => null) : null
+    return { status: res?.status() ?? 0, headers: body?.data?.headers ?? null, format: body?.data?.format ?? null, message: body?.message ?? body?.error?.message ?? null }
+  }
+  const PAGE_WORDS = /Accepted: \.csv · \.tsv · \.txt · \.xlsx · \.xls · \.json\./
+  /** A real CSV between two files, so what is read next is that file's and not the last one's. */
   const chooseFine = async () => {
     await page.getByTestId('import-sheet-file').setInputFiles({ name: `fine-${TAG}.csv`, mimeType: 'text/csv', buffer: Buffer.from(`Title\nFine ${TAG}\n`, 'utf8') }, { timeout: 10_000 })
     await waitUntil(async () => (await page.getByTestId('import-sheet-not-text').count()) === 0, { timeoutMs: 8000 })
   }
   await page.getByTestId('import-sheet-file').setInputFiles({ name: `board-${TAG}.xlsx`, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: XLSX }, { timeout: 10_000 })
   const byName = await settledOn(`board-${TAG}.xlsx`)
+  const xlsxDrawn = byName.preview ? await previewOf() : null
   /*
-   * AND AN .xls WHOSE BYTES ARE TEXT: some tools save tab-separated text
-   * under an .xls name. Its first bytes say nothing, so only its name does —
-   * this one is the name rule's alone. (The .xlsx above is refused by its
-   * first bytes as well, and a real .xls by its own, below.)
+   * AND AN .xls WHOSE BYTES ARE TEXT: some tools save tab-separated text under
+   * an .xls name. It is uploaded, as its name says a workbook, and the server
+   * reads it as the text it is.
    */
   await chooseFine()
   const TEXT_XLS = Buffer.from(`Title\tStatus\nOld board ${TAG}\tDone\n`, 'utf8')
   await page.getByTestId('import-sheet-file').setInputFiles({ name: `board-${TAG}.xls`, mimeType: 'application/vnd.ms-excel', buffer: TEXT_XLS }, { timeout: 10_000 })
   const byOldName = await settledOn(`board-${TAG}.xls`)
+  const textXlsDrawn = byOldName.preview ? await previewOf() : null
   chk(
-    PAGE_WORDS.test(byName.said) && byName.kept === 0 && byName.preview === false &&
-      PAGE_WORDS.test(byOldName.said) && byOldName.kept === 0 && byOldName.preview === false,
-    'an .xlsx or .xls chosen anyway is refused by its name, in the words under the picker, and nothing is offered: no file kept, no Preview',
-    `the .xlsx: the page said ${JSON.stringify(byName.said)}, kept ${byName.kept} file line(s), Preview enabled: ${byName.preview}; ` +
-      `the .xls: ${JSON.stringify(byOldName.said)}, kept ${byOldName.kept}, Preview enabled: ${byOldName.preview}`,
+    byName.uploaded === 'true' && byName.preview === true && xlsxDrawn?.status === 201 && xlsxDrawn?.format === 'xlsx' && (xlsxDrawn?.headers ?? [])[0] === 'Name' &&
+      byOldName.uploaded === 'true' && textXlsDrawn?.status === 201 && JSON.stringify(textXlsDrawn?.headers) === JSON.stringify(['Title', 'Status']),
+    'an .xlsx, and an .xls whose bytes are text, are uploaded as the files they are and previewed from them: the workbook’s own columns, and the text’s',
+    JSON.stringify({ xlsx: { ...byName, drawn: xlsxDrawn }, xls: { ...byOldName, drawn: textXlsDrawn } }),
   )
 
   await chooseFine()
-  const previewsBefore = previewBodies.length
   await page.getByTestId('import-sheet-file').setInputFiles({ name: `board-${TAG}.csv`, mimeType: 'text/csv', buffer: XLSX }, { timeout: 10_000 })
   const byBytes = await settledOn(`board-${TAG}.csv`)
-  // Pressed only where it can be: a Preview the page offers would send the zip to the server.
-  if (byBytes.preview) await page.getByTestId('import-sheet-preview').click({ timeout: 5000 }).catch(() => {})
-  await waitUntil(async () => previewBodies.length > previewsBefore, { timeoutMs: 3000 })
+  const csvNamedDrawn = byBytes.preview ? await previewOf() : null
+  const sentKey = previewBodies[previewBodies.length - 1] ?? {}
   chk(
-    PAGE_WORDS.test(byBytes.said) && byBytes.kept === 0 && byBytes.preview === false && previewBodies.length === previewsBefore,
-    'an .xlsx renamed .csv is refused by its first bytes, the same way, and no preview is asked of the server',
-    `the page said ${JSON.stringify(byBytes.said)}, kept ${byBytes.kept} file line(s), Preview enabled: ${byBytes.preview}; ${previewBodies.length - previewsBefore} preview request(s) sent`,
+    byBytes.uploaded === 'true' && csvNamedDrawn?.format === 'xlsx' && (csvNamedDrawn?.headers ?? [])[0] === 'Name' && typeof sentKey.fileKey === 'string' && sentKey.content === undefined,
+    'an .xlsx renamed .csv is known by its first bytes and read as the workbook it is — uploaded, its key sent, never its bytes as text',
+    JSON.stringify({ ...byBytes, drawn: csvNamedDrawn, sent: Object.keys(sentKey) }),
   )
 
   /*
-   * A LEGACY .xls IS NO ZIP: an OLE2 compound file, D0 CF 11 E0 A1 B1 1A E1
-   * and then NULs. A real one (written by xlwt) renamed .csv was taken, its
-   * preview drew five column names of binary, and its import failed (measured
-   * on lane 4). These are its first 512 bytes as a compound file begins them.
+   * A LEGACY .xls IS NO ZIP: an OLE2 compound file, D0 CF 11 E0 A1 B1 1A E1.
+   * These are a compound file's first 512 bytes with nothing after them — a
+   * damaged one — renamed .csv: known by its signature, uploaded, and refused
+   * by the server in words, with nothing offered to import.
    */
   await chooseFine()
   const XLS = Buffer.concat([Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), Buffer.alloc(504)])
-  const previewsBeforeXls = previewBodies.length
   await page.getByTestId('import-sheet-file').setInputFiles({ name: `legacy-${TAG}.csv`, mimeType: 'text/csv', buffer: XLS }, { timeout: 10_000 })
   const xlsByBytes = await settledOn(`legacy-${TAG}.csv`)
-  if (xlsByBytes.preview) await page.getByTestId('import-sheet-preview').click({ timeout: 5000 }).catch(() => {})
-  await waitUntil(async () => previewBodies.length > previewsBeforeXls, { timeoutMs: 3000 })
+  const damaged = xlsByBytes.preview ? await previewOf() : null
+  const damagedSaid = (await page.getByTestId('import-sheet-preview-error').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => '')) ?? ''
   chk(
-    PAGE_WORDS.test(xlsByBytes.said) && xlsByBytes.kept === 0 && xlsByBytes.preview === false && previewBodies.length === previewsBeforeXls,
-    'a legacy .xls renamed .csv is refused by its first bytes too — the compound file’s signature — and no preview is asked of the server',
-    `the page said ${JSON.stringify(xlsByBytes.said)}, kept ${xlsByBytes.kept} file line(s), Preview enabled: ${xlsByBytes.preview}; ${previewBodies.length - previewsBeforeXls} preview request(s) sent`,
+    xlsByBytes.uploaded === 'true' && damaged?.status === 400 && /workbook/i.test(damagedSaid) && (await page.getByTestId('import-sheet-review').count()) === 0,
+    'a damaged legacy .xls renamed .csv is known by its signature, uploaded, and refused by the server in words — nothing is offered to import',
+    JSON.stringify({ ...xlsByBytes, drawn: damaged, said: damagedSaid }),
   )
 
   console.log('\n▶ a file still being read when a refused one replaces it')
@@ -934,6 +955,7 @@ try {
    * the page said the second was refused and kept no file line, yet offered
    * Preview — which sent the first file, 21 MB of it (measured on lane 4,
    * three runs of three). `slow-…` is read 1.5 s late (the init script above).
+   * What the page refuses now is a file of no kind the import reads: a PDF.
    */
   await chooseFine()
   const previewsBeforeSlow = previewBodies.length
@@ -944,9 +966,9 @@ try {
     async () => ((await page.getByTestId('import-sheet-filename').filter({ visible: true }).innerText({ timeout: 1000 }).catch(() => '')) ?? '').includes(`slow-${TAG}.csv`),
     { timeoutMs: 8000 },
   )
-  await page.getByTestId('import-sheet-file').setInputFiles({ name: `replaced-${TAG}.csv`, mimeType: 'text/csv', buffer: XLSX }, { timeout: 10_000 })
+  await page.getByTestId('import-sheet-file').setInputFiles({ name: `replaced-${TAG}.pdf`, mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7\n', 'utf8') }, { timeout: 10_000 })
   const slowRead = await waitUntil(async () => (await slowLanded()) > slowBefore, { timeoutMs: 8000 })
-  const afterSlow = await settledOn(`replaced-${TAG}.csv`)
+  const afterSlow = await settledOn(`replaced-${TAG}.pdf`)
   if (afterSlow.preview) await page.getByTestId('import-sheet-preview').click({ timeout: 5000 }).catch(() => {})
   await waitUntil(async () => previewBodies.length > previewsBeforeSlow, { timeoutMs: 3000 })
   chk(
@@ -957,7 +979,7 @@ try {
       `kept ${afterSlow.kept} file line(s), Preview enabled: ${afterSlow.preview}; ${previewBodies.length - previewsBeforeSlow} preview request(s) sent`,
   )
 
-  console.log('\n▶ the same .xlsx sent to the server, as the page would have read it')
+  console.log('\n▶ the same .xlsx sent to the server as text, as the page once read it')
   const asText = new TextDecoder('utf-8').decode(XLSX)
   const firstColumn = asText.split('\n')[0]
   const xlsxPreview = await api(`/workspaces/${WT}/import/spreadsheet/preview`, { method: 'POST', body: { content: asText } })
@@ -969,16 +991,16 @@ try {
     jobs: xlsxImport.data?.jobId ? (await sql`select count(*)::int as n from clickup_import_jobs where id = ${xlsxImport.data.jobId}`)[0].n : 0,
     spaces: (await sql`select count(*)::int as n from spaces where workspace_id = ${WT} and name = ${`Xlsx ${TAG}`}`)[0].n,
   }
-  const SERVER_WORDS = 'Accepted: .csv · .tsv · .txt. .xlsx is not read — re-save the sheet as CSV first.'
+  const SERVER_WORDS = 'This is a workbook or another binary file sent as text: upload the file itself and send its key, as the import page does. Accepted: .csv · .tsv · .txt · .xlsx · .xls · .json.'
   chk(
     xlsxPreview.status === 400 && xlsxPreview.message === SERVER_WORDS &&
       xlsxImport.status === 400 && xlsxImport.message === SERVER_WORDS && xlsxLeft.jobs === 0 && xlsxLeft.spaces === 0,
-    'the server refuses an .xlsx’s content too — preview and import answer 400 in the page’s words — and makes nothing: no job row, no space',
+    'the server refuses an .xlsx’s bytes sent as text — preview and import answer 400, saying to send the file itself — and makes nothing: no job row, no space',
     `preview ${xlsxPreview.status} ${JSON.stringify(xlsxPreview.message)}; import ${xlsxImport.status} ${JSON.stringify(xlsxImport.message)}; ` +
       `left behind: ${xlsxLeft.jobs} job row(s), ${xlsxLeft.spaces} space(s)`,
   )
 
-  console.log('\n▶ the same legacy .xls sent to the server, as the page would have read it')
+  console.log('\n▶ the same legacy .xls sent to the server as text')
   /*
    * No zip, so the zip test passed it: as text its first line holds NULs,
    * which no header row of delimited text does.
@@ -995,7 +1017,7 @@ try {
   chk(
     xlsPreview.status === 400 && xlsPreview.message === SERVER_WORDS &&
       xlsImport.status === 400 && xlsImport.message === SERVER_WORDS && xlsLeft.jobs === 0 && xlsLeft.spaces === 0,
-    'the server refuses a legacy .xls’s content too — a NUL in its first line — preview and import answering 400 in the page’s words, and makes nothing',
+    'the server refuses a legacy .xls’s bytes sent as text too — a NUL in its first line — preview and import answering 400 in the same words, and makes nothing',
     `preview ${xlsPreview.status} ${JSON.stringify(xlsPreview.message)} (${xlsPreview.data?.headers?.length ?? 0} column(s) drawn); import ${xlsImport.status} ${JSON.stringify(xlsImport.message)}; ` +
       `left behind: ${xlsLeft.jobs} job row(s), ${xlsLeft.spaces} space(s)`,
   )

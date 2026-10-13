@@ -11,15 +11,21 @@
  * ClickUp API token for comments/attachments, which is beyond the frames).
  *
  * TEN TILES THAT OPEN A DIALOG THAT CANNOT IMPORT IS THE FACADE DEFECT AT TEN
- * TIMES SCALE. So this file builds ONE real thing — a generic delimited-text
+ * TIMES SCALE. So this file builds ONE real thing — a generic spreadsheet
  * importer with an explicit, user-editable column mapping — and then carries
  * per-source **column presets** for the named tools that genuinely publish a
- * task-shaped CSV. A preset is not a separate importer; it is the starting
+ * task-shaped sheet. A preset is not a separate importer; it is the starting
  * mapping for the same parser, which is why it can be honest.
  *
- * The four sources with no preset are NOT drawn as controls anywhere. They are
- * listed once, as text, with the reason — see `UNSUPPORTED_SOURCES`. Absent
- * beats fake.
+ * The sheet is read from any of the files ClickUp's Spreadsheets Importer
+ * takes — CSV, TSV, text, an Excel workbook (.xlsx or .xls) or a JSON list
+ * (`sheet-file.ts`) — so Monday's and Wrike's own Excel exports are read as
+ * they are downloaded (`ledger-rows/row-816`).
+ *
+ * The three named tools whose export is no sheet each have an importer of
+ * their own, as ClickUp has (`commit-log/log-601eacc-2`): Basecamp over its
+ * API, Confluence's space export into Docs, Slack's export into Chat. Nothing
+ * on the frame's submenu is left as text with a reason (`UNSUPPORTED_SOURCES`).
  */
 
 import { cellHasTime, splitCsvLines, mapStatus, mapPriority, type TaskPriority, type TaskStatus } from './clickup-csv.util'
@@ -89,7 +95,7 @@ export const SHEET_SOURCES: readonly SheetSource[] = [
     key: 'generic',
     label: 'Spreadsheet files',
     priorityScale: 'clickup',
-    exportHint: 'Any CSV or TSV with a header row. Map the columns yourself.',
+    exportHint: 'Any CSV, TSV or Excel workbook with a header row, or a JSON list of tasks. Map the columns yourself.',
     columns: {
       title: 'title',
       name: 'title',
@@ -148,9 +154,11 @@ export const SHEET_SOURCES: readonly SheetSource[] = [
     key: 'monday',
     label: 'Monday',
     priorityScale: 'text',
-    exportHint: 'monday.com › Board menu › Export board to Excel, then save as CSV.',
+    exportHint: 'monday.com › Board menu › Export board to Excel, and choose the file it downloads.',
+    // The board's export is read as the board (`readExportLayout`): each item's group comes in as `Group`.
     columns: {
       name: 'title',
+      item: 'title',
       notes: 'description',
       person: 'assignees',
       owner: 'assignees',
@@ -160,6 +168,11 @@ export const SHEET_SOURCES: readonly SheetSource[] = [
       timeline: 'ignore',
       priority: 'priority',
       group: 'list',
+      'board group': 'list',
+      subitems: 'ignore',
+      'item id': 'ignore',
+      'creation log': 'ignore',
+      'last updated': 'ignore',
     },
   },
   {
@@ -216,7 +229,8 @@ export const SHEET_SOURCES: readonly SheetSource[] = [
     key: 'wrike',
     label: 'Wrike',
     priorityScale: 'text',
-    exportHint: 'Wrike › folder ▾ › Export to Excel, then save as CSV.',
+    exportHint: 'Wrike › folder ▾ › Export to Excel, and choose the file it downloads.',
+    // A task in several folders is one line a folder, each with its Key: read once (`readExportLayout`).
     columns: {
       title: 'title',
       description: 'description',
@@ -224,58 +238,29 @@ export const SHEET_SOURCES: readonly SheetSource[] = [
       'assigned to': 'assignees',
       'start date': 'startDate',
       'due date': 'dueDate',
+      'end date': 'dueDate',
       'finish date': 'dueDate',
       priority: 'priority',
+      location: 'list',
+      folder: 'list',
+      key: 'ignore',
+      duration: 'ignore',
+      'parent task': 'ignore',
     },
   },
 ] as const
 
 /**
- * The frame's remaining rows, recorded as DECISIONS rather than quietly
- * dropped — and deliberately not rendered as anything clickable.
- *
- * Re-check these before trusting them (a reason that stopped being true is its
- * own defect class). Each one is "there is no task-shaped export to parse",
- * not "we ran out of time".
+ * The frame's rows with no importer, each with its reason — and there are none
+ * left (`commit-log/log-601eacc-2`). Basecamp was "needs the Basecamp API and
+ * an OAuth app", Confluence "a document importer writing Docs", Slack "no task
+ * rows to map": each is now the importer the reason asked for, as ClickUp
+ * imports it — Basecamp signed in to, Confluence's space export into Docs,
+ * Slack's export into Chat — and Document files its own tab. The list stays
+ * as the catalogue's place for a row with a reason, and the page draws it only
+ * when it holds one.
  */
-export const UNSUPPORTED_SOURCES: ReadonlyArray<{ key: string; label: string; reason: string }> = [
-  {
-    key: 'basecamp',
-    label: 'Basecamp',
-    reason:
-      'Basecamp has no built-in export of to-dos; reading them needs the Basecamp API and an OAuth app, which is a different build from a file importer.',
-  },
-  {
-    key: 'confluence',
-    label: 'Confluence',
-    reason:
-      'Confluence exports pages as HTML/XML/PDF, not task rows. Importing it means a document importer writing Docs, not tasks.',
-  },
-  {
-    key: 'slack',
-    label: 'Slack',
-    reason:
-      'A Slack export is conversation JSON. There are no task rows in it to map.',
-  },
-  {
-    key: 'documents',
-    label: 'Document files',
-    /*
-     * THIS REASON WAS TRUE AND STOPPED BEING TRUE, which is worse than a
-     * missing one: it said "no document parser is built, so no control is
-     * drawn for it" and a parser was then built, so the sentence kept
-     * explaining an absence that had been filled. A person reading it would
-     * have gone looking for a feature that is one tab away.
-     *
-     * The row stays in THIS list because it is still not a spreadsheet preset —
-     * it writes Docs rather than task rows, which is the whole reason it needs
-     * its own tab — and the sentence now points at that tab instead of
-     * apologising for it.
-     */
-    reason:
-      'Document import writes Rundesk Docs, not task rows, so it is not a spreadsheet preset. It has its own tab above, which reads Markdown and plain text.',
-  },
-] as const
+export const UNSUPPORTED_SOURCES: ReadonlyArray<{ key: string; label: string; reason: string }> = []
 
 export const sourceByKey = (key?: string): SheetSource =>
   SHEET_SOURCES.find((s) => s.key === key) ?? SHEET_SOURCES[0]
@@ -283,21 +268,29 @@ export const sourceByKey = (key?: string): SheetSource =>
 // ── what is read at all ──────────────────────────────────────────────────────
 
 /**
- * The files this importer reads: delimited text. No XLSX parser ships in this
- * repo (reading one is the feature `ledger-rows/row-816`), so the page asks
- * for a CSV rather than accepting an .xlsx it would then fail to read.
+ * The files this importer reads: ClickUp's Spreadsheets Importer's six
+ * (`ledger-rows/row-816`). Delimited text is sent as text, as it always was;
+ * a workbook and a JSON list are uploaded and read from the file itself
+ * (`sheet-file.ts`), since a workbook's bytes do not survive being read as text.
  */
-export const ACCEPTED_SHEET_EXTENSIONS = ['.csv', '.tsv', '.txt'] as const
+export const ACCEPTED_SHEET_EXTENSIONS = ['.csv', '.tsv', '.txt', '.xlsx', '.xls', '.json'] as const
 
 /**
- * A FILE THAT IS NOT DELIMITED TEXT IS REFUSED IN THE PAGE'S OWN WORDS
- * (`found-5-oct/xlsx-read-as-text`): its `import.sheetAccepted` and
- * `import.sheetNoXlsx`, run together as the page shows them under the picker.
- * An .xlsx put in anyway (the picker's "All files", a drop) was read as text,
- * its zip's bytes drawn as one column name, offered for import, and the run
- * failed on them — leaving an empty space, project and list behind.
+ * A FILE THIS IMPORT DOES NOT READ, refused in the page's own words, as the
+ * page shows them under the picker (`import.sheetAccepted`): a PDF, a Word
+ * document, an image put in through the picker's "All files" or a drop.
  */
-export const NOT_DELIMITED_TEXT = `Accepted: ${ACCEPTED_SHEET_EXTENSIONS.join(' · ')}. .xlsx is not read — re-save the sheet as CSV first.`
+export const NOT_A_SHEET_FILE = `Accepted: ${ACCEPTED_SHEET_EXTENSIONS.join(' · ')}.`
+
+/**
+ * A WORKBOOK'S BYTES SENT AS TEXT ARE STILL REFUSED (`found-5-oct/xlsx-read-as-text`):
+ * read as text, a zip or a compound file loses the bytes that make it one, and
+ * its preview drew them as one column name and its run failed, leaving a space
+ * behind. A workbook is read from the file itself, which the page uploads; a
+ * client sending `content` is told so.
+ */
+export const NOT_DELIMITED_TEXT =
+  `This is a workbook or another binary file sent as text: upload the file itself and send its key, as the import page does. ${NOT_A_SHEET_FILE}`
 
 /**
  * A ZIP, BY ITS FIRST BYTES: "PK" and one of its three signatures (a file's
@@ -405,12 +398,31 @@ export function splitDelimitedRow(line: string, delim: SheetDelimiter): string[]
   return fields
 }
 
+/** What a sheet was read from: delimited text, an Excel workbook (new or legacy), or a JSON list. */
+export type SheetFormat = 'csv' | 'xlsx' | 'xls' | 'json'
+
 export type SheetTable = {
   headers: string[]
   delimiter: SheetDelimiter
-  /** One entry per data row: its cells, and the 1-based LINE number in the file. */
+  /** One entry per data row: its cells, and the 1-based LINE number in the file (a workbook's row number; a JSON list's place). */
   rows: Array<{ line: number; cells: string[] }>
+  /** Delimited text when absent. */
+  format?: SheetFormat
+  /** The workbook's sheet that was read. */
+  sheetName?: string
+  /** The first row as the file holds it, before its empty names are named — what `readExportLayout` reads a title row from. */
+  headerRow?: { line: number; cells: string[] }
+  /** What a source's own export held beyond its table, and what was done with it (`readExportLayout`). */
+  layout?: ExportLayout
 }
+
+/**
+ * A board read as Monday writes one to Excel — its name, its groups, the rows
+ * of Monday's own it left out (a group's sums, a subitem's line) — or an
+ * export whose rows repeat a task once per folder it is in, as Wrike's do,
+ * each task read once.
+ */
+export type ExportLayout = { kind: 'board'; board: string; groups: string[]; leftOut: number } | { kind: 'keyed'; repeated: number }
 
 /** Split a delimited file into a header row plus numbered data rows. */
 export function parseSheet(text: string, delimiter?: SheetDelimiter): SheetTable {
@@ -423,7 +435,7 @@ export function parseSheet(text: string, delimiter?: SheetDelimiter): SheetTable
     line: i + 2,
     cells: splitDelimitedRow(line, delim),
   }))
-  return { headers, delimiter: delim, rows }
+  return { headers, delimiter: delim, rows, headerRow: { line: 1, cells: headers } }
 }
 
 /**

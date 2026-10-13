@@ -45,6 +45,15 @@ import { isReservedSlug, resolveSlug } from '../skills/skill-slug'
 import { fetchLinkPreview, type UnfurlResult } from './link-unfurl'
 import { likeContaining } from '../../common/sql/like'
 
+/**
+ * WHO A MESSAGE IS DRAWN UNDER (`commit-log/log-601eacc-2`): its author — or,
+ * for a message imported from Slack whose author is nobody in this workspace,
+ * the name it was written under (`chat_messages.imported_author`), and no
+ * picture: the person who imported it is not who said it.
+ */
+const AUTHOR_NAME = sql<string | null>`coalesce(${chatMessages.importedAuthor}, ${users.displayName})`
+const AUTHOR_AVATAR = sql<string | null>`case when ${chatMessages.importedAuthor} is null then ${users.avatarUrl} end`
+
 const AI_USER_EMAIL = 'ai-assistant@rundesk.system'
 
 /** Link-preview cache tuning (Plan §6.3). Short TTL so previews stay fresh but
@@ -1430,8 +1439,10 @@ export class ChatService {
         pinnedById: chatMessages.pinnedById,
         deletedAt: chatMessages.deletedAt,
         createdAt: chatMessages.createdAt,
-        authorName: users.displayName,
-        authorAvatarUrl: users.avatarUrl,
+        authorName: AUTHOR_NAME,
+        authorAvatarUrl: AUTHOR_AVATAR,
+        // Set on a message imported from Slack whose author is nobody here: the page says it was imported.
+        importedAuthor: chatMessages.importedAuthor,
         // §12 — where this was forwarded from, if it was.
         forwardedFromId: chatMessages.forwardedFromId,
         // §2.8 gap 9 — set when this message IS a call card.
@@ -1553,7 +1564,7 @@ export class ChatService {
           channelName: chatChannels.name,
           isPrivate: chatChannels.isPrivate,
           isDm: chatChannels.isDm,
-          authorName: users.displayName,
+          authorName: AUTHOR_NAME,
           sentAt: chatMessages.createdAt,
         })
         .from(chatMessages)
@@ -1782,8 +1793,8 @@ export class ChatService {
         editedAt: chatMessages.editedAt,
         pinnedAt: chatMessages.pinnedAt,
         createdAt: chatMessages.createdAt,
-        authorName: users.displayName,
-        authorAvatarUrl: users.avatarUrl,
+        authorName: AUTHOR_NAME,
+        authorAvatarUrl: AUTHOR_AVATAR,
       })
       .from(chatMessages)
       .leftJoin(users, eq(users.id, chatMessages.authorId))
@@ -1885,8 +1896,8 @@ export class ChatService {
         editedAt: chatMessages.editedAt,
         pinnedAt: chatMessages.pinnedAt,
         createdAt: chatMessages.createdAt,
-        authorName: users.displayName,
-        authorAvatarUrl: users.avatarUrl,
+        authorName: AUTHOR_NAME,
+        authorAvatarUrl: AUTHOR_AVATAR,
       })
       .from(chatMessages)
       .leftJoin(users, eq(users.id, chatMessages.authorId))
@@ -2476,8 +2487,8 @@ export class ChatService {
         pinnedAt: chatMessages.pinnedAt,
         pinnedById: chatMessages.pinnedById,
         createdAt: chatMessages.createdAt,
-        authorName: users.displayName,
-        authorAvatarUrl: users.avatarUrl,
+        authorName: AUTHOR_NAME,
+        authorAvatarUrl: AUTHOR_AVATAR,
       })
       .from(chatMessages)
       .leftJoin(users, eq(users.id, chatMessages.authorId))
@@ -2689,7 +2700,7 @@ export class ChatService {
         isDm: chatChannels.isDm,
         body: chatMessages.body,
         authorId: chatMessages.authorId,
-        authorName: users.displayName,
+        authorName: AUTHOR_NAME,
         assignedById: chatMessageAssignments.assignedById,
         dueAt: chatMessageAssignments.dueAt,
         resolvedAt: chatMessageAssignments.resolvedAt,
@@ -2818,8 +2829,8 @@ export class ChatService {
         createdAt: chatMessages.createdAt,
         savedAt: chatMessageSaves.createdAt,
         tags: chatMessageSaves.tags,
-        authorName: users.displayName,
-        authorAvatarUrl: users.avatarUrl,
+        authorName: AUTHOR_NAME,
+        authorAvatarUrl: AUTHOR_AVATAR,
       })
       .from(chatMessageSaves)
       .innerJoin(chatMessages, eq(chatMessages.id, chatMessageSaves.messageId))
@@ -3003,7 +3014,7 @@ export class ChatService {
         channelName: chatChannels.name,
         parentMessageId: chatMessages.parentMessageId,
         authorId: chatMessages.authorId,
-        authorName: users.displayName,
+        authorName: AUTHOR_NAME,
         body: chatMessages.body,
         createdAt: chatMessages.createdAt,
       })

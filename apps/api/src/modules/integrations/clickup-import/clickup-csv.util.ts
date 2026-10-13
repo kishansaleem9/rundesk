@@ -93,7 +93,8 @@ export function mapStatus(value?: string): TaskStatus {
   if (!value) return 'todo'
   const v = value.toLowerCase().trim()
   if (v.includes('done') || v.includes('complete') || v.includes('closed')) return 'done'
-  if (v.includes('progress') || v === 'doing') return 'in_progress'
+  // Monday's own in-progress status is "Working on it".
+  if (v.includes('progress') || v === 'doing' || v.startsWith('working on')) return 'in_progress'
   if (v.includes('review')) return 'in_review'
   if (v.includes('cancel')) return 'cancelled'
   if (v.includes('backlog') || v.includes('open')) return 'backlog'
