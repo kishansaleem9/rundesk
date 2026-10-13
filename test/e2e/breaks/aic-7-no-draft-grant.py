@@ -2,6 +2,10 @@
 # (`ledger-rows/row-2294`)
 # Reddens: ai-connected-apps: "linking Gmail asks Google to send, to leave drafts and to read — and the mailbox is kept with the draft grant (read by SQL)"
 #   or "confirmed, the email is a draft in her own Gmail — to the client, copying Mia, its subject and words — nothing is sent, and the result says where it is"
+#   or "a draft is written only in a mailbox its asker linked: one naming Olga’s, sent by Mia, is refused in words and her mailbox is untouched"
+#
+# Its third claim stands on what the first two broke: with no draft left in her mailbox, the forged one's check finds
+# none to be untouched. Measured on lane 10, 13 October: 8 of 11, the three named.
 #
 # The mailbox is linked to send and read; a draft asked of it is refused as needing the mailbox linked again.
 import io

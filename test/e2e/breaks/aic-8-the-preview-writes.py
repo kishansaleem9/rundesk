@@ -2,6 +2,10 @@
 # (`ledger-rows/row-2294`)
 # Reddens: ai-connected-apps: "the Commands tab drafts the event for her to confirm — its title, its time in her own zone, whom it invites — and nothing is in her calendar yet"
 #   or "confirmed, the event is in her own Google Calendar at that instant — 10:00 in Karachi, 05:00 UTC — in Room 4, inviting both, Google asked to send the invitations, and the result says where it went"
+#   or "a calendar whose grant the provider refuses at the confirm is said so in words — connect it again — and the event is not written"
+#
+# Its third claim stands on what it broke: the preview wrote the refused event before the grant was refused.
+# Measured on lane 10, 13 October: 8 of 11, the three named.
 #
 # Executed during the turn, as the chat surface writes a container: it is in the calendar before anybody confirmed, and twice once they do.
 import io

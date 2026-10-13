@@ -95,7 +95,8 @@ async function main() {
   })
   // An invite (\`ledger-rows/row-2294\`): Google is asked to send it, and the write is kept as it was asked.
   await step(out, 'invite', async () => {
-    const e = { title: 'Review', start: new Date('2026-10-08T11:00:00Z'), end: new Date('2026-10-08T11:30:00Z'), allDay: false, location: 'Room 4', attendees: ['ann@x.test'] }
+    // Outside the window the reads below count, so it adds nothing to them.
+    const e = { title: 'Review', start: new Date('2026-10-20T11:00:00Z'), end: new Date('2026-10-20T11:30:00Z'), allDay: false, location: 'Room 4', attendees: ['ann@x.test'] }
     const id = await writeEvent('gcal', 'g', 'primary', e, null)
     const w = (await held('g')).writes.filter((x: any) => x.method === 'POST').pop()
     return { id: typeof id === 'string', sendUpdates: w?.query?.sendUpdates ?? null, attendees: w?.body?.attendees ?? null, location: w?.body?.location ?? null }

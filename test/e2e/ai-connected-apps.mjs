@@ -144,7 +144,7 @@ try {
     const [row] = await sql`select id from users where email = ${email}`
     return { id: row.id, email, api: apiAs(signed.accessToken) }
   }
-  const olga = await person('olga', 'admin')
+  const olga = await person('olga', 'workspace_admin')
   const mia = await person('mia', 'member')
   const O = olga.api
   const M = mia.api
@@ -407,7 +407,7 @@ try {
   // ══ 6. THE AI VALUE PANEL COUNTS THEM ══════════════════════════════════════
   console.log('\n▶ the AI value panel counts the connected apps’ runs')
   const value = await O(`/ai/value?workspaceId=${WS}`)
-  const cats = Object.fromEntries((value.data?.categories ?? []).map((c) => [c.category, c]))
+  const cats = Object.fromEntries((value.data?.byCategory ?? []).map((c) => [c.category, c]))
   const runs = await sql`select feature, count(*)::int as n from ai_usage where workspace_id = ${WS} and user_id = ${olga.id} and status = 'succeeded' group by feature`
   const ran = Object.fromEntries(runs.map((r) => [r.feature, r.n]))
   const filled = cats.externalActions?.supported === true && cats.externalSearches?.supported === true

@@ -916,7 +916,7 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 
 ## 4. Counts
 
-**174 rows: 160 built · 7 partial · 7 missing.**
+**174 rows: 161 built · 7 partial · 6 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -953,8 +953,8 @@ rather than believed:
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
 | §2, the sections table | 122 | 6 | 5 | 133 |
-| §5, recovered from the frame observations | 38 | 1 | 2 | 41 |
-| **consolidated** | **160** | **7** | **7** | **174** |
+| §5, recovered from the frame observations | 39 | 1 | 1 | 41 |
+| **consolidated** | **161** | **7** | **6** | **174** |
 
 FOUR ROWS MOVED FROM `P` TO `B` AND THE TOTAL DID NOT CHANGE, which is the
 only shape of movement this table should ever show for a build — and the fourth
@@ -1023,13 +1023,23 @@ and without one (`ai-button-relationship-fields.mjs`, 17 checks;
 `commit-log/log-c980bee-1`, `ledger-rows/row-719`). So §2 moves `121 · 7 · 5` →
 `122 · 6 · 5`: 121 `B`, 1 `B*`, 6 `P` and 5 `M`.
 
+ONE OF §5's ROWS MOVED FROM `M` TO `B` ON 13 OCTOBER, AND THE TOTAL DID NOT.
+The AI acting inside a connected app (`19:05`, `[19:02]`–`[19:22]`: *"meri
+MEETING BOOK kar do … Gmail pe jaa ke EMAIL kar do"*) was `M`, every tool the
+AI had acting on this product's own rows. It books an event in the asker's own
+calendar, leaves a draft in a mailbox they linked and searches their own Drive,
+Gmail and SharePoint, each previewed and written once confirmed, as ClickUp's
+AI works through a person's own connections (`ai-connected-apps.mjs`, 11
+checks; `ledger-rows/row-2294`). So §5 moves `38 · 1 · 2` → `39 · 1 · 1`, and
+the total stays 174.
+
 §2's 122 built includes the one marked `B*` — built, but the row also records
 something the frame asks for that is not there. It is counted as built
 because that is what it is; the asterisk is where the remainder is written
 down. This read "the four" until 29 September while §2 held six: the two that
 were left, and four whose asterisk meant something else — a suite not yet run —
 which had stopped being true (the legend under §2 records it); and "the two"
-until 9 October, when the `Comment ▾` row's Email mode was built. §5's 38 built
+until 9 October, when the `Comment ▾` row's Email mode was built. §5's 39 built
 includes one `B*` of its own, the busy state, whose remainder is the frame's own
 words.
 
@@ -1107,20 +1117,21 @@ said so. §4's table credits §5 with **31 · 4 · 6**; the line above says
 survived several readings — which is precisely how the 173-that-was-two-numbers
 got as far as it did, recorded at the top of §4.
 
-They are the same forty-one rows at two moments. Twenty-three have closed
-since this section was written — nineteen that were missing and four that
-were partial — and twenty-three is the whole difference. (Seventeen until 29
+They are the same forty-one rows at two moments. Twenty-four have closed
+since this section was written — twenty that were missing and four that
+were partial — and twenty-four is the whole difference. (Seventeen until 29
 September, when the project-status breakdown and the busy state were read
 against the tree and found built and measured; nineteen until 30 September,
 when the create modal's Templates menu was built, twenty until the
-Template Center's Tags and Created-by facets were, and twenty-one until 9
-October, when a pasted clip link and the composer's Email were.)
+Template Center's Tags and Created-by facets were, twenty-one until 9
+October, when a pasted clip link and the composer's Email were, and
+twenty-three until 13 October, when the AI acting in a connected app was.)
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
 | as recovered (this section, and the three appendices below) | 15 | 5 | 21 | 41 |
-| closed since, each named on its own row by the suite that proves it | +23 | −4 | −19 | 0 |
-| **live (what §4 credits §5 with)** | **38** | **1** | **2** | **41** |
+| closed since, each named on its own row by the suite that proves it | +24 | −4 | −20 | 0 |
+| **live (what §4 credits §5 with)** | **39** | **1** | **1** | **41** |
 
 Both numbers are kept rather than one being overwritten, because the
 as-recovered split is what the three appendices below add up to, and a section
@@ -2425,7 +2436,11 @@ Frames re-extracted and read: `15:17`, `15:18`, `15:19`, `15:20`, `15:22`,
   independently — `apps/api/src/modules/calendar-sync/calendar-sync.service.ts:426-427`
   already POSTs events to `calendar/v3/calendars/…/events` — the AI simply has no
   door to it.
-- status: M
+- status: B
+- closed by: ai-connected-apps 11/11 (13 October; `ledger-rows/row-2294`) — an
+  event in the asker's own calendar, a draft in a mailbox they linked, a search
+  of their own Drive, Gmail and SharePoint, each previewed on the Commands tab
+  and written once confirmed; the two tiles count those runs now
 - defect class: none. The reason in `ai-categories.ts` is **not** stale: it says
   "nothing in `COMMAND_TOOLS` reaches a connected app", which is literally true
   as written, and the tile is honest about it.
