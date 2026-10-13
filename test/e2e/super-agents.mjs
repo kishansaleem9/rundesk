@@ -185,15 +185,21 @@ try {
     'no agent is offered among the people a comment may mention — a private one least of all',
     JSON.stringify(candidateIds),
   )
-  const miaChanges = await M(`/super-agents/${secret.id}`, { method: 'PATCH', body: { name: 'Mine now' } })
   const adminChanges = await A(`/super-agents/${helper.id}`, { method: 'PATCH', body: { instructions: 'Be brief. Sign off with a wave.' } })
-  chk(
-    miaChanges.status === 404 && adminChanges.ok && adminChanges.data?.instructions === 'Be brief. Sign off with a wave.',
-    'only its maker or a workspace admin changes an agent',
-    `Mia on the admin’s: ${said(miaChanges)}; admin on Mia’s: ${said(adminChanges)}`,
-  )
   must(await A(`/super-agents/${secret.id}/access`, { method: 'PUT', body: { isPrivate: true, userIds: [mia.id] } }), 'share it with Mia')
   const sharedNow = ((await M(`/workspaces/${WS}/super-agents`)).data ?? []).map((a) => a.id)
+  /*
+   * Shared with her, so she sees it and may use it — and still may not change it:
+   * the change rule is asked of an agent its reader can see. Asked of one she
+   * cannot, the 404 came from visibility and the rule was never reached, so the
+   * check passed with the rule removed (`sa-4`, 13 October).
+   */
+  const miaChanges = await M(`/super-agents/${secret.id}`, { method: 'PATCH', body: { name: 'Mine now' } })
+  chk(
+    miaChanges.status === 403 && /Only its maker or a workspace admin/.test(miaChanges.message ?? '') && adminChanges.ok && adminChanges.data?.instructions === 'Be brief. Sign off with a wave.',
+    'only its maker or a workspace admin changes an agent',
+    `Mia on the admin’s, shared with her: ${said(miaChanges)}; admin on Mia’s: ${said(adminChanges)}`,
+  )
   chk(sharedNow.includes(secret.id), 'shared with Mia, the private agent is listed to her', JSON.stringify(sharedNow))
   must(await A(`/super-agents/${secret.id}/access`, { method: 'PUT', body: { isPrivate: true, userIds: [] } }), 'unshare it')
 
@@ -424,7 +430,8 @@ try {
   await page.click('button[type=submit]')
   await page.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS })
   await page.goto(`${B}/app/${WS}/ai`, { waitUntil: 'domcontentloaded' })
-  await page.getByTestId('ai-mode-agents').click({ timeout: 25_000 })
+  // Bounded: a switch that is gone fails the check below by name, not the run (`sa-23`).
+  await page.getByTestId('ai-mode-agents').click({ timeout: 25_000 }).catch(() => {})
   await page.getByRole('button', { name: /^Accept$/ }).click({ timeout: 2000 }).catch(() => {})
   const cards = page.locator('[data-testid="sa-card"]')
   await page.locator(`[data-testid="sa-card"][data-agent-id="${helper.id}"]`).waitFor({ timeout: 15_000 }).catch(() => {})
@@ -435,9 +442,9 @@ try {
     JSON.stringify(cardIds),
   )
 
-  await page.getByTestId('sa-new').click()
-  await page.getByTestId('sa-builder-input').fill('Every Monday, list overdue work.')
-  await page.getByTestId('sa-builder-submit').click()
+  await page.getByTestId('sa-new').click({ timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('sa-builder-input').fill('Every Monday, list overdue work.', { timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('sa-builder-submit').click({ timeout: 10_000 }).catch(() => {})
   // Where no model answers the builder says so, and the form is started from scratch instead.
   let builderRefusal = null
   if (!MODEL_ON) {
@@ -525,7 +532,8 @@ try {
 
   await page.goto(`${B}/app/${WS}`, { waitUntil: 'domcontentloaded' })
   await page.getByTestId('quick-create-open').click({ timeout: 25_000 })
-  await page.getByTestId('create-footer-super-agent').click()
+  // Bounded, as above: an item that is gone fails its check, not the run (`sa-28`).
+  await page.getByTestId('create-footer-super-agent').click({ timeout: 10_000 }).catch(() => {})
   await page.getByTestId('sa-builder-input').waitFor({ timeout: 15_000 }).catch(() => {})
   chk(
     (await page.getByTestId('sa-builder-input').count()) === 1 && /hub=agents/.test(page.url()) && /agent=new/.test(page.url()),
