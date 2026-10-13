@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 548 items: 0 open · 0 partly fixed · 533 closed, and 15 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 549 items: 0 open · 0 partly fixed · 537 closed, and 12 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 84, each reproduced
+## Found by the triage, 5 October, and since — 85, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10397,6 +10397,23 @@ Checks: `check-ledger-ids-cases.mjs` 11 → 13: "a day's find of another month, 
 - the search reader does not ask it;
 - the loop reads the name its own way.
 
+### `found-13-oct/single-brace-placeholders-print-themselves` — **closed** (visible bug, small; found building batch 40b's strings) · reproduced 13 October
+
+**Three strings wrote `{name}` where the translator fills `{{name}}`, so they printed their braces in all four locales**
+
+*Evidence, 13 October:* `translate.ts` fills `{{word}}` and nothing else. Three keys wrote a single brace:
+- `superAgents.madeBy`, "Made by {name}", on every Super Agent's card (batch 40a);
+- `superAgents.deleteConfirm`, "Delete {name}? …", the agent's delete prompt (batch 40a);
+- `taskDetail.checklistAssignLabel`, "Assignee for {item}", the name a screen reader is given for a checklist item's assign button.
+
+Each printed as written, braces and all, in English, Spanish, Arabic and Urdu. Nothing read the catalogues for it: their keys are typed, but their words are not.
+
+*Closed, 13 October.* The twelve strings fill `{{name}}` and `{{item}}`. `scripts/check-i18n-placeholders.mjs` holds two rules over every string of every catalogue:
+- no single-braced word, except where braces are the product's own syntax (a formula's field names);
+- each key fills the same `{{…}}` in every locale as in English. A singular, dual or zero form may leave out `{{count}}`, as Arabic says "one task" in its word.
+
+Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.mjs --mutate` catches 9 of 9 mutations. Both run in the preflight and in CI. `brain-comments-and-decks.mjs`: "a Super Agent's card says who made it, by name — not "Made by {name}"" (`bcd-34` writes the brace back).
+
 ### `found-13-oct/ai-answer-rendering-names-a-drawn-view-undrawn` — **closed** (test tooling, small; found by rehearsal 14 of `7c454f4`) · reproduced 13 October
 
 **`ai-answer-rendering` used the Mind Map view as its example of a view this build does not draw, and batch 39 drew it**
@@ -10413,7 +10430,7 @@ Checks: `check-ledger-ids-cases.mjs` 11 → 13: "a day's find of another month, 
 
 *Closed, 8 October.* The save reads a folder's lists by `position`, then when they were made, then id — the sidebar's order — and each list's tasks the same way (`project-templates.service.ts`). The suite now makes the folder's second list first and dates the first a minute earlier, so the table's order is not the order made: `template-center` 84 of 85 before the fix with that fixture (the lists second first), 85 of 85 after, on lane 1. Patch `template-center-42` (the lists by position alone) reddens the check, 84 of 85 on lane 1.
 
-## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 41
+## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 44
 
 On the owner's word of 8 October ("close all of these properly … close them as they work on clickup"), the
 items the triage set aside as features and decisions are closed one by one: as ClickUp works each where its
@@ -11326,13 +11343,74 @@ Checks (`list-views`, 32): "the newest entry of the list’s feed is the status 
 
 *Closed, 13 October*, with `ledger-rows/row-852`: the Create menu's footer makes a Super Agent, opening the AI hub's new-agent page with the builder and the form (`create-footer-super-agent`; not for a guest, who has no agents). `super-agents.mjs`: "the Create menu makes a Super Agent: it opens the new-agent page" (`sa-28`).
 
+### `ledger-rows/row-745` — **closed** (feature, large; was not counted, a feature; triage, 5 October; was: open, medium) · reproduced 13 October
+
+**@ picker Brain section and Agents — still absent**
+
+*Evidence:* reaudit.md:745 says Brain and Agents are 'blocked rather than pending'. task-detail-sheet.tsx:299-305: MentionTab is 'people'|'tasks'|'docs'|'whiteboards'|'locations'|'channels', and the comment refuses Brain/Agents because 'The Brain² hub is a recorded decision'. The AI service and dock exist (see row-743), so an @Brain mention that asks the AI in the thread has something to call. Agents have nothing: no agents schema or module.
+
+*To close:* @Brain: research how ClickUp's @Brain answers in a comment thread, then build it on ai.service + comment create, measured on a model-stub lane. Agents: wait for row-852's Super Agents.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The @ picker has six sections and no Brain or Agents section. @Brain could be built on the existing AI service, but Agents cannot be built until Super Agents (row-852) exists. Evidence: `docs/triage-2026-10-05.md`.
+
+*13 October:* the Agents half is built with `ledger-rows/row-852`: the comment @ picker has an Agents tab listing the agents the reader may use, and Chat's picker an Agents section, each inserting a mention the agent answers in the thread (`super-agents.mjs`, `sa-29`, `sa-30`). The Brain section — @Brain answering in a comment thread — is what is left.
+
+*Closed, 13 October (batch 40b), as ClickUp's @Brain works.* The research is ClickUp's help on @mentioning Brain and on using Brain on task comments. @Brain in a comment answers right away, in that comment's thread. By default it draws only on what is public in the workspace. It reads a private item only when it was asked inside one, or when the prompt links to one. Its reply is read by everybody who can see the task, including people the private data it drew on would refuse. Each new question names it again. Built that way:
+- **The picker.** The @ picker opens with frame `04:00`'s Brain section, "Brain² — Ask, Build, Create", above the people, and picking it writes `@Brain`. Its Agents section now ends in "+ Create Agent", which opens a new Super Agent.
+- **The answer.** A comment naming `@Brain`, in any case, is answered by Brain's own account. That account is an agent's, so it is on no roster, never notified, and follows nothing. The answer goes in the comment's thread and is posted where its asker may comment (`brain-comments.ts`).
+- **What Brain reads.** It reads the task, the thread, and the workspace knowledge its asker may read. Of that it keeps only what has no private or personal space, private folder, or private or Personal List above it. Two exceptions: what is in the task's own list, and what the comment links (`?task=<id>`, `/docs/<id>`).
+- **What starts it.** Brain's own words start nothing. Where no model answers, the picker's Brain row says why it is greyed out, and a posted @Brain says it will not be answered.
+
+`brain-comments-and-decks.mjs` checks this, with the model stub and without one. The stub signs each answer with the task it was asked on and the knowledge it was given, so the suite reads what Brain was allowed to know from its words. Building it also fixed three things:
+- **The stub's prompt reading.** The stub read a system prompt sent as text blocks as its JSON, its lines escaped into one. It now reads the words, and `check-model-stub.mjs` holds it to that.
+- **Agents following tasks.** An agent's account followed every task it commented on (`NotificationsService.autoFollowEnabled`). It now follows none.
+- **Strings that print their braces.** `found-13-oct/single-brace-placeholders-print-themselves`.
+
+### `ledger-rows/row-853` — **closed** (feature, large; was not counted, a feature; triage, 5 October; was: open, large) · reproduced 13 October
+
+**Credit meter, rotating placeholder, composer '+', generated artifacts/slide deck — absent; the placeholder's revert reason is weakening now lanes can carry a model**
+
+*Evidence:* reaudit.md:853 (M). ai-panel.tsx testids have no composer-plus. :1817-1823 has three static placeholder states with no rotation (built then reverted in 4ad25f6 because 'the resting state never renders in a lane'). Since 6fbd79b/ad00a7c a lane can be given a model per lane (RUNDESK_LANE_MODEL). TaskAiBar disables 'presentation' because there is 'no slide-deck entity' (task-detail-sheet.tsx:596-600, 625-629). The ai_usage metering exists (reaudit.md:6558-6564). Only the allowance and reset are missing, which the frames never give.
+
+*To close:* Rotating placeholder: built 29 September (`commit-log/log-4ad25f6-1`). Credit meter: allowance and reset from ClickUp research, reading ai_usage. Composer '+': contents from ClickUp research (existing parts: knowledge tab, skills, @-mention search). Slide deck: frame 16:50 specifies an inline 4-slide embed; needs an artifact entity plus a renderer.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The rotating placeholder is built. The composer '+' and generated slide decks are unbuilt features, and the credit meter waits on the owner's Credits decision. None of it is a defect. Evidence: `docs/triage-2026-10-05.md`.
+
+*12 October:* the credit meter is built, with the Credits tab and Add credits (`commit-log/log-3943965-1`). What stays is the composer '+' and generated slide decks.
+
+*Closed, 13 October (batch 40b), as ClickUp's Brain and its Artifacts work.* The research is ClickUp's help on Chat with Brain and on creating decks, dashboards and other Artifacts. The composer's "+" lets you pick an item or location for Brain to focus on, and upload files: images, PDFs, sheets and Docs. Asked for a deck, Brain makes it as an Artifact that is private to you, opened from a card in its reply. You change it by asking again, and the whole deck is made anew. Earlier versions can be restored, and it is shared through a published link. Built that way:
+- **The "+".** The AI composer's "+" offers "Add a task, Doc or location", searched as the asker may search, and "Upload a file". Each choice becomes a chip on the next question.
+- **What the server does with them.** It reads each item as its asker may read it: 404 when it is not there, 403 in the read rule's words when it is refused. It reads each file or refuses it by name. Images and PDFs go to the model as they are. Sheets, Word documents and text go as their words. At most five files are taken (`composer-files.ts`).
+- **The deck.** Asked "What's new in Brain²?", Brain calls `create_slide_deck`. The deck is checked as a typed deck would be (one to fifteen slides, a title each, at most eight points), kept as the asker's own (`ai_artifacts`, migration `0190`), and named on the wire. Frame `16:50`'s card draws it under the answer, with its title and slide count.
+- **Opening it.** The deck opens over the page and is paged as frame `16:55` pages it: the arrows, ← and →, and "2 / 4". "Remake" makes the whole deck again as a new version. A version can be restored, which writes it again as the newest. "Publish to a link" opens a page anybody may read, `/deck/<token>`, and unpublishing closes it.
+- **Who sees it.** A deck is its maker's alone, listed under the AI page's Artifacts tab. Another member is told it is not there, and a guest is refused.
+
+The model stub now streams a staged tool call, as the chat surface asks for one. `brain-comments-and-decks.mjs` checks all of this with the model stub and without one. Without one, a deck is written by SQL as Brain would keep it, so the viewer, its versions, its link and its deletion are measured in CI too.
+
+### `commit-log/log-214dac0-1` — **closed** (feature, large; was not counted, a feature; triage, 5 October; was: open, large) · reproduced 13 October
+
+**The Brain² hub and everything that depends on it is unbuilt**
+
+*Evidence:* Recorded in commits 214dac0, 4dacd13, 10c3194, d626849, 601eacc and 4cb50d3 ('Brain²'s hub still needs a runtime'). The API has no agents module (ls apps/api/src/modules). quick-create-modal.tsx:275 says 'SUPER AGENT ... is deliberately absent', and task-detail-sheet.tsx:578 says the Brain² button 'does not exist and is not being built'. workspace-ai-page.tsx:123 and 184-196 is a seven-tab strip, not the frame's two-group left nav, and has no Ask|Agents toggle. ai-panel.tsx has no composer '+' and no generated-artifact or slide-deck output. The ledger still counts these rows as M, P or excluded: 743 (task-header Brain²), 745 (@ picker Brain and Agents), 751 ('Brain' in the + menu), 770 (Super Agent), 848 (Agents, excluded), 852 (hub, left nav, Ask|Agents, Super Agents), 853 (composer +, artifacts) and 870 (image generation).
+
+*To close:* Research how ClickUp Brain and Super Agents work: the hub layout, what an agent is, its tools and triggers, and Ask vs Agents. Build an agents table, module and route first, then the hub shell, the toggle and the entry points (task header, + menu, @ picker, create menu). Test on a lane that has the model stub.
+
+*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). There are still no agents (no table, module or route; every agents route is a 404 on lane 6), no hub nav or Ask|Agents toggle, no composer '+', no artifacts and no image generation, but the task-header Brain² button (row 743) and the '+' menu Brain (row 751) are now built. Evidence: `docs/triage-2026-10-05.md`.
+
+*13 October:* the agent runtime it waited for is built — Super Agents (`ledger-rows/row-852`, `ledger-rows/row-770`, the Agents half of `ledger-rows/row-745`). Left: @Brain in comments (row-745's other half) and the composer's '+' with generated artifacts (`ledger-rows/row-853`).
+
+*Closed, 13 October.* Brain² and everything that depended on it is built as ClickUp works it:
+- the hub and Super Agents (`ledger-rows/row-852`, `ledger-rows/row-770`, batch 40a);
+- @Brain and Agents in the @ picker (`ledger-rows/row-745`);
+- the composer's "+" and the decks Brain makes (`ledger-rows/row-853`, batch 40b).
+
 ## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
 
 Moved here by the triage of 5 October, at the owner's request: these are not open defects and are not in the
 counts. Each says what it is in its heading, with the status it had before. Their full evidence is in
 `docs/triage-2026-10-05.md`.
 
-#### Features and ClickUp gaps — 5
+#### Features and ClickUp gaps — 2
 
 ### `found-13-oct/importers-by-sign-in-unbuilt` — feature, not counted (found closing `commit-log/log-601eacc-2`, 13 October)
 
@@ -11349,42 +11427,6 @@ counts. Each says what it is in its heading, with the status it had before. Thei
 *Evidence, 12 October:* ClickUp's Email ClickApp links "Gmail, Outlook, or another over IMAP" (help centre, "Use Email in ClickUp", through search excerpts). Rundesk links Gmail and Outlook through their own consent (`email-accounts.service.ts`) and refuses any other provider (400, "Only Gmail or Outlook is linked to send email").
 
 *To close:* link a mailbox by its IMAP and SMTP servers and a password kept encrypted as the other grants are; send through its SMTP server and read its answers from its IMAP inbox on the same schedule; a lane stub that speaks both.
-
-### `commit-log/log-214dac0-1` — feature, not counted (triage, 5 October; was: open, large)
-
-**The Brain² hub and everything that depends on it is unbuilt**
-
-*Evidence:* Recorded in commits 214dac0, 4dacd13, 10c3194, d626849, 601eacc and 4cb50d3 ('Brain²'s hub still needs a runtime'). The API has no agents module (ls apps/api/src/modules). quick-create-modal.tsx:275 says 'SUPER AGENT ... is deliberately absent', and task-detail-sheet.tsx:578 says the Brain² button 'does not exist and is not being built'. workspace-ai-page.tsx:123 and 184-196 is a seven-tab strip, not the frame's two-group left nav, and has no Ask|Agents toggle. ai-panel.tsx has no composer '+' and no generated-artifact or slide-deck output. The ledger still counts these rows as M, P or excluded: 743 (task-header Brain²), 745 (@ picker Brain and Agents), 751 ('Brain' in the + menu), 770 (Super Agent), 848 (Agents, excluded), 852 (hub, left nav, Ask|Agents, Super Agents), 853 (composer +, artifacts) and 870 (image generation).
-
-*To close:* Research how ClickUp Brain and Super Agents work: the hub layout, what an agent is, its tools and triggers, and Ask vs Agents. Build an agents table, module and route first, then the hub shell, the toggle and the entry points (task header, + menu, @ picker, create menu). Test on a lane that has the model stub.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). There are still no agents (no table, module or route; every agents route is a 404 on lane 6), no hub nav or Ask|Agents toggle, no composer '+', no artifacts and no image generation, but the task-header Brain² button (row 743) and the '+' menu Brain (row 751) are now built. Evidence: `docs/triage-2026-10-05.md`.
-
-*13 October:* the agent runtime it waited for is built — Super Agents (`ledger-rows/row-852`, `ledger-rows/row-770`, the Agents half of `ledger-rows/row-745`). Left: @Brain in comments (row-745's other half) and the composer's '+' with generated artifacts (`ledger-rows/row-853`).
-
-### `ledger-rows/row-853` — feature, not counted (triage, 5 October; was: open, large)
-
-**Credit meter, rotating placeholder, composer '+', generated artifacts/slide deck — absent; the placeholder's revert reason is weakening now lanes can carry a model**
-
-*Evidence:* reaudit.md:853 (M). ai-panel.tsx testids have no composer-plus. :1817-1823 has three static placeholder states with no rotation (built then reverted in 4ad25f6 because 'the resting state never renders in a lane'). Since 6fbd79b/ad00a7c a lane can be given a model per lane (RUNDESK_LANE_MODEL). TaskAiBar disables 'presentation' because there is 'no slide-deck entity' (task-detail-sheet.tsx:596-600, 625-629). The ai_usage metering exists (reaudit.md:6558-6564). Only the allowance and reset are missing, which the frames never give.
-
-*To close:* Rotating placeholder: built 29 September (`commit-log/log-4ad25f6-1`). Credit meter: allowance and reset from ClickUp research, reading ai_usage. Composer '+': contents from ClickUp research (existing parts: knowledge tab, skills, @-mention search). Slide deck: frame 16:50 specifies an inline 4-slide embed; needs an artifact entity plus a renderer.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The rotating placeholder is built. The composer '+' and generated slide decks are unbuilt features, and the credit meter waits on the owner's Credits decision. None of it is a defect. Evidence: `docs/triage-2026-10-05.md`.
-
-*12 October:* the credit meter is built, with the Credits tab and Add credits (`commit-log/log-3943965-1`). What stays is the composer '+' and generated slide decks.
-
-### `ledger-rows/row-745` — feature, not counted (triage, 5 October; was: open, medium)
-
-**@ picker Brain section and Agents — still absent**
-
-*Evidence:* reaudit.md:745 says Brain and Agents are 'blocked rather than pending'. task-detail-sheet.tsx:299-305: MentionTab is 'people'|'tasks'|'docs'|'whiteboards'|'locations'|'channels', and the comment refuses Brain/Agents because 'The Brain² hub is a recorded decision'. The AI service and dock exist (see row-743), so an @Brain mention that asks the AI in the thread has something to call. Agents have nothing: no agents schema or module.
-
-*To close:* @Brain: research how ClickUp's @Brain answers in a comment thread, then build it on ai.service + comment create, measured on a model-stub lane. Agents: wait for row-852's Super Agents.
-
-*Triage, 5 October:* a feature, not a defect (confirmed unbuilt). The @ picker has six sections and no Brain or Agents section. @Brain could be built on the existing AI service, but Agents cannot be built until Super Agents (row-852) exists. Evidence: `docs/triage-2026-10-05.md`.
-
-*13 October:* the Agents half is built with `ledger-rows/row-852`: the comment @ picker has an Agents tab listing the agents the reader may use, and Chat's picker an Agents section, each inserting a mention the agent answers in the thread (`super-agents.mjs`, `sa-29`, `sa-30`). The Brain section — @Brain answering in a comment thread — is what is left.
 
 #### Settled by the owner: reverted or superseded, 5 October — 7
 

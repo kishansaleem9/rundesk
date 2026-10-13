@@ -324,14 +324,18 @@ type MentionDocLite = { id: string; title: string; updatedAt?: string }
  *                   space mein para hai, ya kis list mein para hai."*
  *   · Channels    — `GET /workspaces/:ws/chat/channels`.
  *
- * NOT offered: **Brain** and **Agents → + Create Agent**, both drawn in the same
- * frame. The Brain² hub is a recorded decision, and the ledger already refused
- * Agents on the grounds that Rundesk has none — `ai.service.ts` declines an
- * Agent filter for exactly that reason. Adding either as a seventh row would be
- * a picker section with nothing behind it.
+ * And the frame's other two sections: **Brain** ("Brain² — Ask, Build,
+ * Create"), atop the People tab, which writes `@Brain` for Brain to answer in
+ * the thread (`ledger-rows/row-745`, `brain-comments.ts`); and **Agents → +
+ * Create Agent**, the Super Agents the reader may use and the way to make one
+ * (`ledger-rows/row-852`).
  */
 type MentionTab = 'people' | 'agents' | 'tasks' | 'docs' | 'whiteboards' | 'locations' | 'channels'
 type MentionSimpleLite = { id: string; title: string; hint?: string }
+/** Brain's own account and its mention, as the server reads them (`brain-comments.ts`): one rule, both sides. */
+const BRAIN_EMAIL = 'brain@rundesk.system'
+const BRAIN_MENTION = /(^|[^\w@.])@brain(?![\w-])/i
+const isBrainAuthor = (author?: { email?: string | null } | null) => author?.email === BRAIN_EMAIL
 
 /**
  * The keyboard prefixes of frame `04:00`'s footer, and the ONE place that
@@ -6817,7 +6821,17 @@ function CommentsPanel({
   const caps = useTaskCaps()
   const qc = useQueryClient()
   const currentUser = useAuthStore((s) => s.user)
+  const navigateTo = useNavigate()
   const [text, setText] = useState('')
+  /*
+   * @BRAIN (`ledger-rows/row-745`): whether a model answers here, and — after a
+   * comment that names Brain — the thread its answer is awaited in, until a
+   * reply by Brain lands there; or, where no model answers, why it will not.
+   */
+  const aiStatus = useQuery({ queryKey: ['ai-status'], queryFn: () => api<{ available: boolean }>('/ai/status'), staleTime: 60_000 })
+  const brainUnavailable = aiStatus.data?.available === false
+  const [brainWait, setBrainWait] = useState<{ threadId: string; since: number; gaveUp: boolean } | null>(null)
+  const [brainRefused, setBrainRefused] = useState(false)
   const [commentFiles, setCommentFiles] = useState<File[]>([])
   // Each file already put on the task, by the file: a send that failed is retried without a second copy.
   const uploadedFilesRef = useRef(new Map<File, string>())
@@ -7129,6 +7143,7 @@ function CommentsPanel({
     mutationFn: async () => {
       // Upload any attached files first, then post the comment referencing them.
       const attachmentIds = await uploadCommentFiles()
+      const mentionsBrain = BRAIN_MENTION.test(text)
       const posted = await api<{ id: string }>(`/tasks/${taskId}/comments`, {
         method: 'POST',
         body: JSON.stringify({
@@ -7160,9 +7175,12 @@ function CommentsPanel({
           toast.error(t('commentPlus.assignFailed'))
         }
       }
-      return posted
+      return { ...posted, mentionsBrain, threadId: replyTo ?? posted.id }
     },
-    onSuccess: async () => {
+    onSuccess: async (posted) => {
+      // Brain answers in this comment's thread, or says here why it cannot.
+      setBrainRefused(posted.mentionsBrain && brainUnavailable)
+      setBrainWait(posted.mentionsBrain && !brainUnavailable ? { threadId: posted.threadId, since: Date.now(), gaveUp: false } : null)
       setText('')
       setCommentFiles([])
       uploadedFilesRef.current.clear()
@@ -7369,6 +7387,29 @@ function CommentsPanel({
     }
   }, [mentionToken?.tab])
 
+  /*
+   * @Brain's answer, awaited in its thread (`ledger-rows/row-745`): the comments
+   * are read again every two seconds until a reply by Brain lands there after
+   * the question, and after ninety seconds without one the wait says so rather
+   * than spinning for ever. Above the early return, as every hook here is.
+   */
+  const brainAnswered = !!brainWait && (commentsQuery.data ?? []).some(
+    (c) => isBrainAuthor(c.author) && c.parentCommentId === brainWait.threadId && new Date(c.createdAt).getTime() >= brainWait.since - 5_000,
+  )
+  useEffect(() => {
+    if (!brainWait || brainWait.gaveUp) return
+    if (brainAnswered) {
+      setBrainWait(null)
+      return
+    }
+    const poll = window.setInterval(() => void qc.invalidateQueries({ queryKey: ['task', taskId, 'comments'] }), 2_000)
+    const stop = window.setTimeout(() => setBrainWait((w) => (w ? { ...w, gaveUp: true } : w)), 90_000)
+    return () => {
+      window.clearInterval(poll)
+      window.clearTimeout(stop)
+    }
+  }, [brainWait, brainAnswered, qc, taskId])
+
   if (commentsQuery.data === null) {
     return <NotWiredNote>{t('taskDetail.commentsUnavailable')}</NotWiredNote>
   }
@@ -7485,8 +7526,9 @@ function CommentsPanel({
                   </p>
                 )}
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium">
+                  <span className="text-xs font-medium inline-flex items-center gap-1">
                     {c.email?.direction === 'in' ? c.email.from : (c.author?.displayName ?? c.author?.email ?? t('taskDetail.userFallback'))}
+                    {isBrainAuthor(c.author) && <BrainBadge />}
                   </span>
                   <span className="text-xs text-muted-foreground">
                     {new Date(c.createdAt).toLocaleString()}
@@ -7646,8 +7688,9 @@ function CommentsPanel({
                         }
                       >
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-medium">
+                          <span className="text-xs font-medium inline-flex items-center gap-1">
                             {reply.email?.direction === 'in' ? reply.email.from : (reply.author?.displayName ?? reply.author?.email ?? t('taskDetail.userFallback'))}
+                            {isBrainAuthor(reply.author) && <BrainBadge />}
                           </span>
                           <span className="text-xs text-muted-foreground">
                             {new Date(reply.createdAt).toLocaleString()}
@@ -7793,6 +7836,23 @@ function CommentsPanel({
             {emailError}
           </p>
         )}
+        {/* @Brain (`ledger-rows/row-745`): answering in the thread, did not, or cannot here. */}
+        {brainWait && !brainWait.gaveUp && (
+          <p className="mb-2 flex items-center gap-1.5 text-xs text-violet-700 dark:text-violet-300" data-testid="brain-answering">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            {t('brain.answering')}
+          </p>
+        )}
+        {brainWait?.gaveUp && (
+          <p className="mb-2 text-xs text-muted-foreground" data-testid="brain-no-answer">
+            {t('brain.noAnswer')}
+          </p>
+        )}
+        {brainRefused && (
+          <p className="mb-2 text-xs text-amber-700 dark:text-amber-400" data-testid="brain-unavailable">
+            {t('brain.unavailable')}
+          </p>
+        )}
         <Textarea
           ref={commentTextRef}
           value={text}
@@ -7902,6 +7962,37 @@ function CommentsPanel({
                 </button>
               ))}
             </div>
+            {/*
+              Frame `04:00`'s Brain section, atop the people (`ledger-rows/row-745`):
+              "Brain² — Ask, Build, Create". It writes `@Brain`, which Brain answers
+              in this comment's thread; where no model answers it says so instead.
+            */}
+            {mentionTab === 'people' && (
+              <div className="border-b border-border/70 px-1 py-1" data-testid="mention-brain-section">
+                <div className="px-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('brain.pickerSection')}</div>
+                <button
+                  type="button"
+                  data-testid="mention-brain"
+                  disabled={brainUnavailable}
+                  onClick={() => {
+                    const cut = /(@+[/#]?)([^\s@/#]*)$/.exec(text)
+                    setText(`${cut ? text.slice(0, cut.index) : text}@Brain `)
+                    setMentionIndex(0)
+                    commentTextRef.current?.focus()
+                  }}
+                  className="w-full rounded px-1.5 py-1.5 text-left text-xs flex items-center gap-2 hover:bg-muted/70 disabled:opacity-60 disabled:hover:bg-transparent"
+                >
+                  <BrainIcon className="h-4 w-4 text-violet-600" aria-hidden />
+                  <span className="font-medium">Brain²</span>
+                  <span className="text-muted-foreground truncate">{t('brain.pickerHint')}</span>
+                </button>
+                {brainUnavailable && (
+                  <div className="px-1.5 pb-1 text-[11px] text-amber-700 dark:text-amber-400" data-testid="mention-brain-unavailable">
+                    {t('brain.unavailable')}
+                  </div>
+                )}
+              </div>
+            )}
             {mentionTab === 'people' && (
               <div className="max-h-40 overflow-auto">
                 {mentionCandidates.slice(0, 8).map((member, idx) => (
@@ -7974,6 +8065,18 @@ function CommentsPanel({
                       <span className="ml-auto text-[10px] text-muted-foreground">{t('superAgents.agentMark')}</span>
                     </button>
                   ))
+                )}
+                {/* Frame `04:00`'s "Agents → + Create Agent": the agents hub's New Super Agent (`ledger-rows/row-745`). */}
+                {workspaceId && (
+                  <button
+                    type="button"
+                    data-testid="mention-agents-create"
+                    className="w-full border-t border-border/70 px-2.5 py-2 text-left text-xs flex items-center gap-2 text-violet-700 hover:bg-muted/70 dark:text-violet-300"
+                    onClick={() => void navigateTo({ to: '/app/$workspaceId/ai', params: { workspaceId }, search: { hub: 'agents', agent: 'new' } })}
+                  >
+                    <Plus className="h-3.5 w-3.5" aria-hidden />
+                    {t('brain.createAgent')}
+                  </button>
                 )}
               </div>
             )}
@@ -11023,8 +11126,9 @@ function CommentThreadPanel({
               className="rounded border border-border/70 p-2 bg-card/50"
             >
               <div className="flex items-center justify-between">
-                <span className="text-xs font-medium">
+                <span className="text-xs font-medium inline-flex items-center gap-1">
                   {r.email?.direction === 'in' ? r.email.from : (r.author?.displayName ?? r.author?.email ?? t('taskDetail.userFallback'))}
+                  {isBrainAuthor(r.author) && <BrainBadge />}
                 </span>
                 <span className="text-[11px] text-muted-foreground">
                   {new Date(r.createdAt).toLocaleString()}
@@ -11064,5 +11168,19 @@ function CommentThreadPanel({
         )}
       </div>
     </div>
+  )
+}
+
+/** Brain's mark on what it wrote in a thread (`ledger-rows/row-745`), as ClickUp marks its replies. */
+function BrainBadge() {
+  const { t } = useTranslation()
+  return (
+    <span
+      data-testid="comment-brain-badge"
+      className="inline-flex items-center gap-0.5 rounded bg-violet-100 px-1 py-px text-[10px] font-medium text-violet-700 dark:bg-violet-900/40 dark:text-violet-300"
+    >
+      <BrainIcon className="h-3 w-3" aria-hidden />
+      {t('brain.badge')}
+    </span>
   )
 }

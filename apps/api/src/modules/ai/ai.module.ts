@@ -23,6 +23,8 @@ import { EmailAccountsModule } from '../email-accounts/email-accounts.module'
 import { AiFieldsService } from './ai-fields.service'
 import { AiFieldsController } from './ai-fields.controller'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { ArtifactsService } from './artifacts.service'
+import { ArtifactsController, ArtifactsPublicController } from './artifacts.controller'
 
 @Module({
   // NotificationsModule supplies NotificationsService for briefing + workload
@@ -61,7 +63,8 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
     CalendarSyncModule,
     EmailAccountsModule,
   ],
-  controllers: [AiController, KnowledgeController, ChatThreadsController, AiFieldsController],
+  // What Brain makes — its decks — and the published ones' public page (`ledger-rows/row-853`).
+  controllers: [AiController, KnowledgeController, ChatThreadsController, AiFieldsController, ArtifactsController, ArtifactsPublicController],
   // BriefingService owns the hourly @Cron that delivers daily briefings;
   // WorkloadAlertService owns the daily @Cron that alerts managers about
   // overloaded teammates (§7.12) — both must be provided here or their crons
@@ -69,7 +72,7 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
   // re-embeds each workspace into the §15.1 semantic store; EmbeddingService is
   // the pluggable embedder (env-gated real API + deterministic local default)
   // used by both the indexer and AiService's knowledge retrieval.
-  providers: [AiService, BriefingService, WorkloadAlertService, EmbeddingService, KnowledgeIndexerService, ChatThreadsService, AiFieldsService, WorkspaceMemberGuard],
+  providers: [AiService, BriefingService, WorkloadAlertService, EmbeddingService, KnowledgeIndexerService, ChatThreadsService, AiFieldsService, WorkspaceMemberGuard, ArtifactsService],
   exports: [AiService],
 })
 export class AiModule {}

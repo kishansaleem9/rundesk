@@ -104,3 +104,4 @@ export * from './email-accounts'
 export * from './import-grants'
 // `ledger-rows/row-852` — Super Agents: their profiles, who a private one is shared with, what they remember, every run.
 export * from './super-agents'
+export * from './ai-artifacts'

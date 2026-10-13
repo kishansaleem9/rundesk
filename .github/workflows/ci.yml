@@ -461,6 +461,17 @@ jobs:
       - name: And that gate can fail, and each case bites
         run: node scripts/check-ledger-ids-cases.mjs --mutate
 
+      # The translator fills `{{name}}` and nothing else, and three strings wrote
+      # `{name}` — "Made by {name}" on a Super Agent's card, in four locales
+      # (found-13-oct/single-brace-placeholders-print-themselves). No string
+      # writes a single-braced word but a formula's own syntax, and each key
+      # fills the same placeholders in every locale as in English.
+      - name: Every placeholder in the catalogues is one the translator fills
+        run: node scripts/check-i18n-placeholders.mjs
+
+      - name: And that gate can fail, and each case bites
+        run: node scripts/check-i18n-placeholders-cases.mjs --mutate
+
       # The sweep fixture picked a workspace by walking every space and then
       # built in spaces[0] whatever it held; a space left empty by an
       # interrupted run ended nine suites before their first check
@@ -2065,6 +2076,20 @@ jobs:
       - name: Super Agents, as ClickUp has them
         timeout-minutes: 15
         run: node test/e2e/super-agents.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # Brain², the rest of it (`ledger-rows/row-745`, `row-853`): @Brain answering
+      # in a comment's thread from what is public and the task's own list; the
+      # composer's "+", what it points Brain at and the files it gives it; and the
+      # decks Brain makes — a card, paged, changed by asking, versions, a
+      # published link. No model answers here, so Brain posts nothing and the
+      # composer says why, a question is refused, and the deck the viewer opens
+      # is written by SQL as Brain would keep it.
+      - name: Brain in a comment's thread, the composer's "+", and its decks
+        timeout-minutes: 15
+        run: node test/e2e/brain-comments-and-decks.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

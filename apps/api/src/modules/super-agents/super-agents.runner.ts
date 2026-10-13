@@ -10,6 +10,7 @@ import { TasksService } from '../tasks/tasks.service'
 import { ChatService } from '../chat/chat.service'
 import { SuperAgentsService } from './super-agents.service'
 import { scheduleDue } from './schedule'
+import { BrainComments } from './brain-comments'
 
 type Agent = typeof superAgents.$inferSelect
 type Trigger = 'mention' | 'dm' | 'assign' | 'schedule' | 'automation' | 'manual'
@@ -54,6 +55,7 @@ export class SuperAgentsRunner implements OnModuleInit {
     private readonly ai: AiService,
     private readonly tasks: TasksService,
     private readonly chat: ChatService,
+    private readonly brain: BrainComments,
   ) {}
 
   onModuleInit() {
@@ -80,6 +82,8 @@ export class SuperAgentsRunner implements OnModuleInit {
 
   async onComment(e: CommentEvent) {
     if (await this.isAgentAccount(e.authorId)) return
+    // @Brain, named in the comment, answers in its thread too (`ledger-rows/row-745`).
+    await this.brain.onComment(e)
     for (const agent of await this.agentsAmong(e.mentionedUserIds)) {
       const [task] = await this.db.select({ title: tasks.title }).from(tasks).where(eq(tasks.id, e.taskId)).limit(1)
       await this.run(agent, {

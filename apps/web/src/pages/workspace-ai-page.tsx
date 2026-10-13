@@ -29,9 +29,11 @@ import {
   Coins,
   CalendarPlus,
   Mail,
+  Presentation,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { AiPanel } from '../components/ai-panel'
+import { ArtifactsList, DeckViewer } from '../components/brain-artifacts'
 import { useSkill, useAiChatActions } from '../lib/skills-api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { localDateTimeValue } from '../lib/local-date'
@@ -134,7 +136,7 @@ export function AiPage() {
   // Guests have no Super Agents, as in ClickUp: the switch is not offered to them.
   const agentsOffered = role !== 'guest'
   const showAgents = hub === 'agents' && agentsOffered
-  const [activeTab, setActiveTab] = useState<'chat' | 'knowledge' | 'commands' | 'generate' | 'notes' | 'writing' | 'analytics' | 'credits'>('chat')
+  const [activeTab, setActiveTab] = useState<'chat' | 'knowledge' | 'commands' | 'generate' | 'notes' | 'writing' | 'analytics' | 'credits' | 'artifacts'>('chat')
 
   // §A2.3 — `?prompt=` is a question handed over from another surface; the chat
   // tab asks it on arrival, then the param is dropped so switching tabs or
@@ -260,6 +262,8 @@ export function AiPage() {
             { id: 'analytics', labelKey: 'ai.tabAnalytics', icon: LineChart },
             // ClickUp's AI hub shows every member the credits used and left (`commit-log/log-3943965-1`).
             { id: 'credits', labelKey: 'ai.tabCredits', icon: Coins },
+            // What Brain made — its decks — as ClickUp lists its Artifacts (`ledger-rows/row-853`).
+            { id: 'artifacts', labelKey: 'ai.tabArtifacts', icon: Presentation },
           ] as const
         ).map((tab) => (
           <button
@@ -305,6 +309,7 @@ export function AiPage() {
             <AiCreditsCard workspaceId={workspaceId} />
           </div>
         )}
+        {activeTab === 'artifacts' && <ArtifactsTab workspaceId={workspaceId} />}
       </div>
       </>
       )}
@@ -2200,6 +2205,17 @@ function WritingTab() {
           </div>
         </Card>
       )}
+    </div>
+  )
+}
+
+/** The decks Brain made for this person, newest first; each opens as it opened from its answer (`ledger-rows/row-853`). */
+function ArtifactsTab({ workspaceId }: { workspaceId: string }) {
+  const [open, setOpen] = useState<string | null>(null)
+  return (
+    <div className="h-full overflow-auto p-4 max-w-xl">
+      <ArtifactsList workspaceId={workspaceId} onOpen={setOpen} />
+      <DeckViewer artifactId={open} onClose={() => setOpen(null)} />
     </div>
   )
 }

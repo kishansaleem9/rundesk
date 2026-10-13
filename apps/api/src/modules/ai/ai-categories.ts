@@ -136,6 +136,8 @@ export const FEATURE_CATEGORY: Readonly<Record<string, AiCategory>> = {
   'skill.propose':          'docs',
   // The Super Agent builder drafts a profile's instructions (`ledger-rows/row-852`).
   'agent.build':            'docs',
+  // A deck Brain made, asked to change (`ledger-rows/row-853`): the whole artefact is written again.
+  'artifact.revise':        'docs',
 
   // Comments or chats sent
   'chat.mention':           'comments',
@@ -144,6 +146,8 @@ export const FEATURE_CATEGORY: Readonly<Record<string, AiCategory>> = {
   'chat':                   'comments',
   // A Super Agent's run answers as a comment or a message (`ledger-rows/row-852`).
   'agent.run':              'comments',
+  // @Brain answers a comment in its thread (`ledger-rows/row-745`).
+  'brain.comment':          'comments',
 
   // Summaries or updates generated
   'summarize':              'summaries',

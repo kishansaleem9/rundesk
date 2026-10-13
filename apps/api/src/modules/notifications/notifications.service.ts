@@ -717,6 +717,10 @@ export class NotificationsService {
    * toggle off actually stops the subscription rather than only hiding it.
    */
   async autoFollowEnabled(userId: string): Promise<boolean> {
+    // An agent's account — a Super Agent's, Brain's — follows nothing it writes on: it is never
+    // notified, and a task's followers are its people (`ledger-rows/row-745`).
+    const [account] = await this.db.select({ isAgent: users.isAgent }).from(users).where(eq(users.id, userId)).limit(1)
+    if (account?.isAgent) return false
     const prefs = await this.getUserPreferences(userId)
     return prefs.autoFollow !== false
   }

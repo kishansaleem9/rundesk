@@ -113,6 +113,36 @@ const SCRIPTS = [
       return `${name} here, started by ${started}.`
     },
   },
+  /*
+   * @BRAIN IN A COMMENT (`ledger-rows/row-745`): it names the task it was asked
+   * on and the knowledge it was given, in the product's own numbering, so a
+   * suite can tell from the words alone what Brain was allowed to read — and
+   * what it was not.
+   */
+  {
+    when: /You are Brain, the AI in Rundesk, answering where you were @mentioned/,
+    text: (system) => {
+      const task = /a comment on the task “([^”]*)”/.exec(system)?.[1] ?? 'a task'
+      const read = [...system.matchAll(/^\[\d+\] (.+?) — /gm)].map((m) => m[1])
+      return `Brain here, on “${task}”. I read: ${read.length ? read.join('; ') : 'nothing from the workspace'}.`
+    },
+  },
+  /*
+   * A DECK, ASKED TO CHANGE (`ledger-rows/row-853`): the deck as it was, its
+   * title kept, with a first slide that says what was asked — so a suite reads
+   * the change from the version it made.
+   */
+  {
+    when: /You revise a slide deck for Rundesk/,
+    text: (system) => {
+      const asked = /What the person asked: (.+)/.exec(system)?.[1]?.trim() ?? 'something'
+      let deck = { title: 'Stub deck', slides: [] }
+      try {
+        deck = JSON.parse(/The deck as it is:\n(\{.*\})\n/.exec(system)?.[1] ?? '{}')
+      } catch {}
+      return JSON.stringify({ title: deck.title, slides: [{ title: `Revised: ${asked}`, bullets: ['What changed'] }, ...(deck.slides ?? [])] })
+    },
+  },
   // The builder drafts a profile (`AiService.draftAgent`).
   {
     when: /You draft a Super Agent's profile for Rundesk/,
@@ -219,7 +249,20 @@ const server = createServer(async (req, res) => {
     return json(res, status, err)
   }
 
-  const system = typeof body.system === 'string' ? body.system : JSON.stringify(body.system ?? '')
+  /*
+   * THE SYSTEM PROMPT AS ITS WORDS, however it was sent (`ledger-rows/row-745`).
+   * The product sends it as a string, or as text blocks with a cache marker
+   * (`AiService.complete`). Read as JSON, a block's lines came back escaped —
+   * one long line with `\n` in it — so a script reading a prompt line by line
+   * (Brain's knowledge, numbered one item a line) found none, and one reading to
+   * the end of a line read to the end of the prompt.
+   */
+  const system =
+    typeof body.system === 'string'
+      ? body.system
+      : Array.isArray(body.system)
+        ? body.system.map((b) => (typeof b?.text === 'string' ? b.text : '')).join('\n')
+        : JSON.stringify(body.system ?? '')
   /*
    * AND AS SLOW AS A REAL ONE, WHEN ASKED (`found-7-oct/a-call-ended-twice-keeps-two-records`).
    * A model takes seconds and this answers at once, so what the product does
@@ -235,12 +278,13 @@ const server = createServer(async (req, res) => {
    * `{type: 'tool_use', name, input}` among them — so a suite can say what the
    * model asks for and measure everything the product does with it: the plan,
    * the preview, what is written once it is confirmed. Answered only to a call
-   * that offered tools, and only one that is not streamed: a tool call nobody
-   * offered is not one a model can make. An id is given to a block without one.
-   * Read before the staging is cleared, as the status and the delay are.
+   * that offered tools: a tool call nobody offered is not one a model can make.
+   * Streamed or not — Brain's Ask surface streams, and makes its decks with a
+   * tool (`ledger-rows/row-853`). An id is given to a block without one. Read
+   * before the staging is cleared, as the status and the delay are.
    */
   const blocks =
-    Array.isArray(staged?.content) && Array.isArray(body.tools) && body.tools.length && body.stream !== true
+    Array.isArray(staged?.content) && Array.isArray(body.tools) && body.tools.length
       ? staged.content.map((b, i) => (b?.type === 'tool_use' && !b.id ? { ...b, id: `toolu_stub_${seen.length}_${i}` } : b))
       : null
   const scripted = SCRIPTS.find((s) => s.when.test(system))?.text
@@ -263,6 +307,31 @@ const server = createServer(async (req, res) => {
    * one is caught.
    */
   if (body.stream === true) {
+    /*
+     * A STAGED ANSWER'S BLOCKS, STREAMED (`ledger-rows/row-853`): each as the
+     * Messages API streams it — text as a delta, a tool call as its start and
+     * its input's JSON — and the turn stopped for the tool, so the SDK's final
+     * message holds the call the product then carries out.
+     */
+    if (blocks) {
+      const events = [['message_start', { type: 'message_start', message: { id, type: 'message', role: 'assistant', model: body.model ?? 'claude-stub', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: usage.input_tokens, output_tokens: 1 } } }]]
+      blocks.forEach((b, index) => {
+        if (b?.type === 'tool_use') {
+          events.push(['content_block_start', { type: 'content_block_start', index, content_block: { type: 'tool_use', id: b.id, name: b.name, input: {} } }])
+          events.push(['content_block_delta', { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: JSON.stringify(b.input ?? {}) } }])
+        } else {
+          events.push(['content_block_start', { type: 'content_block_start', index, content_block: { type: 'text', text: '' } }])
+          events.push(['content_block_delta', { type: 'content_block_delta', index, delta: { type: 'text_delta', text: String(b?.text ?? '') } }])
+        }
+        events.push(['content_block_stop', { type: 'content_block_stop', index }])
+      })
+      const stopForTool = blocks.some((b) => b?.type === 'tool_use')
+      events.push(['message_delta', { type: 'message_delta', delta: { stop_reason: stopForTool ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: { output_tokens: usage.output_tokens } }])
+      events.push(['message_stop', { type: 'message_stop' }])
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
+      for (const [event, data] of events) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+      return res.end()
+    }
     const words = text.split(/(?<= )/)
     const per = Math.max(1, Math.ceil(words.length / 3))
     const parts = []

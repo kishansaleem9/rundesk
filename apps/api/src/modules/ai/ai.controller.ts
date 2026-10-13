@@ -13,6 +13,7 @@ import { RequirePlan } from '../plans/require-plan.decorator'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { HELP_TOPICS } from './knowledge'
 import { IMAGE_PROMPT_MAX, IMAGE_SIZES, IMAGES_PER_ASK, imageFileName, type ImageSize } from './image-generation'
+import { readComposerFiles, withComposerFiles } from './composer-files'
 
 @ApiTags('ai')
 @ApiBearerAuth()
@@ -453,6 +454,12 @@ export class AiController {
        * (`found-29-sep/ai-chat-takes-no-task`).
        */
       taskId?: string
+      /**
+       * `ledger-rows/row-853` — the composer's "+": the tasks, Docs and
+       * locations the person pointed Brain at, and the files they gave it.
+       */
+      focus?: unknown
+      files?: unknown
     },
     @Res() res: any,
   ) {
@@ -468,6 +475,18 @@ export class AiController {
         throw new HttpException('That task is not in this workspace', HttpStatus.BAD_REQUEST)
       }
     }
+    /*
+     * `ledger-rows/row-853` — AND SO IS WHAT THE COMPOSER'S "+" GAVE IT: each item
+     * read as its asker may read it, each file read or refused by its name, all
+     * before the model is asked whether it is there — the refusal is a status
+     * code, and nothing has been streamed.
+     */
+    let focusText = ''
+    if (body.focus != null) {
+      if (!body.workspaceId) throw new HttpException('Say which workspace the items are in', HttpStatus.BAD_REQUEST)
+      focusText = await this.ai.focusContext(body.workspaceId, { id: user.id, role: user.role }, body.focus)
+    }
+    const files = readComposerFiles(body.files)
     if (!this.ai.isAvailable()) {
       // §V2-11 — recorded before the 503, like `assertAvailable`. This route
       // owns its own response (it streams), so it sends rather than throws.
@@ -547,6 +566,13 @@ export class AiController {
       context = `${context}\n\nThe task this conversation is about:\n${taskInput}`
     }
 
+    // What the "+" pointed Brain at, under headings that say what each one is.
+    if (focusText) {
+      step('focus')
+      context = `${context}\n\n${focusText}`
+    }
+    if (files.length) step('files')
+
     // The trace still names the skill, in the place it always appeared. It
     // reports work already done rather than announcing work about to start —
     // the one step here that does, because a refusal has to be answerable with
@@ -563,7 +589,7 @@ export class AiController {
      * one wrong is a container created by a turn nobody could see the steps of.
      */
     await this.ai.chatStream(
-      body.messages,
+      withComposerFiles(body.messages, files),
       context,
       res as any,
       { userId: user.id, workspaceId: body.workspaceId },

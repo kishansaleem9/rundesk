@@ -56,7 +56,8 @@ import {
 import { isUuid } from '../../common/validation/uuid'
 import { resolveIsManager, taskVisibilityFilter, listVisibilityFilter } from '../../common/permissions/item-visibility'
 import { hiddenDocIds } from '../../common/permissions/doc-access'
-import { readableTask } from '../../common/permissions/read-access'
+import { readableList, readableProject, readableTask } from '../../common/permissions/read-access'
+import { canReadDoc } from '../../common/permissions/doc-access'
 import {
   assembleKnowledgeContext,
   deterministicKnowledgeAnswer,
@@ -137,6 +138,8 @@ import { CalendarAccountsService } from '../calendar-sync/calendar-accounts.serv
 import { CalendarFailed, CalendarRefused } from '../calendar-sync/calendar-events'
 import { EmailAccountsService } from '../email-accounts/email-accounts.service'
 import { SearchService } from '../search/search.service'
+import { ArtifactsService, parseDeck, type DeckInput } from './artifacts.service'
+import { DECK_TOOLS, DECK_TOOL_INSTRUCTION, DECK_TOOL_NAME } from './ai-artifact-tools'
 
 export type AiCtx = { userId?: string; workspaceId?: string }
 
@@ -460,6 +463,17 @@ export function sanitizeAutomationSuggestions(raw: unknown): AutomationSuggestio
 }
 
 /** JSON.parse that returns undefined instead of throwing on malformed input. */
+/** The words of a turn's last question, whatever blocks came with it. */
+function lastUserText(messages: Anthropic.Messages.MessageParam[]): string {
+  const last = [...messages].reverse().find((m) => m.role === 'user')
+  if (!last) return ''
+  if (typeof last.content === 'string') return last.content
+  return last.content
+    .map((b) => (b.type === 'text' ? b.text : ''))
+    .filter(Boolean)
+    .join('\n')
+}
+
 function safeJsonParse(text: string): unknown {
   try {
     return JSON.parse(text)
@@ -988,6 +1002,12 @@ export class AiService {
     @Optional() private calendars?: CalendarAccountsService,
     @Optional() private mailboxes?: EmailAccountsService,
     @Optional() private search?: SearchService,
+    /**
+     * What Brain makes (`ledger-rows/row-853`): the decks the Ask surface's
+     * `create_slide_deck` keeps as the asker's own. @Optional like the rest;
+     * when absent, the tool is not offered at all.
+     */
+    @Optional() private artifacts?: ArtifactsService,
   ) {
     const apiKey = config.get<string>('ANTHROPIC_API_KEY')
     if (apiKey) {
@@ -1839,7 +1859,8 @@ Write one reply in plain text, one to three sentences, answering the most recent
 
   // ─── AI Chatbot (streaming) ───────────────────────────────────────────────
   async chatStream(
-    messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+    /** A turn's last message may carry the composer's files as content blocks (`ledger-rows/row-853`). */
+    messages: Anthropic.Messages.MessageParam[],
     workspaceContext: string,
     res: Response,
     ctx: AiCtx = {},
@@ -1903,7 +1924,14 @@ Write one reply in plain text, one to three sentences, answering the most recent
      * looser one, because it reports one person's workload to another and that
      * is not a thing a skill-shaped turn should be able to reach for either.
      */
-    const tools = canAct ? [...CONTAINER_TOOLS, ...ASSIGN_TOOLS] : []
+    /*
+     * `ledger-rows/row-853` — AND THE DECK, on the same two conditions save the
+     * container services: an asker to keep it for, and no skill answering. It
+     * writes nothing in the workspace — a deck is the asker's own until they
+     * publish it — so it does not wait on the services that make containers.
+     */
+    const canDeck = !!agent && !skillPrompt?.trim() && !!this.artifacts
+    const tools = [...(canAct ? [...CONTAINER_TOOLS, ...ASSIGN_TOOLS] : []), ...(canDeck ? DECK_TOOLS : [])]
 
     const intro = skillPrompt?.trim()
       ? skillPrompt.trim()
@@ -1917,7 +1945,7 @@ Be concise, helpful, and action-oriented.`
      * that adjacency, and it pins it because a block wedged in there is a block
      * the model reads as part of the workspace.
      */
-    const agentPrompt = canAct ? `\n\n${CONTAINER_TOOL_INSTRUCTION}\n\n${REFERENCE_INSTRUCTION}` : ''
+    const agentPrompt = `${canAct ? `\n\n${CONTAINER_TOOL_INSTRUCTION}\n\n${REFERENCE_INSTRUCTION}` : ''}${canDeck ? `\n\n${DECK_TOOL_INSTRUCTION}` : ''}`
     const systemPrompt = `${intro}
 
 Workspace context:
@@ -2016,7 +2044,7 @@ ${FOLLOW_UP_INSTRUCTION}${agentPrompt}`
         const toolUses = ((final?.content ?? []) as Anthropic.Messages.ContentBlock[]).filter(
           (block): block is Anthropic.Messages.ToolUseBlock => block.type === 'tool_use',
         )
-        if (!toolUses.length || !canAct || !agent) break
+        if (!toolUses.length || !tools.length || !agent) break
 
         convo.push({ role: 'assistant', content: final!.content })
         const toolResults: Anthropic.Messages.ToolResultBlockParam[] = []
@@ -2031,6 +2059,37 @@ ${FOLLOW_UP_INSTRUCTION}${agentPrompt}`
            * three retrieval steps already do.
            */
           raw.write(`data: ${JSON.stringify({ step: use.name })}\n\n`)
+          /*
+           * `ledger-rows/row-853` — a deck, checked as a typed one is and kept as
+           * the asker's; the panel is told what was made, so it draws the card
+           * from the row and not from the prose.
+           */
+          if (use.name === DECK_TOOL_NAME) {
+            const parsed = parseDeck(input)
+            if (!parsed.ok || !this.artifacts) {
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: use.id,
+                is_error: true,
+                content: JSON.stringify({ ok: false, say: parsed.ok ? 'Slide decks cannot be made here' : parsed.reason }),
+              })
+              continue
+            }
+            const asked = lastUserText(messages)
+            const made = await this.artifacts.createDeck(agent.workspaceId, agent.userId, parsed.deck, asked)
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: use.id,
+              content: JSON.stringify({ ok: true, say: `Made the slide deck “${made.title}”: ${made.slideCount} slides. The person sees it as a card under your answer, which opens the slides.` }),
+            })
+            raw.write(`data: ${JSON.stringify({ artifact: made })}\n\n`)
+            continue
+          }
+          // A tool this turn did not offer is not one the model may use.
+          if (!canAct) {
+            toolResults.push({ type: 'tool_result', tool_use_id: use.id, is_error: true, content: JSON.stringify({ ok: false, say: 'That tool is not offered here' }) })
+            continue
+          }
           /*
            * §V2-S17 `15:50` — the read-only one, answered from the database and
            * handed back as the deterministic sentence.
@@ -4131,6 +4190,249 @@ Respond ONLY with valid JSON of this exact shape:
     } catch {
       throw new HttpException('The builder did not draft a Super Agent — describe it again', HttpStatus.BAD_GATEWAY)
     }
+  }
+
+  /**
+   * ASKING AGAIN FOR A DECK (`ledger-rows/row-853`): ClickUp changes an
+   * Artifact by making the whole of it anew from what was asked — there is no
+   * editing one slide. The answer is returned as the model gave it; the caller
+   * checks it as a typed deck (`parseDeck`) before it is kept.
+   */
+  async reviseDeck(deck: DeckInput, instruction: string, ctx: AiCtx): Promise<unknown> {
+    await this.assertAvailable('artifact.revise', ctx)
+    const system = `You revise a slide deck for Rundesk. What the person asked: ${instruction}
+The deck as it is:
+${JSON.stringify(deck)}
+Make the whole deck again with what they asked changed, and nothing else changed. Respond ONLY with valid JSON of this exact shape:
+{"title": "string", "slides": [{"title": "string", "bullets": ["string"], "notes": "string, optional"}]}`
+    const response = await this.complete('artifact.revise', ctx, {
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2048,
+      system,
+      messages: [{ role: 'user', content: instruction }],
+    })
+    const text = response.content.find((b) => b.type === 'text')?.text ?? ''
+    const found = text.match(/\{[\s\S]+\}/)
+    if (!found) throw new HttpException('Brain did not make a deck from that — ask again', HttpStatus.BAD_GATEWAY)
+    try {
+      return JSON.parse(found[0])
+    } catch {
+      throw new HttpException('Brain did not make a deck from that — ask again', HttpStatus.BAD_GATEWAY)
+    }
+  }
+
+  /**
+   * WHAT THE COMPOSER'S "+" POINTS BRAIN AT (`ledger-rows/row-853`), as
+   * ClickUp's "+" lets you pick an item or a location for Brain to focus on: a
+   * task, a Doc, a list, a folder or a space of the turn's workspace, each read
+   * as its asker may read it. One that is not there is 404, and one they may
+   * not read is 403 with what it is — the read rule's own answers — before
+   * anything is asked of the model.
+   */
+  async focusContext(workspaceId: string, reader: { id: string; role?: string | null }, items: unknown): Promise<string> {
+    if (items == null) return ''
+    if (!Array.isArray(items)) throw new HttpException('focus is a list of items', HttpStatus.BAD_REQUEST)
+    if (items.length > 5) throw new HttpException('Brain focuses on at most 5 items at once', HttpStatus.BAD_REQUEST)
+    const notHere = (what: string) => new NotFoundException(`That ${what} is not here`)
+    const refused = (what: string) => new ForbiddenException(`You do not have access to this ${what}`)
+    /** A list of the workspace, readable or not: whether it is there at all is asked before whether it may be read. */
+    const listHere = async (id: string) =>
+      (
+        await this.db
+          .select({ id: lists.id })
+          .from(lists)
+          .innerJoin(projects, eq(projects.id, lists.projectId))
+          .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+          .where(and(eq(lists.id, id), eq(spaces.workspaceId, workspaceId)))
+          .limit(1)
+      ).length > 0
+    const parts: string[] = []
+    for (const raw of items) {
+      const { kind, id } = (raw ?? {}) as { kind?: unknown; id?: unknown }
+      if (typeof id !== 'string' || !isUuid(id)) throw new HttpException('Each item needs its id', HttpStatus.BAD_REQUEST)
+      if (kind === 'task') {
+        const taskWorkspace = await this.assertTaskReadable(id, reader)
+        if (taskWorkspace !== workspaceId) throw notHere('task')
+        parts.push(`The task the person pointed you at:\n${await this.buildTaskSummaryInput(id)}`)
+      } else if (kind === 'doc') {
+        const [doc] = await this.db
+          .select({ id: docs.id, workspaceId: docs.workspaceId, spaceId: docs.spaceId, parentDocId: docs.parentDocId, title: docs.title, plaintext: docs.plaintext })
+          .from(docs)
+          .where(and(eq(docs.id, id), eq(docs.workspaceId, workspaceId)))
+          .limit(1)
+        if (!doc) throw notHere('Doc')
+        const manager = await isWorkspaceManager(this.db, workspaceId, reader.id)
+        if (!(reader.role === 'super_admin' || (await canReadDoc(this.db, doc, reader.id, manager)))) throw refused('Doc')
+        parts.push(`The Doc the person pointed you at, “${doc.title}”:\n${doc.plaintext.slice(0, 12_000) || '(empty)'}`)
+      } else if (kind === 'list') {
+        if (!(await listHere(id))) throw notHere('list')
+        if (!(await readableList(this.db, workspaceId, id, reader))) throw refused('list')
+        parts.push(await this.containerFocus(workspaceId, 'list', [id], reader))
+      } else if (kind === 'project') {
+        const [folderHere] = await this.db
+          .select({ id: projects.id })
+          .from(projects)
+          .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+          .where(and(eq(projects.id, id), eq(spaces.workspaceId, workspaceId)))
+          .limit(1)
+        if (!folderHere) throw notHere('folder')
+        if (!(await readableProject(this.db, workspaceId, id, reader))) throw refused('folder')
+        const inside = await this.db.select({ id: lists.id }).from(lists).where(eq(lists.projectId, id))
+        const readable: string[] = []
+        for (const l of inside) if (await readableList(this.db, workspaceId, l.id, reader)) readable.push(l.id)
+        parts.push(await this.containerFocus(workspaceId, 'folder', readable, reader, id))
+      } else if (kind === 'space') {
+        const [space] = await this.db
+          .select({ id: spaces.id, visibility: spaces.visibility })
+          .from(spaces)
+          .where(and(eq(spaces.id, id), eq(spaces.workspaceId, workspaceId)))
+          .limit(1)
+        if (!space) throw notHere('space')
+        const role = await this.memberRole(workspaceId, reader.id)
+        if (!(reader.role === 'super_admin' || (role && (await checkContainerAccess(this.db, { spaceId: space.id, spaceVisibility: space.visibility }, { userId: reader.id, workspaceRole: role }))))) throw refused('space')
+        const inside = await this.db
+          .select({ id: lists.id })
+          .from(lists)
+          .innerJoin(projects, eq(projects.id, lists.projectId))
+          .where(eq(projects.spaceId, id))
+        const readable: string[] = []
+        for (const l of inside) if (await readableList(this.db, workspaceId, l.id, reader)) readable.push(l.id)
+        parts.push(await this.containerFocus(workspaceId, 'space', readable, reader, id))
+      } else {
+        throw new HttpException('Brain focuses on a task, a Doc, a list, a folder or a space', HttpStatus.BAD_REQUEST)
+      }
+    }
+    return parts.join('\n\n')
+  }
+
+  /** A location as Brain reads it: its name, then its lists' tasks the reader may open, by list. */
+  private async containerFocus(workspaceId: string, kind: 'list' | 'folder' | 'space', listIds: string[], reader: { id: string; role?: string | null }, containerId?: string) {
+    let name = ''
+    if (kind === 'folder' && containerId) name = (await this.db.select({ name: projects.name }).from(projects).where(eq(projects.id, containerId)).limit(1))[0]?.name ?? ''
+    if (kind === 'space' && containerId) name = (await this.db.select({ name: spaces.name }).from(spaces).where(eq(spaces.id, containerId)).limit(1))[0]?.name ?? ''
+    const lines: string[] = []
+    for (const listId of listIds.slice(0, 20)) {
+      const [list] = await this.db.select({ name: lists.name }).from(lists).where(eq(lists.id, listId)).limit(1)
+      if (kind === 'list') name = list?.name ?? ''
+      const rows = await this.db
+        .select({ id: tasks.id, title: tasks.title, status: tasks.status, dueDate: tasks.dueDate })
+        .from(tasks)
+        .where(and(eq(tasks.listId, listId), eq(tasks.isArchived, false), isNull(tasks.deletedAt)))
+        .orderBy(asc(tasks.position))
+        .limit(100)
+      const open: string[] = []
+      for (const t of rows) if (await readableTask(this.db, workspaceId, t.id, reader)) open.push(`  - ${t.title} (${t.status}${t.dueDate ? `, due ${new Date(t.dueDate).toISOString().slice(0, 10)}` : ''})`)
+      lines.push(`List “${list?.name ?? ''}”${open.length ? `:\n${open.join('\n')}` : ': no tasks'}`)
+    }
+    const label = kind === 'list' ? 'list' : kind === 'folder' ? 'folder' : 'space'
+    return `The ${label} the person pointed you at, “${name}”:\n${lines.join('\n') || '(nothing in it they may read)'}`
+  }
+
+  /**
+   * @BRAIN IN A COMMENT (`ledger-rows/row-745`): the reply it posts in the
+   * thread, from the task, the thread and what it may draw on of the
+   * workspace (`brainKnowledge`) — never the asker's own context, which would
+   * carry what only they may read into a reply everybody on the task reads.
+   */
+  async brainCommentReply(
+    turn: { taskTitle: string; task: string; thread: string; knowledge: Array<{ n: number; title: string; text: string }>; question: string },
+    ctx: AiCtx,
+  ): Promise<string> {
+    await this.assertAvailable('brain.comment', ctx)
+    const system = `You are Brain, the AI in Rundesk, answering where you were @mentioned: a comment on the task “${turn.taskTitle}”. Reply to the comment in plain text, briefly, as a reply in its thread. Use the task, the thread and the workspace knowledge below; when they do not hold the answer, say so — never invent tasks, dates or names.
+
+The task:
+${turn.task}
+
+The thread so far:
+${turn.thread || '(this comment starts it)'}
+
+Workspace knowledge you may use:
+${turn.knowledge.length ? turn.knowledge.map((k) => `[${k.n}] ${k.title} — ${k.text}`).join('\n') : '(none)'}`
+    const response = await this.complete('brain.comment', ctx, {
+      model: 'claude-sonnet-4-6',
+      max_tokens: 700,
+      system,
+      messages: [{ role: 'user', content: turn.question || 'Say what you can help with here.' }],
+    })
+    return response.content.find((b) => b.type === 'text')?.text?.trim() ?? ''
+  }
+
+  /**
+   * WHAT @BRAIN MAY DRAW ON (`ledger-rows/row-745`), as ClickUp's does: what its
+   * asker may read, and of that only what is public in the workspace — no
+   * private or personal space, private folder or private list above it —
+   * unless it is where Brain was asked (the task's own list) or the comment
+   * links it. Brain's answer is a comment everybody who can open the task
+   * reads, so something private it drew on would be told to people the
+   * something refuses. A linked item is read only if its asker may read it.
+   */
+  async brainKnowledge(
+    workspaceId: string,
+    askerId: string,
+    question: string,
+    here: { listId: string | null },
+    linked: { taskIds: string[]; docIds: string[] },
+  ): Promise<Array<{ n: number; title: string; text: string }>> {
+    const hits = await this.retrieveKnowledgeHits(workspaceId, askerId, question, 12).catch(() => [] as RawSearchHit[])
+    const kept: RawSearchHit[] = []
+    for (const h of hits) if (await this.brainMayUse(h, here, linked)) kept.push(h)
+    const enriched = await this.enrichKnowledgeContent(kept.slice(0, 6))
+    return enriched.map((h, i) => ({ n: i + 1, title: h.title, text: (h.content || '').replace(/\s+/g, ' ').trim().slice(0, 1200) }))
+  }
+
+  private async brainMayUse(hit: RawSearchHit, here: { listId: string | null }, linked: { taskIds: string[]; docIds: string[] }) {
+    const { type, rawId } = splitSearchId(hit.id)
+    if (!isUuid(rawId)) return false
+    if (type === 'doc') {
+      if (linked.docIds.includes(rawId)) return true
+      return this.docIsPublic(rawId)
+    }
+    let taskId: string | null = null
+    if (type === 'task') taskId = rawId
+    else if (type === 'comment') {
+      const [c] = await this.db.select({ taskId: taskComments.taskId }).from(taskComments).where(eq(taskComments.id, rawId)).limit(1)
+      taskId = c?.taskId ?? null
+    } else if (type === 'attachment') {
+      const [a] = await this.db.select({ taskId: taskAttachments.taskId }).from(taskAttachments).where(eq(taskAttachments.id, rawId)).limit(1)
+      taskId = a?.taskId ?? null
+    }
+    if (!taskId) return false
+    if (linked.taskIds.includes(taskId)) return true
+    const [t] = await this.db.select({ listId: tasks.listId }).from(tasks).where(eq(tasks.id, taskId)).limit(1)
+    if (!t?.listId) return false
+    if (here.listId && t.listId === here.listId) return true
+    return this.listIsPublic(t.listId)
+  }
+
+  /** No private or personal space, private folder, or private or Personal List above it. */
+  private async listIsPublic(listId: string) {
+    const [row] = await this.db
+      .select({ list: lists.visibility, personalOf: lists.personalOf, folder: projects.visibility, space: spaces.visibility, personal: spaces.isPersonal })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(lists.id, listId))
+      .limit(1)
+    if (!row) return false
+    return row.list !== 'private' && !row.personalOf && row.folder !== 'private' && row.space !== 'private' && !row.personal
+  }
+
+  /** A doc is read as where it lives: public unless it, or a doc above it, is filed in a private or personal space. */
+  private async docIsPublic(docId: string) {
+    let id: string | null = docId
+    for (let depth = 0; id && depth < 12; depth++) {
+      const [d] = await this.db
+        .select({ parent: docs.parentDocId, visibility: spaces.visibility, personal: spaces.isPersonal })
+        .from(docs)
+        .leftJoin(spaces, eq(spaces.id, docs.spaceId))
+        .where(eq(docs.id, id))
+        .limit(1)
+      if (!d) return false
+      if (d.visibility === 'private' || d.personal) return false
+      id = d.parent
+    }
+    return true
   }
 
   /**

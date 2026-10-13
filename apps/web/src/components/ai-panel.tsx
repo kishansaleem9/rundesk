@@ -30,7 +30,21 @@ import {
   LayoutGrid,
   Brain,
   ImagePlus,
+  Plus,
+  Paperclip,
+  AtSign,
+  FileText,
 } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from '@rundesk/ui'
+import { ArtifactCard, DeckViewer, type MadeArtifact } from './brain-artifacts'
 import { useNavigate } from '@tanstack/react-router'
 import { renderInlineMarkdown, renderMarkdownBlocks } from './markdown'
 import { api, ApiError } from '../lib/api'
@@ -141,7 +155,24 @@ type Message = {
    * the sentence beside it is the account.
    */
   created?: CreatedContainer[]
+  /**
+   * `ledger-rows/row-853` — what Brain made in this turn, as the server named
+   * it on the wire (`{artifact: …}`): a deck it kept, drawn as the card frame
+   * `16:50` puts under the answer.
+   */
+  artifacts?: MadeArtifact[]
+  /** What the "+" gave this question — items and files, by name — shown on it. */
+  attached?: string[]
 }
+
+/** An item the composer's "+" points Brain at, and a file given to it (`ledger-rows/row-853`). */
+type FocusItem = { kind: 'task' | 'doc' | 'list' | 'project' | 'space'; id: string; title: string }
+type ComposerFile = { name: string; data: string; size: number }
+const COMPOSER_FILE_MAX = 5 * 1024 * 1024
+const COMPOSER_FILE_ACCEPT = '.png,.jpg,.jpeg,.gif,.webp,.pdf,.xlsx,.xls,.csv,.tsv,.docx,.txt,.md,.json,.xml,.html,.htm'
+const SEARCH_KIND: Record<string, FocusItem['kind']> = { task: 'task', doc: 'doc', list: 'list', folder: 'project', space: 'space' }
+/** A search hit's own id: the search names each `<type>-<id>`, so one search can hold a task and a doc of the same id. */
+const hitRawId = (h: { id: string; entityType: string }) => (h.id.startsWith(`${h.entityType}-`) ? h.id.slice(h.entityType.length + 1) : h.id)
 
 type CreatedContainer = { kind: 'list' | 'folder'; id: string; name: string; path: string }
 
@@ -533,6 +564,10 @@ const AI_STEP_LABEL: Record<string, TranslationKey> = {
   // was attempted; what came of it is in the answer.
   create_list: 'aiPanel.stepCreatingList',
   create_folder: 'aiPanel.stepCreatingFolder',
+  // `ledger-rows/row-853` — what the "+" gave the turn, read; and a deck, made.
+  focus: 'aiPanel.stepFocus',
+  files: 'aiPanel.stepFiles',
+  create_slide_deck: 'aiPanel.stepMakingDeck',
 }
 
 /**
@@ -542,7 +577,7 @@ const AI_STEP_LABEL: Record<string, TranslationKey> = {
  * forgotten here is impossible to introduce by adding one line: a new action
  * step has to be listed, and a retrieval step has to not be.
  */
-const ACTION_STEPS: ReadonlySet<string> = new Set(['create_list', 'create_folder'])
+const ACTION_STEPS: ReadonlySet<string> = new Set(['create_list', 'create_folder', 'create_slide_deck'])
 
 /**
  * §V2-S16 frames `18:00` / `18:45` / `20:10` — the busy state, in words.
@@ -904,6 +939,48 @@ export function AiPanel({
    * anywhere else they are saved to the computer.
    */
   const [imageOpen, setImageOpen] = useState(false)
+  /*
+   * `ledger-rows/row-853` — THE COMPOSER'S "+", as ClickUp's: an item or a
+   * location for Brain to focus on, picked from what the person may find, and
+   * files given to it. Both ride the next question once and are shown on it.
+   */
+  const [focusItems, setFocusItems] = useState<FocusItem[]>([])
+  const [composerFiles, setComposerFiles] = useState<ComposerFile[]>([])
+  const [contextOpen, setContextOpen] = useState(false)
+  const [contextQuery, setContextQuery] = useState('')
+  const [openArtifact, setOpenArtifact] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  /*
+   * The picker opens once the "+" menu has closed, not from the item itself: the
+   * menu hands focus back to its button as it closes, and a popover opened in
+   * that moment reads the hand-back as a click outside and closes again (the
+   * comment box's "+" does the same, `onCloseAutoFocus`).
+   */
+  const contextChosen = useRef(false)
+  const contextSearch = useQuery({
+    queryKey: ['ai-context-search', workspaceId, contextQuery.trim()],
+    queryFn: () =>
+      api<Array<{ id: string; entityType: string; title: string }>>(
+        `/search/${workspaceId}?q=${encodeURIComponent(contextQuery.trim())}&types=task,doc,list,folder,space&limit=8`,
+      ),
+    enabled: contextOpen && !!workspaceId && contextQuery.trim().length > 0,
+  })
+  const addFiles = async (list: FileList | null) => {
+    if (!list) return
+    for (const file of Array.from(list)) {
+      if (file.size > COMPOSER_FILE_MAX) {
+        toast.error(t('aiPanel.fileTooLarge', { name: file.name }))
+        continue
+      }
+      const data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''))
+        reader.onerror = () => reject(reader.error)
+        reader.readAsDataURL(file)
+      })
+      setComposerFiles((prev) => (prev.length >= 5 ? prev : [...prev, { name: file.name, data, size: file.size }]))
+    }
+  }
   const addImages = async (files: File[]) => {
     if (!scope) {
       saveFiles(files)
@@ -1199,7 +1276,13 @@ export function AiPanel({
     if (!content.trim() || isStreaming) return
     setInput('')
 
-    const userMsg: Message = { role: 'user', content, id: Date.now().toString() }
+    // What the "+" gave this question goes with it, once, and is shown on it.
+    const focusNow = focusItems
+    const filesNow = composerFiles
+    setFocusItems([])
+    setComposerFiles([])
+    const attached = [...focusNow.map((f) => f.title), ...filesNow.map((f) => f.name)]
+    const userMsg: Message = { role: 'user', content, id: Date.now().toString(), ...(attached.length ? { attached } : {}) }
     // A regenerate re-uses the question already on screen, so echoing it again
     // would show it twice.
     if (!opts.skipEcho) setMessages((prev) => [...prev, userMsg])
@@ -1255,6 +1338,9 @@ export function AiPanel({
           // still in flight: the server falls back to DEFAULT_TIER, which is
           // the same answer, and a null in the body would read as a choice.
           ...(tier ? { tier } : {}),
+          // `ledger-rows/row-853` — the "+": what Brain is pointed at, and the files it is given.
+          ...(focusNow.length ? { focus: focusNow.map((f) => ({ kind: f.kind, id: f.id })) } : {}),
+          ...(filesNow.length ? { files: filesNow.map((f) => ({ name: f.name, data: f.data })) } : {}),
         }),
         signal: controller.signal,
       })
@@ -1299,6 +1385,8 @@ export function AiPanel({
        * one of the two is evidence.
        */
       const collectedCreated: CreatedContainer[] = []
+      // `ledger-rows/row-853` — decks Brain made this turn, as the server named them.
+      const collectedArtifacts: MadeArtifact[] = []
       /*
        * A STREAM THE SERVER OPENED AND COULD NOT FINISH ends in `{ error }` —
        * the provider failed after the steps went out. This loop read every
@@ -1338,6 +1426,14 @@ export function AiPanel({
                   path: String(parsed.created.path ?? ''),
                 })
               }
+              if (parsed.artifact?.id) {
+                collectedArtifacts.push({
+                  id: String(parsed.artifact.id),
+                  kind: 'deck',
+                  title: String(parsed.artifact.title ?? ''),
+                  slideCount: Number(parsed.artifact.slideCount ?? 0),
+                })
+              }
               if (parsed.delta) {
                 accumulated += parsed.delta
                 setStreamBuffer(accumulated)
@@ -1358,6 +1454,7 @@ export function AiPanel({
         steps: collectedSteps.length ? collectedSteps : undefined,
         followUps: collectedFollowUps.length ? collectedFollowUps : undefined,
         created: collectedCreated.length ? collectedCreated : undefined,
+        artifacts: collectedArtifacts.length ? collectedArtifacts : undefined,
       }
       setMessages((prev) => [...prev, assistantMsg])
       setStreamBuffer('')
@@ -1429,6 +1526,8 @@ export function AiPanel({
 
   return (
     <AiRefs.Provider value={refIndex}>
+    {/* `ledger-rows/row-853` — a deck Brain made, opened from its card. */}
+    <DeckViewer artifactId={openArtifact} onClose={() => setOpenArtifact(null)} />
     <div className={cn('flex flex-col h-full bg-card', className)}>
       {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border shrink-0">
@@ -1525,6 +1624,7 @@ export function AiPanel({
             message={msg}
             workspaceId={workspaceId}
             threadId={activeThreadId}
+            onOpenArtifact={setOpenArtifact}
             // Only the LAST answer can be regenerated: re-asking from the
             // middle of a conversation would silently discard everything said
             // after it, which is not what a refresh icon promises.
@@ -1637,6 +1737,50 @@ export function AiPanel({
             <Wand2 className="h-3.5 w-3.5" />
             {t('aiPanel.configHint')}
           </p>
+        )}
+        {/* `ledger-rows/row-853` — what the "+" gave the next question, each taken off by its ×. */}
+        {(focusItems.length > 0 || composerFiles.length > 0) && (
+          <div className="mb-2 flex flex-wrap gap-1" data-testid="ai-composer-chips">
+            {focusItems.map((f) => (
+              <span
+                key={`${f.kind}-${f.id}`}
+                data-testid="ai-context-chip"
+                data-kind={f.kind}
+                data-id={f.id}
+                className="inline-flex items-center gap-1 rounded-full border border-violet-300 bg-violet-50 px-2 py-0.5 text-[11px] text-violet-800 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200"
+              >
+                <AtSign className="h-3 w-3" />
+                <span className="max-w-[10rem] truncate">{f.title}</span>
+                <button
+                  type="button"
+                  data-testid="ai-context-chip-remove"
+                  aria-label={t('aiPanel.removeContext')}
+                  onClick={() => setFocusItems((prev) => prev.filter((x) => !(x.kind === f.kind && x.id === f.id)))}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+            {composerFiles.map((f, i) => (
+              <span
+                key={`${f.name}-${i}`}
+                data-testid="ai-file-chip"
+                data-name={f.name}
+                className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[11px]"
+              >
+                <FileText className="h-3 w-3" />
+                <span className="max-w-[10rem] truncate">{f.name}</span>
+                <button
+                  type="button"
+                  data-testid="ai-file-chip-remove"
+                  aria-label={t('aiPanel.removeFile')}
+                  onClick={() => setComposerFiles((prev) => prev.filter((_, j) => j !== i))}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
         )}
         {voice.supported && (voice.listening || voice.interimTranscript) && (
           <p className="mb-2 flex items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
@@ -1892,6 +2036,104 @@ export function AiPanel({
         {/* The month's AI credits, and the banner at 80% and at 100% (`commit-log/log-3943965-1`). */}
         <AiCreditMeter workspaceId={workspaceId} />
         <div className="relative z-50 flex gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={COMPOSER_FILE_ACCEPT}
+            className="hidden"
+            data-testid="ai-file-input"
+            onChange={(e) => {
+              void addFiles(e.target.files)
+              e.target.value = ''
+            }}
+          />
+          <Popover open={contextOpen} onOpenChange={(open) => { setContextOpen(open); if (!open) setContextQuery('') }}>
+            <PopoverAnchor asChild>
+              <span className="inline-flex">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      data-testid="ai-composer-plus"
+                      title={t('aiPanel.plus')}
+                      aria-label={t('aiPanel.plus')}
+                      disabled={isStreaming}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="start"
+                    side="top"
+                    onCloseAutoFocus={(e) => {
+                      if (!contextChosen.current) return
+                      contextChosen.current = false
+                      e.preventDefault()
+                      setContextOpen(true)
+                    }}
+                  >
+                    <DropdownMenuItem
+                      data-testid="ai-plus-context"
+                      onSelect={() => {
+                        contextChosen.current = true
+                      }}
+                    >
+                      <AtSign className="mr-2 h-4 w-4" />
+                      {t('aiPanel.plusContext')}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem data-testid="ai-plus-upload" onSelect={() => fileInputRef.current?.click()}>
+                      <Paperclip className="mr-2 h-4 w-4" />
+                      {t('aiPanel.plusUpload')}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </span>
+            </PopoverAnchor>
+            <PopoverContent align="start" side="top" className="w-80 p-2" data-testid="ai-context-picker">
+              <Input
+                autoFocus
+                data-testid="ai-context-search"
+                value={contextQuery}
+                onChange={(e) => setContextQuery(e.target.value)}
+                placeholder={t('aiPanel.contextSearch')}
+                className="h-8 text-sm"
+              />
+              <div className="mt-2 max-h-56 overflow-auto">
+                {!contextQuery.trim() ? (
+                  <p className="px-1 text-xs text-muted-foreground">{t('aiPanel.contextHint')}</p>
+                ) : contextSearch.isPending ? (
+                  <p className="px-1 text-xs text-muted-foreground" data-testid="ai-context-searching">{t('aiPanel.contextSearching')}</p>
+                ) : (contextSearch.data ?? []).filter((h) => SEARCH_KIND[h.entityType]).length === 0 ? (
+                  <p className="px-1 text-xs text-muted-foreground" data-testid="ai-context-none">{t('aiPanel.contextNone')}</p>
+                ) : (
+                  (contextSearch.data ?? [])
+                    .filter((h) => SEARCH_KIND[h.entityType])
+                    .map((h) => (
+                      <button
+                        key={`${h.entityType}-${h.id}`}
+                        type="button"
+                        data-testid="ai-context-result"
+                        data-kind={SEARCH_KIND[h.entityType]}
+                        data-id={hitRawId(h)}
+                        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
+                        onClick={() => {
+                          const item: FocusItem = { kind: SEARCH_KIND[h.entityType], id: hitRawId(h), title: h.title }
+                          setFocusItems((prev) => (prev.some((x) => x.kind === item.kind && x.id === item.id) || prev.length >= 5 ? prev : [...prev, item]))
+                          setContextOpen(false)
+                          setContextQuery('')
+                          inputRef.current?.focus()
+                        }}
+                      >
+                        <span className="text-[10px] uppercase text-muted-foreground w-12 shrink-0">{t(`aiPanel.kind_${SEARCH_KIND[h.entityType]}` as TranslationKey)}</span>
+                        <span className="truncate">{h.title}</span>
+                      </button>
+                    ))
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
           <Input
             ref={inputRef}
             value={input}
@@ -2000,11 +2242,13 @@ function MessageBubble({
   workspaceId,
   threadId,
   onRegenerate,
+  onOpenArtifact,
 }: {
   message: Message
   workspaceId: string
   threadId: string | null
   onRegenerate?: () => void
+  onOpenArtifact?: (id: string) => void
 }) {
   const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
@@ -2075,6 +2319,25 @@ function MessageBubble({
               >
                 {c.kind === 'folder' ? <FolderPlus className="h-3 w-3" /> : <ListTree className="h-3 w-3" />}
                 <span className="truncate">{c.path || c.name}</span>
+              </span>
+            ))}
+          </div>
+        )}
+        {/* `ledger-rows/row-853`, frame `16:50` — the deck Brain made, as a card under the answer. */}
+        {!isUser && (message.artifacts?.length ?? 0) > 0 && (
+          <div data-testid={`ai-artifacts-${message.id}`}>
+            {message.artifacts!.map((a) => (
+              <ArtifactCard key={a.id} artifact={a} onOpen={(id) => onOpenArtifact?.(id)} />
+            ))}
+          </div>
+        )}
+        {/* What the "+" gave this question, by name. */}
+        {isUser && (message.attached?.length ?? 0) > 0 && (
+          <div data-testid="ai-message-attached" className="flex flex-wrap justify-end gap-1 pt-1">
+            {message.attached!.map((name, i) => (
+              <span key={`${name}-${i}`} className="inline-flex items-center gap-1 rounded border border-border bg-muted px-1.5 py-px text-[11px] text-muted-foreground">
+                <Paperclip className="h-3 w-3" />
+                <span className="max-w-[12rem] truncate">{name}</span>
               </span>
             ))}
           </div>

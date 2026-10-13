@@ -38,6 +38,8 @@ step "every offered permission is asked" node scripts/check-permission-keys-aske
 step "and that gate bites too"         node scripts/check-permission-keys-asked-cases.mjs --mutate
 step "every ledger id cited is an item" node scripts/check-ledger-ids.mjs
 step "and that gate bites as well"      node scripts/check-ledger-ids-cases.mjs --mutate
+step "every placeholder is one the translator fills" node scripts/check-i18n-placeholders.mjs
+step "and that gate bites as well"      node scripts/check-i18n-placeholders-cases.mjs --mutate
 step "the sweep fixture builds where it picked" node scripts/check-sweep-fixture-cases.mjs --mutate
 step "a drifted lane database is caught" bash scripts/e2e-lanes/schema-drift-selfcheck.sh
 step "a push that stops is not read as synced" bash scripts/e2e-lanes/push-log-selfcheck.sh --mutate

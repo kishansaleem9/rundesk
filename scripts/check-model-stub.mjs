@@ -147,6 +147,26 @@ async function main() {
     out.streamFinal = final.content[0]?.type === 'text' ? final.content[0].text : null
     out.streamStop = final.stop_reason
     out.streamUsage = final.usage
+    // A SYSTEM PROMPT SENT AS TEXT BLOCKS, as \`AiService.complete\` sends one with its cache marker, is read as its words (\`ledger-rows/row-745\`).
+    const blocked = await client.messages.create({
+      model: 'claude-stub-1', max_tokens: 64,
+      system: [{ type: 'text', text: 'You are Brain, the AI in Rundesk, answering where you were @mentioned: a comment on the task “Stub task”.\\n\\nWorkspace knowledge you may use:\\n[1] Alpha — one\\n[2] Beta — two', cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: 'what do you know?' }],
+    })
+    out.blockedText = blocked.content[0]?.type === 'text' ? blocked.content[0].text : null
+    // AND A STAGED TOOL CALL, STREAMED (\`ledger-rows/row-853\`): Brain's Ask surface streams, and makes its decks with a tool.
+    await fetch(BASE + '/__control/next', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: [{ type: 'text', text: 'Making it.' }, { type: 'tool_use', name: 'create_slide_deck', input: { title: 'Stub deck', slides: [{ title: 'One', bullets: ['a'] }] } }] }) })
+    const toolStream = client.messages.stream({
+      model: 'claude-stub-1', max_tokens: 64, system: 'x',
+      tools: [{ name: 'create_slide_deck', input_schema: { type: 'object', properties: {} } }],
+      messages: [{ role: 'user', content: 'a deck please' }],
+    })
+    const toolFinal = await toolStream.finalMessage()
+    const streamedUse = toolFinal.content.find((b) => b.type === 'tool_use')
+    out.streamToolName = streamedUse?.type === 'tool_use' ? streamedUse.name : null
+    out.streamToolTitle = streamedUse?.type === 'tool_use' ? (streamedUse.input as { title?: string }).title : null
+    out.streamToolText = toolFinal.content.find((b) => b.type === 'text')?.type === 'text' ? (toolFinal.content.find((b) => b.type === 'text') as { text: string }).text : null
+    out.streamToolStop = toolFinal.stop_reason
     await fetch(BASE + '/__control/reset', { method: 'POST' })
     out.afterReset = (await (await fetch(BASE + '/__control/seen')).json()).calls.length
   } catch (err) {
@@ -286,6 +306,16 @@ if (out.none !== undefined) {
     'a streamed call — what the chat dock makes — is answered as the Messages API\'s events: the scripted reply in several deltas, which the SDK joins into its final message, ended and metered',
     `the stream gave ${out.streamDeltas} delta(s) joining to ${JSON.stringify(String(out.streamJoined).slice(0, 80))}; its final message read ${JSON.stringify(String(out.streamFinal).slice(0, 80))}, stop ${out.streamStop}, usage ${JSON.stringify(out.streamUsage)}`,
   )
+  chk(
+    out.blockedText === 'Brain here, on “Stub task”. I read: Alpha; Beta.',
+    'a system prompt sent as text blocks is read as its words — a script reading it line by line finds each line',
+    `it answered ${JSON.stringify(out.blockedText)}`,
+  )
+  chk(
+    out.streamToolName === 'create_slide_deck' && out.streamToolTitle === 'Stub deck' && out.streamToolText === 'Making it.' && out.streamToolStop === 'tool_use',
+    'a staged tool call answers a STREAMED call that offered tools too — its words and its tool_use, the turn stopped for it — as Brain\'s Ask surface makes a deck',
+    `the streamed call came back as ${JSON.stringify({ name: out.streamToolName, title: out.streamToolTitle, text: out.streamToolText, stop: out.streamToolStop })}`,
+  )
   chk(out.afterReset === 0, 'and reset clears the record, so a section can establish its own starting state', `after reset the stub still held ${out.afterReset} call(s)`)
   const wantSource = createHash('sha1').update(readFileSync(STUB)).digest('hex').slice(0, 12)
   chk(
@@ -329,6 +359,10 @@ if (process.argv.includes('--mutate')) {
     ['the streamed reply goes out in one delta', 'const per = Math.max(1, Math.ceil(words.length / 3))', 'const per = words.length || 1'],
     // `ledger-rows/row-2294`: a staged tool call answered as the fallback's words.
     ['a staged tool call is answered as text', "content: blocks ?? [{ type: 'text', text }],", "content: [{ type: 'text', text }],"],
+    // `ledger-rows/row-745`: a block-form system prompt read as its JSON, its lines escaped into one.
+    ['a block-form system prompt is read as JSON', "        ? body.system.map((b) => (typeof b?.text === 'string' ? b.text : '')).join('\\n')", '        ? JSON.stringify(body.system)'],
+    // `ledger-rows/row-853`: a streamed call's staged tool call answered as the fallback's words.
+    ['a streamed call\'s staged tool call is streamed as text', '    if (blocks) {\n      const events =', '    if (false) {\n      const events ='],
   ]
   console.log('\n▶ and each mutation of the stub reddens a case')
   for (const [label, from, to] of MUTATIONS) {
