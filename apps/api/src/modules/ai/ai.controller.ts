@@ -377,6 +377,10 @@ export class AiController {
     // id is summarised only for someone who may open it.
     if (body.taskId) await this.ai.assertTaskReadable(body.taskId, { id: user.id, role: user.role })
     if (!this.ai.isAvailable()) {
+      // A workspace whose month's credits are spent is told so whatever the
+      // server has, as `assertAvailable` tells it; with a model, `summarizeStream`
+      // asks them before its stream opens (`found-13-oct/a-refused-chat-turn-never-ends`).
+      await this.ai.assertWithinCredits('summarize', { userId: user.id, workspaceId: body.workspaceId })
       // §V2-11 — recorded before the 503, like `assertAvailable`. This route
       // owns its own response (it streams), so it sends rather than throws.
       await this.ai.recordFailure('summarize', 'none', { userId: user.id, workspaceId: body.workspaceId }, 'not_configured', 'AI features are not configured')

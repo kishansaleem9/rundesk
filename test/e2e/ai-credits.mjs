@@ -40,7 +40,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 17
+const EXPECTED_CHECKS = 18
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -212,6 +212,25 @@ try {
     turn.status === 402 && turnSaid.includes('paused') && turnSaid.includes(renewWords),
     'and a chat turn is refused the same way, before anything streams and whatever the server has — not left open (402)',
     `${turn.status} ${turnBody.slice(0, 200)}`,
+  )
+  // And a summary streamed: it asked the credits only where a model answers, so a server without one
+  // told a paused workspace it had no model (503).
+  const streamedSummary = await fetch(`${API}/ai/summarize/stream`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${mia.token}` },
+    body: JSON.stringify({ workspaceId: WS, content: `The launch plan for ${TAG} is drafted.` }),
+    signal: AbortSignal.timeout(15_000),
+  }).catch((e) => ({ status: 0, cut: String(e?.message ?? e) }))
+  const summaryBody = streamedSummary.text ? await streamedSummary.text().catch((e) => `(left open: ${e?.message ?? e})`) : `(no answer: ${streamedSummary.cut})`
+  let summarySaid = ''
+  try {
+    const parsed = JSON.parse(summaryBody)
+    summarySaid = String(typeof parsed?.error === 'string' ? parsed.error : parsed?.error?.message ?? '')
+  } catch {}
+  chk(
+    streamedSummary.status === 402 && summarySaid.includes('paused') && summarySaid.includes(renewWords),
+    'and so is a summary streamed, whatever the server has (402)',
+    `${streamedSummary.status} ${summaryBody.slice(0, 200)}`,
   )
 
   // ══ 5. THE COMPOSER SAYS IT IS PAUSED ═══════════════════════════════════════

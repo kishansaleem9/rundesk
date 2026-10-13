@@ -10533,13 +10533,16 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 - The chat route opens its stream first (`openSseStream`, which hijacks the reply), to report what it reads. Only then does it call `chatStream`, which asked the hour's limits and the month's credits as its first act. A refusal there was thrown to a hijacked reply: no 429 or 402 was sent, no frame was written, and the response was never ended.
 - So the request stood on a 201 until its client gave up: five minutes for the suites' fetch, read as "terminated" (`found-13-oct/bcd-stops-where-a-check-should-fail`), and in the composer, Brain answering.
 - Lane 2's `ai_usage` shows the cycle: in every run the cap refused, a `chat` refusal, and a second one five minutes later.
-- Without a model the route said "AI features are not configured" (503) to a workspace whose credits are spent. `assertAvailable` answers 402 for every other feature, the credits "whatever the server has".
-- Measured with the check below, on the lanes' trees before the fix: lane 2 (with a model, `77eb42e`), "201 (left open: The operation was aborted due to timeout)"; lane 3 (without one, `6848104`), "503 {"error":"AI features are not configured"}".
+- Without a model the route said "AI features are not configured" (503) to a workspace whose credits are spent. `assertAvailable` answers 402 for every other feature, the credits "whatever the server has". The streamed summary's route did the same; with a model it asks before its stream opens, so it was never left open.
+- Measured with the checks below, on the lanes' trees before the fix: the chat turn on lane 2 (with a model, `77eb42e`), "201 (left open: The operation was aborted due to timeout)", and on lane 3 (without one, `6848104`), "503 {"error":"AI features are not configured"}"; the streamed summary on lane 3 (at `0e01918`), the same 503.
 
-*Closed, 13 October.* The chat route asks the hour's limits and the month's credits before its stream opens, before the 503, so a refusal is a 429 or a 402 in words, which the composer already shows (`ai.controller.ts`). `chatStream` asks them itself only where it opens its own stream. Past the open, whatever throws is said down the stream, and the stream is ended (`endSseWithError`).
-- `ai-credits.mjs`: "and a chat turn is refused the same way, before anything streams and whatever the server has — not left open (402)".
+*Closed, 13 October.* The chat route asks the hour's limits and the month's credits before its stream opens, before the 503, so a refusal is a 429 or a 402 in words, which the composer already shows (`ai.controller.ts`). `chatStream` asks them itself only where it opens its own stream. Past the open, whatever throws is said down the stream, and the stream is ended (`endSseWithError`). The streamed summary asks the credits before its 503 too.
+- `ai-credits.mjs`: "and a chat turn is refused the same way, before anything streams and whatever the server has — not left open (402)", and "and so is a summary streamed, whatever the server has (402)". After: 17 of 17 on lane 2 with a model and on lane 3 without one, before the summary's check; with it, 18 of 18 on lane 2.
 - Unit `chat-trace.test.ts`: refused past the hour's limit, and in a spent workspace, before the reply is hijacked; a read that throws past the open ends the stream with an error frame. On the old route all three failed.
-- Patches `acr-16` (asked inside `chatStream` again), `acr-17` (asked after the 503; only where no model answers), `acr-u4` and `acr-u5`. On the tree: `acr-u4` reddened both refusal tests, `acr-u5` the stream's end.
+- Patches:
+  - `acr-16` (asked inside `chatStream` again): 16 of 17 on lane 2 with a model ("201 data: {"step":"workspace"}") and on lane 3 without one ("503").
+  - `acr-17` (asked after the 503; only where no model answers) and `acr-18` (the summary's credits asked only where a model answers): their runs on lane 3 are below.
+  - `acr-u4` reddened both refusal tests, `acr-u5` the stream's end.
 
 ### `found-13-oct/lane-admin-meets-the-hourly-ai-cap` — **closed** (test tooling, small; found by batch 40b's break runs) · reproduced 13 October
 
@@ -10553,7 +10556,7 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
   - `bcd-31` and `-33` at `77eb42e`: 15 of 29 for `bcd-33`, its own check among 14 failures. In the same runs Mia, a fresh account, was answered.
 - `ai_usage` shows the cap refusing the same admin on earlier days as well.
 
-*Closed, 13 October.* A lane with a model raises the cap to 100,000 calls an hour (`lane_model_env`, `lane-env.sh`). A lane's admin is not a person, and the refusal itself is held by `chat-trace.test.ts`. The runs it spoiled are re-run on it.
+*Closed, 13 October.* A lane with a model raises the cap to 100,000 calls an hour (`lane_model_env`, `lane-env.sh`). A lane's admin is not a person, and the refusal itself is held by `chat-trace.test.ts`. The runs it spoiled, re-run on it on lane 2 at `0e01918` (baseline 29 of 29): `bcd-29`, `bcd-31` and `bcd-33` 28 of 29 each, each reddening only the check it names.
 
 ## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 46
 
@@ -11511,6 +11514,13 @@ Checks (`list-views`, 32): "the newest entry of the list’s feed is the status 
 - **Who sees it.** A deck is its maker's alone, listed under the AI page's Artifacts tab. Another member is told it is not there, and a guest is refused.
 
 The model stub now streams a staged tool call, as the chat surface asks for one. `brain-comments-and-decks.mjs` checks all of this with the model stub and without one. Without one, a deck is written by SQL as Brain would keep it, so the viewer, its versions, its link and its deletion are measured in CI too.
+
+Patches for both rows, `bcd-1` to `bcd-34`, on lane 2 with the model stub (baselines 29 of 29), each reddened the check it names:
+- at `83eef2f`: `bcd-1` and `bcd-2` 21 of 29 (Brain silent, or answering outside the thread, fails every answer read); `bcd-17` 24 of 29 (`found-13-oct/a-deck-made-where-none-was-offered`); `bcd-24` 24 of 29 and `bcd-16` and `bcd-26` 27 of 29, each with the checks that read on from it; `bcd-4` to `bcd-11`, `bcd-15`, `bcd-18`, `bcd-20` to `bcd-23`, `bcd-25`, `bcd-27`, `bcd-28` and `bcd-34` 28 of 29;
+- the eight that ended short there (`found-13-oct/bcd-stops-where-a-check-should-fail`), at `77eb42e`: `bcd-3`, `-12`, `-13`, `-14` and `-30` 28 of 29, `bcd-19` 26 of 29;
+- the three the lanes' AI cap spoiled (`found-13-oct/lane-admin-meets-the-hourly-ai-cap`), at `0e01918`: `bcd-29`, `-31` and `-33` 28 of 29.
+
+`bcd-32`, which only a lane without a model reddens, 28 of 29 on lane 2 at `70c1d8f`. The unit `bcd-u1` and `bcd-u2` are measured by the preflight's unit claims.
 
 ### `commit-log/log-214dac0-1` — **closed** (feature, large; was not counted, a feature; triage, 5 October; was: open, large) · reproduced 13 October
 
