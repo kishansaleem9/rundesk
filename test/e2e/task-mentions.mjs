@@ -201,10 +201,12 @@ try {
     // than a failing check.
     els.map((el) => (el.getAttribute('data-testid') ?? '').replace('mention-tab-', '')),
   )
+  // The frame's six, in its order, and the Agents tab Super Agents added after People
+  // (`ledger-rows/row-745`, batch 40a): an agent is mentioned as a person is.
   chk(
-    tabIds.join(',') === 'people,tasks,docs,whiteboards,locations,channels',
-    'the picker draws all six of the frame\'s tabs, in the frame\'s order',
-    `it draws [${tabIds.join(', ')}] — the frame names six`,
+    tabIds.join(',') === 'people,agents,tasks,docs,whiteboards,locations,channels',
+    'the picker draws the frame\'s six tabs in its order, and Agents after People',
+    `it draws [${tabIds.join(', ')}] — the frame’s six and Agents`,
   )
 
   /*

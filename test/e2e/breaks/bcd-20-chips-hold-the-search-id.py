@@ -1,5 +1,5 @@
 # A chip keeps the search hit’s id, `task-<id>`, where the server reads an id.
-# Reddens: brain-comments-and-decks: "the composer’s "+" offers a task, Doc or location to focus on and a file to upload, each shown as a chip on the next question"
+# Reddens: brain-comments-and-decks: "the composer’s \"+\" offers a task, Doc or location to focus on and a file to upload, each shown as a chip on the next question"
 import io
 p = '/home/user/rundesk/apps/web/src/components/ai-panel.tsx'
 a = 'const hitRawId = (h: { id: string; entityType: string }) => (h.id.startsWith(`${h.entityType}-`) ? h.id.slice(h.entityType.length + 1) : h.id)'

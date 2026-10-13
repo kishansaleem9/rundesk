@@ -723,6 +723,12 @@ lane_media_up () {
 # stub's control seam — the port its version is asked on — on 97<k>.
 lane_mail_port () { echo $((9600 + $1)); }
 lane_mail_control_port () { echo $((9700 + $1)); }
+# And the mailbox a person links over IMAP (`mailbox-stub.mjs`, `found-12-oct/task-email-imap-unbuilt`):
+# its IMAP on 98<k>, its SMTP on 98<k+50>, its control seam on 99<k>, its certificate in /tmp.
+lane_mailbox_port () { echo $((9800 + $1)); }
+lane_mailbox_smtp_port () { echo $((9850 + $1)); }
+lane_mailbox_control_port () { echo $((9900 + $1)); }
+lane_mailbox_tls_dir () { echo "/tmp/claude-0/mailbox-tls-v$1"; }
 
 lane_mail_env () {
   export SMTP_HOST=127.0.0.1
@@ -735,6 +741,14 @@ lane_mail_env () {
   # within thirty seconds; a lane does both in seconds, so a suite can wait them out.
   export EMAIL_REPLY_POLL_SECONDS=2
   export TASK_EMAIL_SCHEDULE_SECONDS=1
+  # A mailbox linked over IMAP (`found-12-oct/task-email-imap-unbuilt`): its servers are
+  # typed by whoever links it, and the API reaches none on a private address unless the
+  # operator names it — a lane names its own mailbox stub — and trusts that stub's
+  # certificate for STARTTLS. Its password is kept sealed, so a lane has a key to seal it
+  # with: the same on every lane, and nobody's secret (a lane's mailboxes are made up).
+  export MAILBOX_PRIVATE_SERVERS="127.0.0.1:$(lane_mailbox_port "$1") 127.0.0.1:$(lane_mailbox_smtp_port "$1")"
+  export MAILBOX_TLS_CA_FILE="$(lane_mailbox_tls_dir "$1")/cert.pem"
+  export TOKEN_ENCRYPTION_KEY=6c616e652d6b65792d6e6f742d612d7365637265742d72756e6465736b2d3031
 }
 
 lane_mail_up () {
@@ -742,16 +756,42 @@ lane_mail_up () {
   port="$(lane_mail_control_port "$k")"
   log="/tmp/claude-0/mail-v$k.log"
   if grep -q '"ready":true' "$log" 2>/dev/null && stub_is_current "$port" "$LANE_ENV_DIR/mail-stub.mjs"; then
-    return 0
+    lane_mailbox_up "$k"
+    return
   fi
   stub_down "$port" "$LANE_ENV_DIR/mail-stub.mjs"
   : > "$log"
   RUNDESK_MAIL_STUB=1 nohup node "$LANE_ENV_DIR/mail-stub.mjs" --port "$port" --smtp-port "$(lane_mail_port "$k")" >> "$log" 2>&1 &
   for _ in $(seq 1 50); do
-    grep -q '"ready":true' "$log" 2>/dev/null && return 0
+    if grep -q '"ready":true' "$log" 2>/dev/null; then
+      lane_mailbox_up "$k"
+      return
+    fi
     sleep 0.2
   done
   echo "lane $k: the mail stub never announced itself on $port" >&2
+  tail -3 "$log" 2>/dev/null >&2
+  return 1
+}
+
+# The mailbox stub starts with the mail stub, so every launcher that brings a
+# lane's mail up brings this up too.
+lane_mailbox_up () {
+  local k="$1" port log
+  port="$(lane_mailbox_control_port "$k")"
+  log="/tmp/claude-0/mailbox-v$k.log"
+  if grep -q '"ready":true' "$log" 2>/dev/null && stub_is_current "$port" "$LANE_ENV_DIR/mailbox-stub.mjs"; then
+    return 0
+  fi
+  stub_down "$port" "$LANE_ENV_DIR/mailbox-stub.mjs"
+  : > "$log"
+  RUNDESK_MAILBOX_STUB=1 nohup node "$LANE_ENV_DIR/mailbox-stub.mjs" --port "$port" --imap-port "$(lane_mailbox_port "$k")" \
+    --smtp-port "$(lane_mailbox_smtp_port "$k")" --tls-dir "$(lane_mailbox_tls_dir "$k")" >> "$log" 2>&1 &
+  for _ in $(seq 1 50); do
+    grep -q '"ready":true' "$log" 2>/dev/null && return 0
+    sleep 0.2
+  done
+  echo "lane $k: the mailbox stub never announced itself on $port" >&2
   tail -3 "$log" 2>/dev/null >&2
   return 1
 }

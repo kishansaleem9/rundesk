@@ -94,7 +94,7 @@ type OAuthState = { provider: Provider; workspaceId: string; userId: string; ts:
 /** The mailboxes a person links to send a task's email from, and what each refuses. */
 export const EMAIL_ACCOUNT_PROVIDERS: ReadonlySet<Provider> = new Set<Provider>(['gmail', 'outlook'])
 export const EMAIL_ACCOUNT_REFUSALS = {
-  notAMailbox: 'Only Gmail or Outlook is linked to send email',
+  notAMailbox: 'Gmail and Outlook are linked through their own sign-in; any other mailbox is linked by its IMAP and SMTP servers',
   guest: 'Guests cannot send email from a task',
   linkedByAnother: 'This mailbox is already linked in this workspace by somebody else: ask them to let you send from it',
 } as const
@@ -1062,8 +1062,8 @@ export class IntegrationConnectionsService {
     return `${webBase}/app/${workspaceId}/email?${params.toString()}`
   }
 
-  /** A plan's room for one more mailbox (`EMAIL_PLANS`), or its refusal in words. */
-  private async assertEmailAccountRoom(workspaceId: string) {
+  /** A plan's room for one more mailbox (`EMAIL_PLANS`), or its refusal in words — an IMAP mailbox's too. */
+  async assertEmailAccountRoom(workspaceId: string) {
     const plan = await this.plans.getWorkspacePlan(workspaceId)
     const room = EMAIL_PLANS[plan.id].accounts
     if (room === null) return

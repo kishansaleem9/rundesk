@@ -655,6 +655,14 @@ jobs:
       - name: The mail seam is really a seam, and each case bites
         run: node scripts/check-mail-stub.mjs --mutate
 
+      # And for a person's own mailbox over IMAP (`found-12-oct/task-email-imap-unbuilt`):
+      # the product's own IMAP and SMTP client against the stub, bare sessions
+      # beside it, and each rule of the stub — a password checked, STARTTLS
+      # offered, a sender held to its own address, a search by its key — broken
+      # in turn.
+      - name: The mailbox seam is really a seam, and each case bites
+        run: node scripts/check-mailbox-stub.mjs --mutate
+
       # And the other direction from the ledger's own reconciliations: does a
       # line of the SPECIFICATION appear anywhere in the evidence? 115
       # timestamped frame observations, and asking found `03:15` — a cover
@@ -807,6 +815,11 @@ jobs:
       # API sends to, and the control seam `test/e2e/lib/mail.mjs` reads back.
       E2E_MAIL_PORT: 9600
       E2E_MAIL_CONTROL_PORT: 9700
+      # And a person's own mailbox, linked over IMAP (`found-12-oct/task-email-imap-unbuilt`):
+      # its IMAP, its SMTP, and the control seam `test/e2e/lib/mailbox.mjs` reads.
+      E2E_MAILBOX_IMAP_PORT: 9800
+      E2E_MAILBOX_SMTP_PORT: 9850
+      E2E_MAILBOX_CONTROL_PORT: 9900
 
     steps:
       - name: Checkout
@@ -957,6 +970,22 @@ jobs:
           done
           echo "The mail stub never announced itself. Its output:"; cat /tmp/mail.log; exit 1
 
+      # A PERSON'S OWN MAILBOX, LINKED OVER IMAP (`found-12-oct/task-email-imap-unbuilt`):
+      # `scripts/e2e-lanes/mailbox-stub.mjs` speaks IMAP and SMTP with STARTTLS
+      # on a certificate it makes with openssl, which the API trusts below.
+      - name: Start the mailbox server
+        timeout-minutes: 15
+        run: |
+          RUNDESK_MAILBOX_STUB=1 nohup node scripts/e2e-lanes/mailbox-stub.mjs \
+            --port "$E2E_MAILBOX_CONTROL_PORT" --imap-port "$E2E_MAILBOX_IMAP_PORT" \
+            --smtp-port "$E2E_MAILBOX_SMTP_PORT" --tls-dir /tmp/mailbox-tls > /tmp/mailbox.log 2>&1 &
+          disown
+          for i in $(seq 1 50); do
+            if grep -q '"ready":true' /tmp/mailbox.log; then echo "mailbox server up"; exit 0; fi
+            sleep 0.2
+          done
+          echo "The mailbox stub never announced itself. Its output:"; cat /tmp/mailbox.log; exit 1
+
       # Backgrounded and waited for: a suite that starts talking to an API that
       # is not up yet fails for a reason that has nothing to do with calls.
       - name: Start the API
@@ -1029,6 +1058,14 @@ jobs:
           # for later is sent within a second, so the suite can wait them out.
           EMAIL_REPLY_POLL_SECONDS: 2
           TASK_EMAIL_SCHEDULE_SECONDS: 1
+          # And the three `lane_mail_env` sets for a mailbox linked over IMAP
+          # (`found-12-oct/task-email-imap-unbuilt`): the stub above is on loopback,
+          # which the API reaches only where the operator names it; its
+          # certificate is trusted for STARTTLS; and a password is kept sealed
+          # under a key — this one nobody's secret, as the mailboxes are made up.
+          MAILBOX_PRIVATE_SERVERS: 127.0.0.1:${{ env.E2E_MAILBOX_IMAP_PORT }} 127.0.0.1:${{ env.E2E_MAILBOX_SMTP_PORT }}
+          MAILBOX_TLS_CA_FILE: /tmp/mailbox-tls/cert.pem
+          TOKEN_ENCRYPTION_KEY: 6c616e652d6b65792d6e6f742d612d7365637265742d72756e6465736b2d3031
           # Integration keys that are not real — the six `lane_oauth_env`
           # exports. A grant's start refuses a provider with no keys, and the
           # suites that read a grant's state start Google, Microsoft and
@@ -2165,6 +2202,17 @@ jobs:
       - name: A task's email goes from the writer's own Gmail or Outlook
         timeout-minutes: 15
         run: node test/e2e/task-email-accounts.mjs --api 3011 --dist apps/web/dist
+
+      # `found-12-oct/task-email-imap-unbuilt` — any other mailbox, linked as
+      # ClickUp's "Sign in with IMAP" links it: by its address, its password and
+      # its IMAP and SMTP servers, signed in to both before it is kept, over TLS
+      # where SSL is required; its password sealed; sent through its SMTP server
+      # and its answers read from its inbox (the mailbox stub above); a password
+      # changed at the provider marks it to link again; the AI's draft in its
+      # Drafts; the composer's form and the Email settings.
+      - name: A task's email goes from a mailbox linked over IMAP
+        timeout-minutes: 15
+        run: node test/e2e/task-email-imap.mjs --api 3011 --dist apps/web/dist
 
       # `ledger-rows/row-2294` — the AI acts in the asker's own connected apps, as
       # ClickUp's does: an event in their calendar, inviting people; a draft in a

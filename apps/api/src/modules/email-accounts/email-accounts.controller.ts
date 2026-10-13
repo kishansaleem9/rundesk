@@ -32,6 +32,12 @@ export class EmailAccountsController {
     return this.accounts.connect(workspaceId, user, provider)
   }
 
+  @Post('email-accounts/imap')
+  @ApiOperation({ summary: 'Link a mailbox by its IMAP and SMTP servers and its password, as ClickUp’s "Sign in with IMAP"' })
+  linkImap(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string, @CurrentUser() user: User, @Body() body: Record<string, unknown>) {
+    return this.accounts.linkImap(workspaceId, user, body && typeof body === 'object' ? body : {})
+  }
+
   @Patch('email-accounts/:accountId')
   @ApiOperation({ summary: 'A mailbox’s sender name, and who besides its owner may send from it' })
   update(

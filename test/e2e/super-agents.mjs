@@ -449,13 +449,14 @@ try {
   let builderRefusal = null
   if (!MODEL_ON) {
     await page.getByTestId('sa-builder-error').waitFor({ timeout: 15_000 }).catch(() => {})
-    builderRefusal = await page.getByTestId('sa-builder-error').textContent().catch(() => null)
+    builderRefusal = await page.getByTestId('sa-builder-error').filter({ visible: true }).textContent().catch(() => null)
     await page.getByTestId('sa-from-scratch').click().catch(() => {})
   }
   await page.getByTestId('sa-form-name').waitFor({ timeout: 15_000 }).catch(() => {})
   const drafted = await page.getByTestId('sa-form-name').inputValue().catch(() => null)
-  await page.getByTestId('sa-form-name').fill(`Built ${TAG}`)
-  await page.getByTestId('sa-form-create').click()
+  // Bounded, as the presses above them: with no Agents switch there is no form (`sa-23`).
+  await page.getByTestId('sa-form-name').fill(`Built ${TAG}`, { timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('sa-form-create').click({ timeout: 10_000 }).catch(() => {})
   await page.getByTestId('sa-profile').waitFor({ timeout: 15_000 }).catch(() => {})
   const [built] = await sql`select id, user_id::text as user, skills, triggers from super_agents where name = ${`Built ${TAG}`}`
   if (built) madeAccount({ id: built.user })
@@ -463,24 +464,24 @@ try {
     (MODEL_ON
       ? drafted === 'Stub Triage Agent' && built && JSON.stringify(built.skills) === '["search_tasks"]' && built.triggers?.schedule?.every === 'weekly'
       : REFUSED.test(builderRefusal ?? '') && drafted === '' && built && JSON.stringify(built.skills) === '["search_tasks","create_task"]') &&
-      (await page.getByTestId('sa-profile-name').textContent().catch(() => null)) === `Built ${TAG}`,
+      (await page.getByTestId('sa-profile-name').filter({ visible: true }).textContent().catch(() => null)) === `Built ${TAG}`,
     'New Super Agent: the builder fills the form, and Create makes the agent from it and opens its profile',
     `drafted ${JSON.stringify(drafted)}; made ${JSON.stringify(built ?? null)}`,
   )
 
-  await page.getByTestId('sa-run-input').fill('Say hello')
-  await page.getByTestId('sa-run-submit').click()
+  await page.getByTestId('sa-run-input').fill('Say hello', { timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('sa-run-submit').click({ timeout: 10_000 }).catch(() => {})
   const output = page.locator('[data-testid="sa-run-output"]')
   await output.waitFor({ timeout: 20_000 }).catch(() => {})
   chk(
     MODEL_ON
-      ? (await output.getAttribute('data-status').catch(() => null)) === 'completed' && /^Built sa\d+ here, started by a test run from your profile/.test((await output.textContent().catch(() => '')) ?? '')
-      : (await output.getAttribute('data-status').catch(() => null)) === 'failed' && REFUSED.test((await output.textContent().catch(() => '')) ?? ''),
+      ? (await output.getAttribute('data-status').catch(() => null)) === 'completed' && /^Built sa\d+ here, started by a test run from your profile/.test((await output.filter({ visible: true }).textContent().catch(() => '')) ?? '')
+      : (await output.getAttribute('data-status').catch(() => null)) === 'failed' && REFUSED.test((await output.filter({ visible: true }).textContent().catch(() => '')) ?? ''),
     'Run agent on the profile answers on the page, from the agent the page is about',
     `${await output.getAttribute('data-status').catch(() => null)}: ${await output.textContent().catch(() => null)}`,
   )
 
-  await page.getByTestId('sa-message').click()
+  await page.getByTestId('sa-message').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForURL(/\/chat\?.*channel=/, { timeout: 15_000 }).catch(() => {})
   const channelInUrl = new URL(page.url()).searchParams.get('channel')
   const [dmMembers] = channelInUrl
@@ -576,7 +577,7 @@ try {
   const assignAgent = page.locator(`[data-testid="assign-agent-${sched.userId}"]`)
   await assignAgent.waitFor({ timeout: 10_000 }).catch(() => {})
   chk(
-    (await assignAgent.count()) === 1 && /Agent/.test((await assignAgent.textContent().catch(() => '')) ?? '') && (await page.locator(`[data-testid="assign-member-${sched.userId}"]`).count()) === 0,
+    (await assignAgent.count()) === 1 && /Agent/.test((await assignAgent.filter({ visible: true }).textContent().catch(() => '')) ?? '') && (await page.locator(`[data-testid="assign-member-${sched.userId}"]`).count()) === 0,
     'the assignee picker lists agents in their own section, marked as agents, not among the people',
     `${await assignAgent.count()} row(s): ${await assignAgent.textContent().catch(() => null)}`,
   )

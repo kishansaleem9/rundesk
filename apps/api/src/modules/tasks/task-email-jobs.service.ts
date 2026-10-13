@@ -5,6 +5,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { EmailAccountsService } from '../email-accounts/email-accounts.service'
 import { withoutQuote } from '../email-accounts/mail-message'
+import type { ThreadMessage } from '../email-accounts/mailbox.client'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { CommentEmailService } from './comment-email.service'
 
@@ -73,19 +74,35 @@ export class TaskEmailJobsService implements OnModuleInit, OnModuleDestroy {
         ),
       )
       .limit(200)
-    let landed = 0
+    // One read of each mailbox, its threads together: an IMAP mailbox is signed in to once a poll, not once a thread.
+    const byAccount = new Map<string, string[]>()
     for (const t of threads) {
       if (!t.accountId || !t.threadId) continue
-      landed += await this.readThread(t.accountId, t.threadId)
+      byAccount.set(t.accountId, [...(byAccount.get(t.accountId) ?? []), t.threadId])
+    }
+    let landed = 0
+    for (const [accountId, threadIds] of byAccount) {
+      // What is already in its task is not read again (an IMAP mailbox asks before it fetches a whole message).
+      const known = async (ids: string[]) =>
+        new Set(
+          ids.length
+            ? (
+                await this.db
+                  .select({ id: taskCommentEmails.providerMessageId })
+                  .from(taskCommentEmails)
+                  .where(and(eq(taskCommentEmails.accountId, accountId), inArray(taskCommentEmails.providerMessageId, ids)))
+              ).map((r) => r.id ?? '')
+            : [],
+        )
+      const read = await this.accounts.readThreads(accountId, threadIds, known)
+      if (!read) continue
+      for (const [threadId, messages] of read.threads) landed += await this.landThread(accountId, read.account.address, threadId, messages)
     }
     return landed
   }
 
-  private async readThread(accountId: string, threadId: string): Promise<number> {
-    const read = await this.accounts.readThread(accountId, threadId)
-    if (!read) return 0
-    const { account, messages } = read
-    const theirs = messages.filter((m) => m.from && m.from !== account.address)
+  private async landThread(accountId: string, address: string, threadId: string, messages: ThreadMessage[]): Promise<number> {
+    const theirs = messages.filter((m) => m.from && m.from !== address)
     if (theirs.length === 0) return 0
     const known = new Set(
       (

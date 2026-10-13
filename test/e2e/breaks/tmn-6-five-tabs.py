@@ -1,7 +1,7 @@
 # A SECTION THE FRAME DRAWS, DROPPED. Channels comes out of the tab strip,
 # which is how three of these six went missing in the first place: each
 # remaining tab is individually plausible.
-# Reddens: task-mentions -- 'the picker draws all six of the frames tabs, in the frames order'
+# Reddens: task-mentions -- 'the picker draws the frames six tabs in its order, and Agents after People'
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """                ['channels', 'taskDetail.mentionChannels'],"""

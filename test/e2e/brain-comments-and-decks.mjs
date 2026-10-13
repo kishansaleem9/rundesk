@@ -316,7 +316,7 @@ try {
   )
   if (MODEL_ON) {
     await stub('reset')
-    await page.getByTestId('ai-composer-input').fill(`Summarise these ${TAG}`)
+    await page.getByTestId('ai-composer-input').fill(`Summarise these ${TAG}`, { timeout: 10_000 }).catch(() => {})
     await page.getByTestId('ai-composer-input').press('Enter')
     await page.getByTestId('ai-message-attached').filter({ visible: true }).first().waitFor({ timeout: 15_000 }).catch(() => {})
     await settle(async () => (await callAsking(`Summarise these ${TAG}`)).user.includes('notes.txt'), 15_000)
@@ -335,12 +335,12 @@ try {
     // The last turn names its new chat with a call of its own, after its answer: staged before that call, the deck would be its.
     await settle(async () => ((await stub('seen'))?.calls ?? []).some((c) => JSON.stringify(c.system ?? '').includes('Name this conversation')), 10_000)
     await stub('next', { content: [{ type: 'text', text: 'I made you a quick overview. 4 slides.' }, { type: 'tool_use', name: 'create_slide_deck', input: { title: `Overview on screen ${TAG}`, slides: SLIDES } }] })
-    await page.getByTestId('ai-composer-input').fill(`What’s new in Brain²? on screen ${TAG}`)
+    await page.getByTestId('ai-composer-input').fill(`What’s new in Brain²? on screen ${TAG}`, { timeout: 10_000 }).catch(() => {})
     await page.getByTestId('ai-composer-input').press('Enter')
   }
   const card = page.getByTestId('artifact-card').filter({ hasText: `Overview on screen ${TAG}` })
   if (MODEL_ON) await card.waitFor({ timeout: 20_000 }).catch(() => {})
-  const cardText = MODEL_ON ? await card.innerText().catch(() => '') : ''
+  const cardText = MODEL_ON ? await card.filter({ visible: true }).innerText().catch(() => '') : ''
   chk(
     MODEL_ON ? /Overview on screen/.test(cardText) && /4 slides/.test(cardText) : (await page.getByTestId('artifact-card').count()) === 0,
     'the deck is drawn as a card under the answer, as frame 16:50 draws it: its title and "4 slides"',
@@ -356,13 +356,13 @@ try {
   await viewer.waitFor({ timeout: 15_000 }).catch(() => {})
   const counter = page.getByTestId('deck-counter')
   const total = MODEL_ON ? 4 : 5
-  const c1 = await counter.innerText().catch(() => '')
+  const c1 = await counter.filter({ visible: true }).innerText().catch(() => '')
   await page.getByTestId('deck-next').click().catch(() => {})
-  const c2 = await counter.innerText().catch(() => '')
+  const c2 = await counter.filter({ visible: true }).innerText().catch(() => '')
   await page.keyboard.press('ArrowRight')
-  const c3 = await counter.innerText().catch(() => '')
+  const c3 = await counter.filter({ visible: true }).innerText().catch(() => '')
   await page.getByTestId('deck-prev').click().catch(() => {})
-  const c4 = await counter.innerText().catch(() => '')
+  const c4 = await counter.filter({ visible: true }).innerText().catch(() => '')
   chk(
     (await row.count()) === 1 && c1 === `1 / ${total}` && c2 === `2 / ${total}` && c3 === `3 / ${total}` && c4 === `2 / ${total}`,
     'the Artifacts list opens the deck, paged through as frame 16:55 pages it: the arrows, ← / →, and where you are',
@@ -374,7 +374,7 @@ try {
   if (MODEL_ON) await page.getByTestId('artifact-viewer-version').filter({ hasText: 'Version 2' }).waitFor({ timeout: 15_000 }).catch(() => {})
   else await page.waitForTimeout(1500)
   const [afterAsk] = await sql`select current_version as v, (select count(*)::int from ai_artifact_versions where artifact_id = ${deckId}) as n from ai_artifacts where id = ${deckId}`
-  const firstTitle = await page.getByTestId('deck-slide-title').innerText().catch(() => '')
+  const firstTitle = await page.getByTestId('deck-slide-title').filter({ visible: true }).innerText().catch(() => '')
   chk(
     MODEL_ON ? afterAsk?.v === 2 && afterAsk?.n === 2 && firstTitle === 'Revised: add a slide on risks' : afterAsk?.v === 2 && afterAsk?.n === 2 && (await page.getByText(REFUSED).count()) > 0,
     'asked to change it, Brain makes the whole deck again as a new version, shown at its first slide',
@@ -403,8 +403,8 @@ try {
   pub.setDefaultTimeout(15_000)
   await pub.goto(`${B}/deck/${token}`, { waitUntil: 'domcontentloaded' })
   await pub.getByTestId('public-deck-title').waitFor({ timeout: 15_000 }).catch(() => {})
-  const pubTitle = await pub.getByTestId('public-deck-title').innerText().catch(() => '')
-  const pubCounter = await pub.getByTestId('deck-counter').innerText().catch(() => '')
+  const pubTitle = await pub.getByTestId('public-deck-title').filter({ visible: true }).innerText().catch(() => '')
+  const pubCounter = await pub.getByTestId('deck-counter').filter({ visible: true }).innerText().catch(() => '')
   chk(
     !!token && pubTitle === `What’s new in Brain² ${TAG}` && pubCounter === `1 / ${SLIDES.length}`,
     'published, its link opens the deck for somebody signed in to nothing — its title and its slides, paged',
@@ -488,7 +488,7 @@ try {
   await page.goto(`${B}/app/${WS}/ai?hub=agents`, { waitUntil: 'domcontentloaded' })
   const cardOf = page.locator('[data-testid="sa-card"]').filter({ hasText: `Card ${TAG}` })
   await cardOf.waitFor({ timeout: 20_000 }).catch(() => {})
-  const cardWords = await cardOf.innerText().catch(() => '')
+  const cardWords = await cardOf.filter({ visible: true }).innerText().catch(() => '')
   chk(
     cardWords.includes(`Made by ${me.display_name}`) && !cardWords.includes('{name}'),
     'a Super Agent’s card says who made it, by name — not "Made by {name}" (found-13-oct/single-brace-placeholders-print-themselves)',

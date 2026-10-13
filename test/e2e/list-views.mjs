@@ -202,7 +202,8 @@ try {
   await page.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS })
   const LIST_URL = `${B}/app/${WS}/${space.id}/${project.id}/${L}`
   const openView = async (view) => {
-    await page.getByTestId(`work-view-tab-type-${view}`).click()
+    // Bounded: a tab a patch takes away fails the check that reads its view, not the run (`lv-26`).
+    await page.getByTestId(`work-view-tab-type-${view}`).click({ timeout: 15_000 }).catch(() => {})
   }
   await page.goto(LIST_URL, { waitUntil: 'domcontentloaded' })
   await page.getByTestId('work-view-tab-type-list').waitFor({ timeout: 25_000 })
@@ -222,7 +223,7 @@ try {
     'the Activity tab draws the feed newest first, under Today, the status change on top',
     `first row ${JSON.stringify(firstRow)} under ${firstDay}; ${drawn} rows for the server’s ${items.length}`,
   )
-  await page.getByTestId('activity-view-search').fill(`Write the brief ${TAG}`)
+  await page.getByTestId('activity-view-search').fill(`Write the brief ${TAG}`, { timeout: 10_000 }).catch(() => {})
   let narrowed = []
   await waitUntil(async () => {
     narrowed = await rows.evaluateAll((els) => els.map((e) => e.getAttribute('data-task-id')))
@@ -366,7 +367,7 @@ try {
     'a task with no date waits in Unscheduled, and dropping it on a day gives it that due date',
     `listed ${sawWaiting}; due ${ymd(scheduled?.dueDate)}, today ${dayOf(0)}`,
   )
-  await page.getByTestId('timeline-group-by').selectOption('status')
+  await page.getByTestId('timeline-group-by').selectOption('status', { timeout: 10_000 }).catch(() => {})
   const t3 = await taskOf(T3)
   await bar(T3, t3?.status).waitFor({ timeout: 8000 }).catch(() => {})
   chk(
@@ -394,9 +395,9 @@ try {
   )
   const node = (id) => page.locator(`[data-testid="mindmap-node"][data-task-id="${id}"]`)
   const CHILD = `Child of the venue ${TAG}`
-  await node(T2).getByTestId('mindmap-add-child').click()
-  await page.getByTestId('mindmap-new-title').fill(CHILD)
-  await page.getByTestId('mindmap-new-title').press('Enter')
+  await node(T2).getByTestId('mindmap-add-child').click({ timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('mindmap-new-title').fill(CHILD, { timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('mindmap-new-title').press('Enter', { timeout: 10_000 }).catch(() => {})
   let children = []
   await waitUntil(async () => {
     children = (await A(`/tasks/${T2}/subtasks`)).data ?? []
@@ -407,7 +408,7 @@ try {
     '+ on a task makes one subtask of it, which the task’s own read has',
     `subtasks ${JSON.stringify(children.map((c) => c.title))}`,
   )
-  await node(T3).dragTo(node(T6))
+  await node(T3).dragTo(node(T6), { timeout: 10_000 }).catch(() => {})
   let parented = null
   await waitUntil(async () => {
     parented = await taskOf(T3)
@@ -415,7 +416,7 @@ try {
   }, { timeoutMs: 10_000 })
   chk(parented?.parentTaskId === T6, 'dropping a task on another makes it that task’s subtask', `parent ${parented?.parentTaskId}`)
   await node(T2).waitFor({ timeout: 8000 }).catch(() => {})
-  await node(T2).dragTo(node(T5))
+  await node(T2).dragTo(node(T5), { timeout: 10_000 }).catch(() => {})
   await page.waitForResponse((r) => r.url().includes(`/tasks/${T2}`) && r.request().method() === 'PATCH', { timeout: 8000 }).catch(() => null)
   const stayed = await taskOf(T2)
   await waitUntil(async () => (await node(T2).getAttribute('data-kind').catch(() => null)) === 'task', { timeoutMs: 8000 })

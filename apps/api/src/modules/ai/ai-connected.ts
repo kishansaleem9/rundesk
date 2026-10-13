@@ -34,7 +34,7 @@ import { EMAIL_BODY_MAX, EMAIL_SUBJECT_MAX, emailAddress, emailRecipients } from
 export type ConnectedCalendar = { provider: 'gcal' | 'outlook'; email: string | null }
 
 /** A mailbox the asker linked themselves. */
-export type ConnectedMailbox = { id: string; provider: 'gmail' | 'outlook'; address: string }
+export type ConnectedMailbox = { id: string; provider: 'gmail' | 'outlook' | 'imap'; address: string }
 
 /** What the planner knows of the asker's own connections. */
 export type ConnectedContext = {
@@ -58,7 +58,7 @@ export const CONNECTED_REFUSALS = {
   calendarRefused: (name: string) =>
     `${name} refused the grant Rundesk holds for your calendar: connect it again in the Planner, under Calendars`,
   noMailbox:
-    'You have linked no mailbox of your own to write drafts in: link Gmail or Outlook in Email settings, and ask again',
+    'You have linked no mailbox of your own to write drafts in: link Gmail, Outlook or another mailbox over IMAP in Email settings, and ask again',
   noSearchSource:
     'You have connected none of your own apps to search: connect Google Drive, Gmail or SharePoint in the App Center, under Connected Search, and ask again',
   notMember: 'You are not a member of that workspace',
@@ -104,7 +104,7 @@ export const CONNECTED_TOOLS: Anthropic.Messages.Tool[] = [
   {
     name: 'draft_email',
     description:
-      "Write an email as a DRAFT in a mailbox the asker linked themselves (Gmail or Outlook). It is saved in their Drafts for them to send; it is never sent from here. PREVIEWED for the user to confirm.",
+      "Write an email as a DRAFT in a mailbox the asker linked themselves (Gmail, Outlook, or another over IMAP). It is saved in their Drafts for them to send; it is never sent from here. PREVIEWED for the user to confirm.",
     input_schema: {
       type: 'object',
       properties: {
@@ -215,7 +215,7 @@ const listed = (xs: string[]): string =>
   xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`
 
 export const providerName = (provider: string): string =>
-  provider === 'gcal' ? 'Google Calendar' : provider === 'outlook' ? 'Outlook' : provider === 'gmail' ? 'Gmail' : provider
+  provider === 'gcal' ? 'Google Calendar' : provider === 'outlook' ? 'Outlook' : provider === 'gmail' ? 'Gmail' : provider === 'imap' ? 'IMAP' : provider
 
 export type CalendarEventArgs = {
   workspaceId: string

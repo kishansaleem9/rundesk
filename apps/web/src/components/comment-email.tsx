@@ -29,6 +29,7 @@ import {
 import { api, ApiError } from '../lib/api'
 import { useDateFormat } from '../lib/date-format'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { ImapLinkDialog } from './imap-link-dialog'
 
 export type CommentEmail = {
   direction: 'out' | 'in'
@@ -44,7 +45,8 @@ export type CommentEmail = {
 /** A mailbox this person may send from: theirs, or shared with them. */
 export type EmailAccount = {
   id: string
-  provider: 'gmail' | 'outlook'
+  /** `imap`: linked by its servers and its password (`found-12-oct/task-email-imap-unbuilt`). */
+  provider: 'gmail' | 'outlook' | 'imap'
   address: string
   senderName: string
   status: 'connected' | 'needs_reconnect'
@@ -66,7 +68,7 @@ export type CommentEmailSetup = {
   /** The server's own address, "<writer> via Rundesk", when it sends mail. */
   server: { name: string; address: string } | null
   accounts: EmailAccount[]
-  providers: { gmail: ProviderReadiness; outlook: ProviderReadiness } | null
+  providers: { gmail: ProviderReadiness; outlook: ProviderReadiness; imap?: ProviderReadiness } | null
   plan: EmailPlan | null
   signatures: EmailSignature[]
   templates: EmailTemplate[]
@@ -360,8 +362,9 @@ function EmailFromPicker({
   workspaceId?: string
 }) {
   const { t } = useTranslation()
+  const [imapOpen, setImapOpen] = useState(false)
   const providers = setup.providers
-  const linkable = (['gmail', 'outlook'] as const).filter((p) => providers?.[p]?.available)
+  const linkable = (['gmail', 'outlook', 'imap'] as const).filter((p) => providers?.[p]?.available)
   return (
     <span className="flex min-w-0 flex-1 items-center gap-2">
       <select
@@ -391,10 +394,12 @@ function EmailFromPicker({
                 key={p}
                 data-testid={`comment-email-link-${p}`}
                 onSelect={() => {
-                  void linkMailbox(workspaceId, p).catch((err) => toast.error(err instanceof ApiError ? err.message : String(err)))
+                  // ClickUp's "Sign in with IMAP" is a form here; Gmail and Outlook are their own sign-in.
+                  if (p === 'imap') setImapOpen(true)
+                  else void linkMailbox(workspaceId, p).catch((err) => toast.error(err instanceof ApiError ? err.message : String(err)))
                 }}
               >
-                {p === 'gmail' ? t('taskDetail.emailLinkGmail') : t('taskDetail.emailLinkOutlook')}
+                {p === 'gmail' ? t('taskDetail.emailLinkGmail') : p === 'outlook' ? t('taskDetail.emailLinkOutlook') : t('taskDetail.emailLinkImap')}
               </DropdownMenuItem>
             ))}
             <DropdownMenuSeparator />
@@ -404,6 +409,7 @@ function EmailFromPicker({
           </DropdownMenuContent>
         </DropdownMenu>
       )}
+      {workspaceId && imapOpen && <ImapLinkDialog workspaceId={workspaceId} open={imapOpen} onOpenChange={setImapOpen} onLinked={(a) => onChange(a.id)} />}
     </span>
   )
 }

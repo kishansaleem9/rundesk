@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 549 items: 0 open · 0 partly fixed · 537 closed, and 12 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 554 items: 1 open · 0 partly fixed · 542 closed, and 11 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 85, each reproduced
+## Found by the triage, 5 October, and since — 90, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10430,7 +10430,50 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 
 *Closed, 8 October.* The save reads a folder's lists by `position`, then when they were made, then id — the sidebar's order — and each list's tasks the same way (`project-templates.service.ts`). The suite now makes the folder's second list first and dates the first a minute earlier, so the table's order is not the order made: `template-center` 84 of 85 before the fix with that fixture (the lists second first), 85 of 85 after, on lane 1. Patch `template-center-42` (the lists by position alone) reddens the check, 84 of 85 on lane 1.
 
-## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 44
+### `found-13-oct/a-refused-refresh-answers-500` — **closed** (visible bug, small; found building `found-12-oct/task-email-imap-unbuilt`) · reproduced 13 October
+
+**A send that met a token refresh the provider refused answered 500, not the provider's words**
+
+*Evidence, 13 October:* `EmailAccountsService.grantOf` refreshes a linked Gmail's or Outlook's token as it is about to lapse. A refresh the provider refuses (`invalid_grant`) marks the mailbox to link again and is thrown as it came — a `MailboxRefused`, not an HTTP answer — and `sendAs` and `draftAs` asked for the grant outside the `try` that says a refusal in words. Measured on lane 3 at `5d5eb13`: a Gmail whose token had lapsed, its refresh refused by the stub, sent from: **500** "Internal server error" (the mailbox marked to link again).
+
+*Closed, 13 October.* `usableGrant` gives the grant, or its refusal as a 502 in the provider's words, for a send and a draft alike; an IMAP password that no longer opens goes the same way (`found-12-oct/task-email-imap-unbuilt`). After, lane 9 on batch 41's tree: the same send, **502** "Gmail refused it (400): Token has been expired or revoked." `task-email-imap.mjs` reads it on an IMAP mailbox ("…the send is refused in words (502, not 500)…"), and `tei-20` throws the refusal as it came again.
+
+### `found-13-oct/provider-grants-kept-in-the-clear` — **open** (security, medium; found building `found-12-oct/task-email-imap-unbuilt`) · reproduced 13 October
+
+**The tokens kept for Google, Microsoft and the other providers are kept in plain text, and a schema comment says the TOTP secret is encrypted when it is not**
+
+*Evidence, 13 October:* `access_token` and `refresh_token` are plain `text` columns in `email_accounts`, `integration_connections`, `calendar_accounts`, `import_grants` and `user_search_connections`, written and read as the provider gave them. A refresh token is a lasting grant to somebody's mailbox, calendar or drive, so whoever reads the database — a backup, a replica, a dump — holds every one. `oauth.service.ts` states the rule ("reintroduce them encrypted at rest — e.g. AES-256-GCM with TOKEN_ENCRYPTION_KEY — rather than in plaintext") and nothing follows it. `security.ts` comments the TOTP secret's column "encrypted at rest"; `security.service.ts` writes and reads it as base32.
+
+*To close:* keep each through the secret box batch 41 added (`common/security/secret-box.ts`): sealed whenever `TOKEN_ENCRYPTION_KEY` is set, read either way so the rows kept before still work, and sealed when next written; the TOTP secret too; and a check that a kept row holds no token in the clear.
+
+### `found-13-oct/task-mentions-reads-six-tabs-after-agents` — **closed** (test tooling, small; found by batch 40b's regression sweep) · reproduced 13 October
+
+**`task-mentions` failed on the Agents tab Super Agents added to the @ picker**
+
+*Evidence, 13 October:* batch 40a gave the comment @ picker an Agents tab after People (the Agents half of `ledger-rows/row-745`). `task-mentions.mjs` still required the frame's six tabs and no other, so batch 40b's regression sweep (lane 9 at `7d3a718`, 16 suites, no model) ended 15 of 16: "the picker draws all six of the frame's tabs, in the frame's order — it draws [people, agents, tasks, docs, whiteboards, locations, channels]". Batch 40a's own sweep had not run the suite.
+
+*Closed, 13 October.* The check reads the frame's six in its order and Agents after People: "the picker draws the frame's six tabs in its order, and Agents after People". `tmn-6` (Channels taken out) names it.
+
+### `found-13-oct/batch-40-suites-throw-and-read-hidden-text` — **closed** (test tooling, small; found by the break runs of batches 39 and 40a, and preflight 3) · reproduced 13 October
+
+**Three suites of batches 39 and 40 ended a section on a throw and read text without asking that it was drawn, and one patch did not build**
+
+*Evidence, 13 October:*
+- `sa-23` (no Agents switch) reddened its check, and then `super-agents.mjs` threw at the form's `fill`, which had no timeout: 29 of 39 checks ran. `lv-26` (no Activity tab) threw at the tab's press before its own check ran: 9 of 32. Preflight 3 named two more unbounded steps in `brain-comments-and-decks.mjs` ("nothing ends a section on a throw").
+- Preflight 3 ("a check of shown text reads what is drawn") named 14 text reads with nothing asking that the text was drawn: nine in `brain-comments-and-decks.mjs`, five in `super-agents.mjs`.
+- `lv-10` did not build: it set `scope = undefined`, which TypeScript narrowed, so `scope.listId` under it was an error. And `acr-1`'s line moved with Super Agents (`eq(users.isAgent, false)` beside the guest rule), so it no longer applied ("every break patch finds its line").
+
+*Closed, 13 October.* Each step a patch can take away is bounded and caught, so what fails is its check; each text read filters to what is drawn; `lv-10` drops the scope where it is read; `acr-1` is re-aimed at the line as it reads now.
+
+### `found-13-oct/break-claims-split-at-their-quotes` — **closed** (test tooling, small; found by preflight 3) · reproduced 13 October
+
+**Ten of batch 40b's patches quoted check names with quotation marks in them, and the claim reader ended each claim there**
+
+*Evidence, 13 October:* `bcd-13`, `-15`, `-16`, `-17`, `-19`, `-20`, `-22`, `-29`, `-33` and `-34` claimed checks whose names hold `"+"`, `"What’s new in Brain²?"`, `"4 slides"`, `"Brain² — Ask, Build, Create"`, `"+ Create Agent"` and `"Made by {name}"`, written inside the claim's own quotes unescaped. The reader (`scripts/lib/claim-match.mjs`) takes `\"` inside a claim and ends one at a bare `"`, so preflight 3's "break patches name a real check" found ten claims no suite has (0 → 10, against its baseline).
+
+*Closed, 13 October.* The inner quotes are escaped, and the gate reads all ten as the checks they name.
+
+## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 45
 
 On the owner's word of 8 October ("close all of these properly … close them as they work on clickup"), the
 items the triage set aside as features and decisions are closed one by one: as ClickUp works each where its
@@ -11404,13 +11447,36 @@ The model stub now streams a staged tool call, as the chat surface asks for one.
 - @Brain and Agents in the @ picker (`ledger-rows/row-745`);
 - the composer's "+" and the decks Brain makes (`ledger-rows/row-853`, batch 40b).
 
+### `found-12-oct/task-email-imap-unbuilt` — **closed** (feature, large; was not counted, a feature; found closing `found-9-oct/task-email-sends-from-the-server`, 12 October) · reproduced 13 October
+
+**A task's email is sent from a linked Gmail or Outlook; ClickUp links any other mailbox over IMAP and SMTP as well**
+
+*Evidence, 12 October:* ClickUp's Email ClickApp links "Gmail, Outlook, or another over IMAP" (help centre, "Use Email in ClickUp", through search excerpts). Rundesk links Gmail and Outlook through their own consent (`email-accounts.service.ts`) and refuses any other provider (400, "Only Gmail or Outlook is linked to send email").
+
+*To close:* link a mailbox by its IMAP and SMTP servers and a password kept encrypted as the other grants are; send through its SMTP server and read its answers from its IMAP inbox on the same schedule; a lane stub that speaks both.
+
+*Measured before, 13 October:* lane 9 at `7d3a718` answered `POST /workspaces/:id/email-accounts/imap` 404, and the lane's database had no column for a mailbox's servers.
+
+*Closed, 13 October (batch 41), as ClickUp's "Sign in with IMAP" works.* The research is ClickUp's help on connecting an email with IMAP (through search excerpts): from a task's comment box, Email, From, "Link an email", then "Sign in with IMAP" asks for the email, the password — an app password where the provider wants one — the IMAP server and port, the SMTP server and port, and whether SSL is required, Yahoo's servers its example; then who may send from it, as for Gmail and Outlook, under the same plans. Built that way:
+- **Linking.** The composer's "Link an email" and the Email settings offer "Sign in with IMAP", a form of those fields (`imap-link-dialog.tsx`). The server signs in to both servers before it keeps the mailbox, and a refusal is said in the server's own words (400); each field is refused in words; a guest links none, and a plan's room is asked before any server is. Linked again by whoever linked it, it is the same mailbox with what was typed now (`POST /workspaces/:id/email-accounts/imap`).
+- **The password** is kept sealed: AES-256-GCM under `TOKEN_ENCRYPTION_KEY`, bound to its own row, so a sealed value copied onto another mailbox does not open there (`common/security/secret-box.ts`, migration `0191`). Without the key no mailbox is linked by a password, and the form's button says why. One that no longer opens marks its mailbox to link again.
+- **Where it connects.** Its servers are typed by whoever links it, so each is resolved and refused when it is on a private, loopback or link-local address the operator has not named in `MAILBOX_PRIVATE_SERVERS`, and the address checked is the one dialled (`mail-server.ts`). "Requires SSL" is TLS from the first byte on 993 and 465, and STARTTLS before the password on any other port, certificates checked (`MAILBOX_TLS_CA_FILE` adds a private authority); without it the session is in the clear, as chosen.
+- **Sending.** An email goes through the mailbox's SMTP server, signed in as it, with a Message-ID of its own; its Bcc goes in the envelope and in no header (`imap-mailbox.ts`).
+- **Answers.** The inbox is read in one sign-in a poll, each thread's answers found by its first email's Message-ID in their References or In-Reply-To, and what is already in its task is not fetched whole again (`imap.client.ts`, the part of IMAP4rev1 this needs; `parseRawMail` reads a message as a mail client does). A sign-in the server refuses marks the mailbox to link again in its words. An answer by email threads on the answer and the first email.
+- **Drafts.** The AI's draft (`ledger-rows/row-2294`) is left in the mailbox's Drafts (RFC 6154's `\Drafts`), flagged a draft.
+
+`task-email-imap.mjs` checks this against the lane's mailbox stub (`scripts/e2e-lanes/mailbox-stub.mjs`: IMAP and SMTP with STARTTLS on a certificate of its own, started beside the mail stub; `check-mailbox-stub.mjs --mutate`, 10 cases, 11 of 11 mutations bite, in the preflight and CI). Before, it stopped at its first read; after, lane 9 on batch 41's tree, 14 of 14. Unit `imap-mail.test.ts`, 9, a scripted IMAP server among them. Building it also fixed `found-13-oct/a-refused-refresh-answers-500` and found `found-13-oct/provider-grants-kept-in-the-clear`.
+
+Checks (`task-email-imap`, 14): "Sign in with IMAP links a mailbox once it has signed in to its IMAP and SMTP servers, over TLS as asked; it is kept as its linker’s, under their name, its password sealed and given back to nobody (read by SQL and from the server’s sign-ins)", "a password the server refuses is said in its words, and a server on a private network nobody named is refused before a password goes to it; neither leaves a mailbox (read by SQL)", "the form is refused field by field, in words: the address, the password, each server and port, and whether SSL is required (400)", "a guest links no mailbox (403, in words); on Pro, whose one mailbox is linked, another is refused in words before any server is asked", "sent from the IMAP mailbox through its own SMTP server, signed in as it over TLS: its people, subject and words, the Bcc in the envelope and in no header; the server’s own mail sent nothing; kept as the task’s email with its Message-ID as the thread, one use taken (read by SQL and from what the server was sent)", "the client’s answer, delivered to the inbox naming the email it answers, lands in the task once, under the email, without its quote — and later reads do not fetch it again (read by SQL and from the server’s fetches)", "answering it by email goes through the same SMTP server in the same thread: In-Reply-To the answer, References the thread’s first email, kept under the same email (read by SQL)", "a mailbox linked without SSL is signed in to in the clear, as its linker chose; one that requires it never sends its password in the clear (read from the server’s sign-ins)", "the mailbox sends for whom its linker lets it: Max is refused (403, in words) until Olga lets him, and then his email goes from her mailbox", "when the provider stops taking the password, the next read of the inbox marks the mailbox to link again in the server’s words, and From refuses it (409); linked again with the new password, it is the same mailbox, connected (read by SQL)", "a password sealed for another mailbox does not open in this one: the send is refused in words (502, not 500), nothing is sent, and the mailbox is marked to link again (read by SQL)", "the AI’s draft is left in the IMAP mailbox’s Drafts, flagged a draft, and sent to nobody", "From’s Link an email offers Sign in with IMAP; its form links the mailbox, From chooses it at once, and Send sends from it over TLS", "the Email settings name an IMAP mailbox by its servers; Link it again opens its form started from them, the password left blank; a password the server refuses is said in the form, in its words".
+- Patches `tei-1` to `tei-22` (the API), `tei-w1` to `tei-w6` (the web) and the unit `tei-u1` to `tei-u6`: their runs are owed.
+
 ## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
 
 Moved here by the triage of 5 October, at the owner's request: these are not open defects and are not in the
 counts. Each says what it is in its heading, with the status it had before. Their full evidence is in
 `docs/triage-2026-10-05.md`.
 
-#### Features and ClickUp gaps — 2
+#### Features and ClickUp gaps — 1
 
 ### `found-13-oct/importers-by-sign-in-unbuilt` — feature, not counted (found closing `commit-log/log-601eacc-2`, 13 October)
 
@@ -11419,14 +11485,6 @@ counts. Each says what it is in its heading, with the status it had before. Thei
 *Evidence, 13 October:* ClickUp's importers for these tools sign in to them and read them over their APIs — its Asana importer signs in to Asana in a pop-up and then chooses the workspace, the projects and the mapping; its Jira importer brings attachments and can make each issue type a List; Trello boards come in as Spaces, Todoist projects into a Space or a Folder (help centre and ClickUp's own import page, through search excerpts). Rundesk reads what each of them exports — a CSV, an Excel workbook (Monday's board and Wrike's folder read in their own layout), a JSON list — through the Spreadsheet importer and its presets, and signs in to Basecamp alone (`commit-log/log-601eacc-2`). So comments, attachments, subtasks and custom fields, which those exports leave out or flatten, do not come in.
 
 *To close:* an importer per tool that signs in as Basecamp's does (a grant kept for the person, `import_grants`), reads its projects, tasks, subtasks, comments, attachments and people over its API, and maps them as ClickUp does; a lane stub per API, as Basecamp's is.
-
-### `found-12-oct/task-email-imap-unbuilt` — feature, not counted (found closing `found-9-oct/task-email-sends-from-the-server`, 12 October)
-
-**A task's email is sent from a linked Gmail or Outlook; ClickUp links any other mailbox over IMAP and SMTP as well**
-
-*Evidence, 12 October:* ClickUp's Email ClickApp links "Gmail, Outlook, or another over IMAP" (help centre, "Use Email in ClickUp", through search excerpts). Rundesk links Gmail and Outlook through their own consent (`email-accounts.service.ts`) and refuses any other provider (400, "Only Gmail or Outlook is linked to send email").
-
-*To close:* link a mailbox by its IMAP and SMTP servers and a password kept encrypted as the other grants are; send through its SMTP server and read its answers from its IMAP inbox on the same schedule; a lane stub that speaks both.
 
 #### Settled by the owner: reverted or superseded, 5 October — 7
 

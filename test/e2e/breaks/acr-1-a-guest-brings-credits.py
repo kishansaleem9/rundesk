@@ -15,8 +15,8 @@ import io
 p = '/home/user/rundesk/apps/api/src/modules/ai/ai.service.ts'
 s = io.open(p, encoding='utf-8').read()
 for a, b in [
-    (".where(and(eq(workspaceMembers.workspaceId, workspaceId), ne(workspaceMembers.role, 'guest'))),",
-     ".where(and(eq(workspaceMembers.workspaceId, workspaceId))),"),
+    (".where(and(eq(workspaceMembers.workspaceId, workspaceId), ne(workspaceMembers.role, 'guest'), eq(users.isAgent, false))),",
+     ".where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(users.isAgent, false))),"),
 ]:
     assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
     s = s.replace(a, b)

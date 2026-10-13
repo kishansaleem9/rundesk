@@ -14,10 +14,11 @@ import { Button, Card, Input, Textarea, cn, toast } from '@rundesk/ui'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import { linkMailbox, type EmailPlan, type EmailSignature, type EmailTemplate } from '../components/comment-email'
+import { ImapLinkDialog, type ImapServers } from '../components/imap-link-dialog'
 
 type AccountView = {
   id: string
-  provider: 'gmail' | 'outlook'
+  provider: 'gmail' | 'outlook' | 'imap'
   address: string
   senderName: string
   status: 'connected' | 'needs_reconnect'
@@ -29,10 +30,13 @@ type AccountView = {
   maySend: boolean
   mayRemove: boolean
   senders: string[] | null
+  /** An IMAP mailbox's servers, for its owner (`found-12-oct/task-email-imap-unbuilt`). */
+  servers: ImapServers | null
 }
+type Readiness = { available: boolean; reason?: string }
 type Overview = {
   plan: EmailPlan
-  providers: { gmail: { available: boolean; reason?: string }; outlook: { available: boolean; reason?: string } }
+  providers: { gmail: Readiness; outlook: Readiness; imap?: Readiness }
   accounts: AccountView[]
   signatures: EmailSignature[]
   templates: Array<EmailTemplate & { createdById: string }>
@@ -46,6 +50,7 @@ function AccountRow({ account, members, workspaceId }: { account: AccountView; m
   const qc = useQueryClient()
   const [name, setName] = useState(account.senderName)
   const [senders, setSenders] = useState<string[]>(account.senders ?? [])
+  const [relinking, setRelinking] = useState(false)
   const refresh = () => qc.invalidateQueries({ queryKey: ['email-settings', workspaceId] })
   const save = useMutation({
     mutationFn: () =>
@@ -65,7 +70,17 @@ function AccountRow({ account, members, workspaceId }: { account: AccountView; m
     <div className="space-y-2 rounded-md border border-border p-3 text-sm" data-testid="email-account-row" data-account-id={account.id} data-provider={account.provider} data-status={account.status}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium" data-testid="email-account-address">{account.address}</span>
-        <span className="text-xs text-muted-foreground">{account.provider === 'gmail' ? 'Gmail' : 'Outlook'}</span>
+        <span className="text-xs text-muted-foreground" data-testid="email-account-provider">
+          {account.provider === 'gmail' ? 'Gmail' : account.provider === 'outlook' ? 'Outlook' : t('emailSettings.providerImap')}
+        </span>
+        {account.servers && (
+          <span className="text-xs text-muted-foreground" data-testid="email-account-servers">
+            {t('emailSettings.imapServers', {
+              imap: `${account.servers.imapHost}:${account.servers.imapPort}`,
+              smtp: `${account.servers.smtpHost}:${account.servers.smtpPort}`,
+            })}
+          </span>
+        )}
         <span className="text-xs text-muted-foreground">{t('emailSettings.owner', { name: account.owner.name })}</span>
         {account.usesLeft !== null && <span className="text-xs text-muted-foreground" data-testid="email-account-uses">{t('emailSettings.usesLeft', { n: account.usesLeft })}</span>}
         {account.mayRemove && (
@@ -82,10 +97,22 @@ function AccountRow({ account, members, workspaceId }: { account: AccountView; m
               size="sm"
               variant="outline"
               data-testid="email-account-relink"
-              onClick={() => void linkMailbox(workspaceId, account.provider).catch((err) => toast.error(said(err)))}
+              onClick={() => {
+                // An IMAP mailbox is linked again by its form, started from the servers it has.
+                if (account.provider === 'imap') setRelinking(true)
+                else void linkMailbox(workspaceId, account.provider).catch((err) => toast.error(said(err)))
+              }}
             >
               {t('emailSettings.relink')}
             </Button>
+          )}
+          {relinking && (
+            <ImapLinkDialog
+              workspaceId={workspaceId}
+              open={relinking}
+              onOpenChange={setRelinking}
+              start={{ address: account.address, servers: account.servers }}
+            />
           )}
         </div>
       )}
@@ -262,6 +289,7 @@ export function EmailSettingsPage() {
           : t('emailSettings.planAccountsMany', { plan: p.label, n: p.accounts })
     return p.uses === null ? accounts : `${accounts} ${t('emailSettings.planUses', { n: p.uses })}`
   }, [data, t])
+  const [imapOpen, setImapOpen] = useState(false)
   const link = (provider: 'gmail' | 'outlook') => {
     void linkMailbox(workspaceId, provider).catch((err) => toast.error(said(err)))
   }
@@ -321,7 +349,18 @@ export function EmailSettingsPage() {
                     {p === 'gmail' ? t('emailSettings.linkGmail') : t('emailSettings.linkOutlook')}
                   </Button>
                 ))}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  data-testid="email-link-imap"
+                  disabled={!data.providers.imap?.available}
+                  title={data.providers.imap?.reason}
+                  onClick={() => setImapOpen(true)}
+                >
+                  {t('emailSettings.linkImap')}
+                </Button>
               </div>
+              {imapOpen && <ImapLinkDialog workspaceId={workspaceId} open={imapOpen} onOpenChange={setImapOpen} />}
               {data.accounts.length === 0 && <p className="text-sm text-muted-foreground" data-testid="email-settings-none">{t('emailSettings.none')}</p>}
               {data.accounts.map((a) => (
                 <AccountRow key={`${a.id}:${a.senderName}:${(a.senders ?? []).join(',')}`} account={a} members={data.members} workspaceId={workspaceId} />

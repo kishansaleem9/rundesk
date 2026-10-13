@@ -10,7 +10,8 @@ import { taskComments } from './comments'
  * (`found-9-oct/task-email-sends-from-the-server`).
  *
  * ClickUp's Email ClickApp sends from an email account its user linked — Gmail
- * or Outlook, signed in at the provider — under a sender name they choose, and
+ * or Outlook, signed in at the provider, or another mailbox by its IMAP and SMTP
+ * servers — under a sender name they choose, and
  * reads the answers there; the one who linked it chooses the teammates who may
  * send from it too (`email_account_senders`). Its grant is the provider's
  * token pair, kept as the other connections keep theirs; `needs_reconnect`
@@ -36,6 +37,18 @@ export const emailAccounts = pgTable(
     refreshToken: text('refresh_token'),
     tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
     scopes: text('scopes').array().notNull().default([]),
+    /*
+     * A mailbox linked over IMAP (`found-12-oct/task-email-imap-unbuilt`): its
+     * servers as its linker typed them, whether they require SSL, and its
+     * password sealed under TOKEN_ENCRYPTION_KEY (`secret-box.ts`). Null for
+     * Gmail and Outlook, whose grant is the token pair above.
+     */
+    imapHost: text('imap_host'),
+    imapPort: integer('imap_port'),
+    smtpHost: text('smtp_host'),
+    smtpPort: integer('smtp_port'),
+    useSsl: boolean('use_ssl'),
+    passwordSealed: text('password_sealed'),
     status: text('status').notNull().default('connected'),
     lastError: text('last_error'),
     uses: integer('uses').notNull().default(0),
@@ -45,7 +58,11 @@ export const emailAccounts = pgTable(
   (t) => [
     uniqueIndex('uq_email_accounts_workspace_address').on(t.workspaceId, t.provider, t.address),
     index('idx_email_accounts_owner').on(t.ownerId),
-    check('email_accounts_provider_check', sql`${t.provider} IN ('gmail', 'outlook')`),
+    check('email_accounts_provider_check', sql`${t.provider} IN ('gmail', 'outlook', 'imap')`),
+    check(
+      'email_accounts_imap_check',
+      sql`${t.provider} <> 'imap' OR (${t.imapHost} IS NOT NULL AND ${t.imapPort} BETWEEN 1 AND 65535 AND ${t.smtpHost} IS NOT NULL AND ${t.smtpPort} BETWEEN 1 AND 65535 AND ${t.useSsl} IS NOT NULL AND ${t.passwordSealed} IS NOT NULL)`,
+    ),
     check('email_accounts_status_check', sql`${t.status} IN ('connected', 'needs_reconnect')`),
   ],
 )
