@@ -10537,11 +10537,11 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 - Measured with the checks below, on the lanes' trees before the fix: the chat turn on lane 2 (with a model, `77eb42e`), "201 (left open: The operation was aborted due to timeout)", and on lane 3 (without one, `6848104`), "503 {"error":"AI features are not configured"}"; the streamed summary on lane 3 (at `0e01918`), the same 503.
 
 *Closed, 13 October.* The chat route asks the hour's limits and the month's credits before its stream opens, before the 503, so a refusal is a 429 or a 402 in words, which the composer already shows (`ai.controller.ts`). `chatStream` asks them itself only where it opens its own stream. Past the open, whatever throws is said down the stream, and the stream is ended (`endSseWithError`). The streamed summary asks the credits before its 503 too.
-- `ai-credits.mjs`: "and a chat turn is refused the same way, before anything streams and whatever the server has — not left open (402)", and "and so is a summary streamed, whatever the server has (402)". After: 17 of 17 on lane 2 with a model and on lane 3 without one, before the summary's check; with it, 18 of 18 on lane 2.
+- `ai-credits.mjs`: "and a chat turn is refused the same way, before anything streams and whatever the server has — not left open (402)", and "and so is a summary streamed, whatever the server has (402)". After: 17 of 17 on lane 2 with a model and on lane 3 without one, before the summary's check; with it, 18 of 18 on lane 2 (at `a72c501`, which the summary's change leaves alone with a model) and on lane 3 (at `33f61ce`).
 - Unit `chat-trace.test.ts`: refused past the hour's limit, and in a spent workspace, before the reply is hijacked; a read that throws past the open ends the stream with an error frame. On the old route all three failed.
 - Patches:
   - `acr-16` (asked inside `chatStream` again): 16 of 17 on lane 2 with a model ("201 data: {"step":"workspace"}") and on lane 3 without one ("503").
-  - `acr-17` (asked after the 503; only where no model answers) and `acr-18` (the summary's credits asked only where a model answers): their runs on lane 3 are below.
+  - `acr-17` (asked after the 503) and `acr-18` (the summary's credits asked only where a model answers), each only where no model answers: 17 of 18 on lane 3 at `33f61ce`, each on its own check ("503").
   - `acr-u4` reddened both refusal tests, `acr-u5` the stream's end.
 
 ### `found-13-oct/lane-admin-meets-the-hourly-ai-cap` — **closed** (test tooling, small; found by batch 40b's break runs) · reproduced 13 October
