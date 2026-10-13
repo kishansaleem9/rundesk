@@ -183,7 +183,9 @@ try {
     address: await linkImap(A, { address: 'not an address' }),
     password: await linkImap(A, { password: '' }),
     host: await linkImap(A, { imapHost: 'imap example.com' }),
-    port: await linkImap(A, { smtpPort: 0 }),
+    // Past the top of the range: 0 is refused by its falsiness as well, so it read the same with the range gone
+    // (`found-13-oct/imap-form-check-types-a-port-every-rule-refuses`).
+    port: await linkImap(A, { smtpPort: 70000 }),
     ssl: await linkImap(A, { useSsl: 'yes' }),
   }
   chk(

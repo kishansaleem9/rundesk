@@ -523,7 +523,8 @@ try {
 
   await page.goto(`${B}/app/${WS}/ai?hub=agents&agentsView=activity`, { waitUntil: 'domcontentloaded' })
   await page.locator('[data-testid="sa-activity-row"]').first().waitFor({ timeout: 20_000 }).catch(() => {})
-  await page.getByTestId('sa-activity-status').selectOption('skipped')
+  // Bounded: with no Agents page (`sa-23`) the filter is not there, and its check fails rather than the run.
+  await page.getByTestId('sa-activity-status').selectOption('skipped', { timeout: 15_000 }).catch(() => {})
   await waitUntil(async () => {
     const st = await page.locator('[data-testid="sa-activity-row"]').evaluateAll((els) => els.map((e) => e.getAttribute('data-status')))
     return st.length > 0 && st.every((s) => s === 'skipped')

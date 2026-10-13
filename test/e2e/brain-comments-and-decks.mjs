@@ -79,7 +79,11 @@ const stub = (route, body) =>
  */
 const callAsking = async (marker) => {
   const seen = await stub('seen')
-  const asked = (c) => JSON.stringify([...(c.messages ?? [])].reverse().find((m) => m.role === 'user')?.content ?? '').includes(marker)
+  // The question's own call: after its answer the chat names itself with a call that carries the
+  // question too, and read as the question's it held none of the chips — whenever the naming came
+  // first, which a warm lane made every run after its first (`found-13-oct/bcd-reads-the-naming-call`).
+  const naming = (c) => JSON.stringify(c.system ?? '').includes('Name this conversation')
+  const asked = (c) => !naming(c) && JSON.stringify([...(c.messages ?? [])].reverse().find((m) => m.role === 'user')?.content ?? '').includes(marker)
   const call = [...(seen?.calls ?? [])].reverse().find(asked)
   if (!call) return { system: '', user: '', blocks: [] }
   const system = typeof call.system === 'string' ? call.system : JSON.stringify(call.system ?? '')

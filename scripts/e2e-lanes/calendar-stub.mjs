@@ -103,6 +103,7 @@
 import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
+import { importApps } from './import-apps-stub.mjs'
 
 if (process.env.RUNDESK_CALENDAR_STUB !== '1') {
   console.error('[calendar-stub] refusing to start without RUNDESK_CALENDAR_STUB=1 — this is a test double')
@@ -115,8 +116,13 @@ const arg = (name, fallback) => {
   return i === -1 ? fallback : process.argv[i + 1]
 }
 const PORT = Number(arg('port', 9401))
-// Which source this process runs: `lane-env.sh` restarts a stub whose file has moved.
-const SOURCE = createHash('sha1').update(readFileSync(new URL(import.meta.url))).digest('hex').slice(0, 12)
+// Which source this process runs: `lane-env.sh` restarts a stub whose file has moved —
+// this file and the importers' tools it serves (`import-apps-stub.mjs`), read in that order.
+const SOURCE = createHash('sha1')
+  .update(readFileSync(new URL(import.meta.url)))
+  .update(readFileSync(new URL('./import-apps-stub.mjs', import.meta.url)))
+  .digest('hex')
+  .slice(0, 12)
 
 /** refresh token → the calendar its access tokens open. */
 const refreshes = new Map()
@@ -487,6 +493,8 @@ const server = createServer(async (req, res) => {
     return g ? json(res, 200, { asked: g.asked }) : json(res, 404, { error: 'no Basecamp grant for that token' })
   }
   if (path.startsWith('/basecamp/')) return basecamp(req, res, url)
+  // Asana, Jira, Trello, Todoist, Wrike and Monday, signed in to for their imports (`found-13-oct/importers-by-sign-in-unbuilt`).
+  if (await importApps(req, res, url, { base: `http://127.0.0.1:${PORT}`, codes })) return
   if (path === '/__control/calendar' && req.method === 'POST') {
     const body = await readBody(req)
     if (!body?.token || !['gcal', 'outlook'].includes(body.provider)) {

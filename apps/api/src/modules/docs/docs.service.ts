@@ -637,6 +637,47 @@ export class DocsService {
     }
   }
 
+  /**
+   * PAGES FROM ANOTHER TOOL AS DOCS, NESTED AS IT NESTS THEM
+   * (`found-13-oct/importers-by-sign-in-unbuilt`): Notion's pages, each at the
+   * top a Doc and the pages under it its pages (`parentDocId`), in the
+   * export's order. Asked as any doc import is: who may make a doc there. What
+   * was made goes again, whole, when a page fails.
+   */
+  async importPageTree(
+    workspaceId: string,
+    userId: string,
+    opts: { spaceId: string | null; pages: Array<{ key: string; parent: string | null; title: string; content: { type: 'doc'; content: unknown[] } }> },
+  ): Promise<{ docs: Array<{ id: string; title: string }>; pagesImported: number }> {
+    if (opts.spaceId) await this.assertDocSpace(opts.spaceId, workspaceId, userId)
+    await this.assertMayMakeDocIn(workspaceId, opts.spaceId, userId)
+    const keys = new Set(opts.pages.map((p) => p.key))
+    const made = new Map<string, string>()
+    const roots: Array<{ id: string; title: string }> = []
+    const position = new Map<string, number>()
+    // Parents before their pages, whatever order the export lists them in.
+    const depth = (key: string, seen = 0): number => {
+      const parent = opts.pages.find((p) => p.key === key)?.parent
+      return parent && keys.has(parent) && seen < 50 ? 1 + depth(parent, seen + 1) : 0
+    }
+    const ordered = [...opts.pages].map((p, i) => ({ p, i, d: depth(p.key) })).sort((a, b) => a.d - b.d || a.i - b.i)
+    try {
+      for (const { p } of ordered) {
+        const parentDocId = p.parent ? made.get(p.parent) ?? null : null
+        const slot = parentDocId ?? '<top>'
+        const at = position.get(slot) ?? 0
+        position.set(slot, at + 1)
+        const row = await this.insertImportedDoc(workspaceId, userId, { spaceId: opts.spaceId, title: p.title.slice(0, 500) || 'Untitled', content: p.content, parentDocId, position: at })
+        made.set(p.key, row.id)
+        if (!parentDocId) roots.push({ id: row.id, title: row.title })
+      }
+    } catch (e) {
+      if (roots.length) await this.db.delete(docs).where(inArray(docs.id, roots.map((r) => r.id))).catch(() => undefined)
+      throw e
+    }
+    return { docs: roots, pagesImported: made.size }
+  }
+
   /** Export a doc as a (line-based) PDF. Access-checked. */
   async exportDocPdf(docId: string, userId: string) {
     await this.assertDocAccess(docId, userId)

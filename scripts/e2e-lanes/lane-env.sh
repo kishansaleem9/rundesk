@@ -98,8 +98,10 @@ lane_proxy_env () {
 # restarted. Keeping a running stub is right — its state is the lane's — but
 # only while it is the stub the tree describes.
 stub_is_current () {
-  local port="$1" file="$2" want
-  want="$(sha1sum "$file" | cut -c1-12)"
+  # A stub made of more than one file names them all, in the order it hashes them.
+  local port="$1" want
+  shift
+  want="$(cat "$@" | sha1sum | cut -c1-12)"
   curl -s --noproxy '*' --max-time 2 "http://127.0.0.1:$port/__control/version" 2>/dev/null |
     grep -q "\"source\":\"$want\""
 }
@@ -636,6 +638,20 @@ lane_calendar_env () {
   export BASECAMP_API_ORIGIN="$base"
   export BASECAMP_CLIENT_ID="${BASECAMP_CLIENT_ID:-stub-basecamp}"
   export BASECAMP_CLIENT_SECRET="${BASECAMP_CLIENT_SECRET:-stub-basecamp-secret}"
+  # And Asana, Jira, Trello, Todoist, Wrike and Monday, signed in to for theirs
+  # (`found-13-oct/importers-by-sign-in-unbuilt`): each tool's sign-in and API here,
+  # under its own path (`import-apps-stub.mjs`), the only addresses its importer asks.
+  export ASANA_AUTH_URL="$base/asana/-/oauth_authorize" ASANA_TOKEN_URL="$base/asana/-/oauth_token" ASANA_API_URL="$base/asana/api/1.0"
+  export ASANA_CLIENT_ID="${ASANA_CLIENT_ID:-stub-asana}" ASANA_CLIENT_SECRET="${ASANA_CLIENT_SECRET:-stub-asana-secret}"
+  export ATLASSIAN_AUTH_URL="$base/atlassian/auth" ATLASSIAN_API_URL="$base/atlassian/api"
+  export JIRA_CLIENT_ID="${JIRA_CLIENT_ID:-stub-jira}" JIRA_CLIENT_SECRET="${JIRA_CLIENT_SECRET:-stub-jira-secret}"
+  export TRELLO_AUTHORIZE_URL="$base/trello/1/authorize" TRELLO_API_URL="$base/trello/1" TRELLO_FILE_ORIGIN="$base"
+  export TRELLO_API_KEY="${TRELLO_API_KEY:-stub-trello}"
+  export TODOIST_AUTH_URL="$base/todoist/oauth/authorize" TODOIST_TOKEN_URL="$base/todoist/oauth/access_token" TODOIST_API_URL="$base/todoist/api/v1"
+  export TODOIST_CLIENT_ID="${TODOIST_CLIENT_ID:-stub-todoist}" TODOIST_CLIENT_SECRET="${TODOIST_CLIENT_SECRET:-stub-todoist-secret}"
+  export WRIKE_AUTH_URL="$base/wrike/oauth2/authorize/v4" WRIKE_TOKEN_URL="$base/wrike/oauth2/token" WRIKE_API_URL="$base/wrike/api/v4"
+  export WRIKE_CLIENT_ID="${WRIKE_CLIENT_ID:-stub-wrike}" WRIKE_CLIENT_SECRET="${WRIKE_CLIENT_SECRET:-stub-wrike-secret}"
+  export MONDAY_API_URL="$base/monday/v2"
 }
 
 lane_calendar_up () {
@@ -644,7 +660,7 @@ lane_calendar_up () {
   log="/tmp/claude-0/calendar-v$k.log"
   # A running stub that is current is kept, and its calendars with it, for the
   # reason the store keeps its objects.
-  if grep -q '"ready":true' "$log" 2>/dev/null && stub_is_current "$port" "$LANE_ENV_DIR/calendar-stub.mjs"; then
+  if grep -q '"ready":true' "$log" 2>/dev/null && stub_is_current "$port" "$LANE_ENV_DIR/calendar-stub.mjs" "$LANE_ENV_DIR/import-apps-stub.mjs"; then
     return 0
   fi
   stub_down "$port" "$LANE_ENV_DIR/calendar-stub.mjs"

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Button, Card, Input, Progress, RadioGroup, RadioGroupItem, Badge, Skeleton } from '@rundesk/ui'
-import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Copy, Info, KeyRound, Table2, Ban, BookOpen, MessagesSquare, Tent } from 'lucide-react'
+import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Copy, Info, KeyRound, Table2, Ban, BookOpen, MessagesSquare, Tent, LayoutGrid } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import { usePermissions } from '../hooks/use-permissions'
@@ -22,6 +22,7 @@ import {
 } from '../lib/imports-api'
 import { createPickTurns, sheetFileKind } from '../lib/sheet-file'
 import { BasecampImportPanel, ConfluenceImportPanel, SlackImportPanel } from './import-panels'
+import { AppsImportPanel } from './import-apps'
 
 type ConflictStrategy = 'skip' | 'create' | 'merge'
 
@@ -68,8 +69,8 @@ type Job = {
   result: ImportSummary | null
 }
 
-type ImportTab = 'clickup' | 'sheet' | 'doc' | 'confluence' | 'basecamp' | 'slack'
-const IMPORT_TABS: ImportTab[] = ['sheet', 'doc', 'confluence', 'basecamp', 'slack', 'clickup']
+type ImportTab = 'clickup' | 'sheet' | 'doc' | 'confluence' | 'basecamp' | 'apps' | 'slack'
+const IMPORT_TABS: ImportTab[] = ['sheet', 'doc', 'confluence', 'basecamp', 'apps', 'slack', 'clickup']
 
 /**
  * §V2-S13 frame `12:08` — Create › **Imports** ›.
@@ -87,11 +88,12 @@ const IMPORT_TABS: ImportTab[] = ['sheet', 'doc', 'confluence', 'basecamp', 'sla
  */
 export function ImportPage() {
   const { t } = useTranslation()
-  // A tab named in the address opens on it: Basecamp's sign-in comes back to `?tab=basecamp`.
+  // A tab named in the address opens on it: Basecamp's sign-in comes back to `?tab=basecamp`, the
+  // other tools' to `?tab=apps&app=<tool>` (`found-13-oct/importers-by-sign-in-unbuilt`).
   const [landing] = useState(() => {
     const q = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search)
     const named = q.get('tab') as ImportTab | null
-    return { tab: named && IMPORT_TABS.includes(named) ? named : null, error: q.get('importError') }
+    return { tab: named && IMPORT_TABS.includes(named) ? named : null, error: q.get('importError'), app: q.get('app') }
   })
   const [tab, setTab] = useState<ImportTab>(landing.tab ?? 'sheet')
   const { workspaceId } = useParams({ from: '/app/$workspaceId/import' })
@@ -152,6 +154,18 @@ export function ImportPage() {
           icon={<Tent className="h-4 w-4" />}
           label="Basecamp"
         />
+        {/*
+          Asana, Jira, Monday, Notion, Todoist, Trello and Wrike, each imported as
+          ClickUp imports it — signed in to, or (Notion) from its workspace export
+          (`found-13-oct/importers-by-sign-in-unbuilt`).
+        */}
+        <TabButton
+          testid="import-tab-apps"
+          active={tab === 'apps'}
+          onClick={() => setTab('apps')}
+          icon={<LayoutGrid className="h-4 w-4" />}
+          label={t('import.tabApps')}
+        />
         <TabButton
           testid="import-tab-slack"
           active={tab === 'slack'}
@@ -190,6 +204,8 @@ export function ImportPage() {
         <SpreadsheetImportPanel />
       ) : tab === 'basecamp' ? (
         <BasecampImportPanel signInError={landing.tab === 'basecamp' ? landing.error : null} />
+      ) : tab === 'apps' ? (
+        <AppsImportPanel landing={{ app: landing.tab === 'apps' ? landing.app : null, error: landing.tab === 'apps' ? landing.error : null }} />
       ) : tab === 'slack' ? (
         <SlackImportPanel />
       ) : (

@@ -55,6 +55,7 @@ import { ClickUpImportModule } from './modules/integrations/clickup-import/click
 // `commit-log/log-601eacc-2` — the importers ClickUp has for the tools whose export is no sheet.
 import { SlackImportModule } from './modules/chat/slack-import.module'
 import { BasecampImportModule } from './modules/integrations/basecamp-import/basecamp-import.module'
+import { AppImportModule } from './modules/integrations/app-import/app-import.module'
 import { IntegrationConnectionsModule } from './modules/integrations/connections/integration-connections.module'
 import { ExternalLinkSyncModule } from './modules/integrations/external-link-sync/external-link-sync.module'
 import { ProjectTemplatesModule } from './modules/project-templates/project-templates.module'
@@ -153,6 +154,7 @@ import { TenantDatabasesModule } from './modules/tenant-databases/tenant-databas
     ClickUpImportModule,
     SlackImportModule,
     BasecampImportModule,
+    AppImportModule,
     IntegrationConnectionsModule,
     ExternalLinkSyncModule,
     ProjectTemplatesModule,

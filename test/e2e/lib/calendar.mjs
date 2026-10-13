@@ -107,3 +107,18 @@ export async function basecampAsked(base, token) {
   const res = await fetch(`${base}/__control/basecamp?token=${encodeURIComponent(token)}`)
   return res.ok ? (await res.json()).asked : null
 }
+
+/**
+ * A SIGN-IN TO ONE OF THE TOOLS AN IMPORT READS (`found-13-oct/importers-by-sign-in-unbuilt`):
+ * seed (replace) what `token` opens in `app` — asana, jira, trello, todoist,
+ * wrike or monday — in that tool's shapes (`import-apps-stub.mjs` says them);
+ * `fail` {status, count} makes its next requests answer `status`. Its consent's
+ * code is `seedConsentCode({ ..., provider: app })`.
+ */
+export const seedApp = (base, { app, token, refreshToken, name, email, data, fail }) => post(base, '/__control/apps', { app, token, refreshToken, name, email, data, fail })
+
+/** What the importer asked of the tool with this token, request by request; null when nothing was seeded. */
+export async function appAsked(base, app, token) {
+  const res = await fetch(`${base}/__control/apps?app=${encodeURIComponent(app)}&token=${encodeURIComponent(token)}`)
+  return res.ok ? (await res.json()).asked : null
+}

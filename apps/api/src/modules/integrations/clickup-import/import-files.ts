@@ -25,7 +25,7 @@ import { safeFileName } from '../../../common/storage/file-name'
  * those previewed and never imported.
  */
 
-export type ImportPurpose = 'sheet' | 'doc' | 'confluence' | 'slack'
+export type ImportPurpose = 'sheet' | 'doc' | 'confluence' | 'slack' | 'notion'
 
 /** The most each kind of file may hold, which its import checks again before reading it. */
 export const IMPORT_FILE_LIMITS: Record<ImportPurpose, number> = {
@@ -33,12 +33,14 @@ export const IMPORT_FILE_LIMITS: Record<ImportPurpose, number> = {
   doc: 25 * 1024 * 1024,
   confluence: 200 * 1024 * 1024,
   slack: 200 * 1024 * 1024,
+  // A Notion workspace's export (`found-13-oct/importers-by-sign-in-unbuilt`).
+  notion: 200 * 1024 * 1024,
 }
 
 export const IMPORT_FILE_REFUSALS = {
   noStore: 'File storage is not configured on this server, so a file cannot be uploaded to import: ask an administrator',
   guest: 'Guests do not import files',
-  purpose: 'Say what the file is for: a sheet, a doc, a Confluence export or a Slack export',
+  purpose: 'Say what the file is for: a sheet, a doc, a Confluence, Slack or Notion export',
   notYours: 'That file was not uploaded by you here: choose it again',
   gone: 'The uploaded file is gone, perhaps cleared after a day: choose it again',
   tooLarge: (limit: number) => `The file is larger than ${Math.round(limit / (1024 * 1024))} MB, which is as much as this import reads`,
@@ -72,7 +74,7 @@ export class ImportFilesService {
     body: { fileName?: unknown; contentType?: unknown; sizeBytes?: unknown; purpose?: unknown },
   ) {
     const purpose = body?.purpose
-    if (purpose !== 'sheet' && purpose !== 'doc' && purpose !== 'confluence' && purpose !== 'slack') {
+    if (purpose !== 'sheet' && purpose !== 'doc' && purpose !== 'confluence' && purpose !== 'slack' && purpose !== 'notion') {
       throw new BadRequestException(IMPORT_FILE_REFUSALS.purpose)
     }
     const [member] = await this.db

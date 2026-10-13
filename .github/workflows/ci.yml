@@ -1035,6 +1035,32 @@ jobs:
           BASECAMP_API_ORIGIN: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}
           BASECAMP_CLIENT_ID: stub-basecamp
           BASECAMP_CLIENT_SECRET: stub-basecamp-secret
+          # And Asana, Jira, Trello, Todoist, Wrike and Monday, signed in to for theirs
+          # (`found-13-oct/importers-by-sign-in-unbuilt`), on the same stub (`import-apps-stub.mjs`). Names, not keys.
+          ASANA_AUTH_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/asana/-/oauth_authorize
+          ASANA_TOKEN_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/asana/-/oauth_token
+          ASANA_API_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/asana/api/1.0
+          ASANA_CLIENT_ID: stub-asana
+          ASANA_CLIENT_SECRET: stub-asana-secret
+          ATLASSIAN_AUTH_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/atlassian/auth
+          ATLASSIAN_API_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/atlassian/api
+          JIRA_CLIENT_ID: stub-jira
+          JIRA_CLIENT_SECRET: stub-jira-secret
+          TRELLO_AUTHORIZE_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/trello/1/authorize
+          TRELLO_API_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/trello/1
+          TRELLO_FILE_ORIGIN: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}
+          TRELLO_API_KEY: stub-trello
+          TODOIST_AUTH_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/todoist/oauth/authorize
+          TODOIST_TOKEN_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/todoist/oauth/access_token
+          TODOIST_API_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/todoist/api/v1
+          TODOIST_CLIENT_ID: stub-todoist
+          TODOIST_CLIENT_SECRET: stub-todoist-secret
+          WRIKE_AUTH_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/wrike/oauth2/authorize/v4
+          WRIKE_TOKEN_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/wrike/oauth2/token
+          WRIKE_API_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/wrike/api/v4
+          WRIKE_CLIENT_ID: stub-wrike
+          WRIKE_CLIENT_SECRET: stub-wrike-secret
+          MONDAY_API_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/monday/v2
           # The photo library started above — the two variables `lane_media_env`
           # exports. Not a credential: the stub takes this one key.
           UNSPLASH_API_URL: http://127.0.0.1:${{ env.E2E_MEDIA_PORT }}/unsplash
@@ -2222,6 +2248,16 @@ jobs:
       - name: The secrets Rundesk keeps are kept sealed
         timeout-minutes: 15
         run: node test/e2e/secrets-at-rest.mjs --api 3011
+
+      # `found-13-oct/importers-by-sign-in-unbuilt` — Asana, Jira, Trello, Todoist,
+      # Wrike and Monday imported as ClickUp imports them: signed in to (Monday's
+      # token pasted; Trello's handed back in the address's fragment), their
+      # projects into Folders or Lists with their statuses, subtasks, people
+      # mapped, comments, files, checklists and fields; and Notion from its
+      # workspace export. Each tool is the calendar stub's (`import-apps-stub.mjs`).
+      - name: Other tools are imported as ClickUp signs in to them
+        timeout-minutes: 20
+        run: node test/e2e/importers-by-sign-in.mjs --api 3011 --dist apps/web/dist
 
       # `ledger-rows/row-2294` — the AI acts in the asker's own connected apps, as
       # ClickUp's does: an event in their calendar, inviting people; a draft in a

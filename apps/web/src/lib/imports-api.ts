@@ -154,7 +154,7 @@ export const fetchSheetJobs = (workspaceId: string, source = 'spreadsheet') =>
 
 // ── files uploaded to import (`commit-log/log-601eacc-2`) ─────────────────────
 
-export type ImportPurpose = 'sheet' | 'doc' | 'confluence' | 'slack'
+export type ImportPurpose = 'sheet' | 'doc' | 'confluence' | 'slack' | 'notion'
 
 /**
  * A file to import, put in the store first and named by its key: a workbook,
@@ -235,6 +235,78 @@ export const fetchBasecampProjects = (workspaceId: string, accountId: string) =>
   api<BasecampProject[]>(`${basecamp(workspaceId)}/projects?account=${encodeURIComponent(accountId)}`)
 export const startBasecampImport = (workspaceId: string, body: { accountId: string; projectIds: string[]; spaceId?: string | null }) =>
   api<{ jobId: string }>(basecamp(workspaceId), { method: 'POST', body })
+
+// ── Asana, Jira, Monday, Todoist, Trello, Wrike — and Notion (`found-13-oct/importers-by-sign-in-unbuilt`) ──
+
+export type AppKey = 'asana' | 'jira' | 'monday' | 'todoist' | 'trello' | 'wrike'
+export const APP_KEYS: AppKey[] = ['asana', 'jira', 'monday', 'todoist', 'trello', 'wrike']
+
+export type AppOption = { key: string; choices: string[]; default: string }
+export type AppStatus = {
+  key: AppKey
+  label: string
+  auth: 'oauth' | 'trello' | 'token'
+  configured: boolean
+  missing: string[]
+  connected: boolean
+  name: string | null
+  options: AppOption[]
+  notImported: string[]
+}
+export type AppSource = { id: string; name: string }
+export type AppProject = { id: string; name: string; detail?: string | null }
+export type AppPeople = {
+  people: Array<{ key: string; name: string | null; email: string | null; match: string | null }>
+  members: Array<{ id: string; name: string; email: string | null }>
+}
+export type AppSummary = {
+  source: string
+  spacesCreated: number
+  foldersCreated: number
+  listsCreated: number
+  tasksCreated: number
+  subtasksCreated: number
+  subtasksFlattened: number
+  tasksDone: number
+  statusesCreated: number
+  assigneesLinked: number
+  assigneesUnmatched: number
+  tagsApplied: number
+  checklistsImported: number
+  fieldsCreated: number
+  fieldValuesSet: number
+  commentsImported: number
+  attachmentsImported: number
+  attachmentsSkipped: number
+  linksMade: number
+  projects: Array<{ name: string; lists: number; tasks: number }>
+  made: { spaces: Array<{ id: string; name: string }>; folders: Array<{ id: string; name: string }>; lists: Array<{ id: string; name: string }> }
+  notImported: string[]
+  errors: string[]
+  docs?: Array<{ id: string; title: string }>
+  pagesImported?: number
+}
+
+const apps = (workspaceId: string) => `/workspaces/${workspaceId}/import/apps`
+
+export const fetchApps = (workspaceId: string) => api<Array<Pick<AppStatus, 'key' | 'label' | 'auth' | 'configured' | 'connected' | 'name'>>>(apps(workspaceId))
+export const fetchAppStatus = (workspaceId: string, app: AppKey) => api<AppStatus>(`${apps(workspaceId)}/${app}`)
+export const connectApp = (workspaceId: string, app: AppKey) => api<{ authUrl: string }>(`${apps(workspaceId)}/${app}/connect`, { method: 'POST' })
+export const saveAppToken = (workspaceId: string, app: AppKey, token: string) =>
+  api<{ connected: true; name: string }>(`${apps(workspaceId)}/${app}/token`, { method: 'POST', body: { token } })
+export const disconnectApp = (workspaceId: string, app: AppKey) => api<{ connected: false }>(`${apps(workspaceId)}/${app}`, { method: 'DELETE' })
+export const fetchAppSources = (workspaceId: string, app: AppKey) => api<AppSource[]>(`${apps(workspaceId)}/${app}/sources`)
+export const fetchAppProjects = (workspaceId: string, app: AppKey, source: string) =>
+  api<AppProject[]>(`${apps(workspaceId)}/${app}/projects?source=${encodeURIComponent(source)}`)
+export const fetchAppPeople = (workspaceId: string, app: AppKey, source: string, projects: string[]) =>
+  api<AppPeople>(`${apps(workspaceId)}/${app}/people?source=${encodeURIComponent(source)}&projects=${encodeURIComponent(projects.join(','))}`)
+export const startAppImport = (
+  workspaceId: string,
+  app: AppKey,
+  body: { source: string; projectIds: string[]; spaceId: string | null; options: Record<string, string>; people: Record<string, string | null> },
+) => api<{ jobId: string }>(`${apps(workspaceId)}/${app}`, { method: 'POST', body })
+export const startNotionImport = (workspaceId: string, body: { fileKey: string; spaceId: string | null }) =>
+  api<{ jobId: string }>(`/workspaces/${workspaceId}/import/notion`, { method: 'POST', body })
 
 // ── Confluence and Word/HTML documents ────────────────────────────────────────
 

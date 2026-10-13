@@ -4,6 +4,9 @@ import { workspaces } from './workspaces'
 import { users } from './users'
 import { sealedText } from './sealed-text'
 
+/** The tools a grant may be for: Basecamp's, and the six signed in to as ClickUp signs in to them. */
+export const IMPORT_GRANT_PROVIDERS = ['basecamp', 'asana', 'jira', 'trello', 'todoist', 'wrike', 'monday'] as const
+
 /**
  * A PERSON'S GRANT TO READ ANOTHER TOOL FOR AN IMPORT (`commit-log/log-601eacc-2`).
  *
@@ -37,6 +40,8 @@ export const importGrants = pgTable(
     // Made by 0187. Declared here as well: a database built by
     // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
     owner: uniqueIndex('uq_import_grants_owner').on(t.workspaceId, t.userId, t.provider),
-    provider: check('import_grants_provider_check', sql`${t.provider} IN ('basecamp')`),
+    // Asana, Jira, Trello, Todoist, Wrike and Monday added by 0192
+    // (`found-13-oct/importers-by-sign-in-unbuilt`).
+    provider: check('import_grants_provider_check', sql`${t.provider} IN ('basecamp', 'asana', 'jira', 'trello', 'todoist', 'wrike', 'monday')`),
   }),
 )
