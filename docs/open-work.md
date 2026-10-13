@@ -10496,7 +10496,7 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 
 *Evidence, 13 October:* `bcd-17` takes the deck tool away (`canDeck` false) and stayed green on lane 2 at `6848104`, 29 of 29: "asked "What’s new in Brain²?", Brain makes a 4-slide deck kept as its asker’s own, and names it on the wire" still passed. The lane's model stub answers with the tool call it was given whatever tools a request offers, and the chat loop ran `create_slide_deck` whenever the model called it: it asked that the slides parse and that decks can be kept, not that the turn had offered the tool. So a turn a skill answers, or one with no asker to keep a deck for, made a deck whenever the model named the tool — where a container or assign tool in the same place was refused ("That tool is not offered here").
 
-*Closed, 13 October.* A deck is made only where the turn offered the tool, and refused in the same words otherwise (`ai.service.ts`). `bcd-17`'s run on it is owed.
+*Closed, 13 October.* A deck is made only where the turn offered the tool, and refused in the same words otherwise (`ai.service.ts`). `bcd-17` reddens it now: 24 of 29 on lane 2 at `83eef2f`.
 
 ### `found-13-oct/bcd-reads-the-naming-call` — **closed** (test tooling, small; found by batch 40b's break runs) · reproduced 13 October
 
@@ -10504,7 +10504,7 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 
 *Evidence, 13 October:* batch 40b's model set on lane 2 (`7d3a718`): its baseline 29 of 29, then "sent, the question carries what the chips held, says so on itself, and the chips are cleared" failed in 26 of the 32 patch runs after it, whatever the patch ("brief in prompt false; file false"); and the re-run of `bcd-13`, `-15` and `-19` at `ffd4f02` was refused at a baseline of 28 of 29, on that check. The suite reads the model call whose last user message holds the question's words, the newest first (`callAsking`). After its answer a new chat names itself with a call of its own ("Name this conversation…", `chat.title`), whose user message is the transcript, the question in it, and which holds none of the chips. Whenever that call came before the suite read, it was read as the question's, and a warm lane made that every run after its first.
 
-*Closed, 13 October.* `callAsking` passes over the naming call. Lane 9 with the model, at batch 43's tree: 29 of 29, twice running. The model set's runs are owed again on it.
+*Closed, 13 October.* `callAsking` passes over the naming call. Lane 9 with the model, at batch 43's tree: 29 of 29, twice running. The model set on it, lane 2 at `83eef2f`: the chips check failed only where a patch takes the chips away, and no baseline was refused.
 
 ### `found-13-oct/imap-form-check-types-a-port-every-rule-refuses` — **closed** (test tooling, small; found by batch 41's break runs) · reproduced 13 October
 
