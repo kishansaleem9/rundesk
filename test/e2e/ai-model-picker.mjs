@@ -373,7 +373,7 @@ try {
   // thirty seconds HERE and the check below never reports — the fix one line
   // down would have moved the exception one line up.
   const tierBefore = await trigger.getAttribute('data-tier', { timeout: 8000 }).catch(() => null)
-  await page.getByTestId('ai-model-option-gemini').click({ force: true })
+  await page.getByTestId('ai-model-option-gemini').click({ force: true, timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(400)
   // Bounded and caught for the same reason: the message runs on the passing
   // path too, and this is a locator held in a variable — the shape rule six

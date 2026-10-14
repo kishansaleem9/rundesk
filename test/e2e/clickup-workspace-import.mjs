@@ -600,8 +600,8 @@ try {
   const revenueFolder = (await sql`select folder_id from goals where workspace_id = ${WS} and title = ${`Q4 revenue ${TAG}`}`)[0]?.folder_id
   await page.goto(`${B}/app/${WS}/goals`, { waitUntil: 'domcontentloaded' })
   const folderBox = page.locator(`[data-testid="goal-folder"][data-folder-id="${growth?.id ?? 'none'}"]`)
-  const drawn = await waitUntil(async () => /Grow signups/.test((await folderBox.innerText().catch(() => '')) ?? ''), { timeoutMs: 15_000 })
-  const looseText = await page.getByTestId('goal-folder-loose').innerText().catch(() => '')
+  const drawn = await waitUntil(async () => /Grow signups/.test((await folderBox.filter({ visible: true }).innerText({ timeout: 2000 }).catch(() => '')) ?? ''), { timeoutMs: 15_000 })
+  const looseText = await page.getByTestId('goal-folder-loose').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => '')
   chk(
     !!growth && signups?.folder_id === growth.id && signups?.owner_id === ana.id && Number(signups?.current_value) === 25 && revenueFolder === null &&
       figures.folders === 1 && drawn && /Q4 revenue/.test(looseText) && !/Grow signups/.test(looseText),

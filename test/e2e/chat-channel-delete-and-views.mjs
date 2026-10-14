@@ -106,8 +106,8 @@ try {
   const panel = page.getByTestId('chat-space-views')
   const listed = await waitUntil(async () => (await panel.locator(`[data-testid="chat-space-view-list"][data-list-id="${list.id}"]`).count()) === 1, { timeoutMs: 15_000 })
   const viewChip = panel.locator(`[data-testid="chat-space-view"][data-view-id="${view.id}"]`)
-  const chipText = await viewChip.innerText().catch(() => '')
-  const folderText = await panel.locator(`[data-testid="chat-space-view-folder"][data-folder-id="${folder.id}"]`).innerText().catch(() => '')
+  const chipText = await viewChip.filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => '')
+  const folderText = await panel.locator(`[data-testid="chat-space-view-folder"][data-folder-id="${folder.id}"]`).filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => '')
   const streamHidden = !(await page.locator('[data-testid="chat-composer"]').isVisible().catch(() => false))
   chk(
     // The Folder's heading is drawn in capitals (`uppercase`), so its words are read without their case.
