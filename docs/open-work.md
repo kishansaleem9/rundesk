@@ -10809,6 +10809,10 @@ Measured:
 - `clickup.test.ts` 18 of 18: three new unit tests.
 - Patches `cwi-31` to `cwi-38` and `cwi-w2`, 9 on lane 3 at `d91b749`, baseline 22 of 22: each reddens the check it names.
 
+*Found building it:* a Workspace's import asks ClickUp a request or two per task, and ClickUp gives a token 100 requests a minute on most plans (1 000 on Business Plus, 10 000 on Enterprise; developer docs, "Rate Limits", through search excerpts). It says how many are left and when the window starts again (`X-RateLimit-Remaining`, `X-RateLimit-Reset`, a Unix time). A token run past that has been reported shut out for hours. The importers' client waited a 429 a second at most ten, three times, and failed the task's comments and files after that.
+- **Fixed** (`a90d5a6`, `app-http.ts`): once a tool says its window is spent, the next request waits for the reset. A 429 with no `Retry-After` is waited out until the reset, a minute at most a wait, five times.
+- **Measured:** `app-import.test.ts` 12 of 12, with two new tests. `cwi-u1` (the window ignored), `cwi-u2` (a 429 waited a moment) and the re-aimed `isi-u9` each redden their test. The re-aimed `isi-29` reddens its check on lane 4 at `a90d5a6`, where `importers-by-sign-in` is 26 of 26 and `clickup-workspace-import` 22 of 22.
+
 ## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 46
 
 On the owner's word of 8 October ("close all of these properly … close them as they work on clickup"), the
