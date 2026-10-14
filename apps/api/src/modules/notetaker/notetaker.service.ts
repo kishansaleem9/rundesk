@@ -312,6 +312,8 @@ export class NotetakerService implements OnModuleInit, OnModuleDestroy {
     if (!cfg || !row.vendorBotId) return
     const bot = await getBot(cfg, row.vendorBotId)
     const state = stateOf(bot)
+    // Sent to join now, or its meeting begun: a bot the service has not yet moved is joining, not waiting for a start.
+    if (state.status === 'scheduled' && (!row.joinAt || row.joinAt.getTime() <= Date.now())) state.status = 'joining'
     if (state.status === 'done') {
       await this.finish(row, transcriptUrlOf(bot))
       return

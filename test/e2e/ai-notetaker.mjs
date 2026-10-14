@@ -56,6 +56,9 @@ const control = async (route, body) => {
   return res.json()
 }
 const bots = async () => (await control('/__control/recall/bots')).bots
+/** The bot asked for this meeting, once one is: `waitUntil` answers whether, not what. */
+const botFor = async (url, timeoutMs) =>
+  (await waitUntil(async () => (await bots()).some((b) => b.meeting_url === url), { timeoutMs })) ? (await bots()).find((b) => b.meeting_url === url) : null
 
 const stamp = Date.now()
 const TAG = `ant${stamp}`
@@ -137,7 +140,7 @@ try {
   console.log('\n▶ "Send AI Notetaker" with a link')
   await page.getByTestId('notetaker-link').fill(LINK, { timeout: 5000 }).catch(() => {})
   await page.getByTestId('notetaker-send').click({ timeout: 5000 }).catch(() => {})
-  const sentBot = await waitUntil(async () => (await bots()).find((b) => b.meeting_url === LINK), { timeoutMs: 15_000 })
+  const sentBot = await botFor(LINK, 15_000)
   const [sentRun] = await sql`select id::text as id, status, join_at, vendor_bot_id from notetaker_bots where workspace_id = ${WS} and meeting_url = ${LINK}`
   const listed = sentRun
     ? await waitUntil(async () => (await page.getByTestId(`notetaker-run-${sentRun.id}`).getAttribute('data-status', { timeout: 2000 }).catch(() => null)) === 'joining', { timeoutMs: 10_000 })
@@ -160,7 +163,7 @@ try {
   // ══ 4. JOIN ALL MEETINGS FOR A CALENDAR ════════════════════════════════════
   console.log('\n▶ "Join all meetings for" the calendar')
   await box.check({ timeout: 5000 }).catch(() => {})
-  const calBot = await waitUntil(async () => (await bots()).find((b) => b.meeting_url === CAL_LINK), { timeoutMs: 20_000 })
+  const calBot = await botFor(CAL_LINK, 20_000)
   const calRuns = await sql`select id::text as id, title, status, calendar_event_id from notetaker_bots where workspace_id = ${WS} and calendar_account_id = ${account.id}`
   const calRun = calRuns.find((r) => r.calendar_event_id === EV.id)
   chk(
@@ -188,10 +191,11 @@ try {
       ],
     })
   }
-  const written = await waitUntil(async () => {
-    const [r] = await sql`select status, meeting_id::text as meeting_id from notetaker_bots where id = ${sentRun?.id ?? null}`
-    return r?.status === 'done' && r.meeting_id ? r : null
-  }, { timeoutMs: 30_000 })
+  const doneRow = async () => (await sql`select status, meeting_id::text as meeting_id from notetaker_bots where id = ${sentRun?.id ?? null}`)[0]
+  const written = (await waitUntil(async () => {
+    const r = await doneRow()
+    return r?.status === 'done' && !!r.meeting_id
+  }, { timeoutMs: 30_000 })) ? await doneRow() : null
   const [meeting] = written
     ? await sql`select id::text as id, title, provider, join_url, transcript, created_by_id::text as created_by from meetings where id = ${written.meeting_id}`
     : []
@@ -266,11 +270,9 @@ try {
     await control(`/__control/recall/bots/${secondBot.id}`, { code: 'joining_call' })
     await control(`/__control/recall/bots/${secondBot.id}`, { code: 'fatal', sub_code: 'meeting_not_found' })
   }
-  const failedRun = second.ok
-    ? await waitUntil(async () => {
-        const r = (await A(`/workspaces/${WS}/notetaker`)).data?.runs?.find((x) => x.id === second.data.id)
-        return r?.status === 'failed' ? r : null
-      }, { timeoutMs: 20_000 })
+  const secondRun = async () => (await A(`/workspaces/${WS}/notetaker`)).data?.runs?.find((x) => x.id === second.data.id)
+  const failedRun = second.ok && (await waitUntil(async () => (await secondRun())?.status === 'failed', { timeoutMs: 20_000 }))
+    ? await secondRun()
     : null
   chk(
     !!failedRun && failedRun.statusDetail === 'meeting_not_found' && failedRun.platform === 'teams',

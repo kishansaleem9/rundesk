@@ -187,7 +187,7 @@ warn_if_public_domain_on_private_bucket() {
     *"Could not check whether R2_PUBLIC_URL"*)
       echo
       echo "⚠ The API could not check whether R2_PUBLIC_URL serves the private bucket; pictures are signed until it can."
-      echo "  ${line#*] }"
+      echo "  ${line##*] }"
       echo
       ;;
     *"to anybody, unsigned"*)
@@ -198,7 +198,7 @@ warn_if_public_domain_on_private_bucket() {
       echo "    2. set R2_PUBLIC_BUCKET_NAME in .env to it;"
       echo "    3. connect the domain to that bucket, and disconnect it — and any r2.dev URL — from R2_BUCKET_NAME;"
       echo "    4. ./deploy/deploy.sh rebuild (the pictures move on boot)."
-      echo "  The API's own words: ${line#*] }"
+      echo "  The API's own words: ${line##*] }"
       echo
       ;;
   esac

@@ -686,6 +686,14 @@ jobs:
       - name: Deployed-UI check survives a section that throws
         run: bash test/deploy/verify-ui-isolation.test.sh
 
+      # `found-30-sep/domain-left-on-the-private-bucket` — a rebuild reads the
+      # API's boot log and says when R2_PUBLIC_URL is a domain of the private
+      # bucket, with the four steps; softly when the API could not check, and
+      # nothing when the domain is on a bucket of its own. Four of four
+      # mutations of the function redden a case (measured 14 October).
+      - name: The deploy says when R2_PUBLIC_URL serves the private bucket
+        run: bash test/deploy/public-domain-warning.test.sh
+
   # The checks that need a real database.
   #
   # Every defect these have caught was invisible to the unit suites by

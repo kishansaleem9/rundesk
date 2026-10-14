@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 112, each reproduced
+## Found by the triage, 5 October, and since — 116, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10813,7 +10813,80 @@ Measured:
 - **Fixed** (`a90d5a6`, `app-http.ts`): once a tool says its window is spent, the next request waits for the reset. A 429 with no `Retry-After` is waited out until the reset, a minute at most a wait, five times.
 - **Measured:** `app-import.test.ts` 12 of 12, with two new tests. `cwi-u1` (the window ignored), `cwi-u2` (a 429 waited a moment) and the re-aimed `isi-u9` each redden their test. The re-aimed `isi-29` reddens its check on lane 4 at `a90d5a6`, where `importers-by-sign-in` is 26 of 26 and `clickup-workspace-import` 22 of 22.
 
-## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 46
+### `found-14-oct/sidebar-sections-reads-the-old-import-page` — **closed** (test tooling, small; found by CI run 1202) · reproduced 14 October
+
+**A suite still expected the import page the imports/exports merge replaced, and CI stopped there**
+
+*Evidence, 14 October:* CI run 1202 on `6efcf8c` failed in `postgres-harnesses` at step 285, "Sidebar sections and drag": the check "Imports goes to the import page, this space its destination" waited for `/app/<ws>/import?…`. Since `found-14-oct/imports-exports-branch-unmerged` the space menu's Imports goes to Settings › Imports / Exports (`?tab=importsExports&locationType=space&locationId=<space>`). The job ended there, and the 32 suites after it never ran.
+
+*Closed, 14 October* (`ce99339`): the check reads the address the merge gives, the space its destination.
+- Measured: `sidebar-sections` 25 of 25 on lane 3; `sidebar-8` reddens it.
+- **The 32 suites CI never reached:** 14 run on lane 4 (`ai-create-containers` to `task-attachments`), and 18 in a rehearsal of `postgres-harnesses` steps 298 to 315 on an isolated checkout. All 32 passed, so no other suite had gone stale the same way.
+
+### `found-14-oct/clickup-import-rest-unimported` — **closed** (feature, large; found closing `found-14-oct/clickup-chat-unimported`, at the owner's word "we need to import their full data too") · reproduced 14 October
+
+**A ClickUp Workspace came over without the rest of what its API gives**
+
+*Evidence, 14 October:* after batch 48 the token import's run still left behind, by its own account or by reading the code:
+- Chat's reactions, its files and its direct messages;
+- a Space's own channel, which landed in no space;
+- an invited person's places in channels;
+- a List's views;
+- Files custom fields;
+- Goal Folders.
+
+*To close:* everything ClickUp's API gives for these, as ClickUp keeps it; and say plainly what stays behind.
+
+*Closed, 14 October* (batch 49, `be5a9c5`, `79a203e`). The import now brings:
+- **Chat reactions,** each as the member who reacted (`GET /chat/messages/{id}/reactions`, at most 1 500 reads a run).
+- **Chat files,** downloaded into the store as the message's files, their links taken out of its words. A message that was only an image is that image.
+- **Direct and group messages,** between the same people, behind the new `dms` option, on unless turned off. A DM with somebody who already has one with the importer joins its history.
+- **A Space's channel** (`4-<space>-8`) in its Space here.
+- **Places for invited people:** a place in a channel or DM is held for somebody invited (`import_pending_channel_members`, 0197) and becomes theirs when they accept (`InvitationsService.claim`).
+- **A List's views** (`GET /list/{id}/view`): grouped and sorted as ClickUp's, its first the default, a private one its owner's. A Form, Doc, Chat or Embed view, which no List here has, is counted and not made.
+- **Files custom fields,** downloaded into the store as the field's value.
+- **Goal Folders** (`goal_folders`, `goals.folder_id`, 0197). The Goals page makes, renames and deletes folders and moves a goal into one.
+
+The run's "not imported" now names only what ClickUp's API cannot give: Whiteboards, Dashboards and reminders, and the views of a Space, a Folder or Everything.
+
+Measured:
+- `clickup-workspace-import` 29 of 29 on lane 3 at `79a203e`, with seven checks new. `clickup.test.ts` 21 of 21 and `app-import.test.ts` 12 of 12.
+- Patches `cwi-39` to `cwi-49`, `cwi-w3` and `cwi-w4` are new, 13 on lane 3. Each reddens what it names.
+- `cwi-17`, `cwi-20`, `cwi-31`, `cwi-33`, `cwi-34`, `cwi-37` and `cwi-w1` were re-aimed to the new lines and words, and each reddens again. `cwi-35` is now a unit claim on `clickup.test.ts`.
+
+### `found-14-oct/chat-channel-cannot-be-deleted` — **closed** (feature, small; found comparing the chat of the prototype in pull request #2 with the branch's) · reproduced 14 October
+
+**A channel could be archived and never deleted**
+
+*Evidence, 14 October:* the prototype in pull request #2 deletes a channel. ClickUp's channel settings delete one for good, its messages with it, by its creator or an admin (help centre, through search excerpts). Here a channel could only be archived: no route, no menu item. A channel made by mistake stayed in everybody's archive.
+
+*Closed, 14 October* (batch 50, `3e89d32`, `09bd80d`):
+- **The route:** `DELETE /chat/channels/:id`, for its creator or a workspace admin. A direct message cannot be deleted.
+- **What goes with it:** its messages, and its files, recordings and call recordings in the store.
+- **Who is told:** its members, by `chat.channel.deleted`.
+- **The page:** the channel menu asks first, by the channel's name. The page then leaves the channel, and everybody's channel lists refresh.
+
+Measured:
+- `chat-channel-delete-and-views` is new: 7 of 7 on lane 4 at `973f28b`, registered in CI.
+- `ccdv-1` to `ccdv-5` and `ccdv-7` each redden what they name.
+- `ccdv-6` stayed green with only the answer's refresh taken away. The deleter is a member and is sent the event too, so either refresh alone keeps the list right. It was re-aimed to take both away.
+
+### `found-14-oct/space-channel-views-unbuilt` — **closed** (feature, small; found beside `found-14-oct/chat-channel-cannot-be-deleted`) · reproduced 14 October
+
+**A Space's channel had no Views tab**
+
+*Evidence, 14 October:* ClickUp's channel of a Space "contains a Views tab with all the views you have access to in the Channel's related Space, Folder, or List" (help centre, through search excerpts). Here a Space's channel was its conversation alone.
+
+*Closed, 14 October* (batch 50, `3e89d32`):
+- **The tabs:** a Space's channel has Chat and Views. A channel of no Space has neither tab.
+- **The Views tab:** the Space's Folders and Lists the reader may open, each read by the routes the sidebar reads them by. Each List's saved views open it on that view.
+- **Switching conversations** goes back to Chat, for a DM's tabs and a channel's alike.
+
+Measured:
+- `ccdv-8` to `ccdv-11` each redden what they name.
+- `a39-dm-tabs` 19 of 19 on lane 4; `a39-2`, re-aimed to the reset's new shape, reddens it.
+
+## Closed from the uncounted list, as ClickUp works them (8 to 14 October) — 48
 
 On the owner's word of 8 October ("close all of these properly … close them as they work on clickup"), the
 items the triage set aside as features and decisions are closed one by one: as ClickUp works each where its
@@ -11841,6 +11914,60 @@ The lane's tools are `scripts/e2e-lanes/import-apps-stub.mjs`, served on the cal
 Checks (`importers-by-sign-in`, 26): "the import page has a tab of the seven tools — Asana, Jira, Monday, Notion, Todoist, Trello, Wrike — each set up on this server and signed in to by nobody yet; a member without the Import data permission is offered none of them", "Asana is signed in to in its own window and comes back to the import page; the grant is kept for the person who signed in, sealed, and says whose it is", "a way back carrying a state signed for another tool, or not by this server, is refused and keeps nothing; and a grant is its importer’s own — another admin here reads nothing through it", "the Asana tab says whose sign-in it is, offers its workspaces and their projects, matches its people to members by email (one who is nobody here maps to nobody), starts on sections as statuses, and reports what the run made and what Asana keeps", "an Asana project comes in as a Folder named for it holding one List, “Imported from Asana”, whose statuses are its sections in their order with a closed one after them; each task in its section’s status, a completed one closed", "its subtasks come in as subtasks, one level deep as ClickUp’s Asana import brings them — a subtask’s own subtasks are not asked for — and every page Asana names is read", "a task keeps its notes, dates, tags, its assignee where they are a member here, and its comments — under their author when they are a member, else under the importer with the author’s name at the head — and its files; a file that is only a link is not one", "with sections as Lists, a project brought into an existing Space is a Folder there with a List for each section — and one for the tasks in none — each with the Space’s own statuses", "Jira is signed in to through Atlassian, asking to read offline so the grant lasts; its sites and every page of their projects are what may be chosen", "with each issue type its own List and epics as tasks, a Jira project is a Folder of an Epic List and a Bug List: a story under its epic as a subtask, the story’s own subtask one level up beside it (subtasks nest one level here), each List with the statuses of the issues in it", "its custom fields become fields of the List — a number, a dropdown holding every value the issues have — and every comment comes in, the ones past the first read from the issue’s own route; its attachment through Atlassian’s redirect to the file; every page of issues read", "with all issues in one List and epics kept apart, the story is a task of its own beside its epic, linked to it", "Trello is authorized to read, and hands its token back to the import page in the address’s fragment; the page gives it to the server, which keeps it sealed, and takes it off the address", "a Trello board comes in as a Folder named for it with one List, “Imported from Trello”, whose statuses are its columns, a done one closed; a card keeps its labels, checklists and custom fields, and its member where the importer mapped them — one not mapped is nobody’s", "its comments come in oldest first, every page of them, under the member mapped or the importer with the author named; an uploaded file is a file and a link a link in the description; a card was made when its id says", "with columns as Lists, a board is a Folder of a List for each column, each card in its column’s List", "a Todoist project is a Folder of a List for its loose tasks and one for each section; tasks keep their subtasks, priority (p1 urgent), labels, due time, when they were made, their assignee and comments — and the completed ones come in closed when asked, read a quarter at a time as Todoist answers them", "left as ClickUp’s wizard starts it, the completed tasks stay in Todoist, unasked for; and the report says Todoist’s files do not come in", "a Wrike space comes in as a Space: its top folder a Folder holding a List of its own tasks and one for each folder and project inside it, a project at the top a List; each List’s statuses the workflow statuses its tasks are in; subtasks and theirs, one level here; a formula field left out", "Monday takes its personal API token, pasted: one Monday refuses is said in the form and nothing is kept; the right one signs in, kept sealed", "a Monday board is a List named for it, in a new Space; with its groups as the statuses, a Done group closes; its people column assigns, its date column is the due date, its other columns fields — the status column one of them — a formula left out; subitems are subtasks and updates comments; every page of items read", "with its status column as the statuses, the board’s labels are the List’s, those Monday marks done closed", "a Notion workspace export comes in as ClickUp brings it: its databases into one Folder, each a List whose rows are tasks — every row, the page under a row its description, its properties text fields — and its pages Docs, the page under another a page of its Doc, with their titles and not Notion’s ids", "a run Asana stops answering half-way fails in Asana’s words — sign in again — and takes away what it had made: the Space, the Folder and the tasks of the project it had read", "when Asana asks to wait (429), the import waits and asks again; and a person of the tool is mapped only to a member here — not to somebody else, nor to a guest", "signing out of Asana here forgets the grant: nothing more is read through it".
 - Patches, lane 3 at `6848104` (baseline 26 of 26): `isi-1` to `isi-36` (the API) and `isi-w1` to `isi-w5` (the web) each reddened the check it names. The unit `isi-u1` to `isi-u9` each reddened its test.
 
+### `found-30-sep/task-labels-left-in-production` — **closed** (schema, small; was not counted, a deploy setting; found closing `found-30-sep/comment-file-index-only-in-a-migration`) · reproduced 14 October
+
+**A table that migration 0001 made is still in production, and nothing reads it**
+
+*Evidence, 30 September, read, not measured on production:* 0001 creates `task_labels` (id, task_id, name, color), with a foreign key to tasks. The schema replaced it with `labels` and `task_label_assignments`, and no migration drops it or moves its rows. Nothing in the API, the web, the scripts or the suites names it. A migrated database has the table; a pushed one does not. The schema gate lets it be, by name, and gives this item as the reason.
+
+*To close:* find out whether production's `task_labels` holds rows. If it is empty, drop it in a migration and take it off the gate's list. If it holds rows, decide first whether they move to `task_label_assignments`.
+
+*Triage, 5 October:* a deploy setting or a production read, not a code defect (needs the production database). A migrated database gets an empty, unused task_labels table that nothing reads or drops. No behaviour is wrong; whether production has it, and any rows, needs a production read. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 14 October* (batch 51, `09bd80d`). Whether production's table holds rows no longer matters: migration 0198 moves what it holds and drops it.
+- Each task's tag in `task_labels` becomes the workspace's label of that name, one per name whatever its case, and is assigned to its task (`task_label_assignments`).
+- A label of that name the workspace already has is used, compared without case. A new one takes the tag's colour, or the default.
+- A blank name is skipped.
+- Then `DROP TABLE IF EXISTS "task_labels"`, and the schema gate's `LEFT_BEHIND` is empty: nothing is let be by name any more.
+
+*Measured* on a scratch database migrated to 0197, with rows planted: the table dropped; two tags differing only in case became one label; a tag matching an existing label in another case took that label; one with no colour took the default; blanks were skipped; a second run changed nothing.
+
+### `found-30-sep/domain-left-on-the-private-bucket` — **closed** (security, deploy; was not counted, a deploy setting; found in review of `found-30-sep/public-cdn-url-makes-every-object-public`) · reproduced 14 October
+
+This replaces the builder's proposed `found-30-sep/public-domain-serves-the-whole-bucket`, whose "To close" the review did.
+
+**A deployment whose `R2_PUBLIC_URL` domain is connected to `R2_BUCKET_NAME` serves every private object by its key until the domain is disconnected. Code can refuse to use it and say so, and does.**
+
+*Evidence, 30 September:*
+- Cloudflare: "When you connect a Custom Domain, your R2 bucket becomes publicly accessible."
+- Measured after the fix, with the domain on the private bucket:
+  - the domain still served a task's file unsigned by its key (lane 4's API, 3 runs; `confirm-finding.mjs`, 3 runs);
+  - the API sent nobody there;
+  - it logged at boot "ERROR [R2Service] R2_PUBLIC_URL (…) serves the objects of R2_BUCKET_NAME (…) to anybody, unsigned … Disconnect that domain from …".
+- Not known: whether any deployment sets `R2_PUBLIC_URL`. `deploy/env.production.template` leaves it empty, and the ledger says the default deployment signs.
+- The API checks the domain it is given, and nothing else: an r2.dev URL or a second domain on `R2_BUCKET_NAME` is outside what it can see.
+
+*To close:*
+1. For each deployment, read `R2_PUBLIC_URL` and the API's boot log.
+2. Where the error is there:
+   1. create the pictures' bucket, with the private bucket's CORS rule;
+   2. set `R2_PUBLIC_BUCKET_NAME`;
+   3. connect the domain to that bucket, and disconnect it, and any r2.dev URL, from `R2_BUCKET_NAME`;
+   4. restart. The pictures move on boot.
+3. Read the log again for "Avatars and workspace logos are served from R2_PUBLIC_URL …; it serves no object of R2_BUCKET_NAME".
+4. Where no deployment sets `R2_PUBLIC_URL`, close this as not applicable.
+
+*Triage, 5 October:* a deploy setting or a production read, not a code defect (a deploy setting). Code already detects a public domain on the private bucket and refuses to use it. Whether any deployment has one (R2_PUBLIC_URL and its Cloudflare binding) is a deployment setting to read and fix outside the code. Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 14 October* (batch 51, `09bd80d`), as far as code reaches: the API's boot-log line, which nobody read, is now read at every deploy.
+- `deploy.sh rebuild` reads the API's boot log (`warn_if_public_domain_on_private_bucket`).
+- Where R2_PUBLIC_URL is a domain of the private bucket, it says so loudly, with the four steps above and the API's own words.
+- Where the API could not check, it says that softly. Where the domain is on a bucket of its own, it says nothing.
+- *Found testing it:* the API's words were printed with the log line's prefix still on them (`${line#*] }` took off only the first `] `). Fixed (`${line##*] }`).
+- *Measured:* `test/deploy/public-domain-warning.test.sh` runs the function itself, against a docker that answers with a log the test writes. Five cases, registered in CI's verify job. Four of four mutations of the function (never called, prefix kept, alarm unread, soft note raising the alarm) redden a case.
+
+What remains is a deployment's: if a rebuild prints the warning, its four steps. If it prints nothing, no deployment's R2_PUBLIC_URL serves the private bucket.
+
 ## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
 
 Moved here by the triage of 5 October, at the owner's request: these are not open defects and are not in the
@@ -12325,41 +12452,6 @@ different workspace" could still be reviewed as a tenant-boundary matter of its 
 
 *Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Four recorded decisions still wait on the owner: ChatGPT/Gemini listed but unselectable, three AI categories that can never fill (images, external actions, external searches), AI Notetaker (bot build-vs-buy) and Automations (parked by the client). Evidence: `docs/triage-2026-10-05.md`.
 
-#### Deploy settings and production reads — 2
+#### Deploy settings and production reads — 0
 
-### `found-30-sep/task-labels-left-in-production` — deploy, not counted (triage, 5 October; was: open (schema, small; found closing `found-30-sep/comment-file-index-only-in-a-migration`))
-
-**A table that migration 0001 made is still in production, and nothing reads it**
-
-*Evidence, 30 September, read, not measured on production:* 0001 creates `task_labels` (id, task_id, name, color), with a foreign key to tasks. The schema replaced it with `labels` and `task_label_assignments`, and no migration drops it or moves its rows. Nothing in the API, the web, the scripts or the suites names it. A migrated database has the table; a pushed one does not. The schema gate lets it be, by name, and gives this item as the reason.
-
-*To close:* find out whether production's `task_labels` holds rows. If it is empty, drop it in a migration and take it off the gate's list. If it holds rows, decide first whether they move to `task_label_assignments`.
-
-*Triage, 5 October:* a deploy setting or a production read, not a code defect (needs the production database). A migrated database gets an empty, unused task_labels table that nothing reads or drops. No behaviour is wrong; whether production has it, and any rows, needs a production read. Evidence: `docs/triage-2026-10-05.md`.
-
-### `found-30-sep/domain-left-on-the-private-bucket` — deploy, not counted (triage, 5 October; was: open (security, deploy; found in review of `found-30-sep/public-cdn-url-makes-every-object-public`))
-
-This replaces the builder's proposed `found-30-sep/public-domain-serves-the-whole-bucket`, whose "To close" the review did.
-
-**A deployment whose `R2_PUBLIC_URL` domain is connected to `R2_BUCKET_NAME` serves every private object by its key until the domain is disconnected. Code can refuse to use it and say so, and does.**
-
-*Evidence, 30 September:*
-- Cloudflare: "When you connect a Custom Domain, your R2 bucket becomes publicly accessible."
-- Measured after the fix, with the domain on the private bucket:
-  - the domain still served a task's file unsigned by its key (lane 4's API, 3 runs; `confirm-finding.mjs`, 3 runs);
-  - the API sent nobody there;
-  - it logged at boot "ERROR [R2Service] R2_PUBLIC_URL (…) serves the objects of R2_BUCKET_NAME (…) to anybody, unsigned … Disconnect that domain from …".
-- Not known: whether any deployment sets `R2_PUBLIC_URL`. `deploy/env.production.template` leaves it empty, and the ledger says the default deployment signs.
-- The API checks the domain it is given, and nothing else: an r2.dev URL or a second domain on `R2_BUCKET_NAME` is outside what it can see.
-
-*To close:*
-1. For each deployment, read `R2_PUBLIC_URL` and the API's boot log.
-2. Where the error is there:
-   1. create the pictures' bucket, with the private bucket's CORS rule;
-   2. set `R2_PUBLIC_BUCKET_NAME`;
-   3. connect the domain to that bucket, and disconnect it, and any r2.dev URL, from `R2_BUCKET_NAME`;
-   4. restart. The pictures move on boot.
-3. Read the log again for "Avatars and workspace logos are served from R2_PUBLIC_URL …; it serves no object of R2_BUCKET_NAME".
-4. Where no deployment sets `R2_PUBLIC_URL`, close this as not applicable.
-
-*Triage, 5 October:* a deploy setting or a production read, not a code defect (a deploy setting). Code already detects a public domain on the private bucket and refuses to use it. Whether any deployment has one (R2_PUBLIC_URL and its Cloudflare binding) is a deployment setting to read and fix outside the code. Evidence: `docs/triage-2026-10-05.md`.
+None: the last two, `found-30-sep/task-labels-left-in-production` and `found-30-sep/domain-left-on-the-private-bucket`, were closed on 14 October and are above.
