@@ -10663,7 +10663,11 @@ Measured:
 - Before (`c37c98a`, lane 3): `agent-performance` 0 of 15. The route answered 404, and the run's columns did not exist (`super_agent_runs.actions_completed`).
 - After (`3a27eef`): 15 of 15 on lane 3 with no model, and 15 of 15 on lane 2 with one. With a model, a run that made a task counts that action and its calls' credits; without one, the refused run counts as a run that did nothing and cost nothing.
 - Beside it at `3a27eef`: `super-agents` 39 of 39, `brain-comments-and-decks` 29 of 29, `ai-connected-apps` 11 of 11, `ai-credits` 18 of 18 and `ai-image-generation` 9 of 9, all with a model; `comment-email` 18 of 18.
-- Patches `agp-1` to `agp-15` (the API) and `agp-w1` to `agp-w6` (the web) claim the suite's checks, `agp-9` only where a model answers. `agp-u1` and `agp-u2` redden their unit tests in `ai-value.test.ts`, which has six new tests: 17 of 17.
+- Patches `agp-1` to `agp-15` (the API) and `agp-w1` to `agp-w6` (the web) redden their checks:
+  - 20 on lane 3 with no model, at `3a27eef`, each on the check it names and on the checks that stand on what it broke;
+  - `agp-9`, which counts only where a model answers, and `agp-8` on lane 2 with a model (baseline 15 of 15).
+- `agp-u1` and `agp-u2` redden their unit tests in `ai-value.test.ts`, which has six new tests: 17 of 17.
+- Also green at batch 44: `ai-action-categories` 29, `ai-activity-filters` 34, `ai-button-relationship-fields` 17 and `ai-value` 23.
 
 ## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 46
 
