@@ -28,7 +28,6 @@ import { readableTaskIds } from '../../common/permissions/read-access'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { agentTriggers } from '../../common/agents/agent-triggers'
 import { evaluateConditions, normaliseConditions, type Condition, type ConditionMatch, type TaskFacts } from './automation-conditions'
-import { AiFieldsService } from '../ai/ai-fields.service'
 
 /** A rule's trigger as stored: its type, its filters, and its conditions with how they match. */
 type StoredTrigger = { type: string; filters?: Record<string, string | string[] | undefined>; conditions?: Condition[]; match?: ConditionMatch }
@@ -558,6 +557,9 @@ export class AutomationsService {
         const fieldId = typeof action.params.fieldId === 'string' ? action.params.fieldId : ''
         const actorId = authorHint ?? ctx.userId
         if (!fieldId || !actorId) break
+        // Loaded here, not at the top: the AI fields' service reaches the tasks' service, which reaches this one,
+        // and a static import of it leaves a constructor's parameter undefined when Nest reads it.
+        const { AiFieldsService } = await import('../ai/ai-fields.service')
         const fields = this.moduleRef?.get(AiFieldsService, { strict: false })
         if (!fields) throw new Error('AI fields are not available here')
         await fields.generate(ctx.workspaceId, ctx.taskId, fieldId, { id: actorId })
