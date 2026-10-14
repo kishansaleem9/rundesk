@@ -411,7 +411,11 @@ function AutomationRow({
   const [testQuery, setTestQuery] = useState('')
   const hits = useQuery({
     queryKey: ['automation-test-tasks', workspaceId, testQuery],
-    queryFn: () => api<Array<{ id: string; title: string }>>(`/search/${workspaceId}?q=${encodeURIComponent(testQuery)}&types=task&limit=5`),
+    // Search names a hit by its kind and id (`task-<id>`); the test takes the task's own id.
+    queryFn: () =>
+      api<Array<{ id: string; entityType?: string; title: string }>>(`/search/${workspaceId}?q=${encodeURIComponent(testQuery)}&types=task&limit=5`).then((all) =>
+        all.filter((h) => !h.entityType || h.entityType === 'task').map((h) => ({ ...h, id: h.id.replace(/^task-/, '') })),
+      ),
     enabled: expanded && mayManage && testQuery.trim().length >= 2,
   })
   const test = useMutation({
