@@ -440,7 +440,7 @@ function AutomationRow({
   })
 
   return (
-    <Card className={cn('overflow-hidden', automation.isEnabled ? '' : 'opacity-60')}>
+    <Card className={cn('overflow-hidden', automation.isEnabled ? '' : 'opacity-60')} data-testid="automation-card" data-automation-id={automation.id}>
       <div className="flex items-center gap-3 px-4 py-3">
         <div
           className={cn(
@@ -477,6 +477,8 @@ function AutomationRow({
           </button>
           <button
             onClick={() => setExpanded((x) => !x)}
+            data-testid="automation-expand"
+            aria-expanded={expanded}
             className="text-muted-foreground hover:text-foreground"
           >
             {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -690,7 +692,7 @@ function AutomationBuilder({
           {/* Name */}
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1 block">{t('automations.name')}</label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('automations.namePlaceholder')} />
+            <Input data-testid="automation-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('automations.namePlaceholder')} />
           </div>
 
           {/* Trigger */}

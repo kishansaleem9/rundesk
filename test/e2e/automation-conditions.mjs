@@ -210,6 +210,7 @@ try {
   console.log('\n▶ The builder makes a rule with conditions')
   await page.goto(`${B}/app/${WS}/automations`, { waitUntil: 'domcontentloaded' })
   await page.getByTestId('automations-new').click({ timeout: 20_000 }).catch(() => {})
+  await page.getByTestId('automation-name').fill(`${TAG} built`).catch(() => {})
   await page.getByTestId('automation-add-condition').click().catch(() => {})
   await page.getByTestId('automation-add-condition').click().catch(() => {})
   const rows = page.getByTestId('automation-condition')
@@ -221,19 +222,21 @@ try {
   const valueShownForUnset = await rows.nth(1).getByTestId('automation-condition-value').count().catch(() => -1)
   await page.getByTestId('automation-conditions-match').selectOption('any').catch(() => {})
   await page.getByTestId('automation-create-submit').click().catch(() => {})
-  const made = await waitUntil(async () => (await sql`select trigger from automations where workspace_id = ${WS} and name = 'New automation'`).length === 1
-    || (await sql`select 1 from automations where workspace_id = ${WS} and trigger->>'match' = 'any' and jsonb_array_length(trigger->'conditions') = 2`).length === 1, { timeoutMs: 15_000 })
-  const [built] = await sql`select trigger from automations where workspace_id = ${WS} and jsonb_array_length(coalesce(trigger->'conditions', '[]'::jsonb)) = 2 and trigger->>'match' = 'any'`
+  // The rule the page made, by the name it was given there: the API's own rules above match "any" with two conditions too.
+  const made = await waitUntil(async () => (await sql`select 1 from automations where workspace_id = ${WS} and name = ${`${TAG} built`}`).length === 1, { timeoutMs: 15_000 })
+  const [built] = await sql`select trigger from automations where workspace_id = ${WS} and name = ${`${TAG} built`}`
   chk(
-    made && valueShownForUnset === 0 && JSON.stringify(built?.trigger?.conditions) === JSON.stringify([{ field: 'priority', operator: 'any_of', value: 'high, urgent' }, { field: 'assignee', operator: 'is_not_set' }]),
+    // jsonb keeps an object's keys in its own order, so each condition is compared by its parts.
+    made && valueShownForUnset === 0 && built?.trigger?.match === 'any' &&
+      (built?.trigger?.conditions ?? []).map((c) => `${c.field}|${c.operator}|${c.value ?? '-'}`).join(' ; ') === 'priority|any_of|high, urgent ; assignee|is_not_set|-',
     'the builder adds conditions — a field, its operators, a value only where one is compared — and keeps them with “any of these”',
     JSON.stringify({ made, valueShownForUnset, trigger: built?.trigger }),
   )
 
   console.log('\n▶ And tests a rule on a task, saying why it would not act')
   await page.goto(`${B}/app/${WS}/automations`, { waitUntil: 'domcontentloaded' })
-  const card = page.locator('div.overflow-hidden', { hasText: `${TAG} escalate` }).first()
-  await card.locator('button').filter({ has: page.locator('svg.lucide-chevron-down') }).first().click({ timeout: 20_000 }).catch(() => {})
+  const card = page.locator(`[data-testid="automation-card"][data-automation-id="${RULE_ALL}"]`)
+  await card.getByTestId('automation-expand').click({ timeout: 20_000 }).catch(() => {})
   await card.getByTestId('automation-test-search').fill('Untagged').catch(() => {})
   await card.getByTestId('automation-test-task').first().click({ timeout: 15_000 }).catch(() => {})
   await card.getByTestId('automation-test-result').waitFor({ timeout: 15_000 }).catch(() => {})

@@ -306,7 +306,7 @@ try {
   const kit = await taskNamed(`Press kit ${TAG}`)
   const oldBug = await taskNamed(`Old bug ${TAG}`)
   const tags = plan ? (await sql`select l.name from task_label_assignments a join labels l on l.id = a.label_id where a.task_id = ${plan.id}`).map((r) => r.name) : []
-  const items = plan ? (await sql`select i.content, i.is_completed from task_checklist_items i join task_checklists c on c.id = i.checklist_id where c.task_id = ${plan.id} order by i.position`).map((r) => `${r.content}:${r.is_completed}`) : []
+  const items = plan ? (await sql`select i.content, i.is_done from task_checklist_items i join task_checklists c on c.id = i.checklist_id where c.task_id = ${plan.id} order by i.position`).map((r) => `${r.content}:${r.is_done}`) : []
   chk(
     !!plan && plan.status_category === 'in_progress' && plan.priority === 'urgent' && plan.due_date_has_time === true &&
       plan.due_date?.toISOString() === '2026-10-20T15:30:00.000Z' && plan.start_date?.toISOString() === '2026-10-05T00:00:00.000Z' && plan.time_estimate === 7200 &&
