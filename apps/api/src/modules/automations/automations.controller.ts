@@ -81,4 +81,21 @@ export class AutomationsController {
   ) {
     return this.svc.listRuns(workspaceId, automationId)
   }
+
+  /*
+   * ClickUp's test of an automation (`found-14-oct/automation-conditions-and-actions-unbuilt`): what the
+   * rule would do to a task — each condition's verdict and the actions it would take — with nothing done.
+   */
+  @Post(':automationId/test')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('automation.manage')
+  @ApiOperation({ summary: 'What an automation would do to a task, done to nothing' })
+  test(
+    @Param('workspaceId') workspaceId: string,
+    @Param('automationId') automationId: string,
+    @Body() body: { taskId?: string },
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.svc.test(workspaceId, automationId, body?.taskId, { id: user.id })
+  }
 }

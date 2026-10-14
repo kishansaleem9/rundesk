@@ -17,6 +17,8 @@ import {
   X,
   ChevronDown,
   ChevronUp,
+  MinusCircle,
+  FlaskConical,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
@@ -25,7 +27,26 @@ import { useSuperAgents } from '../components/super-agents/super-agents-hub'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type TriggerDef = { type: string; filters?: Record<string, string | undefined> }
+/*
+ * An automation's conditions (`found-14-oct/automation-conditions-and-actions-unbuilt`): a field of the task,
+ * an operator and a value, all of them holding or any one. The fields and the operators each takes are the API's
+ * (`automation-conditions.ts`); a set or unset test takes no value.
+ */
+type Condition = { field: string; operator: string; value?: string }
+type TriggerDef = { type: string; filters?: Record<string, string | undefined>; conditions?: Condition[]; match?: 'all' | 'any' }
+const CONDITION_FIELDS: Array<{ value: string; operators: string[] }> = [
+  { value: 'status', operators: ['is', 'is_not', 'any_of', 'none_of'] },
+  { value: 'priority', operators: ['is', 'is_not', 'any_of', 'none_of', 'is_set', 'is_not_set'] },
+  { value: 'assignee', operators: ['is', 'is_not', 'any_of', 'none_of', 'is_set', 'is_not_set'] },
+  { value: 'list', operators: ['is', 'is_not', 'any_of', 'none_of'] },
+  { value: 'tag', operators: ['is', 'is_not', 'any_of', 'none_of', 'is_set', 'is_not_set'] },
+  { value: 'due_date', operators: ['is_set', 'is_not_set', 'before', 'after'] },
+  { value: 'title', operators: ['is', 'is_not', 'contains'] },
+]
+const MAX_CONDITIONS = 15
+const takesValue = (operator: string) => operator !== 'is_set' && operator !== 'is_not_set'
+type ConditionVerdict = { field: string; operator: string; value: string | string[] | null; passed: boolean }
+type TestResult = { trigger: string; match: 'all' | 'any'; wouldAct: boolean; conditions: ConditionVerdict[]; actions: ActionDef[] }
 type ActionDef = { type: string; params: Record<string, string | undefined> }
 
 type Automation = {
@@ -78,7 +99,14 @@ const ACTION_OPTIONS = [
   { value: 'post_to_channel', labelKey: 'automations.action.postToChannel', paramLabelKey: 'automations.param.messageWithVars', paramKey: 'message' },
   // ClickUp's "Run a Super Agent" action (`ledger-rows/row-852`): an agent picker and this run's own instructions.
   { value: 'run_super_agent', labelKey: 'automations.action.runSuperAgent', paramLabelKey: 'automations.param.agentInstructions', paramKey: 'instructions' },
+  // Add a comment, add a watcher, set the due date, fill an AI field (`found-14-oct/automation-conditions-and-actions-unbuilt`).
+  { value: 'add_comment', labelKey: 'automations.action.addComment', paramLabelKey: 'automations.param.commentText', paramKey: 'text' },
+  { value: 'add_follower', labelKey: 'automations.action.addFollower', paramLabelKey: 'automations.param.userId', paramKey: 'userId' },
+  { value: 'set_due_date', labelKey: 'automations.action.setDueDate', paramLabelKey: 'automations.param.days', paramKey: 'days' },
+  { value: 'update_ai_field', labelKey: 'automations.action.updateAiField', paramLabelKey: 'automations.param.aiField', paramKey: 'fieldId' },
 ] as const
+/** Actions whose one value is picked, not typed: a member, an AI field. */
+const PICKED_PARAMS = new Set(['add_follower', 'update_ai_field'])
 
 const RECIPES = [
   {
@@ -100,6 +128,16 @@ const RECIPES = [
     labelKey: 'automations.recipe.escalate',
     trigger: { type: 'task.overdue', filters: {} },
     actions: [{ type: 'set_priority', params: { priority: 'urgent' } }],
+  },
+  {
+    labelKey: 'automations.recipe.dueInAWeek',
+    trigger: { type: 'task.created', filters: {}, conditions: [{ field: 'due_date', operator: 'is_not_set' }], match: 'all' },
+    actions: [{ type: 'set_due_date', params: { days: '7' } }],
+  },
+  {
+    labelKey: 'automations.recipe.urgentNote',
+    trigger: { type: 'task.created', filters: {}, conditions: [{ field: 'priority', operator: 'is', value: 'urgent' }], match: 'all' },
+    actions: [{ type: 'add_comment', params: { text: 'Urgent: {{task.title}} needs an owner today.' } }],
   },
 ] as const
 
@@ -369,6 +407,16 @@ function AutomationRow({
 }) {
   const { t, tCount } = useTranslation()
   const [expanded, setExpanded] = useState(false)
+  // Test on a task: what the rule would do to it, done to nothing.
+  const [testQuery, setTestQuery] = useState('')
+  const hits = useQuery({
+    queryKey: ['automation-test-tasks', workspaceId, testQuery],
+    queryFn: () => api<Array<{ id: string; title: string }>>(`/search/${workspaceId}?q=${encodeURIComponent(testQuery)}&types=task&limit=5`),
+    enabled: expanded && mayManage && testQuery.trim().length >= 2,
+  })
+  const test = useMutation({
+    mutationFn: (taskId: string) => api<TestResult>(`/workspaces/${workspaceId}/automations/${automation.id}/test`, { method: 'POST', body: { taskId } }),
+  })
   const runsQuery = useQuery({
     queryKey: ['automation-runs', automation.id],
     queryFn: () => api<AutomationRun[]>(`/workspaces/${workspaceId}/automations/${automation.id}/runs`),
@@ -443,6 +491,60 @@ function AutomationRow({
 
       {expanded && (
         <div className="border-t border-border px-4 py-3 bg-muted/30">
+          {(automation.trigger?.conditions?.length ?? 0) > 0 && (
+            <p className="text-xs text-muted-foreground mb-2" data-testid="automation-conditions-summary">
+              {t(automation.trigger.match === 'any' ? 'automations.conditionsAny' : 'automations.conditionsAll', {
+                list: automation.trigger.conditions!.map((c) => `${t(`automations.field.${c.field}` as 'automations.field.status')} ${t(`automations.op.${c.operator}` as 'automations.op.is')}${c.value ? ` ${c.value}` : ''}`).join(' · '),
+              })}
+            </p>
+          )}
+          {mayManage && (
+            <div className="mb-3 space-y-2" data-testid="automation-test">
+              <div className="flex items-center gap-2">
+                <FlaskConical className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-xs font-medium text-muted-foreground">{t('automations.testTitle')}</span>
+              </div>
+              <Input
+                data-testid="automation-test-search"
+                className="h-8 text-xs"
+                value={testQuery}
+                onChange={(e) => setTestQuery(e.target.value)}
+                placeholder={t('automations.testPlaceholder')}
+              />
+              {(hits.data ?? []).length > 0 && !test.data && (
+                <ul className="rounded-md border bg-background text-xs divide-y">
+                  {(hits.data ?? []).map((h) => (
+                    <li key={h.id}>
+                      <button type="button" data-testid="automation-test-task" className="w-full px-2 py-1.5 text-left hover:bg-muted" onClick={() => test.mutate(h.id)}>
+                        {h.title}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {test.isError && <p className="text-xs text-destructive" data-testid="automation-test-error">{(test.error as Error).message}</p>}
+              {test.data && (
+                <div className="rounded-md border bg-background p-2 text-xs space-y-1" data-testid="automation-test-result" data-would-act={test.data.wouldAct ? 'true' : 'false'}>
+                  <p className="font-medium">{t(test.data.wouldAct ? 'automations.testWouldAct' : 'automations.testWouldNotAct')}</p>
+                  {test.data.conditions.map((v, i) => (
+                    <p key={i} data-testid="automation-test-condition" data-passed={v.passed ? 'true' : 'false'} className={v.passed ? 'text-emerald-600' : 'text-destructive'}>
+                      {v.passed ? '✓' : '✗'} {t(`automations.field.${v.field}` as 'automations.field.status')} {t(`automations.op.${v.operator}` as 'automations.op.is')}
+                      {v.value ? ` ${Array.isArray(v.value) ? v.value.join(', ') : v.value}` : ''}
+                    </p>
+                  ))}
+                  {test.data.actions.map((a, i) => {
+                    const opt = ACTION_OPTIONS.find((o) => o.value === a.type)
+                    return (
+                      <p key={i} data-testid="automation-test-action">→ {opt ? t(opt.labelKey) : a.type}</p>
+                    )
+                  })}
+                  <button type="button" className="text-accent hover:underline" onClick={() => test.reset()}>
+                    {t('automations.testAgain')}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <p className="text-xs font-medium text-muted-foreground mb-2">{t('automations.runHistory')}</p>
           {runsQuery.isLoading && <p className="text-xs text-muted-foreground"><InlineSkeleton /></p>}
           {!runsQuery.isLoading && (!runsQuery.data || runsQuery.data.length === 0) && (
@@ -451,18 +553,24 @@ function AutomationRow({
           {runsQuery.data && runsQuery.data.length > 0 && (
             <div className="space-y-1">
               {runsQuery.data.slice(0, 20).map((run) => (
-                <div key={run.id} className="flex items-center gap-2 text-xs">
+                <div key={run.id} className="flex items-center gap-2 text-xs" data-testid="automation-run" data-outcome={run.outcome}>
                   {run.outcome === 'success' ? (
                     <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  ) : run.outcome === 'skipped' ? (
+                    <MinusCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                   ) : (
                     <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0" />
                   )}
                   <span className="text-muted-foreground">
                     {new Date(run.triggeredAt).toLocaleString()}
                   </span>
-                  {run.errorMsg && (
+                  {run.outcome === 'skipped' ? (
+                    <span className="text-muted-foreground truncate" data-testid="automation-run-skipped">
+                      {t('automations.runSkipped', { count: skippedBy(run).length })}
+                    </span>
+                  ) : run.errorMsg ? (
                     <span className="text-destructive truncate">{run.errorMsg}</span>
-                  )}
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -471,6 +579,16 @@ function AutomationRow({
       )}
     </Card>
   )
+}
+
+/** The conditions that did not hold on a skipped run, as its context keeps them. */
+function skippedBy(run: AutomationRun): ConditionVerdict[] {
+  try {
+    const all = JSON.parse(run.context?.conditions ?? '[]') as ConditionVerdict[]
+    return Array.isArray(all) ? all.filter((v) => !v.passed) : []
+  } catch {
+    return []
+  }
 }
 
 // ─── AutomationBuilder ────────────────────────────────────────────────────────
@@ -499,6 +617,20 @@ function AutomationBuilder({
   const [actions, setActions] = useState<ActionDef[]>([
     { type: 'send_notification', params: { message: '' } },
   ])
+  const [conditions, setConditions] = useState<Condition[]>([])
+  const [match, setMatch] = useState<'all' | 'any'>('all')
+  // Who may be made a watcher, and which AI fields a rule may fill.
+  const membersQuery = useQuery({
+    queryKey: ['workspace-members', workspaceId],
+    queryFn: () => api<Array<{ userId: string; displayName: string; email: string }>>(`/workspaces/${workspaceId}/members`),
+    enabled: actions.some((a) => a.type === 'add_follower'),
+  })
+  const aiFieldsQuery = useQuery({
+    queryKey: ['workspace-fields', workspaceId],
+    queryFn: () => api<Array<{ id: string; name: string; projectName: string; ai?: boolean }>>(`/search/${workspaceId}/custom-fields`),
+    enabled: actions.some((a) => a.type === 'update_ai_field'),
+  })
+  const aiFields = (aiFieldsQuery.data ?? []).filter((f) => f.ai)
 
   // Channels for the post_to_channel action picker (DMs excluded).
   const channelsQuery = useQuery({
@@ -524,6 +656,7 @@ function AutomationBuilder({
                 : toStatus
                   ? { toStatus }
                   : {},
+            ...(conditions.length ? { conditions: conditions.map((c) => (takesValue(c.operator) ? c : { field: c.field, operator: c.operator })), match } : {}),
           },
           actions,
         },
@@ -607,6 +740,79 @@ function AutomationBuilder({
             )}
           </div>
 
+          {/* Conditions */}
+          <div data-testid="automation-conditions">
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium text-muted-foreground">{t('automations.conditions')}</label>
+              {conditions.length > 1 && (
+                <select
+                  data-testid="automation-conditions-match"
+                  className="rounded-md border border-border bg-background px-2 py-1 text-xs"
+                  value={match}
+                  onChange={(e) => setMatch(e.target.value as 'all' | 'any')}
+                >
+                  <option value="all">{t('automations.matchAll')}</option>
+                  <option value="any">{t('automations.matchAny')}</option>
+                </select>
+              )}
+            </div>
+            <div className="space-y-2">
+              {conditions.map((c, i) => {
+                const field = CONDITION_FIELDS.find((f) => f.value === c.field) ?? CONDITION_FIELDS[0]
+                return (
+                  <div key={i} className="flex gap-2 items-center flex-wrap" data-testid="automation-condition">
+                    <select
+                      data-testid="automation-condition-field"
+                      className="rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                      value={c.field}
+                      onChange={(e) => {
+                        const next = CONDITION_FIELDS.find((f) => f.value === e.target.value) ?? CONDITION_FIELDS[0]
+                        setConditions((prev) => prev.map((x, idx) => (idx === i ? { field: next.value, operator: next.operators[0], value: '' } : x)))
+                      }}
+                    >
+                      {CONDITION_FIELDS.map((f) => (
+                        <option key={f.value} value={f.value}>{t(`automations.field.${f.value}` as 'automations.field.status')}</option>
+                      ))}
+                    </select>
+                    <select
+                      data-testid="automation-condition-operator"
+                      className="rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                      value={c.operator}
+                      onChange={(e) => setConditions((prev) => prev.map((x, idx) => (idx === i ? { ...x, operator: e.target.value } : x)))}
+                    >
+                      {field.operators.map((op) => (
+                        <option key={op} value={op}>{t(`automations.op.${op}` as 'automations.op.is')}</option>
+                      ))}
+                    </select>
+                    {takesValue(c.operator) && (
+                      <Input
+                        data-testid="automation-condition-value"
+                        className="flex-1 min-w-[8rem]"
+                        type={c.field === 'due_date' ? 'date' : 'text'}
+                        value={c.value ?? ''}
+                        onChange={(e) => setConditions((prev) => prev.map((x, idx) => (idx === i ? { ...x, value: e.target.value } : x)))}
+                        placeholder={t(c.operator === 'any_of' || c.operator === 'none_of' ? 'automations.conditionValues' : 'automations.conditionValue')}
+                      />
+                    )}
+                    <button type="button" onClick={() => setConditions((prev) => prev.filter((_, idx) => idx !== i))} className="text-muted-foreground hover:text-destructive">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                )
+              })}
+              {conditions.length < MAX_CONDITIONS && (
+                <button
+                  type="button"
+                  data-testid="automation-add-condition"
+                  onClick={() => setConditions((prev) => [...prev, { field: 'priority', operator: 'is', value: '' }])}
+                  className="text-xs text-accent hover:underline flex items-center gap-1"
+                >
+                  <Plus className="h-3.5 w-3.5" /> {t('automations.addCondition')}
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* Actions */}
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1 block">{t('automations.thenActions')}</label>
@@ -663,7 +869,33 @@ function AutomationBuilder({
                         ))}
                       </select>
                     )}
-                    {meta && (
+                    {action.type === 'add_follower' && (
+                      <select
+                        data-testid="automation-follower-picker"
+                        className="rounded-md border border-border bg-background px-3 py-1.5 text-sm flex-1 min-w-[9rem]"
+                        value={(action.params.userId as string) ?? ''}
+                        onChange={(e) => updateAction(i, { params: { ...action.params, userId: e.target.value } })}
+                      >
+                        <option value="">{t('automations.param.pickMember')}</option>
+                        {(membersQuery.data ?? []).map((m) => (
+                          <option key={m.userId} value={m.userId}>{m.displayName || m.email}</option>
+                        ))}
+                      </select>
+                    )}
+                    {action.type === 'update_ai_field' && (
+                      <select
+                        data-testid="automation-ai-field-picker"
+                        className="rounded-md border border-border bg-background px-3 py-1.5 text-sm flex-1 min-w-[9rem]"
+                        value={(action.params.fieldId as string) ?? ''}
+                        onChange={(e) => updateAction(i, { params: { ...action.params, fieldId: e.target.value } })}
+                      >
+                        <option value="">{t('automations.param.aiField')}</option>
+                        {aiFields.map((f) => (
+                          <option key={f.id} value={f.id}>{f.projectName} · {f.name}</option>
+                        ))}
+                      </select>
+                    )}
+                    {meta && !PICKED_PARAMS.has(action.type) && (
                       <Input
                         className="flex-1 min-w-[9rem]"
                         value={(action.params[meta.paramKey] as string) ?? ''}

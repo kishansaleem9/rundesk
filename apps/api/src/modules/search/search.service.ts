@@ -1,3 +1,4 @@
+import { aiConfigOf } from '../custom-fields/ai-field'
 import { Injectable, Inject, Optional, OnModuleInit, Logger, ForbiddenException } from '@nestjs/common'
 import {
   SEARCH_SOURCES,
@@ -1733,6 +1734,7 @@ export class SearchService implements OnModuleInit {
         projectId: customFieldDefinitions.projectId,
         projectName: projects.name,
         listId: customFieldDefinitions.listId,
+        config: customFieldDefinitions.config,
       })
       .from(customFieldDefinitions)
       .innerJoin(projects, eq(projects.id, customFieldDefinitions.projectId))
@@ -1743,7 +1745,9 @@ export class SearchService implements OnModuleInit {
     // (`fieldsOnReadableLists`, `found-6-oct/field-lists-name-a-private-lists-fields`):
     // a private list's field was offered by name to a member it refuses.
     const readable = await fieldsOnReadableLists(this.db, workspaceId, fields, { id: userId, role: actorRole })
-    return readable.map(({ listId: _listId, ...field }) => field)
+    // Whether it is an AI field, which an automation may fill (`found-14-oct/automation-conditions-and-actions-unbuilt`);
+    // its prompt and the rest of its settings stay off this list.
+    return readable.map(({ listId: _listId, config, ...field }) => ({ ...field, ai: !!aiConfigOf(field.type, config) }))
   }
 
   /**

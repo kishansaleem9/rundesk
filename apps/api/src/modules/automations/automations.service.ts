@@ -1,4 +1,5 @@
-import { Injectable, Inject, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, ForbiddenException, BadRequestException, Optional } from '@nestjs/common'
+import { ModuleRef } from '@nestjs/core'
 import { Cron, CronExpression } from '@nestjs/schedule'
 import { and, eq, desc, lte, sql } from 'drizzle-orm'
 import {
@@ -16,12 +17,22 @@ import {
   chatMessages,
   users,
   customFieldDefinitions,
+  labels,
+  taskComments,
+  taskLabelAssignments,
+  taskLists,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { readableTaskIds } from '../../common/permissions/read-access'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { agentTriggers } from '../../common/agents/agent-triggers'
+import { evaluateConditions, normaliseConditions, type Condition, type ConditionMatch, type TaskFacts } from './automation-conditions'
+import { AiFieldsService } from '../ai/ai-fields.service'
+
+/** A rule's trigger as stored: its type, its filters, and its conditions with how they match. */
+type StoredTrigger = { type: string; filters?: Record<string, string | string[] | undefined>; conditions?: Condition[]; match?: ConditionMatch }
+type ConditionVerdictLog = ReturnType<typeof evaluateConditions>['verdicts']
 
 type TriggerContext = {
   taskId?: string
@@ -63,6 +74,9 @@ export class AutomationsService {
     @Inject(DB_TOKEN) private db: Db,
     // RealtimeModule is @Global, so the gateway injects without importing chat.
     private realtime: RealtimeGateway,
+    // The AI fields' service, asked for when a rule fills one: the AI module answers through Tasks,
+    // which imports this one, so it is found at run time rather than imported.
+    @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
 
   // ─── Time-based triggers ───────────────────────────────────────────────────
@@ -130,15 +144,23 @@ export class AutomationsService {
    * column invariant (trigger is an object, actions is an array of typed steps)
    * always holds.
    */
-  private normaliseTrigger(trigger: unknown): { type: string; filters?: Record<string, string | string[] | undefined> } {
+  private normaliseTrigger(trigger: unknown): StoredTrigger {
     if (!trigger || typeof trigger !== 'object' || Array.isArray(trigger)) {
       throw new BadRequestException('Automation trigger must be an object with a "type"')
     }
-    const t = trigger as { type?: unknown; filters?: unknown }
+    const t = trigger as { type?: unknown; filters?: unknown; conditions?: unknown; match?: unknown }
     if (typeof t.type !== 'string' || !t.type.trim()) {
       throw new BadRequestException('Automation trigger requires a string "type"')
     }
-    return { type: t.type, filters: (t.filters as Record<string, string | string[] | undefined>) ?? undefined }
+    // Its conditions (`found-14-oct/automation-conditions-and-actions-unbuilt`): read as stored, or refused in words.
+    const c = normaliseConditions(t.conditions)
+    if ('error' in c) throw new BadRequestException(c.error)
+    if (t.match !== undefined && t.match !== 'all' && t.match !== 'any') throw new BadRequestException('An automation’s conditions match all of them or any one')
+    return {
+      type: t.type,
+      filters: (t.filters as Record<string, string | string[] | undefined>) ?? undefined,
+      ...(c.conditions.length ? { conditions: c.conditions, match: (t.match as ConditionMatch | undefined) ?? 'all' } : {}),
+    }
   }
 
   private normaliseActions(actions: unknown): Array<{ type: string; params: Record<string, string | string[] | undefined> }> {
@@ -266,13 +288,75 @@ export class AutomationsService {
       return true
     })
 
+    // A rule's conditions read the task as it is now; read once for every rule that has some.
+    let facts: TaskFacts | null | undefined
+    let ran = 0
     for (const rule of matching) {
-      await this.executeRule(rule, ctx)
+      const t = rule.trigger as StoredTrigger
+      if (t.conditions?.length) {
+        facts ??= ctx.taskId ? await this.taskFacts(ctx.taskId) : null
+        const verdict = facts ? evaluateConditions(t.conditions, t.match ?? 'all', facts) : { passed: false, verdicts: [] }
+        if (!verdict.passed) {
+          await this.logRun(rule.id, ctx, 'skipped', facts ? 'Its conditions did not hold' : 'Its conditions read a task, and this event has none', verdict.verdicts)
+          continue
+        }
+        await this.executeRule(rule, ctx, verdict.verdicts)
+      } else {
+        await this.executeRule(rule, ctx)
+      }
+      ran++
     }
-    return matching.length
+    return ran
   }
 
-  private async executeRule(rule: typeof automations.$inferSelect, ctx: TriggerContext) {
+  /** What a rule's conditions read of a task: its status, priority, assignees, Lists, tags, due date and title. */
+  async taskFacts(taskId: string): Promise<TaskFacts | null> {
+    const [t] = await this.db
+      .select({ status: tasks.status, priority: tasks.priority, listId: tasks.listId, dueDate: tasks.dueDate, title: tasks.title })
+      .from(tasks)
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    if (!t) return null
+    const assignees = (await this.db.select({ userId: taskAssignees.userId }).from(taskAssignees).where(eq(taskAssignees.taskId, taskId))).map((r) => r.userId)
+    const tags = (
+      await this.db
+        .select({ name: labels.name })
+        .from(taskLabelAssignments)
+        .innerJoin(labels, eq(labels.id, taskLabelAssignments.labelId))
+        .where(eq(taskLabelAssignments.taskId, taskId))
+    ).map((r) => r.name)
+    // The List it lives in, and the others it is in (`log-713a611-1`).
+    const others = (await this.db.select({ listId: taskLists.listId }).from(taskLists).where(eq(taskLists.taskId, taskId))).map((r) => r.listId)
+    return {
+      status: t.status ?? null,
+      priority: t.priority ?? null,
+      assignees,
+      lists: [...new Set([t.listId, ...others].filter((x): x is string => !!x))],
+      tags,
+      dueDate: t.dueDate ?? null,
+      title: t.title ?? '',
+    }
+  }
+
+  /**
+   * WHAT A RULE WOULD DO TO A TASK, DONE TO NOTHING (`found-14-oct/automation-conditions-and-actions-unbuilt`):
+   * ClickUp's test of an automation. Each condition's verdict on the task as it is now, whether the rule
+   * would act, and the actions it would take — none of them taken, and no run logged. For somebody who
+   * may manage automations, on a task they may open.
+   */
+  async test(workspaceId: string, automationId: string, taskId: unknown, reader: { id: string }) {
+    const rule = await this.assertOwnership(workspaceId, automationId)
+    if (typeof taskId !== 'string' || !taskId) throw new BadRequestException('Choose a task to test the automation on')
+    if (!(await this.mayOpenTask(workspaceId, reader.id, taskId))) throw new NotFoundException('Task not found')
+    const facts = await this.taskFacts(taskId)
+    if (!facts) throw new NotFoundException('Task not found')
+    const t = rule.trigger as StoredTrigger
+    const verdict = evaluateConditions(t.conditions ?? [], t.match ?? 'all', facts)
+    const actions = (rule.actions as Array<{ type: string; params: Record<string, string | string[] | undefined> }>).map((a) => ({ type: a.type, params: a.params }))
+    return { trigger: t.type, match: t.match ?? 'all', wouldAct: verdict.passed, conditions: verdict.verdicts, actions: verdict.passed ? actions : [] }
+  }
+
+  private async executeRule(rule: typeof automations.$inferSelect, ctx: TriggerContext, verdicts?: ConditionVerdictLog) {
     let outcome: 'success' | 'error' = 'success'
     let errorMsg: string | undefined
 
@@ -291,13 +375,18 @@ export class AutomationsService {
       errorMsg = err?.message ?? String(err)
     }
 
-    // Log the run
+    await this.logRun(rule.id, ctx, outcome, errorMsg, verdicts)
+  }
+
+  /** A run, as it went: done, failed, or skipped because its conditions did not hold — with each condition's verdict. */
+  private async logRun(automationId: string, ctx: TriggerContext, outcome: 'success' | 'error' | 'skipped', errorMsg?: string, verdicts?: ConditionVerdictLog) {
     await this.db.insert(automationRuns).values({
-      automationId: rule.id,
+      automationId,
       context: {
         taskId: ctx.taskId ?? '',
         userId: ctx.userId ?? '',
         workspaceId: ctx.workspaceId,
+        ...(verdicts?.length ? { conditions: JSON.stringify(verdicts) } : {}),
       },
       outcome,
       errorMsg,
@@ -422,6 +511,56 @@ export class AutomationsService {
           instructions: typeof action.params.instructions === 'string' ? action.params.instructions.slice(0, 2000) : '',
           actorId: ctx.userId ?? authorHint ?? null,
         })
+        break
+      }
+
+      /*
+       * ADD A COMMENT, ADD A WATCHER, SET THE DUE DATE, FILL AN AI FIELD
+       * (`found-14-oct/automation-conditions-and-actions-unbuilt`), as ClickUp's automations act.
+       * The comment is the rule maker's — there is no system author — with `{{task.title}}`
+       * and the like filled in; a watcher is a member who may open the task; the due date is
+       * days from the moment the rule runs; an AI field is filled as its Generate button fills
+       * it, as the rule's maker.
+       */
+      case 'add_comment': {
+        if (!ctx.taskId) break
+        const template = typeof action.params.text === 'string' ? action.params.text : ''
+        const body = renderTemplate(template, await this.buildMessageVars(ctx)).trim()
+        if (!body) break
+        const authorId = await this.resolveChannelAuthor(ctx.workspaceId, authorHint)
+        if (!authorId) throw new Error('No eligible author for the automation’s comment')
+        await this.db.insert(taskComments).values({ taskId: ctx.taskId, authorId, body: body.slice(0, 10_000) })
+        break
+      }
+
+      case 'add_follower': {
+        if (!ctx.taskId) break
+        const userId = typeof action.params.userId === 'string' ? action.params.userId : ''
+        if (!userId) break
+        if (!(await this.mayOpenTask(ctx.workspaceId, userId, ctx.taskId))) throw new Error('That person cannot open this task, so they cannot watch it')
+        await this.db.insert(taskWatchers).values({ taskId: ctx.taskId, userId }).onConflictDoNothing()
+        break
+      }
+
+      case 'set_due_date': {
+        if (!ctx.taskId) break
+        const days = Number(action.params.days)
+        if (!Number.isInteger(days) || days < 0 || days > 3650) throw new Error('A due date is set a whole number of days ahead, from 0 to 3650')
+        const due = new Date()
+        due.setUTCHours(0, 0, 0, 0)
+        due.setUTCDate(due.getUTCDate() + days)
+        await this.db.update(tasks).set({ dueDate: due, dueDateHasTime: false, updatedAt: new Date() }).where(eq(tasks.id, ctx.taskId))
+        break
+      }
+
+      case 'update_ai_field': {
+        if (!ctx.taskId) break
+        const fieldId = typeof action.params.fieldId === 'string' ? action.params.fieldId : ''
+        const actorId = authorHint ?? ctx.userId
+        if (!fieldId || !actorId) break
+        const fields = this.moduleRef?.get(AiFieldsService, { strict: false })
+        if (!fields) throw new Error('AI fields are not available here')
+        await fields.generate(ctx.workspaceId, ctx.taskId, fieldId, { id: actorId })
         break
       }
 

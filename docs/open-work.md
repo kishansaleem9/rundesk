@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 573 items: 3 open · 0 partly fixed · 560 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 14 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 574 items: 4 open · 0 partly fixed · 560 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 14 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 109, each reproduced
+## Found by the triage, 5 October, and since — 110, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10704,6 +10704,22 @@ Measured:
 - `link-worktree.sh` gives a worktree no `node_modules` for it, and `lane-env.sh`'s `WEB_SOURCE_PATHS` leaves it out.
 
 *To close:* add it to each list, and to the linker's self-check.
+
+### `found-14-oct/automation-conditions-and-actions-unbuilt` — **open** (feature, medium; found comparing the automations of the prototype in pull request #2 with the branch's) · reproduced 14 October
+
+**An automation cannot ask anything of the task it runs on, and cannot comment, add a watcher, set a due date, fill an AI field or be tested**
+
+*Evidence, 14 October:*
+- A rule's trigger takes filters on the event — a project, a list, the field that changed, the status moved from or to (`AutomationsService.fire`) — and nothing of the task: "only if the priority is Urgent", "only if it has the tag Client" cannot be said. Whatever the event, every matching rule runs.
+- Its actions are seven: change the status, set the priority, notify, make a subtask, assign, post to a channel, run a Super Agent. ClickUp's automations also add a comment, add a watcher, change the due date and fill AI fields.
+- A rule cannot be tried on a task without running it, and a run that did nothing is not logged at all.
+- The automations prototype brought in by pull request #2 (`Rundesk-task-timesheet-admin/lib/automation`) has all of these: conditions on a task's status, priority, assignee, list, tags, due date and title with eq/neq/in/not_in/is_empty/contains/lt/gt, all or any, at most fifteen; `add_comment`, `add_follower`, `set_due_date`, `update_ai_field`; and an event test console.
+
+*To close:* as ClickUp's automations work (conditions "only if…" on a trigger, all or any; the actions above; a test of a rule on a task):
+- conditions on a rule's trigger, read from the task as it is when the event fires, refused in words when they cannot be read, and a skipped run logged with each condition's verdict;
+- the four actions, a watcher only somebody who may open the task, the comment under the rule's maker;
+- a test that says what a rule would do to a task and does nothing;
+- the builder's conditions, the actions' pickers, the test on a rule's card, a skipped run in its history.
 
 ## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 46
 

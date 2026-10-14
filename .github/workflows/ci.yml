@@ -3858,6 +3858,15 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # `found-14-oct/automation-conditions-and-actions-unbuilt` — a rule's
+      # conditions (a field, an operator, a value; all of them or any one),
+      # read from the task when the event fires, a skipped run logged with each
+      # verdict; four actions (a comment, a watcher, a due date, an AI field);
+      # and a rule tested on a task with nothing done.
+      - name: An automation acts only when its conditions hold, and is tested on a task
+        timeout-minutes: 15
+        run: node test/e2e/automation-conditions.mjs --api 3011 --dist apps/web/dist
+
       # What is made once is made once, however many ask for it at the same
       # time: a new workspace's #general, listed three times at once, and a
       # call's meeting record, ended again while its record is written
