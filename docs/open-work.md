@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 576 items: 0 open · 0 partly fixed · 566 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 14 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 580 items: 0 open · 0 partly fixed · 573 closed, and 7 items the owner settled, not counted as defects; counted from this file's headings on 14 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -10869,7 +10869,7 @@ Measured:
 Measured:
 - `chat-channel-delete-and-views` is new: 7 of 7 on lane 4 at `973f28b`, registered in CI.
 - `ccdv-1` to `ccdv-5` and `ccdv-7` each redden what they name.
-- `ccdv-6` stayed green with only the answer's refresh taken away. The deleter is a member and is sent the event too, so either refresh alone keeps the list right. It was re-aimed to take both away.
+- `ccdv-6` stayed green with only the answer's refresh taken away. The deleter is a member and is sent the event too, so either refresh alone keeps the list right. It was re-aimed to take both away, and reddens the check on lane 4 (6 of 7).
 
 ### `found-14-oct/space-channel-views-unbuilt` — **closed** (feature, small; found beside `found-14-oct/chat-channel-cannot-be-deleted`) · reproduced 14 October
 
@@ -10886,7 +10886,7 @@ Measured:
 - `ccdv-8` to `ccdv-11` each redden what they name.
 - `a39-dm-tabs` 19 of 19 on lane 4; `a39-2`, re-aimed to the reset's new shape, reddens it.
 
-## Closed from the uncounted list, as ClickUp works them (8 to 14 October) — 48
+## Closed from the uncounted list, as ClickUp works them (8 to 14 October) — 49
 
 On the owner's word of 8 October ("close all of these properly … close them as they work on clickup"), the
 items the triage set aside as features and decisions are closed one by one: as ClickUp works each where its
@@ -11968,6 +11968,41 @@ This replaces the builder's proposed `found-30-sep/public-domain-serves-the-whol
 
 What remains is a deployment's: if a rebuild prints the warning, its four steps. If it prints nothing, no deployment's R2_PUBLIC_URL serves the private bucket.
 
+### `commit-log/log-39863ff-1` — **closed** (decision, medium; was not counted, a decision for the owner) · reproduced 14 October
+
+**Four recorded 'decisions' need owner confirmation: ChatGPT/Gemini, the three AI categories that can never be filled, AI Notetaker, Automations**
+
+*Evidence:* Commit 39863ff 'DECISIONS RECORDED RATHER THAN QUIETLY BUILT'. ChatGPT and Gemini are listed and not selectable (ledger row 860). ai-categories.ts:76-78: images, externalActions and externalSearches are unsupported and print a reason. AI Notetaker (needs a meeting bot) and Automations (parked, [14:29]) are in §3. Automations was parked by the client, so it is not simply unbuilt. The rest are product decisions, not gaps in the frames.
+
+*To close:* Put each one to the owner: which stay parked, and which to research and build now that frame silence is not an accepted reason.
+
+*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Four recorded decisions still wait on the owner: ChatGPT/Gemini listed but unselectable, three AI categories that can never fill (images, external actions, external searches), AI Notetaker (bot build-vs-buy) and Automations (parked by the client). Evidence: `docs/triage-2026-10-05.md`.
+
+*Closed, 14 October.* The owner's word of 8 October was to close these as ClickUp works them, and of 14 October to "close all gaps and items". Each of the four is now built, and none is a decision any more:
+- **The three AI categories** that could never fill now fill: images (`ledger-rows/row-870`, batch 27), actions in a connected app (`ledger-rows/row-2294`, batch 37) and searches of one (`found-23-sep/connected-search-per-person`, batch 32). `ai-categories.ts` marks none unsupported.
+- **Automations,** parked by the client, came with pull request #2's prototype; their conditions, four actions and test were measured in batch 46 (`found-14-oct/automation-conditions-and-actions-unbuilt`).
+- **ChatGPT and Gemini** answer in Brain's picker, as ClickUp's Brain offers OpenAI's and Google's models beside Claude's (help centre, "Select an AI model", through search excerpts). Batch 51a, `03cfe2e`:
+  - a turn put to either goes through OpenAI's Chat Completions API, which Gemini speaks at its compatible address (`chat-providers.ts`);
+  - it takes the same loop as Claude's: the workspace's context, the tools and their results, the follow-ups, the meter, the failure said;
+  - each provider is a tier where its key is set (`CHATGPT_API_KEY` or `OPENAI_API_KEY`; `GEMINI_API_KEY`) and a named row with its reason where it is not;
+  - the preference write and the chat route ask the server's catalogue, and the composer opens for a provider with a key whatever Claude's state;
+  - prices for the default models are in `ai-cost.ts`.
+- **The AI Notetaker** joins meetings as ClickUp's does (help centre, "Use AI Notetaker to take notes and record meetings", through search excerpts). Batch 51b, `44a2510`, `950f66d`:
+  - the bot is Recall.ai's (`notetaker/recall.ts`; `RECALL_API_KEY`, `RECALL_API_URL`);
+  - sent by a Zoom, Meet or Teams link, it joins now; a calendar picked under "Join all meetings for" has each of its meetings with a link joined at its start, once (a calendar event now carries its meeting's link, `CalendarEvent.meetingUrl`; the calendar's flag and `notetaker_bots` are 0199);
+  - its recording done, the meeting record is written as an internal call's is: the transcript as who said what, notes where a model is set up, the members who spoke as attendees and anybody else by name;
+  - its owner is told in the Inbox (`meeting_notes_ready`, 0200);
+  - called back, it is unscheduled at the service and not sent again, and a colleague sees none of it;
+  - the Meetings page has its panel.
+  - ClickUp keeps the notes in a private Doc. A Doc here has no privacy of its own (it is read as the place it lives), so the notes live where this product's meeting notes already live.
+
+*Measured:*
+- **ChatGPT:** `ai-chatgpt-answers` is new, 7 of 7 on lane 3 at `03cfe2e`, without a Claude key there: picked on the AI page it answers there, metered under OpenAI's model, its tool call makes the list and is handed its result, its refusal said, kept as the preferred model; a Gemini turn never reaches OpenAI. `acg-1` to `acg-8` each redden the check they name.
+- **The picker:** `ai-model-picker` 32 of 32 on the new catalogue, with `mp-2`, `mp-5` and `mp-6` re-aimed and red. `ai-model-cards` 24 of 24, with `amc-5` red.
+- **Unit tests:** `chat-providers.test.ts` (9) and `model-tiers.test.ts`. The media stub's gate drives the product's client, and 21 of 21 mutations bite.
+- **The notetaker:** `ai-notetaker` is new, 10 of 10 on lane 4 at `950f66d`, and `ant-1` to `ant-13` each redden the check they name. `recall.test.ts` has 5 tests and `calendar-events.test.ts` the meeting links. The media stub's gate has 27 of 27 mutations, the calendar stub's 15 of 15.
+- *Found measuring it:* a bot sent to join now read "Joins when it begins" until the service first moved it, the poller turning `joining` back into `scheduled`. Fixed: such a bot is joining.
+
 ## Not counted as defects: features, ClickUp gaps, decisions and deploy settings (triage, 5 October)
 
 Moved here by the triage of 5 October, at the owner's request: these are not open defects and are not in the
@@ -12440,17 +12475,10 @@ reason (`found-30-sep/private-task-reads-say-403`, reverted). This item asked to
 so it no longer describes a defect, and it is not counted. The 400 "Doc belongs to a
 different workspace" could still be reviewed as a tenant-boundary matter of its own.
 
-#### Decisions for the owner — 1
+#### Decisions for the owner — 0
 
-### `commit-log/log-39863ff-1` — decision, not counted (triage, 5 October; was: open, medium)
+None: the last, `commit-log/log-39863ff-1`, was closed on 14 October and is above.
 
-**Four recorded 'decisions' need owner confirmation: ChatGPT/Gemini, the three AI categories that can never be filled, AI Notetaker, Automations**
-
-*Evidence:* Commit 39863ff 'DECISIONS RECORDED RATHER THAN QUIETLY BUILT'. ChatGPT and Gemini are listed and not selectable (ledger row 860). ai-categories.ts:76-78: images, externalActions and externalSearches are unsupported and print a reason. AI Notetaker (needs a meeting bot) and Automations (parked, [14:29]) are in §3. Automations was parked by the client, so it is not simply unbuilt. The rest are product decisions, not gaps in the frames.
-
-*To close:* Put each one to the owner: which stay parked, and which to research and build now that frame silence is not an accepted reason.
-
-*Triage, 5 October:* a decision for the owner, not a defect (waiting on the owner). Four recorded decisions still wait on the owner: ChatGPT/Gemini listed but unselectable, three AI categories that can never fill (images, external actions, external searches), AI Notetaker (bot build-vs-buy) and Automations (parked by the client). Evidence: `docs/triage-2026-10-05.md`.
 
 #### Deploy settings and production reads — 0
 
