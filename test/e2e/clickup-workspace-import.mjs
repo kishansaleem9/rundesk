@@ -364,10 +364,11 @@ try {
   const held = { nina: (await heldFor(nina.email)).length, gil: (await heldFor(gil.email)).length, ola: (await heldFor(ola.email)).length, pat: (await heldFor(pat.email)).length }
   chk(
     roleIn(inv.nina).join() === 'member' && roleIn(inv.gil).join() === 'guest' && roleIn(inv.ola).join() === 'workspace_admin' && roleIn(inv.pat).join() === 'member' &&
-      ninaMail && ninaMails.length === 1 && (ninaMails[0]?.text ?? '').includes(inv.nina[0]?.token ?? 'no-token') &&
+      // The invitation is sent as HTML alone: its link carries the token.
+      ninaMail && ninaMails.length === 1 && `${ninaMails[0]?.text ?? ''}${ninaMails[0]?.html ?? ''}`.includes(inv.nina[0]?.token ?? 'no-token') &&
       held.nina === 2 && held.gil === 1 && held.ola === 1 && held.pat === 1 && plan && (await assigneesOf(plan.id)).join() === ana.id,
     'each of the four is invited into this workspace once, with ClickUp’s role for them, and the invitation is emailed; their five tasks wait for them, while Ana, a member, is on hers already',
-    JSON.stringify({ roles: { nina: roleIn(inv.nina), gil: roleIn(inv.gil), ola: roleIn(inv.ola), pat: roleIn(inv.pat) }, ninaMails: ninaMails.length, held }),
+    JSON.stringify({ roles: { nina: roleIn(inv.nina), gil: roleIn(inv.gil), ola: roleIn(inv.ola), pat: roleIn(inv.pat) }, ninaMails: ninaMails.length, tokenMailed: `${ninaMails[0]?.text ?? ''}${ninaMails[0]?.html ?? ''}`.includes(inv.nina[0]?.token ?? 'no-token'), held, planAssignees: plan ? (await assigneesOf(plan.id)).length : null }),
   )
 
   // ══ 10. JOINING TAKES THEIR TASKS ═════════════════════════════════════════

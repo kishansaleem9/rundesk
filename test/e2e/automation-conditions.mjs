@@ -238,8 +238,11 @@ try {
   const card = page.locator(`[data-testid="automation-card"][data-automation-id="${RULE_ALL}"]`)
   await card.getByTestId('automation-expand').click({ timeout: 20_000 }).catch(() => {})
   await card.getByTestId('automation-test-search').fill('Untagged').catch(() => {})
+  await card.getByTestId('automation-test-task').first().waitFor({ timeout: 15_000 }).catch(() => {})
+  const hits = await card.getByTestId('automation-test-task').count().catch(() => -1)
   await card.getByTestId('automation-test-task').first().click({ timeout: 15_000 }).catch(() => {})
-  await card.getByTestId('automation-test-result').waitFor({ timeout: 15_000 }).catch(() => {})
+  await card.getByTestId('automation-test-result').or(card.getByTestId('automation-test-error')).first().waitFor({ timeout: 15_000 }).catch(() => {})
+  const testError = (await readText(card.getByTestId('automation-test-error').filter({ visible: true }))) ?? null
   const result = card.getByTestId('automation-test-result').filter({ visible: true })
   const wouldAct = await result.getAttribute('data-would-act').catch(() => null)
   const lines = await card.getByTestId('automation-test-condition').filter({ visible: true }).evaluateAll((els) => els.map((e) => `${e.getAttribute('data-passed')}:${e.innerText}`)).catch(() => [])
@@ -247,15 +250,16 @@ try {
   chk(
     wouldAct === 'false' && lines.length === 2 && lines[0].startsWith('true:') && lines[1].startsWith('false:') && /Tag/.test(lines[1]) && /Only if all of/.test(summary),
     'the rule’s card says its conditions, and testing it on the untagged task shows it would not act: the priority holds, the tag does not',
-    JSON.stringify({ wouldAct, lines, summary }),
+    JSON.stringify({ cards: await card.count().catch(() => -1), expanded: await card.getByTestId('automation-expand').getAttribute('aria-expanded').catch(() => null), hits, testError, wouldAct, lines, summary }),
   )
 
+  // The rule skipped more than one run (each status change of a task it does not act on); the untagged task's is the one where one condition failed.
   const skippedShown = await waitUntil(() => card.getByTestId('automation-run-skipped').filter({ visible: true }).count().then((n) => n > 0).catch(() => false), { timeoutMs: 10_000 })
-  const skippedText = (await readText(card.getByTestId('automation-run-skipped').filter({ visible: true }).first())) ?? ''
+  const skippedTexts = await card.getByTestId('automation-run-skipped').filter({ visible: true }).allInnerTexts().catch(() => [])
   chk(
-    skippedShown && /Skipped: 1 condition/.test(skippedText),
+    skippedShown && skippedTexts.some((t) => /Skipped: 1 condition/.test(t)),
     'and its run history shows the skipped run, and how many conditions did not hold',
-    JSON.stringify({ skippedShown, skippedText }),
+    JSON.stringify({ skippedShown, skippedTexts }),
   )
 } catch (e) {
   failed += 1
