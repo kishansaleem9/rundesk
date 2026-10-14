@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 563 items: 0 open · 0 partly fixed · 553 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 568 items: 0 open · 0 partly fixed · 558 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 99, each reproduced
+## Found by the triage, 5 October, and since — 104, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10561,6 +10561,48 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 *Evidence, 13 October:* rehearsal 15's browser job at `0eba332`, "Loading states are never blank", 25 of 26: "no visible "Loading…" copy is wired to a surface (4 such strings exist, none referenced) — artifacts.loading="Loading…"". Batch 40b's Artifacts list (the AI page's Artifacts tab) and its deck viewer showed `artifacts.loading` while their request was out. The suite holds every surface to shapes rather than the word; batch 40b's lane runs had not included it.
 
 *Closed, 13 October.* The list draws the inline skeleton and the viewer the panel's, as the other surfaces do (`brain-artifacts.tsx`), and the unused string is gone from the four catalogs. `loading-states`, run here on the fix: 26 of 26, "no visible "Loading…" copy is wired to a surface (3 such strings exist, none referenced)".
+
+### `found-14-oct/suites-read-sealed-secrets-raw` — **closed** (test tooling, small; found by rehearsal 16) · reproduced 14 October
+
+**`webhook-access` read a webhook's secret by SQL as kept, sealed since batch 42, and `connected-calendars` compared a sealed token with a plain one**
+
+*Evidence, 14 October:*
+- Rehearsal 16 at `ce4b825`, "Webhooks and their secrets belong to webhook.manage", 13 of 15: "a webhook made on the page shows its signing secret — the one stored — and joins the list — shown 40 characters; stored 97 characters; the same: false", and the admin's twin. Batch 42 seals `webhooks.secret`; the suite read it as given. Batch 42's lane runs had not included the suite.
+- Reading every suite for the columns batch 42 seals found one more: `connected-calendars` checked the refreshed calendar's token with `!== TOKENS.stale`, which any sealed value passes, the expired token sealed again among them. Its refresh check could no longer fail on the token.
+
+*Closed, 14 October.* Both open what they read with `openKept` (`lib/sealed.mjs`), as the suites batch 42 changed do, and the calendar's check asks for the token its token address gave (`refreshed-…`), not merely another.
+
+### `found-14-oct/planner-rail-read-before-its-order` — **closed** (test tooling, small; found by rehearsal 16) · reproduced 14 October
+
+**`planner-rail-sections` read the rail before its stored order and sections had answered, and got the five built in**
+
+*Evidence, 14 October:* rehearsal 16, "A planner rail section of one's own holds the tasks put in it, where its maker places it", 10 of 11: "an order saved from the other workspace keeps this one's section where it stood, and each rail draws only its own — … stored ["section:…","priorities","section:…","meetWith",…]; this rail ["priorities","meetWith","assignedToMe","todayOverdue","backlog"]". The stored order was right. The planner draws its rail from two answers, the stored order (`/settings`) and this workspace's sections (`/sections`), and until both land it holds the five built in. `openPlanner` waited for the sections' answer and for any row drawn, which the five are at once. Rehearsal 15 passed the step.
+
+*Closed, 14 October.* The rail is `aria-busy` until both have answered (`workspace-planner-page.tsx`), and the suite waits until it is not.
+
+### `found-14-oct/brain-row-read-before-the-status` — **closed** (test tooling, small; found by rehearsal 16) · reproduced 14 October
+
+**`brain-comments-and-decks` read the @ picker's Brain row before `/ai/status` had answered, and found it offered where no model answers**
+
+*Evidence, 14 October:* rehearsal 16, without a model, 28 of 29: "the @ picker opens with frame 04:00's Brain section … — where no model answers it is offered disabled and says why: disabled false, note 0". The row is disabled once `/ai/status` says there is no model; before it answers, the row is offered. The suite read it as soon as it was drawn. Rehearsal 15 and the lanes passed the step.
+
+*Closed, 14 October.* The row is `aria-busy` until the status has answered (`task-detail-sheet.tsx`), and the suite reads it after.
+
+### `found-14-oct/task-cover-board-press-lost` — **closed** (test tooling, small; found by rehearsal 16) · reproduced 14 October
+
+**`task-cover` pressed the Board tab once, forgot a press that failed, and then waited for a card the board was never asked to draw**
+
+*Evidence, 14 October:* rehearsal 16, "Task cover", 40 of 42 in 122.7 s (24.1 s in rehearsal 15): "the Board never drew the task's card (…), so there was nothing to take off", and the teammate's board the same. The API's log shows nothing failing then. The press was caught and forgotten, so the run cannot say whether it was lost on a tab strip drawn again under it or the board drew late.
+
+*Closed, 14 October.* The tab says when its view is current (`aria-current`), so the suite presses it until it does, and a card that still never draws now says which of the two it was.
+
+### `found-14-oct/leftover-audit-blames-the-nightly-scores` — **closed** (test tooling, small; found by rehearsal 16) · reproduced 14 October
+
+**The leftover audit blamed the suite running at 2 AM for the API's own daily project-health scores**
+
+*Evidence, 14 October:* rehearsal 16, "ClickApps are switched by workspace.clickapps.manage": 7 of 7 checks, and failed on "this run left 2 rows that nothing it registered removes: 2 project_health_scores rows". The API scores every project daily at 2 AM (`project-health.service.ts`, `@Cron(EVERY_DAY_AT_2AM)`), and the step ran then. The audit counts every row made while a run runs, so a CI run crossing 02:00 UTC fails whichever suite runs then.
+
+*Closed, 14 October.* The audit leaves `project_health_scores` to the schedule (`LEFT_BY_USE`, `lib/made-sweep.mjs`; `check-made-sweep.mjs` 50 of 50). A score about a project the run removes goes with it.
 
 ### `found-13-oct/lane-admin-meets-the-hourly-ai-cap` — **closed** (test tooling, small; found by batch 40b's break runs) · reproduced 13 October
 

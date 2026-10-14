@@ -277,7 +277,7 @@ try {
   await tab.getByTestId('webhook-form-save').click({ timeout: 10_000 }).catch(() => {})
   await waitUntil(async () => (await tab.getByTestId('webhook-secret-once').count()) > 0, { timeoutMs: 15_000 })
   const shown = ((await tab.getByTestId('webhook-secret-value').filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
-  // Kept sealed since batch 42 (`found-14-oct/webhook-secret-read-sealed`): opened as the API opens it.
+  // Kept sealed since batch 42 (`found-14-oct/suites-read-sealed-secrets-raw`): opened as the API opens it.
   const [storedRow] = await sql`select id, secret from webhooks where workspace_id = ${WS} and name = ${MADE}`
   const stored = storedRow && { ...storedRow, secret: openKept(storedRow.secret, 'webhooks.secret') }
   const madeRow = stored ? tab.getByTestId(`webhook-row-${stored.id}`) : null
