@@ -14,6 +14,11 @@ export const MODEL_PRICING: Record<string, { in: number; out: number }> = {
   'claude-opus-5': { in: 5, out: 25 },
   'claude-sonnet-4-6': { in: 3, out: 15 },
   'claude-haiku-4-5': { in: 1, out: 5 },
+  // ChatGPT's and Gemini's defaults (`chat-providers.ts`), at their list prices
+  // of 14 October (aggregators' tables, through search excerpts). A model named by
+  // CHATGPT_MODEL or GEMINI_MODEL beyond these is estimated at the fallback.
+  'gpt-5.4': { in: 2.5, out: 15 },
+  'gemini-3-flash-preview': { in: 0.5, out: 3 },
 }
 
 /**

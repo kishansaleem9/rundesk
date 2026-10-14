@@ -17,12 +17,15 @@
  *      have supplied that answer, and the suite also asserts the old key is not
  *      being written, so a reintroduced mirror shows up here.
  *
- *   2. THE UNROUTABLE PROVIDERS CANNOT BE PICKED. The frame offers ChatGPT and
- *      Gemini; `apps/api` has no OpenAI or Google client. They are listed with
- *      the reason — silence would be read as "soon" — and the API REFUSES to
- *      store either as a preference. That refusal is the check: a facade here
- *      would accept the write, resolve to Claude, and leave a row in Postgres
- *      as evidence for a feature that does not exist.
+ *   2. A PROVIDER WITHOUT ITS KEY CANNOT BE PICKED. The frame offers ChatGPT
+ *      and Gemini, and since 14 October each answers where the server has its
+ *      key (`commit-log/log-39863ff-1`). The lanes and CI give ChatGPT a key —
+ *      the media stub answers it — and Gemini none, so here ChatGPT is a tier
+ *      with OpenAI's model behind it, and Gemini is listed with the reason —
+ *      silence would be read as "soon" — and the API REFUSES to store it as a
+ *      preference. That refusal is the check: a facade here would accept the
+ *      write, resolve to Claude, and leave a row in Postgres as evidence for a
+ *      feature that is not there.
  *
  *   3. CHOOSING AND PREFERRING ARE DIFFERENT ACTS, because the transcript
  *      describes both. Choosing must NOT write; preferring must. Both halves
@@ -132,26 +135,29 @@ try {
     `it returned ${catalog.status} ${JSON.stringify(catalog.data).slice(0, 140)}`,
   )
   /*
-   * THREE, since `0163`. The frame heads three rows "Best models" and puts the
-   * rest behind Show more, and the third is a real tier resolving to its own
-   * model — `claude-opus-5` — not a third label over one of the other two. The
+   * FOUR: Claude's three, since `0163` — the frame heads three rows "Best
+   * models", and the third is a real tier resolving to its own model,
+   * `claude-opus-5` — and ChatGPT, whose key this server has. The
    * duplicate-model check below is what keeps that honest, and it is the check
    * that would have caught a padded catalogue.
    */
   chk(
-    models.length === 3,
-    'three routable tiers, as `MODEL_TIERS` declares and `[17:16]` draws',
+    models.map((m) => m.id).join(',') === 'max,deep,fast,chatgpt',
+    'four routable tiers: Claude’s three, as `MODEL_TIERS` declares and `[17:16]` draws, and ChatGPT, whose key this server has',
     `it offered ${models.length}: ${models.map((m) => m.id).join(', ')}`,
   )
   /*
-   * EVERY ROUTABLE ENTRY NAMES A REAL ANTHROPIC MODEL. This is the check that
-   * catches "ChatGPT" being quietly added to the routable list with a Claude
-   * model behind it, which is the exact facade this row exists to refuse.
+   * EVERY ROUTABLE ENTRY NAMES A REAL MODEL OF ITS OWN PROVIDER. This is the
+   * check that catches "ChatGPT" in the routable list with a Claude model
+   * behind it, which is the exact facade this row exists to refuse.
    */
   chk(
-    models.length > 0 && models.every((m) => typeof m.model === 'string' && m.model.startsWith('claude-')),
-    'and each resolves to a real Anthropic model',
-    `models resolved to ${models.map((m) => m.model).join(', ')}`,
+    models.length > 0 &&
+      models.every((m) => typeof m.model === 'string' && (m.provider === 'anthropic') === m.model.startsWith('claude-')) &&
+      models.find((m) => m.id === 'chatgpt')?.provider === 'openai' &&
+      /^gpt-/.test(models.find((m) => m.id === 'chatgpt')?.model ?? ''),
+    'and each resolves to a real model of its own maker: Claude’s to Anthropic’s, ChatGPT to OpenAI’s',
+    `models resolved to ${models.map((m) => `${m.id}=${m.provider}/${m.model}`).join(', ')}`,
   )
   chk(
     new Set(models.map((m) => m.model)).size === models.length,
@@ -159,9 +165,8 @@ try {
     `duplicate models: ${models.map((m) => m.model).join(', ')}`,
   )
   chk(
-    unavailable.length === 2 &&
-      unavailable.map((m) => m.label).sort().join(',') === 'ChatGPT,Gemini',
-    'the two the frame names and this product cannot reach are listed by name',
+    unavailable.length === 1 && unavailable[0]?.label === 'Gemini',
+    'Gemini, which this server has no key for, is listed by name',
     `unavailable was ${JSON.stringify(unavailable.map((m) => m.label))}`,
   )
   /*
@@ -175,12 +180,12 @@ try {
   )
 
   console.log('\n▶ the preference is a row, and it refuses what it cannot run')
-  const refusedOpenAi = await setPref('openai')
+  const refusedGemini = await setPref('gemini')
   chk(
-    refusedOpenAi.status >= 400 && refusedOpenAi.status < 500,
-    'storing "openai" as a preference is REFUSED',
-    `it returned ${refusedOpenAi.status} — a stored preference nothing can route to is ` +
-      'the database becoming evidence for a feature that does not exist',
+    refusedGemini.status >= 400 && refusedGemini.status < 500,
+    'storing "gemini", which this server has no key for, as a preference is REFUSED',
+    `it returned ${refusedGemini.status} — a stored preference nothing can route to is ` +
+      'the database becoming evidence for a feature that is not there',
   )
   const refusedJunk = await setPref('turbo')
   chk(
@@ -332,30 +337,32 @@ try {
   await page.getByTestId('ai-model-show-more').click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(300)
   const hidden = page.locator('[data-testid^="ai-model-option-"][data-available="false"]')
+  const chatgptRow = page.locator('[data-testid="ai-model-option-chatgpt"][data-available="true"]')
   chk(
-    (await hidden.count()) === 2,
-    'pressing it reveals exactly the two unreachable providers',
-    `${await hidden.count()} unavailable rows appeared`,
+    (await hidden.count()) === 1 && (await page.locator('[data-testid="ai-model-option-gemini"][data-available="false"]').count()) === 1 &&
+      (await chatgptRow.count()) === 1,
+    'pressing it reveals ChatGPT, pickable, and Gemini, which is not',
+    `${await hidden.count()} unavailable row(s), ${await chatgptRow.count()} pickable ChatGPT row(s)`,
   )
-  // Both bounded and caught, then `?? ''` before `.trim()`. The checks below
-  // require a non-empty sentence, so an absent row answers '' and fails them
-  // rather than ending the section thirty seconds later.
-  const openAiReason = (
-    (await page.getByTestId('ai-model-reason-openai').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => null)) ?? ''
+  // Bounded and caught, then `?? ''` before `.trim()`. The check below requires
+  // a non-empty sentence, so an absent row answers '' and fails it rather than
+  // ending the section thirty seconds later.
+  const geminiReason = (
+    (await page.getByTestId('ai-model-reason-gemini').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => null)) ?? ''
   ).trim()
-  const googleReason = (
-    (await page.getByTestId('ai-model-reason-google').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => null)) ?? ''
+  const chatgptMaker = (
+    (await page.getByTestId('ai-model-provider-chatgpt').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => null)) ?? ''
   ).trim()
   /*
-   * A REASON EACH, AND DIFFERENT ONES. A missing i18n key falls back to a
-   * sibling's string, so "a reason is present" would pass on exactly that bug
-   * — the `VIEW_LABEL` "team" defect in another shape. Each must name its own
-   * provider.
+   * ITS OWN REASON, NAMING WHAT WOULD CHANGE IT. A missing i18n key falls back
+   * to a sibling's string, so "a reason is present" would pass on exactly that
+   * bug — the `VIEW_LABEL` "team" defect in another shape. Gemini's must name
+   * Gemini's key, and the ChatGPT row beside it says who makes it.
    */
   chk(
-    /OpenAI/i.test(openAiReason) && /Google/i.test(googleReason) && openAiReason !== googleReason,
-    'each says WHY it cannot be used, naming its own provider',
-    `openai reason ${JSON.stringify(openAiReason)}, google reason ${JSON.stringify(googleReason)}`,
+    /Gemini/.test(geminiReason) && /GEMINI_API_KEY/.test(geminiReason) && !/OpenAI|CHATGPT/.test(geminiReason) && chatgptMaker === 'OpenAI',
+    'Gemini says WHY it cannot be used, naming its own key, and ChatGPT says who makes it',
+    `gemini reason ${JSON.stringify(geminiReason)}, ChatGPT maker ${JSON.stringify(chatgptMaker)}`,
   )
   /*
    * AND CLICKING ONE CHANGES NOTHING. The whole row turns on this: an
@@ -366,7 +373,7 @@ try {
   // thirty seconds HERE and the check below never reports — the fix one line
   // down would have moved the exception one line up.
   const tierBefore = await trigger.getAttribute('data-tier', { timeout: 8000 }).catch(() => null)
-  await page.getByTestId('ai-model-option-google').click({ force: true })
+  await page.getByTestId('ai-model-option-gemini').click({ force: true })
   await page.waitForTimeout(400)
   // Bounded and caught for the same reason: the message runs on the passing
   // path too, and this is a locator held in a variable — the shape rule six
@@ -392,7 +399,7 @@ try {
     tierAfterUnavailable !== null && tierAfterUnavailable === tierBefore,
     'and clicking one does not change the model in use',
     `the composer moved from ${JSON.stringify(tierBefore)} to ${JSON.stringify(tierAfterUnavailable)} ` +
-      'after a provider with no client was clicked',
+      'after a provider with no key was clicked',
   )
 
   console.log('\n▶ `[17:28]`–`[17:32]` — choosing, and PREFERRING, are two acts')

@@ -9,7 +9,9 @@
  * one, a key it never checks, a download it never counts — would let that suite
  * pass about a product that fails against the real library. So the product's
  * OWN client (`photo-library.ts`) is driven against it here, and each rule of
- * the stub is broken in turn: a case must notice.
+ * the stub is broken in turn: a case must notice. And since 14 October the
+ * same for ChatGPT answering a Brain turn (`commit-log/log-39863ff-1`): the
+ * product's own `streamChat` against the stub's Chat Completions.
  *
  *   node scripts/check-media-stub.mjs            # the cases
  *   node scripts/check-media-stub.mjs --mutate   # and that each one bites
@@ -50,6 +52,7 @@ const chk = (cond, good, bad) => {
 const PROBE = `
 import { searchPhotos, trackPhotoUse, photoLibraryConfig, PhotoLibraryFailed, PHOTOS_PER_PAGE } from './src/modules/cover-photos/photo-library'
 import { generateImages, imagesConfig, ImagesFailed } from './src/modules/ai/image-generation'
+import { streamChat, ProviderFailed } from './src/modules/ai/chat-providers'
 import { geocode, geocoderConfigured, mapTilesTemplate } from './src/common/geo/geocoder'
 const BASE = 'http://127.0.0.1:${PORT}'
 const cfg = { base: BASE + '/unsplash', key: 'lane-photos' }
@@ -129,6 +132,55 @@ await step('imagesFailure', async () => {
   const answers: unknown[] = []
   for (let i = 0; i < 2; i++) {
     try { answers.push((await generateImages(icfg, 'a kite', 1, '1024x1024')).length) } catch (e) { answers.push(istatus(e)) }
+  }
+  return answers
+})
+const ccfg = { id: 'openai' as const, base: BASE + '/openai/v1', key: 'lane-chatgpt', model: 'gpt-5.4' }
+const cstatus = (e: unknown) => (e instanceof ProviderFailed ? e.status : String(e))
+const ask = async (c: typeof ccfg, messages: any[], tools?: any[]) => {
+  const stream = streamChat(c, { system: 'You are Brain.', messages, tools })
+  let text = ''
+  for await (const e of stream) text += e.delta.text
+  return { text, final: await stream.finalMessage() }
+}
+await step('chat', async () => {
+  await control('/__control/chat/reset', {})
+  const { text, final } = await ask(ccfg, [{ role: 'user', content: 'What is due this week?' }])
+  const held = (await control('/__control/chat/requests')) as { requests: { model: string; stream: boolean; roles: string[]; asked: string; system: string }[] }
+  return {
+    text,
+    blocks: final.content.map((b: any) => b.type),
+    usage: [final.usage.input_tokens > 0, final.usage.output_tokens > 0],
+    held: held.requests.map((r) => [r.model, r.stream, r.roles.join(','), r.asked, r.system]),
+  }
+})
+await step('chatTool', async () => {
+  await control('/__control/chat/reset', {})
+  await control('/__control/chat/stage', { replies: [{ tool_calls: [{ name: 'create_list', arguments: { name: 'Launch plan', spaceName: 'Marketing' } }] }, { content: 'Made it.' }] })
+  const tools = [{ name: 'create_list', input_schema: { type: 'object' } }]
+  const first = await ask(ccfg, [{ role: 'user', content: 'Make a list' }], tools)
+  const use = first.final.content.find((b: any) => b.type === 'tool_use') as any
+  const second = await ask(ccfg, [
+    { role: 'user', content: 'Make a list' },
+    { role: 'assistant', content: first.final.content },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: use?.id, content: '{"ok":true}' }] },
+  ], tools)
+  const held = (await control('/__control/chat/requests')) as { requests: { tools: string[]; toolResults: { id: string; content: string }[] }[] }
+  return {
+    call: use ? [use.name, use.input] : null,
+    after: second.text,
+    tools: held.requests[0]?.tools,
+    result: held.requests[1]?.toolResults?.map((r) => [r.id === use?.id, r.content]),
+  }
+})
+await step('chatWrongKey', async () => {
+  try { await ask({ ...ccfg, key: 'not-the-key' }, [{ role: 'user', content: 'hi' }]); return 'answered' } catch (e) { return cstatus(e) }
+})
+await step('chatFailure', async () => {
+  await control('/__control/chat/fail', { status: 429, count: 1 })
+  const answers: unknown[] = []
+  for (let i = 0; i < 2; i++) {
+    try { answers.push((await ask(ccfg, [{ role: 'user', content: 'again' }])).text.length > 0) } catch (e) { answers.push(cstatus(e)) }
   }
   return answers
 })
@@ -269,6 +321,23 @@ if (out.none !== undefined) {
     'with no key images are not set up; OpenAI’s address and model unless others are given, and IMAGES_API_KEY before OPENAI_API_KEY',
     `read ${JSON.stringify(out.imagesConfig)}`,
   )
+  // ChatGPT answering a Brain turn (`commit-log/log-39863ff-1`): the product's own client against the stub.
+  const c = out.chat ?? {}
+  chk(
+    c.text === 'ChatGPT (gpt-5.4) here. You asked: “What is due this week?”' && same(c.blocks, ['text']) && same(c.usage, [true, true]) &&
+      same(c.held, [['gpt-5.4', true, 'system,user', 'What is due this week?', 'You are Brain.']]),
+    'ChatGPT answers a turn in OpenAI’s chat shape, streamed: its pieces joined into one answer, the tokens counted, and the request kept with its model, its roles and what was asked',
+    `answered ${JSON.stringify(c)}`,
+  )
+  const ct = out.chatTool ?? {}
+  chk(
+    same(ct.call, ['create_list', { name: 'Launch plan', spaceName: 'Marketing' }]) && ct.after === 'Made it.' &&
+      same(ct.tools, ['create_list']) && same(ct.result, [[true, '{"ok":true}']]),
+    'a staged tool call comes back as one call with its whole arguments, and the next ask carries its result under the call’s id',
+    `answered ${JSON.stringify(ct)}`,
+  )
+  chk(out.chatWrongKey === 401, 'a chat key that is not the lane’s is refused 401, in OpenAI’s words', `answered ${JSON.stringify(out.chatWrongKey)}`)
+  chk(same(out.chatFailure, [429, true]), 'a staged chat failure answers the requests it was asked to, and then ChatGPT answers again', `answered ${JSON.stringify(out.chatFailure)}`)
   // A map's two services (`ledger-rows/row-777`): the product's geocoder client and the tiles, against the stub.
   const g = out.geocode ?? {}
   chk(
@@ -313,6 +382,11 @@ if (process.argv.includes('--mutate')) {
     ['nowhere is somewhere', "    if (!q || /\\bnowhere\\b/i.test(q)) return json(res, 200, [])\n", "    if (!q) return json(res, 200, [])\n"],
     ['a known place lands where its words say', "    const known = PLACES.find((p) => q.toLowerCase().includes(p.match))\n", "    const known = undefined\n"],
     ['a tile outside the world is drawn', "    if (x >= 2 ** z || y >= 2 ** z) return json(res, 404, { error: 'no such tile' })\n", ''],
+    ['any chat key is taken', "if ((req.headers.authorization ?? '') !== `Bearer ${CHAT_KEY}`) {", "if ((req.headers.authorization ?? '') === 'never') {"],
+    ['a tool call is sent without its arguments', "      send([{ index: 0, delta: { tool_calls: [{ index: i, function: { arguments: c.args.slice(half) } }] }, finish_reason: null }])\n", ''],
+    ['the tokens are never counted', "    if (body.stream_options?.include_usage === true) send([], { usage })\n", ''],
+    ['a staged chat failure never runs out', '      chatFailure.left -= 1\n', ''],
+    ['a chat request is answered and not kept', '    chatRequests.push({\n', '    ;({\n'],
   ]
   console.log('\n▶ and each mutation of the stub reddens a case')
   for (const [label, from, to] of MUTATIONS) {

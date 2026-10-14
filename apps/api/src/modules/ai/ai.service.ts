@@ -21,7 +21,8 @@ import { FOLLOW_UP_INSTRUCTION, createFollowUpSplitter } from './follow-ups'
 import { generateImages, imagesConfig, ImagesFailed, type ImageSize, type MadeImage } from './image-generation'
 import { summariseValue, validateBenchmark } from './ai-value'
 import { formatStandupFallback, type StandupData } from '../people/standup'
-import { DEFAULT_TIER, isSelectableTier, modelForTier, type ModelTier } from './model-tiers'
+import { DEFAULT_TIER, isSelectableTier, modelCatalog, tierFor, type ModelTier } from './model-tiers'
+import { chatProvidersFrom, streamChat, OTHER_PROVIDER_MAX_TOKENS, type ChatProviders } from './chat-providers'
 import { rollUpByCategory } from './ai-categories'
 import {
   fallbackProposal,
@@ -972,6 +973,8 @@ export function endSseWithError(stream: SseStream, err: unknown) {
 @Injectable()
 export class AiService {
   private client: Anthropic | null = null
+  /** ChatGPT and Gemini, each where its key is set (`chat-providers.ts`, `commit-log/log-39863ff-1`). */
+  private chatProviders: ChatProviders = {}
 
   constructor(
     private config: ConfigService,
@@ -1038,6 +1041,27 @@ export class AiService {
     if (apiKey) {
       this.client = new Anthropic({ apiKey })
     }
+    const env = (k: string) => config.get<string>(k) ?? undefined
+    this.chatProviders = chatProvidersFrom({
+      CHATGPT_API_KEY: env('CHATGPT_API_KEY'),
+      OPENAI_API_KEY: env('OPENAI_API_KEY'),
+      CHATGPT_API_URL: env('CHATGPT_API_URL'),
+      CHATGPT_MODEL: env('CHATGPT_MODEL'),
+      GEMINI_API_KEY: env('GEMINI_API_KEY'),
+      GEMINI_API_URL: env('GEMINI_API_URL'),
+      GEMINI_MODEL: env('GEMINI_MODEL'),
+    })
+  }
+
+  /**
+   * The picker's catalogue on this server (`GET /ai/models`): Claude's tiers,
+   * each other provider with a key as a tier, each without as a named row.
+   */
+  modelCatalog() {
+    return modelCatalog({
+      ...(this.chatProviders.openai ? { openai: { model: this.chatProviders.openai.model } } : {}),
+      ...(this.chatProviders.google ? { google: { model: this.chatProviders.google.model } } : {}),
+    })
   }
 
   private get claude() {
@@ -1601,7 +1625,7 @@ export class AiService {
     // reported as unset rather than echoed back: the picker would have nothing
     // to select, and `modelForTier` would silently answer with the default
     // anyway. Saying "not set" is the same behaviour, told truthfully.
-    if (!row || !isSelectableTier(row.tier)) {
+    if (!row || !isSelectableTier(row.tier, this.modelCatalog().models)) {
       return { preferredTier: DEFAULT_TIER, isSet: false, updatedAt: null }
     }
     return { preferredTier: row.tier, isSet: true, updatedAt: row.updatedAt }
@@ -1610,16 +1634,16 @@ export class AiService {
   /**
    * Store somebody's preferred tier for this workspace.
    *
-   * REFUSES ANYTHING THAT IS NOT A ROUTABLE TIER rather than coercing it. The
-   * frame offers ChatGPT and Gemini and this product has no client for either
-   * (`UNROUTABLE_PROVIDERS`); accepting `openai` here and quietly resolving it
-   * to Claude is how "I set Gemini and it saved" becomes true on a product that
-   * cannot run Gemini. The row would round-trip through Postgres and mean
-   * nothing — the mirror of a facade, and worse, because the database would
-   * then be evidence for a feature that does not exist.
+   * REFUSES ANYTHING THAT IS NOT A ROUTABLE TIER ON THIS SERVER rather than
+   * coercing it. The frame offers ChatGPT and Gemini, and a server without a
+   * provider's key lists it as not set up (`modelCatalog`); accepting `gemini`
+   * there and quietly resolving it to Claude is how "I set Gemini and it saved"
+   * becomes true on a server that cannot run Gemini. The row would round-trip
+   * through Postgres and mean nothing — the mirror of a facade, and worse,
+   * because the database would then be evidence for a feature that is not there.
    */
   async setModelPreference(userId: string, workspaceId: string, preferredTier: string) {
-    if (!isSelectableTier(preferredTier)) {
+    if (!isSelectableTier(preferredTier, this.modelCatalog().models)) {
       throw new BadRequestException(
         `"${preferredTier}" is not a model this workspace can route to`,
       )
@@ -1932,7 +1956,15 @@ Write one reply in plain text, one to three sentences, answering the most recent
     // does: asked here, after the open, a refusal reached nobody
     // (`found-13-oct/a-refused-chat-turn-never-ends`).
     if (!opened) await this.assertWithinRateLimit(ctx, new Date(), 'chat')
-    const model = modelForTier(tier)
+    /*
+     * WHO ANSWERS (`commit-log/log-39863ff-1`): the tier the composer chose, on
+     * this server's catalogue — Claude's, or ChatGPT's or Gemini's where their
+     * key is set. A tier this server cannot route resolves to the default, so
+     * `ai_usage.model` names the model that actually answered.
+     */
+    const chosen = tierFor(tier, this.modelCatalog().models)
+    const model = chosen.model
+    const other = chosen.provider === 'anthropic' ? null : (this.chatProviders[chosen.provider] ?? null)
 
     /*
      * §V2-S16 — WHEN THE ASK SURFACE GETS TOOLS, and when it must not.
@@ -2049,14 +2081,17 @@ ${FOLLOW_UP_INSTRUCTION}${agentPrompt}`
 
       let final: Anthropic.Messages.Message | null = null
       for (let pass = 0; pass < MAX_TOOL_PASSES; pass += 1) {
-        const stream = this.claude.messages.stream({
-          model,
-          max_tokens: 2048,
-          // Cache the (large, repeated) system context across turns.
-          system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
-          messages: convo,
-          ...(tools.length ? { tools } : {}),
-        })
+        // ChatGPT and Gemini take the same turn in OpenAI's words, and hand back Claude's shape.
+        const stream = other
+          ? streamChat(other, { system: systemPrompt, messages: convo, tools, maxTokens: OTHER_PROVIDER_MAX_TOKENS })
+          : this.claude.messages.stream({
+              model,
+              max_tokens: 2048,
+              // Cache the (large, repeated) system context across turns.
+              system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+              messages: convo,
+              ...(tools.length ? { tools } : {}),
+            })
 
         for await (const chunk of stream) {
           if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
@@ -3515,8 +3550,14 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
     return rankAssignees(candidates, taskId, overloaded)
   }
 
-  isAvailable(): boolean {
-    return this.client !== null
+  /**
+   * Whether a turn can be answered: by Claude, or — when the turn names ChatGPT
+   * or Gemini and this server has its key — by that provider. Without a tier,
+   * Claude's, as it always was.
+   */
+  isAvailable(tier?: string | null): boolean {
+    const chosen = tierFor(tier, this.modelCatalog().models)
+    return chosen.provider === 'anthropic' ? this.client !== null : !!this.chatProviders[chosen.provider]
   }
 
   // ─── Agentic AI commands (Plan §7.6 / §7.8) ───────────────────────────────

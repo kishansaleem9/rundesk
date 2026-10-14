@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Patch, Post, Put, Query, Res, UseGuard
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { AiService, endSseWithError, openSseStream, type AiRunStatus } from './ai.service'
 import { SkillsService } from '../skills/skills.service'
-import { BEST_MODELS_VISIBLE, MODEL_TIERS, UNROUTABLE_PROVIDERS, splitPickerModels } from './model-tiers'
+import { BEST_MODELS_VISIBLE, splitPickerModels } from './model-tiers'
 import { isStarterSurface } from './ai-starters'
 import { BriefingService } from './briefing.service'
 import type { PlanAction } from './ai-command'
@@ -39,10 +39,11 @@ export class AiController {
    * §V2-S18, frame `[17:16]` — what the composer's picker is allowed to offer.
    *
    * TWO LISTS, NOT ONE LIST WITH A FLAG. `models` is what this server can
-   * actually route to; `unavailable` is what the frame names and this product
-   * has no client for. They are separate shapes so no rewrite of the picker can
-   * accidentally hand an unroutable id to `modelForTier` — the unroutable shape
-   * has no field to put a model in.
+   * actually route to — Claude's tiers, and ChatGPT and Gemini where their key
+   * is set; `unavailable` is each the frame names that this server has no key
+   * for. They are separate shapes so no rewrite of the picker can accidentally
+   * hand an unroutable id to `tierFor` — the unroutable shape has no field to
+   * put a model in.
    *
    * The unavailable entries carry a translation KEY, not a sentence: this is
    * read by a person in four locales.
@@ -55,13 +56,14 @@ export class AiController {
   @Get('models')
   @ApiOperation({ summary: '§15 — the tiers the composer offers, and the ones it cannot' })
   models() {
-    const { best, more } = splitPickerModels(MODEL_TIERS)
+    const { models, unavailable } = this.ai.modelCatalog()
+    const { best, more } = splitPickerModels(models)
     return {
-      models: MODEL_TIERS,
+      models,
       best,
       more,
       visible: BEST_MODELS_VISIBLE,
-      unavailable: UNROUTABLE_PROVIDERS,
+      unavailable,
     }
   }
 
@@ -507,7 +509,8 @@ export class AiController {
      */
     const asker = { userId: user.id, workspaceId: body.workspaceId }
     await this.ai.assertWithinRateLimit(asker, new Date(), 'chat')
-    if (!this.ai.isAvailable()) {
+    // Whoever this turn asks for: Claude, or ChatGPT or Gemini where this server has its key.
+    if (!this.ai.isAvailable(body.tier)) {
       // §V2-11 — recorded before the 503, like `assertAvailable`. This route
       // owns its own response (it streams), so it sends rather than throws.
       await this.ai.recordFailure('chat', 'none', asker, 'not_configured', 'AI features are not configured')

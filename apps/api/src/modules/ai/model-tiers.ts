@@ -10,40 +10,42 @@
  * sakte ho, Gemini ke features bhi use kar sakte ho; agar aap 'Show More' pe
  * jaoge to aap CLAUDE ke features bhi use kar sakte ho."
  *
- * WHAT IS BUILT, AND THE ONE THING THAT IS NOT.
+ * WHAT IS BUILT. A bounded group of three, a disclosure holding the rest, a
+ * hover card per row carrying its one line and its two bars, and a preferred
+ * model that is persisted server-side (`ai_model_preferences`, 0150) instead of
+ * in one browser's `localStorage`. And, since 14 October, ChatGPT and Gemini
+ * answer as well as Claude (`commit-log/log-39863ff-1`): through OpenAI's Chat
+ * Completions API, which Gemini speaks too at its compatible address
+ * (`chat-providers.ts`), each where this server has its key.
  *
- * The STRUCTURE is built: a bounded group of three, a disclosure holding the
- * rest, a hover card per row carrying its one line and its two bars, and a
- * preferred model that is persisted server-side (`ai_model_preferences`, 0150)
- * instead of in one browser's `localStorage`.
+ * A PROVIDER WITHOUT ITS KEY IS STILL NOT FAKED. A pickable "Gemini" that sent
+ * the request to Claude would be a control that changes a stored value and then
+ * answers from somebody else: the facade this audit exists to catch, and the
+ * worst kind, because the stored value would be evidence the feature exists.
  *
- * The ROUTING to OpenAI and Google is not, and must not be faked. There is no
- * OpenAI or Google client anywhere in `apps/api` — no SDK, no key, no adapter.
- * Adding "ChatGPT" and "Gemini" as pickable entries here would produce a
- * control that changes a stored value and then sends the request to Claude
- * regardless: the facade this audit exists to catch, and the worst kind,
- * because the stored value would be evidence the feature exists.
+ * So the two lists stay separate BY TYPE, not by a boolean anybody can flip:
  *
- * So the two lists are separate BY TYPE, not by a boolean anybody can flip:
+ *   · `models` (`modelCatalog`) is what `tierFor` can resolve. Every entry
+ *     routes: Claude's three, and each other provider whose key is set.
+ *   · `unavailable` is each provider whose key is not. Entries carry the
+ *     REASON, the surface renders them unselectable, and no code path can turn
+ *     one into a model id — there is no field to hold it.
  *
- *   · `MODEL_TIERS` is what `modelForTier` can resolve. Every entry routes.
- *   · `UNROUTABLE_PROVIDERS` is what the frame shows and this product cannot
- *     do. Entries carry the REASON, the surface renders them unselectable, and
- *     no code path can turn one into a model id — there is no field to hold it.
- *
- * The day an OpenAI client lands, that provider moves across as a `ModelTier`
- * with a real `model`, and the picker needs no change at all.
+ * A key set moves its provider across as a `ModelTier` with a real `model`, and
+ * the picker needs no change at all.
  */
+export type ModelProvider = 'anthropic' | 'openai' | 'google'
+
 export interface ModelTier {
-  id: 'fast' | 'deep' | 'max'
-  /** The Anthropic model this actually resolves to. */
+  id: 'fast' | 'deep' | 'max' | 'chatgpt' | 'gemini'
+  /** The model this actually resolves to, at its provider. */
   model: string
   /** Shown in the picker. */
   label: string
   /** One line, so the choice can be made without knowing model names. */
   hint: string
-  /** Who makes it. Drawn as the row's glyph, as the frame does. */
-  provider: 'anthropic'
+  /** Who makes it, and so which client answers. Drawn as the row's glyph, as the frame does. */
+  provider: ModelProvider
   /**
    * `best` is the frame's "Best models" group; `more` is what its **Show more**
    * reveals. Every routable tier declares itself `best`; whether it is actually
@@ -57,13 +59,13 @@ export interface ModelTier {
 }
 
 /**
- * A provider the frame offers and Rundesk cannot reach.
+ * A provider the frame offers and this server has no key for.
  *
  * There is deliberately NO `model` field. A shape that cannot hold a model id
  * cannot be accidentally routed to, however the picker is later rewritten.
  */
 export interface UnroutableProvider {
-  id: 'openai' | 'google'
+  id: 'chatgpt' | 'gemini'
   /** The name on the row, as the frame writes it. */
   label: string
   provider: 'openai' | 'google'
@@ -72,7 +74,7 @@ export interface UnroutableProvider {
    * locales, and an English string baked into the API would appear untranslated
    * on three of them.
    */
-  reasonKey: 'aiModels.reasonNoOpenAiClient' | 'aiModels.reasonNoGoogleClient'
+  reasonKey: 'aiModels.reasonChatGptNotSetUp' | 'aiModels.reasonGeminiNotSetUp'
 }
 
 /**
@@ -146,26 +148,71 @@ export function splitPickerModels<T>(
 }
 
 /**
- * The two the frame names that this product has no client for.
+ * The two the frame names besides Claude, each a tier where this server has its
+ * key and a named row with its reason where it has not.
  *
- * Listed rather than omitted on purpose. Omitting them answers "can I use
- * ChatGPT here" with silence, and silence is read as "not yet, probably soon".
- * Naming them with the reason answers it.
+ * Listed rather than omitted when unset, on purpose. Omitting them answers "can
+ * I use ChatGPT here" with silence, and silence is read as "not yet, probably
+ * soon". Naming them with the reason answers it — and says what would change it.
  */
-export const UNROUTABLE_PROVIDERS: readonly UnroutableProvider[] = [
+export const OTHER_PROVIDERS = [
   {
-    id: 'openai',
-    label: 'ChatGPT',
     provider: 'openai',
-    reasonKey: 'aiModels.reasonNoOpenAiClient',
+    tier: (model: string): ModelTier => ({
+      id: 'chatgpt',
+      model,
+      label: 'ChatGPT',
+      hint: `OpenAI’s ${model}, for a team that thinks in ChatGPT`,
+      provider: 'openai',
+      group: 'best',
+      speed: 3,
+      intelligence: 4,
+    }),
+    unset: { id: 'chatgpt', label: 'ChatGPT', provider: 'openai', reasonKey: 'aiModels.reasonChatGptNotSetUp' },
   },
   {
-    id: 'google',
-    label: 'Gemini',
     provider: 'google',
-    reasonKey: 'aiModels.reasonNoGoogleClient',
+    tier: (model: string): ModelTier => ({
+      id: 'gemini',
+      model,
+      label: 'Gemini',
+      hint: `Google’s ${model}, quick and broad`,
+      provider: 'google',
+      group: 'best',
+      speed: 4,
+      intelligence: 3,
+    }),
+    unset: { id: 'gemini', label: 'Gemini', provider: 'google', reasonKey: 'aiModels.reasonGeminiNotSetUp' },
   },
-] as const
+] as const satisfies ReadonlyArray<{
+  provider: 'openai' | 'google'
+  tier: (model: string) => ModelTier
+  unset: UnroutableProvider
+}>
+
+/** Which other providers this server has a key for, and the model each answers with. */
+export type ProviderModels = Partial<Record<'openai' | 'google', { model: string }>>
+
+/**
+ * The picker's catalogue on THIS server: Claude's three, then each other
+ * provider with a key as a tier, and each without as a named row it cannot pick.
+ *
+ * Pure, and takes the providers rather than reading the environment, so both
+ * halves can be tested without a key existing.
+ */
+export function modelCatalog(providers: ProviderModels = {}): {
+  models: ModelTier[]
+  unavailable: UnroutableProvider[]
+} {
+  const models: ModelTier[] = [...MODEL_TIERS]
+  const unavailable: UnroutableProvider[] = []
+  for (const p of OTHER_PROVIDERS) {
+    const set = providers[p.provider]
+    if (set?.model) models.push(p.tier(set.model))
+    else unavailable.push({ ...p.unset })
+  }
+  return { models, unavailable }
+}
 
 /** What chat used before a picker existed, so the default changes nothing. */
 export const DEFAULT_TIER: ModelTier['id'] = 'deep'
@@ -178,26 +225,26 @@ export const DEFAULT_TIER: ModelTier['id'] = 'deep'
  * has no better option to offer them than the one they would have got anyway.
  *
  * This is also the choke point that keeps the unroutable list honest. Ask it
- * for `openai` and it returns Claude — because that IS what would happen — so
- * any attempt to make those rows selectable shows up as the wrong model in
- * `ai_usage.model`, where the activity log will print it.
+ * for `gemini` on a server with no Gemini key and it returns Claude — because
+ * that IS what would happen — so any attempt to make that row selectable shows
+ * up as the wrong model in `ai_usage.model`, where the activity log prints it.
+ * `models` is the server's catalogue (`modelCatalog`); left out, Claude's alone.
  */
-export function modelForTier(tier: string | undefined | null): string {
-  const found = MODEL_TIERS.find((t) => t.id === tier)
-  return (found ?? MODEL_TIERS.find((t) => t.id === DEFAULT_TIER)!).model
+export function modelForTier(tier: string | undefined | null, models: readonly ModelTier[] = MODEL_TIERS): string {
+  return tierFor(tier, models).model
 }
 
-export function tierFor(tier: string | undefined | null): ModelTier {
-  return MODEL_TIERS.find((t) => t.id === tier) ?? MODEL_TIERS.find((t) => t.id === DEFAULT_TIER)!
+export function tierFor(tier: string | undefined | null, models: readonly ModelTier[] = MODEL_TIERS): ModelTier {
+  return models.find((t) => t.id === tier) ?? MODEL_TIERS.find((t) => t.id === DEFAULT_TIER)!
 }
 
 /**
- * Is this a tier somebody may store as their preference?
+ * Is this a tier somebody may store as their preference, on this server?
  *
  * The preference write refuses anything else instead of coercing it. Coercion
- * is how "I set Gemini and it saved" becomes true on a product that cannot run
+ * is how "I set Gemini and it saved" becomes true on a server that cannot run
  * Gemini — the row would round-trip through Postgres and mean nothing.
  */
-export function isSelectableTier(tier: unknown): tier is ModelTier['id'] {
-  return typeof tier === 'string' && MODEL_TIERS.some((t) => t.id === tier)
+export function isSelectableTier(tier: unknown, models: readonly ModelTier[] = MODEL_TIERS): tier is ModelTier['id'] {
+  return typeof tier === 'string' && models.some((t) => t.id === tier)
 }

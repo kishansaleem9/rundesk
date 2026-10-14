@@ -1074,6 +1074,10 @@ jobs:
           # And the AI's images (`ledger-rows/row-870`), from the same stub in OpenAI's shape.
           IMAGES_API_URL: http://127.0.0.1:${{ env.E2E_MEDIA_PORT }}/openai/v1
           IMAGES_API_KEY: lane-images
+          # And ChatGPT in Brain's picker (`commit-log/log-39863ff-1`), from the same stub in OpenAI's chat shape.
+          # No Gemini key: its "not set up" row is what the picker draws here.
+          CHATGPT_API_URL: http://127.0.0.1:${{ env.E2E_MEDIA_PORT }}/openai/v1
+          CHATGPT_API_KEY: lane-chatgpt
           # And a map's geocoder and tiles (`ledger-rows/row-777`), from the same stub in OpenStreetMap's shapes.
           GEOCODER_URL: http://127.0.0.1:${{ env.E2E_MEDIA_PORT }}/geocode
           MAP_TILES_URL: http://127.0.0.1:${{ env.E2E_MEDIA_PORT }}/tiles/{z}/{x}/{y}.svg
@@ -2182,11 +2186,24 @@ jobs:
           E2E_PASSWORD: Admin@123!
 
       # §P frame `17:16` — "Best models", Speed/Intelligence bars, Show more, and
-      # a preferred model persisted server-side. ChatGPT and Gemini are listed
-      # and must stay unselectable: storing one is refused, not coerced.
+      # a preferred model persisted server-side. ChatGPT, whose key this job
+      # gives the API, is a tier; Gemini, with none, is listed and must stay
+      # unselectable: storing it is refused, not coerced.
       - name: AI model picker
         timeout-minutes: 15
         run: node test/e2e/ai-model-picker.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # `commit-log/log-39863ff-1` — ChatGPT answers in Brain's picker (OpenAI's
+      # chat API; the media stub answers it here): picked on the AI page it
+      # answers there, its turn is metered under its model, its tool calls make
+      # what they ask, its refusal is said, it can be the preferred model, and a
+      # turn asking for Gemini, which has no key, never reaches OpenAI.
+      - name: ChatGPT answers in Brain's picker
+        timeout-minutes: 15
+        run: node test/e2e/ai-chatgpt-answers.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

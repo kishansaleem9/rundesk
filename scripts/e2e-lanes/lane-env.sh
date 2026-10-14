@@ -706,6 +706,10 @@ lane_media_env () {
   # And images made to order (`ledger-rows/row-870`): OpenAI's images shape, from the same stub.
   export IMAGES_API_URL="http://127.0.0.1:$(lane_media_port "$1")/openai/v1"
   export IMAGES_API_KEY="lane-images"
+  # And ChatGPT in Brain's picker (`commit-log/log-39863ff-1`): OpenAI's chat shape, from the same stub.
+  # No Gemini key, so the picker's "not set up" row is drawn and refused on every lane, as in CI.
+  export CHATGPT_API_URL="http://127.0.0.1:$(lane_media_port "$1")/openai/v1"
+  export CHATGPT_API_KEY="lane-chatgpt"
   # And a map's geocoder and tiles (`ledger-rows/row-777`): OpenStreetMap's shapes, from the same stub.
   export GEOCODER_URL="http://127.0.0.1:$(lane_media_port "$1")/geocode"
   export MAP_TILES_URL="http://127.0.0.1:$(lane_media_port "$1")/tiles/{z}/{x}/{y}.svg"

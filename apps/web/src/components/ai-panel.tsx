@@ -63,9 +63,9 @@ import { viewWithScope, type AiDockScope } from '../lib/ai-dock'
  * TWO LISTS WITH DIFFERENT SHAPES, ON PURPOSE. A `ModelTier` carries the tier
  * id the composer sends; an `UnavailableModel` has no such field, so there is
  * nothing for a later refactor to accidentally put in the request body. The
- * frame offers ChatGPT and Gemini; `apps/api` has no OpenAI or Google client,
- * and a pickable row that quietly answers from Claude is the facade this audit
- * exists to catch.
+ * frame offers ChatGPT and Gemini; the server answers with each where it has
+ * the provider's key, and names each it has none for — a pickable row that
+ * quietly answered from Claude would be the facade this audit exists to catch.
  */
 type ModelTier = {
   id: string
@@ -810,6 +810,12 @@ function ModelPickerRow({
         <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary" />
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="text-xs font-medium text-foreground">{model.label}</span>
+          {/* The frame draws each row's maker; Claude's tiers are Brain's own. */}
+          {model.provider !== 'anthropic' && (
+            <span data-testid={`ai-model-provider-${model.id}`} className="text-[10px] text-muted-foreground">
+              {model.provider === 'openai' ? 'OpenAI' : model.provider === 'google' ? 'Google' : model.provider}
+            </span>
+          )}
           {preferred && (
             <span
               data-testid={`ai-model-preferred-badge-${model.id}`}
@@ -1512,7 +1518,14 @@ export function AiPanel({
     }
   }
 
-  const aiAvailable = statusQuery.data?.available !== false
+  /*
+   * WHO WOULD ANSWER (`commit-log/log-39863ff-1`). `/ai/status` speaks for
+   * Claude; ChatGPT and Gemini are in the catalogue only where the server has
+   * their key, so a turn put to one of them can be asked whatever Claude's
+   * state — the composer is open for it.
+   */
+  const chosenModel = modelTiers.find((m) => m.id === tier)
+  const aiAvailable = chosenModel && chosenModel.provider !== 'anthropic' ? true : statusQuery.data?.available !== false
   // The resting invitation's turn: a timer runs only while the composer rests
   // on it, so the rotation stops the moment anything else is true.
   const [restingTurn, setRestingTurn] = useState(0)
@@ -1918,10 +1931,11 @@ export function AiPanel({
                       {/*
                         `[17:20]` — what the disclosure reveals. In ClickUp it
                         is more MODELS; here it is both, and in that order: any
-                        routable tier past the frame's three, then the two
-                        providers this product has no client for. The same row
-                        component draws the routable ones, so a tier cannot
-                        behave differently for having been hidden.
+                        routable tier past the frame's three — ChatGPT and
+                        Gemini where this server has their keys — then each
+                        provider it has no key for. The same row component
+                        draws the routable ones, so a tier cannot behave
+                        differently for having been hidden.
                       */}
                       {moreModels.map((m) => (
                         <ModelPickerRow

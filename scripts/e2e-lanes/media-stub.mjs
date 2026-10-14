@@ -33,6 +33,18 @@
  * place in the answer, so the same prompt draws the same pictures and two
  * pictures of one answer differ.
  *
+ * AND CHATGPT ANSWERING A BRAIN TURN, in OpenAI's Chat Completions shapes
+ * (`commit-log/log-39863ff-1`): the API asks CHATGPT_API_URL with CHATGPT_API_KEY —
+ *   POST /openai/v1/chat/completions {model, messages, tools?, stream?}
+ * with `Authorization: Bearer <key>`, a key that is not the lane's refused 401
+ * in OpenAI's words. Streamed, it answers as OpenAI streams: a role chunk, the
+ * text in pieces, each tool call's id and name and then its arguments in pieces
+ * under its `index`, the finish reason, the usage when `stream_options` asks for
+ * it, then `[DONE]`. Unstreamed, one `chat.completion`. What it says is the
+ * next STAGED reply when a suite staged one — text, or tool calls with their
+ * arguments — and otherwise one sentence naming the model and repeating the
+ * question, so a page shows which provider answered what.
+ *
  * AND A MAP'S TWO OUTSIDE SERVICES (`commit-log/log-68bc188-1`, `ledger-rows/row-777`):
  * ClickUp's Map view places a task by its Location field's address, which the
  * API turns into coordinates through a geocoder at GEOCODER_URL, and draws the
@@ -51,6 +63,10 @@
  *   GET  /__control/images/requests       the image requests made, in order
  *   POST /__control/images/fail {status, count}   the next `count` image requests answer `status`
  *   POST /__control/images/reset          forget them and any failure
+ *   GET  /__control/chat/requests         the chat requests made, in order
+ *   POST /__control/chat/stage {replies}  the next asks' replies: [{content?, tool_calls?: [{name, arguments}]}]
+ *   POST /__control/chat/fail {status, count}   the next `count` chat requests answer `status`
+ *   POST /__control/chat/reset            forget them, any staged reply and any failure
  *   GET  /__control/geocode/requests      the addresses asked, in order
  *   POST /__control/geocode/reset         forget them
  *   GET  /__control/version               which source this process runs
@@ -82,6 +98,7 @@ const PORT = Number(arg('port', 9501))
 /** The keys every lane gives the API (`lane_media_env`, and CI's API step). */
 const KEY = arg('key', 'lane-photos')
 const IMAGES_KEY = arg('images-key', 'lane-images')
+const CHAT_KEY = arg('chat-key', 'lane-chatgpt')
 // Which source this process runs: `lane-env.sh` restarts a stub whose file has moved.
 const SOURCE = createHash('sha1').update(readFileSync(new URL(import.meta.url))).digest('hex').slice(0, 12)
 const BASE = `http://127.0.0.1:${PORT}`
@@ -180,6 +197,9 @@ let failure = null // { status, left }
 const imageRequests = []
 let imageFailure = null // { status, left }
 const geocodeRequests = []
+const chatRequests = []
+const chatStaged = []
+let chatFailure = null // { status, left }
 
 /** The places every lane knows, by a word of their address. */
 const PLACES = [
@@ -246,6 +266,106 @@ const server = createServer(async (req, res) => {
     }
     failure = { status, left: count }
     return json(res, 200, { failing: failure })
+  }
+
+  if (path === '/__control/chat/requests' && req.method === 'GET') return json(res, 200, { requests: chatRequests })
+  if (path === '/__control/chat/reset' && req.method === 'POST') {
+    chatRequests.length = 0
+    chatStaged.length = 0
+    chatFailure = null
+    return json(res, 200, { reset: true })
+  }
+  if (path === '/__control/chat/stage' && req.method === 'POST') {
+    const body = await readBody(req)
+    const replies = Array.isArray(body?.replies) ? body.replies : null
+    const shaped = (r) =>
+      r && typeof r === 'object' &&
+      (r.content === undefined || typeof r.content === 'string') &&
+      (r.tool_calls === undefined || (Array.isArray(r.tool_calls) && r.tool_calls.every((c) => typeof c?.name === 'string' && c.name)))
+    if (!replies || !replies.length || !replies.every(shaped)) {
+      return json(res, 400, { error: 'replies is a list of {content?, tool_calls?: [{name, arguments}]}' })
+    }
+    chatStaged.push(...replies)
+    return json(res, 200, { staged: chatStaged.length })
+  }
+  if (path === '/__control/chat/fail' && req.method === 'POST') {
+    const body = await readBody(req)
+    const status = Number(body?.status)
+    const count = Number(body?.count ?? 1)
+    if (!Number.isInteger(status) || status < 400 || status > 599 || !Number.isInteger(count) || count < 1) {
+      return json(res, 400, { error: 'status is 400–599 and count a whole number' })
+    }
+    chatFailure = { status, left: count }
+    return json(res, 200, { failing: chatFailure })
+  }
+
+  if (path === '/openai/v1/chat/completions' && req.method === 'POST') {
+    // OpenAI's refusal of a key it does not know.
+    if ((req.headers.authorization ?? '') !== `Bearer ${CHAT_KEY}`) {
+      return json(res, 401, { error: { message: 'Incorrect API key provided.', type: 'invalid_request_error', code: 'invalid_api_key' } })
+    }
+    if (chatFailure) {
+      const { status } = chatFailure
+      chatFailure.left -= 1
+      if (chatFailure.left <= 0) chatFailure = null
+      return json(res, status, { error: { message: status === 429 ? 'Rate limit reached for requests' : 'The server had an error while processing your request', type: status === 429 ? 'rate_limit_error' : 'server_error' } })
+    }
+    const body = await readBody(req)
+    const model = typeof body?.model === 'string' ? body.model : ''
+    const messages = Array.isArray(body?.messages) ? body.messages : []
+    if (!model) return json(res, 400, { error: { message: 'you must provide a model parameter', type: 'invalid_request_error' } })
+    if (!messages.length) return json(res, 400, { error: { message: "'messages' must contain at least one message", type: 'invalid_request_error' } })
+    const textOf = (m) => (typeof m?.content === 'string' ? m.content : Array.isArray(m?.content) ? m.content.map((p) => (p?.type === 'text' ? p.text : '')).join(' ') : '')
+    const lastUser = [...messages].reverse().find((m) => m?.role === 'user')
+    const asked = textOf(lastUser).trim()
+    chatRequests.push({
+      model,
+      stream: body.stream === true,
+      roles: messages.map((m) => m?.role),
+      system: textOf(messages.find((m) => m?.role === 'system')),
+      asked,
+      tools: Array.isArray(body.tools) ? body.tools.map((t) => t?.function?.name) : [],
+      toolResults: messages.filter((m) => m?.role === 'tool').map((m) => ({ id: m.tool_call_id, content: m.content })),
+      at: new Date().toISOString(),
+    })
+    const staged = chatStaged.shift()
+    const content = staged ? (staged.content ?? '') : `ChatGPT (${model}) here. You asked: “${asked.slice(0, 120)}”`
+    const calls = (staged?.tool_calls ?? []).map((c, i) => ({
+      id: `call_${chatRequests.length}_${i + 1}`,
+      name: c.name,
+      args: typeof c.arguments === 'string' ? c.arguments : JSON.stringify(c.arguments ?? {}),
+    }))
+    const finish = calls.length ? 'tool_calls' : 'stop'
+    const usage = {
+      prompt_tokens: Math.max(1, Math.ceil(JSON.stringify(messages).length / 4)),
+      completion_tokens: Math.max(1, Math.ceil((content.length + calls.reduce((n, c) => n + c.args.length, 0)) / 4)),
+    }
+    usage.total_tokens = usage.prompt_tokens + usage.completion_tokens
+    const id = `chatcmpl-${chatRequests.length}`
+    const created = Math.floor(Date.now() / 1000)
+    if (body.stream !== true) {
+      return json(res, 200, {
+        id, object: 'chat.completion', created, model,
+        choices: [{ index: 0, message: { role: 'assistant', content: content || null, ...(calls.length ? { tool_calls: calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.args } })) } : {}) }, finish_reason: finish }],
+        usage,
+      })
+    }
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
+    const send = (choices, extra = {}) => res.write(`data: ${JSON.stringify({ id, object: 'chat.completion.chunk', created, model, choices, ...extra })}\n\n`)
+    send([{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }])
+    // The text in three pieces, as a model streams it: a reader joins them.
+    const third = Math.ceil(content.length / 3)
+    for (let at = 0; at < content.length; at += third) send([{ index: 0, delta: { content: content.slice(at, at + third) }, finish_reason: null }])
+    calls.forEach((c, i) => {
+      send([{ index: 0, delta: { tool_calls: [{ index: i, id: c.id, type: 'function', function: { name: c.name, arguments: '' } }] }, finish_reason: null }])
+      const half = Math.ceil(c.args.length / 2)
+      send([{ index: 0, delta: { tool_calls: [{ index: i, function: { arguments: c.args.slice(0, half) } }] }, finish_reason: null }])
+      send([{ index: 0, delta: { tool_calls: [{ index: i, function: { arguments: c.args.slice(half) } }] }, finish_reason: null }])
+    })
+    send([{ index: 0, delta: {}, finish_reason: finish }])
+    if (body.stream_options?.include_usage === true) send([], { usage })
+    res.write('data: [DONE]\n\n')
+    return res.end()
   }
 
   if (path === '/__control/geocode/requests' && req.method === 'GET') return json(res, 200, { requests: geocodeRequests })

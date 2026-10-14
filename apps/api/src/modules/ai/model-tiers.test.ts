@@ -4,6 +4,8 @@ import {
   BEST_MODELS_VISIBLE,
   DEFAULT_TIER,
   MODEL_TIERS,
+  isSelectableTier,
+  modelCatalog,
   modelForTier,
   splitPickerModels,
   tierFor,
@@ -109,6 +111,45 @@ describe('§15 model tiers', () => {
     assert.equal(modelForTier('turbo'), 'claude-sonnet-4-6')
     assert.equal(modelForTier('../../etc/passwd'), 'claude-sonnet-4-6')
     assert.equal(tierFor('nonsense').id, DEFAULT_TIER)
+  })
+
+  /*
+   * `commit-log/log-39863ff-1` — CHATGPT AND GEMINI, WHERE THIS SERVER HAS THEIR
+   * KEY. The catalogue is the server's, not a constant: a provider with a key is
+   * a tier with its own model, one without is a named row with a reason and no
+   * model at all.
+   */
+  it('offers ChatGPT and Gemini as tiers where their keys are set, each its own model', () => {
+    const { models, unavailable } = modelCatalog({ openai: { model: 'gpt-5.4' }, google: { model: 'gemini-3-flash-preview' } })
+    assert.deepEqual(models.map((m) => m.id), ['max', 'deep', 'fast', 'chatgpt', 'gemini'])
+    assert.equal(unavailable.length, 0)
+    assert.equal(tierFor('chatgpt', models).provider, 'openai')
+    assert.equal(modelForTier('chatgpt', models), 'gpt-5.4')
+    assert.equal(modelForTier('gemini', models), 'gemini-3-flash-preview')
+    assert.ok(isSelectableTier('gemini', models))
+    // The bound still holds: the two land behind Show more, not in Best models.
+    const { best, more } = splitPickerModels(models)
+    assert.deepEqual(best.map((m) => m.id), ['max', 'deep', 'fast'])
+    assert.deepEqual(more.map((m) => m.id), ['chatgpt', 'gemini'])
+    assert.equal(new Set(models.map((m) => m.hint)).size, models.length, 'two rows say the same line')
+  })
+
+  it('names a provider with no key as not set up, with its own reason and nothing to route to', () => {
+    const { models, unavailable } = modelCatalog({ openai: { model: 'gpt-5.4' } })
+    assert.deepEqual(models.map((m) => m.id), ['max', 'deep', 'fast', 'chatgpt'])
+    assert.deepEqual(unavailable, [{ id: 'gemini', label: 'Gemini', provider: 'google', reasonKey: 'aiModels.reasonGeminiNotSetUp' }])
+    // Asked for anyway, it is Claude that answers — and the preference refuses it.
+    assert.equal(tierFor('gemini', models).id, DEFAULT_TIER)
+    assert.equal(isSelectableTier('gemini', models), false)
+    const none = modelCatalog({})
+    assert.deepEqual(none.unavailable.map((u) => u.reasonKey), ['aiModels.reasonChatGptNotSetUp', 'aiModels.reasonGeminiNotSetUp'])
+    assert.ok(none.unavailable.every((u) => !('model' in u)))
+    assert.equal(isSelectableTier('chatgpt', none.models), false)
+  })
+
+  it('prices the other providers\' default models too', () => {
+    const { models } = modelCatalog({ openai: { model: 'gpt-5.4' }, google: { model: 'gemini-3-flash-preview' } })
+    for (const tier of models) assert.ok(MODEL_PRICING[tier.model], `${tier.id} resolves to ${tier.model}, unpriced`)
   })
 
   it('always has a tier matching the declared default', () => {
