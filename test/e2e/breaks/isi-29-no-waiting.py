@@ -5,7 +5,7 @@ import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/app-import/app-http.ts'
 s = io.open(p, encoding='utf-8').read()
 for a, b in [
-    ('      if (res.status === 429 && attempt < 3) {\n',
+    ('      if (res.status === 429 && attempt < 5) {\n',
      '      if (res.status === 429 && attempt < 0) {\n'),
 ]:
     assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

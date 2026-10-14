@@ -17,6 +17,14 @@ import { safeFetch } from '../../../common/http/safe-fetch'
  *     and never with the grant.
  *   · A 429 says when to ask again (`Retry-After`), and is waited out a few
  *     times; a 401 is the grant refused, said as such.
+ *   · A TOOL THAT COUNTS ITS REQUESTS is not run past its count
+ *     (`found-14-oct/clickup-chat-unimported`). ClickUp gives a token 100
+ *     requests a minute on most plans and says how many are left of the
+ *     window and when it starts again (`X-RateLimit-Remaining`,
+ *     `X-RateLimit-Reset`, a Unix time); a token run past it has been reported
+ *     shut out for hours. So once a window is spent the next request waits for
+ *     its reset, and a 429 is waited out until it — a minute at most a wait,
+ *     five times — rather than a moment and failed.
  */
 
 export class AppError extends Error {
@@ -38,6 +46,18 @@ export const APP_REFUSALS = {
 
 export type AppFile = { buffer: Buffer; contentType: string }
 
+/** The longest one wait on a tool's count of requests: its minute's window, and a little. */
+export const MOST_RATE_WAIT_MS = 65_000
+
+/** When a tool's window of requests starts again, from `X-RateLimit-Reset`: a Unix time in seconds or milliseconds, or seconds from now. */
+export function rateResetAt(raw: string | null, now = Date.now()): number | null {
+  const n = Number(raw)
+  if (raw === null || raw.trim() === '' || !Number.isFinite(n) || n < 0) return null
+  if (n > 1e12) return n
+  if (n > 1e9) return n * 1000
+  return now + n * 1000
+}
+
 /** The most one imported file may hold; a larger one is listed as not imported. */
 export const MAX_IMPORTED_FILE_BYTES = 100 * 1024 * 1024
 
@@ -55,6 +75,10 @@ export function originOf(url: string): string | null {
 
 export class AppHttp {
   private readonly origins: Set<string>
+  /** Until when the tool has said its window of requests is spent. */
+  private pausedUntil = 0
+  /** How a wait is waited: the clock's own; a test's, to see it. */
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms))
 
   constructor(
     readonly label: string,
@@ -80,6 +104,8 @@ export class AppHttp {
   async request(url: string, init: { method?: string; body?: string; headers?: Record<string, string> } = {}): Promise<Response> {
     let target = this.checked(url)
     for (let attempt = 0, hops = 0; ; ) {
+      const paused = this.pausedUntil - Date.now()
+      if (paused > 0) await this.sleep(Math.min(paused, MOST_RATE_WAIT_MS))
       let res: Response
       try {
         res = await this.fetchImpl(target, {
@@ -92,10 +118,10 @@ export class AppHttp {
       } catch {
         throw new AppError(APP_REFUSALS.unreachable(this.label), 502)
       }
-      if (res.status === 429 && attempt < 3) {
+      this.heed(res)
+      if (res.status === 429 && attempt < 5) {
         attempt++
-        const wait = Math.min(Number(res.headers.get('retry-after') ?? 1) || 1, 10)
-        await new Promise((r) => setTimeout(r, Math.max(wait, 0.2) * 1000))
+        await this.sleep(this.waitAfter429(res))
         continue
       }
       if (res.status >= 300 && res.status < 400 && res.headers.get('location') && hops < 3) {
@@ -108,6 +134,22 @@ export class AppHttp {
       if (!res.ok) throw new AppError(APP_REFUSALS.failed(this.label, res.status), 502)
       return res
     }
+  }
+
+  /** A window the tool says is spent pauses what is asked of it next, until the window starts again. */
+  private heed(res: Response) {
+    const left = Number(res.headers.get('x-ratelimit-remaining') ?? NaN)
+    const reset = rateResetAt(res.headers.get('x-ratelimit-reset'))
+    if (Number.isFinite(left) && left <= 0 && reset !== null) this.pausedUntil = Math.max(this.pausedUntil, Math.min(reset, Date.now() + MOST_RATE_WAIT_MS))
+  }
+
+  /** How long a 429 is waited out: as `Retry-After` says, else until the window's reset, else a second. */
+  private waitAfter429(res: Response): number {
+    const after = Number(res.headers.get('retry-after') ?? NaN)
+    if (Number.isFinite(after) && after >= 0) return Math.min(Math.max(after, 0.2) * 1000, MOST_RATE_WAIT_MS)
+    const reset = rateResetAt(res.headers.get('x-ratelimit-reset'))
+    if (reset !== null) return Math.min(Math.max(reset - Date.now(), 200), MOST_RATE_WAIT_MS)
+    return 1000
   }
 
   async json<T>(url: string, init: { method?: string; body?: string; headers?: Record<string, string> } = {}): Promise<T> {

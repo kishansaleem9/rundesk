@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
 import { zipOf } from '../../../common/import/zip-test-kit'
-import { AppError, AppHttp } from './app-http'
+import { AppError, AppHttp, MOST_RATE_WAIT_MS, rateResetAt } from './app-http'
 import { ASANA } from './asana'
 import { JIRA } from './jira'
 import { placeStatus, statusRows, valueFor, type ImNode, type ImTask } from './import-tree'
@@ -57,6 +57,47 @@ describe('a tool’s API, asked with one person’s grant', () => {
       () => http.json('https://api.tool.test/gone'),
       (e: unknown) => e instanceof AppError && e.status === 401 && /Tool refused the grant: sign in to Tool again/.test(e.message),
     )
+  })
+
+  it('waits for the window to start again once the tool says it is spent, and asks nothing before', async () => {
+    const reset = Math.floor(Date.now() / 1000) + 30
+    let calls = 0
+    const { fn } = fakeFetch({ 'https://api.tool.test/count': () => json({ n: ++calls }, 200, { 'x-ratelimit-remaining': calls === 1 ? '0' : '99', 'x-ratelimit-reset': String(reset) }) })
+    const http = new AppHttp('Tool', ['https://api.tool.test'], {}, fn)
+    const waited: number[] = []
+    http.sleep = async (ms) => {
+      waited.push(ms)
+    }
+    await http.json('https://api.tool.test/count')
+    assert.deepEqual(waited, [], 'the first request is not held')
+    await http.json('https://api.tool.test/count')
+    assert.equal(waited.length, 1)
+    assert.ok(waited[0]! > 25_000 && waited[0]! <= 30_000, `waited ${waited[0]} ms for a reset 30 s away`)
+  })
+
+  it('waits a 429 out until the window starts again when it gives no Retry-After, a minute at most, five times', async () => {
+    let calls = 0
+    const soon = Math.floor(Date.now() / 1000) + 10
+    const { fn } = fakeFetch({
+      'https://api.tool.test/limited': () => (++calls <= 2 ? json({}, 429, { 'x-ratelimit-reset': String(soon) }) : json({ ok: true })),
+      'https://api.tool.test/never': () => json({}, 429, { 'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3600) }),
+    })
+    const http = new AppHttp('Tool', ['https://api.tool.test'], {}, fn)
+    const waited: number[] = []
+    http.sleep = async (ms) => {
+      waited.push(ms)
+    }
+    assert.deepEqual(await http.json('https://api.tool.test/limited'), { ok: true })
+    assert.equal(waited.length, 2)
+    assert.ok(waited.every((ms) => ms > 5_000 && ms <= 10_000), `waited ${waited.join(', ')} ms for a reset 10 s away`)
+    waited.length = 0
+    await assert.rejects(() => http.json('https://api.tool.test/never'), (e: unknown) => e instanceof AppError && /Tool answered 429/.test(e.message))
+    assert.equal(waited.length, 5)
+    assert.ok(waited.every((ms) => ms === MOST_RATE_WAIT_MS))
+    assert.equal(rateResetAt('1791999999'), 1791999999000)
+    assert.equal(rateResetAt('1791999999000'), 1791999999000)
+    assert.equal(rateResetAt('30', 1000), 31_000)
+    assert.equal(rateResetAt(null), null)
   })
 
   it('fetches a file off the tool only from a public address, and never with the grant; one past the limit is none', async () => {
