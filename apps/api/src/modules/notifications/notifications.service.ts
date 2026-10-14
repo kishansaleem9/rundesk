@@ -203,6 +203,9 @@ type NotificationType =
   | 'access_requested'
   // §2.8 [19:25] — "aap ko notification aa raha hoga ke CALL ka option aaya".
   | 'call_started'
+  // The AI Notetaker's notes of a meeting it joined (`commit-log/log-39863ff-1`):
+  // ClickUp's land in the Inbox once the meeting ends.
+  | 'meeting_notes_ready'
   // §G11 [15:36] — a chat message assigned to you as an action item. Not
   // task_assigned: nothing was created, and the link has to open the message.
   | 'message_assigned'

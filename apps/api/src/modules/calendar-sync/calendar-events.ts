@@ -17,6 +17,7 @@
  * Pure of the database: the caller passes a token, and is told when the
  * provider refused it (`CalendarRefused`), so it can refresh and ask once more.
  */
+import { findMeetingUrl } from '../../common/meeting-links'
 
 export type CalendarProvider = 'gcal' | 'outlook'
 
@@ -35,6 +36,11 @@ export interface CalendarEvent {
   location: string | null
   /** Where the provider shows it, when it says. */
   link: string | null
+  /**
+   * Its video meeting's link — Zoom, Google Meet or Teams — when it has one:
+   * what the AI Notetaker joins (`commit-log/log-39863ff-1`, `meeting-links.ts`).
+   */
+  meetingUrl: string | null
 }
 
 /**
@@ -88,6 +94,23 @@ const answer = async (res: Response, provider: CalendarProvider) => {
   return res
 }
 
+/**
+ * A Google event's meeting: Meet's own `hangoutLink`, a conference's video entry
+ * point (Zoom's and Teams' add-ons write theirs there), or a link in where it is
+ * or what it says.
+ */
+function googleMeetingUrl(item: any): string | null {
+  const video = Array.isArray(item?.conferenceData?.entryPoints)
+    ? item.conferenceData.entryPoints.find((p: any) => p?.entryPointType === 'video')?.uri
+    : null
+  return findMeetingUrl(item?.hangoutLink, video, item?.location, item?.description)
+}
+
+/** A Graph event's meeting: its online meeting's join link, or a link in where it is or what it says. */
+function graphMeetingUrl(item: any): string | null {
+  return findMeetingUrl(item?.onlineMeeting?.joinUrl, item?.onlineMeetingUrl, item?.location?.displayName, item?.bodyPreview)
+}
+
 /** `YYYY-MM-DD` of an instant, in UTC. */
 const dayOf = (iso: string) => new Date(iso).toISOString().slice(0, 10)
 
@@ -108,6 +131,7 @@ export function fromGoogle(item: any, accountId: string): CalendarEvent | null {
     allDay,
     location: typeof item.location === 'string' && item.location ? item.location : null,
     link: typeof item.htmlLink === 'string' ? item.htmlLink : null,
+    meetingUrl: googleMeetingUrl(item),
   }
 }
 
@@ -133,6 +157,7 @@ export function fromGraph(item: any, accountId: string): CalendarEvent | null {
     allDay,
     location: typeof item.location?.displayName === 'string' && item.location.displayName ? item.location.displayName : null,
     link: typeof item.webLink === 'string' ? item.webLink : null,
+    meetingUrl: graphMeetingUrl(item),
   }
 }
 

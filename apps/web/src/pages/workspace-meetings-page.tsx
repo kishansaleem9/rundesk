@@ -17,6 +17,7 @@ import { useTranslation } from '../lib/i18n'
 import { api } from '../lib/api'
 import { calendarAccountsQuery } from '../lib/calendar-accounts'
 import { ListSkeleton } from '../components/loading-skeletons'
+import { NotetakerPanel } from '../components/notetaker-panel'
 import { useAuthStore } from '../store/auth'
 import {
   isJoinable,
@@ -91,6 +92,8 @@ export function MeetingsPage() {
       </header>
 
       <MeetingsAsk workspaceId={workspaceId} name={me?.displayName?.split(' ')[0] ?? ''} />
+
+      <NotetakerPanel workspaceId={workspaceId} />
 
       <UpcomingMeetings meetings={upcomingQuery.data} failed={upcomingQuery.isError} />
 

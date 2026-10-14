@@ -45,6 +45,19 @@
  * arguments — and otherwise one sentence naming the model and repeating the
  * question, so a page shows which provider answered what.
  *
+ * AND THE AI NOTETAKER'S MEETING BOT, in Recall.ai's shapes (`commit-log/log-39863ff-1`): the
+ * API asks RECALL_API_URL with RECALL_API_KEY —
+ *   POST   /recall/api/v1/bot/                  {meeting_url, bot_name, join_at?, recording_config}  → {id, …}
+ *   GET    /recall/api/v1/bot/:id/              the bot: {id, meeting_url, join_at, status_changes, recordings}
+ *   DELETE /recall/api/v1/bot/:id/              a bot that has not joined; 400 for one that has
+ *   POST   /recall/api/v1/bot/:id/leave_call/   a bot in its call leaves it (`call_ended`)
+ *   GET    /recall/media/:id/transcript.json    a done bot's transcript, by the address its recording gives
+ * with `Authorization: Token <key>`, a key that is not the lane's refused 401 in
+ * Recall's words, and a link that is no Zoom, Meet or Teams meeting refused 400.
+ * A bot's life is the suite's to move: it stays as made until the control seam
+ * says it joined, recorded, ended or failed — and once `done`, its recording
+ * carries the transcript's address.
+ *
  * AND A MAP'S TWO OUTSIDE SERVICES (`commit-log/log-68bc188-1`, `ledger-rows/row-777`):
  * ClickUp's Map view places a task by its Location field's address, which the
  * API turns into coordinates through a geocoder at GEOCODER_URL, and draws the
@@ -63,6 +76,10 @@
  *   GET  /__control/images/requests       the image requests made, in order
  *   POST /__control/images/fail {status, count}   the next `count` image requests answer `status`
  *   POST /__control/images/reset          forget them and any failure
+ *   GET  /__control/recall/bots           every bot made, with what it was asked and where it stands
+ *   POST /__control/recall/bots/:id {code, sub_code?, transcript?}   the bot's next status change, and
+ *                                         with `done` the transcript its recording carries
+ *   POST /__control/recall/reset          forget every bot
  *   GET  /__control/chat/requests         the chat requests made, in order
  *   POST /__control/chat/stage {replies}  the next asks' replies: [{content?, tool_calls?: [{name, arguments}]}]
  *   POST /__control/chat/fail {status, count}   the next `count` chat requests answer `status`
@@ -99,6 +116,7 @@ const PORT = Number(arg('port', 9501))
 const KEY = arg('key', 'lane-photos')
 const IMAGES_KEY = arg('images-key', 'lane-images')
 const CHAT_KEY = arg('chat-key', 'lane-chatgpt')
+const RECALL_KEY = arg('recall-key', 'lane-recall')
 // Which source this process runs: `lane-env.sh` restarts a stub whose file has moved.
 const SOURCE = createHash('sha1').update(readFileSync(new URL(import.meta.url))).digest('hex').slice(0, 12)
 const BASE = `http://127.0.0.1:${PORT}`
@@ -198,6 +216,19 @@ const imageRequests = []
 let imageFailure = null // { status, left }
 const geocodeRequests = []
 const chatRequests = []
+/** The meeting bots made, by id: what each was asked, and its status changes. */
+const recallBots = new Map()
+const MEETING_LINK = /^https:\/\/(meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}|([a-z0-9-]+\.)?zoom\.us\/(j|w|my)\/|teams\.(microsoft\.com\/(l\/meetup-join|meet)\/|live\.com\/meet\/))/i
+const botView = (b) => ({
+  id: b.id,
+  meeting_url: b.meetingUrl,
+  bot_name: b.botName,
+  join_at: b.joinAt,
+  status_changes: b.statusChanges,
+  recordings: b.done
+    ? [{ id: `rec-${b.id}`, media_shortcuts: { transcript: { status: { code: 'done' }, data: { download_url: `${BASE}/recall/media/${b.id}/transcript.json` } } } }]
+    : [],
+})
 const chatStaged = []
 let chatFailure = null // { status, left }
 
@@ -266,6 +297,67 @@ const server = createServer(async (req, res) => {
     }
     failure = { status, left: count }
     return json(res, 200, { failing: failure })
+  }
+
+  if (path === '/__control/recall/bots' && req.method === 'GET') {
+    return json(res, 200, { bots: [...recallBots.values()].map((b) => ({ ...botView(b), asked: b.asked, removed: b.removed })) })
+  }
+  if (path === '/__control/recall/reset' && req.method === 'POST') {
+    recallBots.clear()
+    return json(res, 200, { reset: true })
+  }
+  const moved = /^\/__control\/recall\/bots\/([A-Za-z0-9-]+)$/.exec(path)
+  if (moved && req.method === 'POST') {
+    const bot = recallBots.get(moved[1])
+    if (!bot) return json(res, 404, { error: 'no such bot' })
+    const body = await readBody(req)
+    if (typeof body?.code !== 'string' || !body.code) return json(res, 400, { error: 'code is the status change' })
+    bot.statusChanges.push({ code: body.code, sub_code: body.sub_code ?? null, created_at: new Date().toISOString() })
+    if (body.code === 'done') {
+      bot.done = true
+      bot.transcript = Array.isArray(body.transcript) ? body.transcript : []
+    }
+    return json(res, 200, botView(bot))
+  }
+
+  if (path.startsWith('/recall/api/v1/bot/')) {
+    // Recall's refusal of a key it does not know.
+    if ((req.headers.authorization ?? '') !== `Token ${RECALL_KEY}`) {
+      return json(res, 401, { detail: 'Invalid token.' })
+    }
+    if (path === '/recall/api/v1/bot/' && req.method === 'POST') {
+      const body = await readBody(req)
+      const meetingUrl = typeof body?.meeting_url === 'string' ? body.meeting_url : ''
+      if (!MEETING_LINK.test(meetingUrl)) return json(res, 400, { meeting_url: ['Meeting URL is not a supported meeting link.'] })
+      const id = createHash('sha1').update(`${meetingUrl}#${recallBots.size}#${Date.now()}`).digest('hex').slice(0, 8) + '-' + String(recallBots.size + 1).padStart(4, '0')
+      const bot = { id, meetingUrl, botName: body.bot_name ?? null, joinAt: body.join_at ?? null, statusChanges: [], done: false, transcript: [], asked: body, removed: false }
+      recallBots.set(id, bot)
+      return json(res, 201, botView(bot))
+    }
+    const one = /^\/recall\/api\/v1\/bot\/([A-Za-z0-9-]+)\/(leave_call\/)?$/.exec(path)
+    const bot = one ? recallBots.get(one[1]) : null
+    if (!bot || bot.deleted) return json(res, 404, { detail: 'Not found.' })
+    if (!one[2] && req.method === 'GET') return json(res, 200, botView(bot))
+    if (!one[2] && req.method === 'DELETE') {
+      // Only a bot that has not joined can be unscheduled; one in its call is asked to leave.
+      if (bot.statusChanges.length) return json(res, 400, { detail: 'Cannot delete a bot that has already joined a call.' })
+      bot.removed = true
+      bot.deleted = true
+      res.writeHead(204)
+      return res.end()
+    }
+    if (one[2] && req.method === 'POST') {
+      bot.statusChanges.push({ code: 'call_ended', sub_code: 'bot_received_leave_call', created_at: new Date().toISOString() })
+      bot.removed = true
+      return json(res, 200, botView(bot))
+    }
+    return json(res, 405, { detail: 'Method not allowed.' })
+  }
+  const media = /^\/recall\/media\/([A-Za-z0-9-]+)\/transcript\.json$/.exec(path)
+  if (media && req.method === 'GET') {
+    const bot = recallBots.get(media[1])
+    if (!bot || !bot.done) return json(res, 404, { detail: 'Not found.' })
+    return json(res, 200, bot.transcript)
   }
 
   if (path === '/__control/chat/requests' && req.method === 'GET') return json(res, 200, { requests: chatRequests })

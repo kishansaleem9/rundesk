@@ -1078,6 +1078,10 @@ jobs:
           # No Gemini key: its "not set up" row is what the picker draws here.
           CHATGPT_API_URL: http://127.0.0.1:${{ env.E2E_MEDIA_PORT }}/openai/v1
           CHATGPT_API_KEY: lane-chatgpt
+          # And the AI Notetaker's meeting bot (`commit-log/log-39863ff-1`), from the same stub in Recall.ai's shapes.
+          RECALL_API_URL: http://127.0.0.1:${{ env.E2E_MEDIA_PORT }}/recall
+          RECALL_API_KEY: lane-recall
+          NOTETAKER_POLL_SECONDS: 2
           # And a map's geocoder and tiles (`ledger-rows/row-777`), from the same stub in OpenStreetMap's shapes.
           GEOCODER_URL: http://127.0.0.1:${{ env.E2E_MEDIA_PORT }}/geocode
           MAP_TILES_URL: http://127.0.0.1:${{ env.E2E_MEDIA_PORT }}/tiles/{z}/{x}/{y}.svg
@@ -2204,6 +2208,19 @@ jobs:
       - name: ChatGPT answers in Brain's picker
         timeout-minutes: 15
         run: node test/e2e/ai-chatgpt-answers.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # `commit-log/log-39863ff-1` — the AI Notetaker (Recall.ai's meeting bot;
+      # the media stub answers it here, the calendar stub holds the meeting):
+      # sent by a link it joins now, told to join a calendar's meetings it joins
+      # each with a link at its start, and its recording becomes a meeting record
+      # with the transcript, the attendees and an Inbox notice; called back, it
+      # is not sent again, and a colleague sees none of it.
+      - name: The AI Notetaker joins meetings and writes their notes
+        timeout-minutes: 15
+        run: node test/e2e/ai-notetaker.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

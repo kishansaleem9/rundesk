@@ -445,6 +445,27 @@ export class CalendarAccountsService {
   }
 
   /**
+   * The events of ONE of this person's connected calendars over a window — the
+   * AI Notetaker's "Join all meetings for" reads each calendar it is told to
+   * join (`commit-log/log-39863ff-1`). Theirs alone: an account of somebody
+   * else's, or one no longer connected, has no events here.
+   */
+  async eventsOfAccount(userId: string, accountId: string, from: Date, to: Date): Promise<CalendarEvent[]> {
+    const [account] = await this.db
+      .select()
+      .from(userCalendarAccounts)
+      .where(and(eq(userCalendarAccounts.id, accountId), eq(userCalendarAccounts.userId, userId), eq(userCalendarAccounts.status, 'connected')))
+      .limit(1)
+    if (!account) return []
+    const got = await this.withToken(account, (token) =>
+      account.provider === 'gcal'
+        ? readGoogle(token, account.externalCalendarId, account.id, from, to, AbortSignal.timeout(CALENDAR_TIMEOUT_MS))
+        : readGraph(token, account.id, from, to, AbortSignal.timeout(CALENDAR_TIMEOUT_MS)),
+    )
+    return got.events
+  }
+
+  /**
    * "Default calendar — where new events are WRITTEN": this person's, with its
    * tokens, when it is connected; null when they have none, or it is not.
    */

@@ -201,6 +201,8 @@ function followReasonKey(notif: Notification): TranslationKey | null {
     case 'ai_briefing':
     case 'workload_alert':
     case 'test_notification':
+    // The AI Notetaker's notes of a meeting it joined for you (`commit-log/log-39863ff-1`).
+    case 'meeting_notes_ready':
       return 'inbox.why.directToYou'
     case 'billing_past_due':
       return 'inbox.why.workspaceAdmin'

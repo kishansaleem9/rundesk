@@ -128,7 +128,10 @@ const SOURCE = createHash('sha1')
 const refreshes = new Map()
 /**
  * token → { provider, events: Map<id, event>, writes: [], fail: {status, left} | null }
- * An event here is the provider-neutral shape: { id, title, start, end, allDay, location }.
+ * An event here is the provider-neutral shape: { id, title, start, end, allDay, location, meetingUrl }.
+ * A `meetingUrl` is said as each provider says its video meeting (`commit-log/log-39863ff-1`):
+ * Google's `hangoutLink` for a Meet link and a conference's video entry point for any, Graph's
+ * `onlineMeeting.joinUrl`.
  * `start`/`end` are ISO instants for a timed event and `YYYY-MM-DD` for an all-day
  * one, whose `end` is the day after its last, as both providers say it.
  */
@@ -288,6 +291,8 @@ const googleEvent = (e) => ({
   htmlLink: `https://calendar.google.test/event?eid=${e.id}`,
   summary: e.title,
   ...(e.location ? { location: e.location } : {}),
+  ...(e.meetingUrl && /^https:\/\/meet\.google\.com\//.test(e.meetingUrl) ? { hangoutLink: e.meetingUrl } : {}),
+  ...(e.meetingUrl ? { conferenceData: { entryPoints: [{ entryPointType: 'video', uri: e.meetingUrl }] } } : {}),
   start: e.allDay ? { date: e.start } : { dateTime: e.start },
   end: e.allDay ? { date: e.end } : { dateTime: e.end },
 })
@@ -310,6 +315,7 @@ const graphEvent = (e) => ({
   isAllDay: e.allDay,
   webLink: `https://outlook.office.test/calendar/item/${e.id}`,
   location: { displayName: e.location ?? '' },
+  ...(e.meetingUrl ? { isOnlineMeeting: true, onlineMeeting: { joinUrl: e.meetingUrl } } : {}),
   start: { dateTime: graphTime(e.allDay ? `${e.start}T00:00:00Z` : e.start), timeZone: 'UTC' },
   end: { dateTime: graphTime(e.allDay ? `${e.end}T00:00:00Z` : e.end), timeZone: 'UTC' },
 })
@@ -503,7 +509,7 @@ const server = createServer(async (req, res) => {
     const events = new Map()
     for (const e of body.events ?? []) {
       const id = e.id ?? randomUUID()
-      events.set(id, { id, title: e.title ?? '', start: e.start, end: e.end, allDay: e.allDay === true, location: e.location ?? null })
+      events.set(id, { id, title: e.title ?? '', start: e.start, end: e.end, allDay: e.allDay === true, location: e.location ?? null, meetingUrl: e.meetingUrl ?? null })
     }
     const had = calendars.get(body.token)
     const cal = { provider: body.provider, events, writes: [], fail: had?.fail ?? null }

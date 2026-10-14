@@ -34,23 +34,28 @@ describe('calendar events — one shape whichever calendar they came from', () =
   it('a Google event is read as an instant in UTC, an all-day one as its days, and a cancelled one not at all', () => {
     assert.deepEqual(
       fromGoogle({ id: 'a', summary: 'Standup', start: { dateTime: '2026-10-08T09:00:00-07:00' }, end: { dateTime: '2026-10-08T09:15:00-07:00' }, htmlLink: 'https://g/a' }, 'acc'),
-      { id: 'a', accountId: 'acc', provider: 'gcal', title: 'Standup', start: '2026-10-08T16:00:00.000Z', end: '2026-10-08T16:15:00.000Z', allDay: false, location: null, link: 'https://g/a' },
+      { id: 'a', accountId: 'acc', provider: 'gcal', title: 'Standup', start: '2026-10-08T16:00:00.000Z', end: '2026-10-08T16:15:00.000Z', allDay: false, location: null, link: 'https://g/a', meetingUrl: null },
     )
     assert.deepEqual(
       fromGoogle({ id: 'b', summary: 'Holiday', start: { date: '2026-10-09' }, end: { date: '2026-10-10' } }, 'acc'),
-      { id: 'b', accountId: 'acc', provider: 'gcal', title: 'Holiday', start: '2026-10-09', end: '2026-10-10', allDay: true, location: null, link: null },
+      { id: 'b', accountId: 'acc', provider: 'gcal', title: 'Holiday', start: '2026-10-09', end: '2026-10-10', allDay: true, location: null, link: null, meetingUrl: null },
     )
+    // `commit-log/log-39863ff-1` — the meeting the AI Notetaker would join: Meet's own link, a conference's video entry, a link in the words.
+    assert.equal(fromGoogle({ id: 'm', summary: 'Sync', start: { dateTime: '2026-10-08T09:00:00Z' }, end: { dateTime: '2026-10-08T09:30:00Z' }, hangoutLink: 'https://meet.google.com/abc-defg-hij' }, 'acc')?.meetingUrl, 'https://meet.google.com/abc-defg-hij')
+    assert.equal(fromGoogle({ id: 'z', summary: 'Zoom', start: { dateTime: '2026-10-08T09:00:00Z' }, end: { dateTime: '2026-10-08T09:30:00Z' }, conferenceData: { entryPoints: [{ entryPointType: 'phone', uri: 'tel:+1' }, { entryPointType: 'video', uri: 'https://acme.zoom.us/j/123456' }] } }, 'acc')?.meetingUrl, 'https://acme.zoom.us/j/123456')
+    assert.equal(fromGoogle({ id: 'n', summary: 'Lunch', start: { dateTime: '2026-10-08T09:00:00Z' }, end: { dateTime: '2026-10-08T09:30:00Z' }, location: 'https://example.com/menu' }, 'acc')?.meetingUrl, null)
+    assert.equal(fromGraph({ id: 't', subject: 'Teams', start: { dateTime: '2026-10-08T09:00:00' }, end: { dateTime: '2026-10-08T09:30:00' }, onlineMeeting: { joinUrl: 'https://teams.microsoft.com/l/meetup-join/19%3ameeting/0' } }, 'acc')?.meetingUrl, 'https://teams.microsoft.com/l/meetup-join/19%3ameeting/0')
     assert.equal(fromGoogle({ id: 'c', status: 'cancelled', start: { dateTime: '2026-10-08T09:00:00Z' }, end: { dateTime: '2026-10-08T10:00:00Z' } }, 'acc'), null)
   })
 
   it('a Graph event, written without a zone in the UTC the request asked for, is read as UTC; an all-day one as its days', () => {
     assert.deepEqual(
       fromGraph({ id: 'o', subject: 'Review', isAllDay: false, start: { dateTime: '2026-10-08T15:00:00.0000000', timeZone: 'UTC' }, end: { dateTime: '2026-10-08T16:00:00.0000000', timeZone: 'UTC' }, location: { displayName: 'Room 4' }, webLink: 'https://o/o' }, 'acc'),
-      { id: 'o', accountId: 'acc', provider: 'outlook', title: 'Review', start: '2026-10-08T15:00:00.000Z', end: '2026-10-08T16:00:00.000Z', allDay: false, location: 'Room 4', link: 'https://o/o' },
+      { id: 'o', accountId: 'acc', provider: 'outlook', title: 'Review', start: '2026-10-08T15:00:00.000Z', end: '2026-10-08T16:00:00.000Z', allDay: false, location: 'Room 4', link: 'https://o/o', meetingUrl: null },
     )
     assert.deepEqual(
       fromGraph({ id: 'd', subject: 'Away', isAllDay: true, start: { dateTime: '2026-10-09T00:00:00.0000000' }, end: { dateTime: '2026-10-11T00:00:00.0000000' } }, 'acc'),
-      { id: 'd', accountId: 'acc', provider: 'outlook', title: 'Away', start: '2026-10-09', end: '2026-10-11', allDay: true, location: null, link: null },
+      { id: 'd', accountId: 'acc', provider: 'outlook', title: 'Away', start: '2026-10-09', end: '2026-10-11', allDay: true, location: null, link: null, meetingUrl: null },
     )
   })
 

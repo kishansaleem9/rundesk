@@ -11,7 +11,8 @@
  * OWN client (`photo-library.ts`) is driven against it here, and each rule of
  * the stub is broken in turn: a case must notice. And since 14 October the
  * same for ChatGPT answering a Brain turn (`commit-log/log-39863ff-1`): the
- * product's own `streamChat` against the stub's Chat Completions.
+ * product's own `streamChat` against the stub's Chat Completions; and for the
+ * AI Notetaker's meeting bot, the product's own Recall.ai client (`recall.ts`).
  *
  *   node scripts/check-media-stub.mjs            # the cases
  *   node scripts/check-media-stub.mjs --mutate   # and that each one bites
@@ -53,6 +54,7 @@ const PROBE = `
 import { searchPhotos, trackPhotoUse, photoLibraryConfig, PhotoLibraryFailed, PHOTOS_PER_PAGE } from './src/modules/cover-photos/photo-library'
 import { generateImages, imagesConfig, ImagesFailed } from './src/modules/ai/image-generation'
 import { streamChat, ProviderFailed } from './src/modules/ai/chat-providers'
+import { createBot, getBot, removeBot, stateOf, transcriptUrlOf, downloadTranscript, RecallFailed } from './src/modules/notetaker/recall'
 import { geocode, geocoderConfigured, mapTilesTemplate } from './src/common/geo/geocoder'
 const BASE = 'http://127.0.0.1:${PORT}'
 const cfg = { base: BASE + '/unsplash', key: 'lane-photos' }
@@ -183,6 +185,49 @@ await step('chatFailure', async () => {
     try { answers.push((await ask(ccfg, [{ role: 'user', content: 'again' }])).text.length > 0) } catch (e) { answers.push(cstatus(e)) }
   }
   return answers
+})
+const rcfg = { base: BASE + '/recall', key: 'lane-recall', botName: 'Rundesk Notetaker' }
+const rstatus = (e: unknown) => (e instanceof RecallFailed ? e.status : String(e))
+const moveBot = (id: string, body: unknown) => control('/__control/recall/bots/' + id, body)
+await step('recall', async () => {
+  await control('/__control/recall/reset', {})
+  const joinAt = new Date('2031-01-02T10:00:00.000Z')
+  const made = await createBot(rcfg, { meetingUrl: 'https://meet.google.com/abc-defg-hij', joinAt })
+  const fresh = stateOf(await getBot(rcfg, made.id)).status
+  await moveBot(made.id, { code: 'joining_call' })
+  await moveBot(made.id, { code: 'in_call_recording' })
+  const inCall = stateOf(await getBot(rcfg, made.id)).status
+  await moveBot(made.id, { code: 'call_ended' })
+  await moveBot(made.id, { code: 'done', transcript: [
+    { participant: { name: 'Bo' }, words: [{ text: 'Agreed.', start_timestamp: { relative: 5 } }] },
+    { participant: { name: 'Ana' }, words: [{ text: 'Ship it', start_timestamp: { relative: 1 } }, { text: 'Friday.', start_timestamp: { relative: 2 } }] },
+  ] })
+  const done = await getBot(rcfg, made.id)
+  const url = transcriptUrlOf(done)
+  const parts = url ? await downloadTranscript(url) : null
+  const held = (await control('/__control/recall/bots')) as { bots: { id: string; asked: any }[] }
+  const asked = held.bots.find((b) => b.id === made.id)?.asked
+  return {
+    states: [fresh, inCall, stateOf(done).status],
+    parts,
+    asked: asked ? [asked.meeting_url, asked.bot_name, asked.join_at, !!asked.recording_config?.transcript?.provider?.meeting_captions] : null,
+  }
+})
+await step('recallWrongKey', async () => {
+  try { await createBot({ ...rcfg, key: 'not-the-key' }, { meetingUrl: 'https://zoom.us/j/1' }); return 'answered' } catch (e) { return rstatus(e) }
+})
+await step('recallNotAMeeting', async () => {
+  try { await createBot(rcfg, { meetingUrl: 'https://example.com/meeting' }); return 'answered' } catch (e) { return rstatus(e) }
+})
+await step('recallRemove', async () => {
+  const waiting = await createBot(rcfg, { meetingUrl: 'https://acme.zoom.us/j/42' })
+  await removeBot(rcfg, waiting.id, false)
+  let after: unknown = 'still there'
+  try { await getBot(rcfg, waiting.id) } catch (e) { after = rstatus(e) }
+  const inCall = await createBot(rcfg, { meetingUrl: 'https://teams.live.com/meet/9387492' })
+  await moveBot(inCall.id, { code: 'in_call_recording' })
+  await removeBot(rcfg, inCall.id, true)
+  return { unscheduled: after, left: stateOf(await getBot(rcfg, inCall.id)).status }
 })
 await step('imagesConfig', async () => [
   imagesConfig({}),
@@ -338,6 +383,26 @@ if (out.none !== undefined) {
   )
   chk(out.chatWrongKey === 401, 'a chat key that is not the lane’s is refused 401, in OpenAI’s words', `answered ${JSON.stringify(out.chatWrongKey)}`)
   chk(same(out.chatFailure, [429, true]), 'a staged chat failure answers the requests it was asked to, and then ChatGPT answers again', `answered ${JSON.stringify(out.chatFailure)}`)
+  // The AI Notetaker's meeting bot (`commit-log/log-39863ff-1`): the product's own client against the stub.
+  const rc = out.recall ?? {}
+  chk(
+    same(rc.asked, ['https://meet.google.com/abc-defg-hij', 'Rundesk Notetaker', '2031-01-02T10:00:00.000Z', true]),
+    'the meeting bot is made in Recall’s shape: the link, its name, when it joins and the meeting’s own captions asked for — and kept',
+    `asked ${JSON.stringify(rc.asked)}`,
+  )
+  chk(
+    same(rc.states, ['scheduled', 'recording', 'done']) &&
+      same(rc.parts, [{ speaker: 'Ana', text: 'Ship it Friday.' }, { speaker: 'Bo', text: 'Agreed.' }]),
+    'its life is read as the notetaker says it — scheduled, recording, done — and once done its transcript is downloaded as who said what',
+    `answered ${JSON.stringify({ states: rc.states, parts: rc.parts })}`,
+  )
+  chk(out.recallWrongKey === 401, 'a bot key that is not the lane’s is refused 401, in Recall’s words', `answered ${JSON.stringify(out.recallWrongKey)}`)
+  chk(out.recallNotAMeeting === 400, 'and a link that is no Zoom, Meet or Teams meeting is refused 400', `answered ${JSON.stringify(out.recallNotAMeeting)}`)
+  chk(
+    same(out.recallRemove, { unscheduled: 404, left: 'processing' }),
+    'a bot not yet joined is unscheduled and gone; one in its call is asked to leave, and its call ends',
+    `answered ${JSON.stringify(out.recallRemove)}`,
+  )
   // A map's two services (`ledger-rows/row-777`): the product's geocoder client and the tiles, against the stub.
   const g = out.geocode ?? {}
   chk(
@@ -387,6 +452,12 @@ if (process.argv.includes('--mutate')) {
     ['the tokens are never counted', "    if (body.stream_options?.include_usage === true) send([], { usage })\n", ''],
     ['a staged chat failure never runs out', '      chatFailure.left -= 1\n', ''],
     ['a chat request is answered and not kept', '    chatRequests.push({\n', '    ;({\n'],
+    ['any recall key is taken', "if ((req.headers.authorization ?? '') !== `Token ${RECALL_KEY}`) {", "if ((req.headers.authorization ?? '') === 'never') {"],
+    ['any link is a meeting', "      if (!MEETING_LINK.test(meetingUrl)) return json(res, 400", "      if (false) return json(res, 400"],
+    ['a done bot carries no transcript', '  recordings: b.done\n', '  recordings: false\n'],
+    ['an unscheduled bot is still there', '      bot.deleted = true\n', ''],
+    ['leaving never ends the call', "      bot.statusChanges.push({ code: 'call_ended', sub_code: 'bot_received_leave_call', created_at: new Date().toISOString() })\n", ''],
+    ['a bot is made and its ask not kept', 'statusChanges: [], done: false, transcript: [], asked: body,', 'statusChanges: [], done: false, transcript: [], asked: null,'],
   ]
   console.log('\n▶ and each mutation of the stub reddens a case')
   for (const [label, from, to] of MUTATIONS) {

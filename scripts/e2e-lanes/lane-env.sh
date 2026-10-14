@@ -710,6 +710,11 @@ lane_media_env () {
   # No Gemini key, so the picker's "not set up" row is drawn and refused on every lane, as in CI.
   export CHATGPT_API_URL="http://127.0.0.1:$(lane_media_port "$1")/openai/v1"
   export CHATGPT_API_KEY="lane-chatgpt"
+  # And the AI Notetaker's meeting bot (`commit-log/log-39863ff-1`): Recall.ai's shapes, from the same
+  # stub. It looks every two seconds rather than every minute, so a suite sees a bot move as it moves.
+  export RECALL_API_URL="http://127.0.0.1:$(lane_media_port "$1")/recall"
+  export RECALL_API_KEY="lane-recall"
+  export NOTETAKER_POLL_SECONDS=2
   # And a map's geocoder and tiles (`ledger-rows/row-777`): OpenStreetMap's shapes, from the same stub.
   export GEOCODER_URL="http://127.0.0.1:$(lane_media_port "$1")/geocode"
   export MAP_TILES_URL="http://127.0.0.1:$(lane_media_port "$1")/tiles/{z}/{x}/{y}.svg"

@@ -165,6 +165,9 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   'import_completed',
   'import_failed',
   'export_ready',
+  // 0200 — the AI Notetaker's notes of a meeting it joined, ready
+  // (`commit-log/log-39863ff-1`): ClickUp's land in the Inbox once it ends.
+  'meeting_notes_ready',
 ])
 
 export const viewTypeEnum = pgEnum('view_type', [

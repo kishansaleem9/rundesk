@@ -20,8 +20,8 @@ export const meetings = pgTable(
     title:        text('title').notNull(),
     startsAt:     timestamp('starts_at', { withTimezone: true }),
     endsAt:       timestamp('ends_at', { withTimezone: true }),
-    /** 'manual' covers a meeting held elsewhere and written up here. */
-    provider:     text('provider').$type<'zoom' | 'google_meet' | 'manual'>().notNull().default('manual'),
+    /** 'manual' covers a meeting held elsewhere and written up here; 'teams' a Teams meeting the AI Notetaker joined. */
+    provider:     text('provider').$type<'zoom' | 'google_meet' | 'teams' | 'manual'>().notNull().default('manual'),
     joinUrl:      text('join_url'),
     recordingUrl: text('recording_url'),
     /*

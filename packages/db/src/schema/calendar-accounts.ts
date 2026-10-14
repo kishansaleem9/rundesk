@@ -57,6 +57,11 @@ export const userCalendarAccounts = pgTable(
     isDefault:       boolean('is_default').notNull().default(false),
     /** Frame `13:50` — "Busy calendars": read to decide when you are busy. */
     countsAsBusy:    boolean('counts_as_busy').notNull().default(true),
+    /**
+     * ClickUp's AI Notetaker "Join all meetings for" (`commit-log/log-39863ff-1`):
+     * the notetaker joins every meeting with a video link on this calendar.
+     */
+    notetakerJoins:  boolean('notetaker_joins').notNull().default(false),
     createdAt:       timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt:       timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -100,5 +105,6 @@ export const PUBLIC_CALENDAR_ACCOUNT_COLUMNS = {
   status: userCalendarAccounts.status,
   isDefault: userCalendarAccounts.isDefault,
   countsAsBusy: userCalendarAccounts.countsAsBusy,
+  notetakerJoins: userCalendarAccounts.notetakerJoins,
   createdAt: userCalendarAccounts.createdAt,
 } as const

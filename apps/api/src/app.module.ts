@@ -19,6 +19,7 @@ import { ContainerMembersModule } from './modules/container-members/container-me
 import { ListsModule } from './modules/lists/lists.module'
 import { TasksModule } from './modules/tasks/tasks.module'
 import { MeetingsModule } from './modules/meetings/meetings.module'
+import { NotetakerModule } from './modules/notetaker/notetaker.module'
 import { BookmarksModule } from './modules/bookmarks/bookmarks.module'
 import { CallsModule } from './modules/calls/calls.module'
 import { LabelsModule } from './modules/labels/labels.module'
@@ -121,6 +122,7 @@ import { TenantDatabasesModule } from './modules/tenant-databases/tenant-databas
     ListsModule,
     TasksModule,
     MeetingsModule,
+    NotetakerModule,
     BookmarksModule,
     CallsModule,
     LabelsModule,

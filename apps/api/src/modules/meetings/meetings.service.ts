@@ -371,7 +371,7 @@ export class MeetingsService {
       title: string
       startsAt?: string | null
       endsAt?: string | null
-      provider?: 'zoom' | 'google_meet' | 'manual'
+      provider?: 'zoom' | 'google_meet' | 'teams' | 'manual'
       joinUrl?: string | null
       recordingUrl?: string | null
       notes?: string | null

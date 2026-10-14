@@ -1394,6 +1394,20 @@
       "when": 1900000143052,
       "tag": "0198_task_labels_moved",
       "breakpoints": true
+    },
+    {
+      "idx": 199,
+      "version": "7",
+      "when": 1900000144052,
+      "tag": "0199_ai_notetaker",
+      "breakpoints": true
+    },
+    {
+      "idx": 200,
+      "version": "7",
+      "when": 1900000145052,
+      "tag": "0200_meeting_notes_notification",
+      "breakpoints": true
     }
   ]
 }
