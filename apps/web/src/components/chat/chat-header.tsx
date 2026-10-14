@@ -1,4 +1,4 @@
-import { Archive, Bookmark, Check, FileText, Hash, Info, LogOut, Link as LinkIcon, MailOpen, MoreHorizontal, Pencil, Pin, Search, Share2, Star, UserPlus, Users, X } from 'lucide-react'
+import { Archive, Bookmark, Check, FileText, Hash, Info, LogOut, Link as LinkIcon, MailOpen, MoreHorizontal, Pencil, Pin, Search, Share2, Star, Trash2, UserPlus, Users, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,6 +41,7 @@ export function ChatHeader({
   onRemoveMember,
   onEditChannel,
   onArchiveChannel,
+  onDeleteChannel,
   onShareChannel,
 }: {
   /** §2.8 — the SyncUp control, rendered by the page that owns the call. */
@@ -69,6 +70,8 @@ export function ChatHeader({
   onRemoveMember?: (userId: string) => void
   onEditChannel?: () => void
   onArchiveChannel?: () => void
+  /** Delete the channel for good — its creator's or a workspace admin's, as Archive is (`found-14-oct/chat-channel-cannot-be-deleted`). */
+  onDeleteChannel?: () => void
   onShareChannel?: () => void
 }) {
   // The channel creator may remove other members / edit / archive (backend also
@@ -253,6 +256,7 @@ export function ChatHeader({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
+              data-testid="chat-channel-menu"
               title={t('chat.more')}
               disabled={!channel}
               className="h-8 w-8 rounded-md flex items-center justify-center transition-colors text-muted-foreground hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] disabled:opacity-50 disabled:cursor-not-allowed"
@@ -296,7 +300,7 @@ export function ChatHeader({
                 ))}
               </>
             )}
-            {canManageChannel && (onEditChannel || onArchiveChannel) && (
+            {canManageChannel && (onEditChannel || onArchiveChannel || onDeleteChannel) && (
               <>
                 <DropdownMenuSeparator />
                 {onEditChannel && (
@@ -309,6 +313,12 @@ export function ChatHeader({
                   <DropdownMenuItem onClick={onArchiveChannel}>
                     <Archive className="h-4 w-4" />
                     {t('chat.archiveChannel')}
+                  </DropdownMenuItem>
+                )}
+                {onDeleteChannel && (
+                  <DropdownMenuItem destructive data-testid="chat-delete-channel" onClick={onDeleteChannel}>
+                    <Trash2 className="h-4 w-4" />
+                    {t('chat.deleteChannel')}
                   </DropdownMenuItem>
                 )}
               </>

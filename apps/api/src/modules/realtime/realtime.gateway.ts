@@ -92,6 +92,8 @@ export type RealtimeEvent =
   | { type: 'export.ready'; workspaceId: string; exportId: string }
   // Chat events
   | { type: 'chat.channel.created'; workspaceId: string; channel: unknown }
+  // A channel deleted for good: it leaves its readers' lists (`found-14-oct/chat-channel-cannot-be-deleted`).
+  | { type: 'chat.channel.deleted'; workspaceId: string; channelId: string }
   | { type: 'chat.channel.members.added'; workspaceId: string; channelId: string }
   | { type: 'chat.channel.members.updated'; workspaceId: string; channelId: string }
   | { type: 'chat.message.created'; workspaceId: string; channelId: string; message: unknown }

@@ -2275,6 +2275,12 @@ jobs:
         timeout-minutes: 15
         run: node test/e2e/clickup-workspace-import.mjs --api 3011 --dist apps/web/dist
 
+      # `found-14-oct/chat-channel-cannot-be-deleted` and `found-14-oct/space-channel-views-unbuilt` —
+      # a channel deleted for good by whoever may archive it, and a Space's channel's Views tab.
+      - name: A channel is deleted for good, and a Space's channel has its views
+        timeout-minutes: 10
+        run: node test/e2e/chat-channel-delete-and-views.mjs --api 3011 --dist apps/web/dist
+
       # `ledger-rows/row-2294` — the AI acts in the asker's own connected apps, as
       # ClickUp's does: an event in their calendar, inviting people; a draft in a
       # mailbox they linked; a search of their own Drive, Gmail and SharePoint —

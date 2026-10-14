@@ -19,6 +19,7 @@ import { ChatComposer, ThreadReplyComposer } from '../components/chat/chat-compo
 import { EmojiPicker } from '../components/emoji/emoji-picker'
 import { LoadOlder } from '../components/load-older'
 import { CallCard } from '../components/call/call-card'
+import { SpaceChannelViews } from '../components/chat/space-channel-views'
 import { useSkillCommands } from '../lib/skills-api'
 import {
   formatDateDivider,
@@ -377,6 +378,8 @@ export function ChatPage() {
   // Which face of a DM is showing. Reset when the conversation changes, or you
   // land on someone else's shared work while thinking you switched to a chat.
   const [dmTab, setDmTab] = useState<'chat' | 'calendar' | 'tasks'>('chat')
+  // A Space's channel has its Views tab beside its Chat (`found-14-oct/space-channel-views-unbuilt`).
+  const [channelTab, setChannelTab] = useState<'chat' | 'views'>('chat')
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [editingBody, setEditingBody] = useState('')
   // Edit history (§6.3): the message whose prior versions are being viewed.
@@ -599,6 +602,9 @@ export function ChatPage() {
   // rather than unmounted, so stepping over to "what are we both on?" and back
   // does not throw away an unsent draft or the scroll position in a long DM.
   const dmSharedOpen = Boolean(selectedChannel?.isDm && selectedChannel.dmPeerId && dmTab !== 'chat')
+  const spaceViewsOpen = Boolean(selectedChannel && !selectedChannel.isDm && selectedChannel.spaceId && channelTab === 'views')
+  // What the stream gives way to: a DM's shared calendar or tasks, or a Space channel's views.
+  const streamHidden = dmSharedOpen || spaceViewsOpen
   const channelMembersQuery = useQuery({
     queryKey: ['chat-channel-members', selectedId],
     queryFn: () => api<Array<{ userId: string; displayName: string; email: string }>>(`/chat/channels/${selectedId}/members`),
@@ -904,6 +910,13 @@ export function ChatPage() {
         qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] })
         qc.invalidateQueries({ queryKey: ['chat-archived-channels', workspaceId] })
       }
+      // A channel deleted for good leaves the lists, and the conversation open on it closes.
+      if (event.type === 'chat.channel.deleted' && event.channelId) {
+        qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] })
+        qc.invalidateQueries({ queryKey: ['chat-archived-channels', workspaceId] })
+        // The open channel is the address's: read it now, as this handler outlives the render that made it.
+        if (new URLSearchParams(window.location.search).get('channel') === event.channelId) setSelectedId(null)
+      }
       if (event.type === 'chat.channel.members.updated' && event.channelId) {
         qc.invalidateQueries({ queryKey: ['chat-channel-members', event.channelId] })
       }
@@ -1171,6 +1184,17 @@ export function ChatPage() {
       if (archived && selectedId === channelId) setSelectedId(null)
     },
     onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotArchiveChannel')),
+  })
+
+  // Delete a channel for good (`found-14-oct/chat-channel-cannot-be-deleted`): its creator's or an admin's, asked first.
+  const deleteChannelMutation = useMutation({
+    mutationFn: (channelId: string) => api<{ ok: boolean }>(`/chat/channels/${channelId}`, { method: 'DELETE' }),
+    onSuccess: async (_, channelId) => {
+      if (selectedId === channelId) setSelectedId(null)
+      await qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] })
+      toast.success(t('chat.channelDeleted'))
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotDeleteChannel')),
   })
 
   const createDmMutation = useMutation({
@@ -1598,7 +1622,10 @@ export function ChatPage() {
   }
 
 
-  useEffect(() => { setDmTab('chat') }, [selectedId])
+  useEffect(() => {
+    setDmTab('chat')
+    setChannelTab('chat')
+  }, [selectedId])
 
   const channelLabel = selectedChannel?.isDm
     ? selectedChannel.dmLabel ?? selectedChannel.dmPeerName ?? t('chat.dm')
@@ -1746,6 +1773,13 @@ export function ChatPage() {
               ? () => setChannelArchivedMutation.mutate({ channelId: selectedChannel.id, archived: true })
               : undefined
           }
+          onDeleteChannel={
+            selectedChannel && !selectedChannel.isDm
+              ? () => {
+                  if (window.confirm(t('chat.deleteChannelConfirm', { name: selectedChannel.name ?? '' }))) deleteChannelMutation.mutate(selectedChannel.id)
+                }
+              : undefined
+          }
           onShareChannel={
             selectedChannel && !selectedChannel.isDm ? () => setShareChannelOpen(true) : undefined
           }
@@ -1774,6 +1808,30 @@ export function ChatPage() {
             ))}
           </div>
         )}
+
+        {selectedChannel && !selectedChannel.isDm && selectedChannel.spaceId && (
+          <div className="flex items-center gap-1 border-b border-border px-4 py-1.5" data-testid="chat-channel-tabs">
+            {(['chat', 'views'] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                data-testid={`chat-channel-tab-${tab}`}
+                aria-pressed={channelTab === tab}
+                onClick={() => setChannelTab(tab)}
+                className={cn(
+                  'rounded-md px-2.5 py-1 text-[13px] transition-colors',
+                  channelTab === tab
+                    ? 'bg-accent/15 font-medium text-foreground'
+                    : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+                )}
+              >
+                {t(tab === 'chat' ? 'chat.dmTabChat' : 'chat.tabViews')}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {spaceViewsOpen && selectedChannel?.spaceId && <SpaceChannelViews workspaceId={workspaceId} spaceId={selectedChannel.spaceId} />}
 
         {dmSharedOpen && selectedChannel?.dmPeerId && dmTab !== 'chat' && (
           <DmSharedPanel
@@ -2328,7 +2386,7 @@ export function ChatPage() {
 
         <div
           ref={scrollRef}
-          className={cn('flex-1 overflow-y-auto px-5 py-4', dmSharedOpen && 'hidden')}
+          className={cn('flex-1 overflow-y-auto px-5 py-4', streamHidden && 'hidden')}
           // The browser's own scroll anchoring would ALSO shift this when older
           // messages land above; the layout effect that keeps the reader in
           // place is the one rule, so the browser's is switched off.
@@ -3238,7 +3296,7 @@ export function ChatPage() {
           )}
         </div>
 
-        {seenByNames.length > 0 && !dmSharedOpen && (
+        {seenByNames.length > 0 && !streamHidden && (
           <div className="px-5 pb-1 text-right text-[10px] text-muted-foreground">
             {t('chat.seenBy')}{' '}
             {seenByNames.length <= 3
@@ -3249,14 +3307,14 @@ export function ChatPage() {
 
         {/* A view-only visitor can read the conversation but not write into it,
             so say why the box is dead rather than leaving it mysteriously inert. */}
-        {selectedChannel?.accessLevel === 'view' && !dmSharedOpen && (
+        {selectedChannel?.accessLevel === 'view' && !streamHidden && (
           <div className="mx-4 mb-2 flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-700 dark:text-amber-300">
             <Lock className="h-3.5 w-3.5 shrink-0" />
             <span>{t('share.viewOnlyChannel')}</span>
           </div>
         )}
 
-        {mentionedNonMembers.length > 0 && selectedChannel && !dmSharedOpen && (
+        {mentionedNonMembers.length > 0 && selectedChannel && !streamHidden && (
           <div className="mx-4 mb-2 flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-700 dark:text-amber-300">
             <UserPlus className="h-3.5 w-3.5 shrink-0" />
             <span className="flex-1">
@@ -3278,7 +3336,7 @@ export function ChatPage() {
           </div>
         )}
 
-        {actionItem && !dmSharedOpen && (
+        {actionItem && !streamHidden && (
           <div className="mx-4 mb-2 flex items-center gap-2 rounded-md border border-violet-500/30 bg-violet-500/5 px-3 py-1.5 text-[12px] text-violet-700 dark:text-violet-300">
             <ListTodo className="h-3.5 w-3.5 shrink-0" />
             <span className="flex-1">
@@ -3293,7 +3351,7 @@ export function ChatPage() {
           </div>
         )}
 
-        <div className={cn(dmSharedOpen && 'hidden')}>
+        <div className={cn(streamHidden && 'hidden')} data-testid="chat-composer">
         <ChatComposer
             workspaceId={workspaceId}
           skillCommands={skillCommands}

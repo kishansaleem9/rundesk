@@ -142,6 +142,11 @@ export class ChatController {
     return this.chat.setChannelArchived(channelId, user.id, false)
   }
 
+  @Delete('chat/channels/:channelId')
+  deleteChannel(@Param('channelId') channelId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.deleteChannel(channelId, user.id)
+  }
+
   @Post('workspaces/:workspaceId/chat/dms')
   @UseGuards(WorkspaceMemberGuard)
   createDm(

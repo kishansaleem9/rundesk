@@ -26,6 +26,7 @@ import {
   // §2.8 gap 9 — a message can be a call card, and a card renders live state.
   calls,
   callParticipants,
+  callRecordings,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -989,6 +990,41 @@ export class ChatService {
       channel: row,
     })
     return row
+  }
+
+  /**
+   * DELETE A CHANNEL FOR GOOD (`found-14-oct/chat-channel-cannot-be-deleted`), as ClickUp's Chat is deleted —
+   * its creator's "Delete Chat", and its API's delete of any channel. Who may archive it may delete it: its
+   * creator or a workspace admin. A direct message is not deleted, as it is not archived. Its messages and
+   * everything on them go with it (the foreign keys' cascade), its calls too; the files they kept are taken
+   * from the store, and its members are told, so the channel leaves their lists.
+   */
+  async deleteChannel(channelId: string, userId: string) {
+    const channel = await this.assertChannelAccess(channelId, userId)
+    if (channel.isDm) throw new BadRequestException('Direct messages cannot be deleted')
+    if (!(await this.canModerateChannel(channel, userId))) {
+      throw new ForbiddenException('Only the channel creator or a workspace admin can delete this channel')
+    }
+    const files = await this.db
+      .select({ key: chatMessageAttachments.storageKey })
+      .from(chatMessageAttachments)
+      .where(eq(chatMessageAttachments.channelId, channelId))
+    const recordings = await this.db
+      .select({ key: callRecordings.storageKey })
+      .from(callRecordings)
+      .innerJoin(calls, eq(calls.id, callRecordings.callId))
+      .where(eq(calls.channelId, channelId))
+    const recorded = await this.db
+      .select({ key: calls.recordingStorageKey })
+      .from(calls)
+      .where(and(eq(calls.channelId, channelId), isNotNull(calls.recordingStorageKey)))
+    // Told while its readers can still be read: the deleted channel has none.
+    await this.emitToChannel(channel, { type: 'chat.channel.deleted', workspaceId: channel.workspaceId, channelId })
+    await this.db.delete(chatChannels).where(eq(chatChannels.id, channelId))
+    if (this.r2.configured) {
+      for (const { key } of [...files, ...recordings, ...recorded]) if (key) await this.r2.deleteObject(key).catch(() => undefined)
+    }
+    return { ok: true }
   }
 
   /**
