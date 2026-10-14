@@ -103,6 +103,15 @@ export const workspaces = pgTable('workspaces', {
   /** In cents, so a rate never rounds through a float on its way to a total. */
   aiHourlyRateCents:    integer('ai_hourly_rate_cents').notNull().default(5000),
   /**
+   * MINUTES OF HUMAN WORK ONE ACTION OF A SUPER AGENT IS TAKEN TO REPLACE — the
+   * per-action time benchmark ClickUp's Agent Performance table multiplies an
+   * agent's completed actions by (`found-14-oct/agent-performance-carried-and-unbuilt`,
+   * migration 0193). Its own number, not `ai_minutes_saved_per_run`: a run is
+   * one call to the model, an action one thing an agent did, and the value
+   * panel says why the two are never counted as each other.
+   */
+  aiMinutesSavedPerAgentAction: integer('ai_minutes_saved_per_agent_action').notNull().default(6),
+  /**
    * WHO MAY OPEN THE TEAMS HUB'S ANALYTICS — ClickUp's two choices: everyone
    * but guests (`members`), or the workspace's owners and admins (`admins`),
    * set on the Analytics page by those who turn the ClickApp on
@@ -116,6 +125,7 @@ export const workspaces = pgTable('workspaces', {
   // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
   check('workspaces_ai_minutes_saved_sane', sql`${t.aiMinutesSavedPerRun} >= 0 AND ${t.aiMinutesSavedPerRun} <= 480`),
   check('workspaces_ai_hourly_rate_sane', sql`${t.aiHourlyRateCents} >= 0 AND ${t.aiHourlyRateCents} <= 10000000`),
+  check('workspaces_ai_agent_minutes_sane', sql`${t.aiMinutesSavedPerAgentAction} >= 0 AND ${t.aiMinutesSavedPerAgentAction} <= 480`),
   // Made by 0177.
   check('workspaces_analytics_audience_known', sql`${t.analyticsAudience} in ('members', 'admins')`),
 ])

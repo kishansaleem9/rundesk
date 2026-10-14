@@ -121,13 +121,17 @@ export class AiController {
     })
   }
 
-  /** §V2-11 — "Edit benchmark", frame `19:00`. Admin-only. */
+  /**
+   * §V2-11 — "Edit benchmark", frame `19:00`. Admin-only. The value panel's
+   * minutes per run, the hourly rate, and My Agent Performance's minutes per
+   * agent action (`found-14-oct/agent-performance-carried-and-unbuilt`).
+   */
   @Patch('value/benchmark')
-  @ApiOperation({ summary: 'Set the minutes-saved-per-run and hourly rate the value panel reasons from' })
+  @ApiOperation({ summary: 'Set the minutes saved per run and per agent action, and the hourly rate, the value panels reason from' })
   updateBenchmark(
     @CurrentUser() user: any,
     @Query('workspaceId') workspaceId: string,
-    @Body() body: { minutesSavedPerRun?: number; hourlyRateCents?: number },
+    @Body() body: { minutesSavedPerRun?: number; hourlyRateCents?: number; minutesSavedPerAgentAction?: number },
   ) {
     return this.ai.updateValueBenchmark(workspaceId, { id: user.id, role: user.role }, body)
   }

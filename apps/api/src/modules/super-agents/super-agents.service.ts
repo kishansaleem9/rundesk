@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
-import { and, desc, eq, exists, gte, inArray, lte, or, sql, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, exists, gte, inArray, lte, or, sql, type SQL } from 'drizzle-orm'
 import {
   lists,
   projects,
@@ -11,6 +11,7 @@ import {
   superAgents,
   users,
   workspaceMembers,
+  workspaces,
   type SuperAgentKnowledge,
   type SuperAgentTriggers,
 } from '@rundesk/db'
@@ -18,6 +19,8 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
 import { isUuid } from '../../common/validation/uuid'
+import { creditMonth } from '../ai/credits'
+import { summariseAgent } from '../ai/ai-value'
 
 /**
  * The tools a Super Agent may be given — its Skills — by the command
@@ -323,6 +326,59 @@ export class SuperAgentsService {
    * first, each with its time, its agent, what started it, who did, where, and
    * how it ended — filtered by status, "My agents", one agent, and dates.
    */
+  /**
+   * MY AGENT PERFORMANCE, as ClickUp's Credits tab draws it
+   * (`found-14-oct/agent-performance-carried-and-unbuilt`): this month, a row
+   * per Super Agent — its runs, the actions it carried out, the time they
+   * saved at the workspace's minutes per action, what that time was worth at
+   * its hourly rate, what the agent cost in credits (its own runs' calls,
+   * `ai_usage.agent_run_id`), and the return. Workspace admins read every
+   * agent of the workspace; a member, the ones they made; a guest, none.
+   */
+  async performance(workspaceId: string, actor: Actor, now: Date = new Date()) {
+    const { isManager } = await this.assertMayUseAgents(workspaceId, actor.id)
+    const since = creditMonth(now).start.toISOString()
+    const [ws] = await this.db
+      .select({ perAction: workspaces.aiMinutesSavedPerAgentAction, rate: workspaces.aiHourlyRateCents })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1)
+    if (!ws) throw new NotFoundException('Workspace not found')
+    const benchmark = { minutesSavedPerAction: ws.perAction, hourlyRateCents: ws.rate }
+    const rows = await this.db
+      .select({
+        id: superAgents.id,
+        name: superAgents.name,
+        avatarColor: superAgents.avatarColor,
+        isActive: superAgents.isActive,
+        createdById: superAgents.createdById,
+        createdByName: users.displayName,
+        // A run refused before it began (switched off, not started by that) did nothing and is not counted.
+        runs: sql<number>`(select count(*)::int from super_agent_runs r where r.agent_id = ${superAgents.id} and r.status <> 'skipped' and r.started_at >= ${since}::timestamptz)`,
+        actions: sql<number>`(select coalesce(sum(r.actions_completed), 0)::int from super_agent_runs r where r.agent_id = ${superAgents.id} and r.started_at >= ${since}::timestamptz)`,
+        credits: sql<number>`(select coalesce(sum(u.credits), 0)::int from ai_usage u join super_agent_runs r on r.id = u.agent_run_id where r.agent_id = ${superAgents.id} and u.created_at >= ${since}::timestamptz)`,
+      })
+      .from(superAgents)
+      .innerJoin(users, eq(users.id, superAgents.createdById))
+      .where(and(eq(superAgents.workspaceId, workspaceId), isManager ? undefined : eq(superAgents.createdById, actor.id)))
+      .orderBy(asc(superAgents.name))
+    return {
+      scope: isManager ? ('all' as const) : ('mine' as const),
+      monthStart: since,
+      benchmark,
+      mayEditBenchmark: isManager,
+      agents: rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        avatarColor: r.avatarColor,
+        isActive: r.isActive,
+        createdBy: { id: r.createdById, name: r.createdByName },
+        runs: r.runs,
+        ...summariseAgent(r.actions, r.credits, benchmark),
+      })),
+    }
+  }
+
   async activity(
     workspaceId: string,
     actor: Actor,

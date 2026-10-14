@@ -141,7 +141,16 @@ import { SearchService } from '../search/search.service'
 import { ArtifactsService, parseDeck, type DeckInput } from './artifacts.service'
 import { DECK_TOOLS, DECK_TOOL_INSTRUCTION, DECK_TOOL_NAME } from './ai-artifact-tools'
 
-export type AiCtx = { userId?: string; workspaceId?: string }
+export type AiCtx = {
+  userId?: string
+  workspaceId?: string
+  /**
+   * The Super Agent run a call is made in, written beside its usage
+   * (`ai_usage.agent_run_id`): the agent's cost is its own, not the cost of
+   * whoever started it (`found-14-oct/agent-performance-carried-and-unbuilt`).
+   */
+  agentRunId?: string
+}
 
 /**
  * §V2-11 — which `ai_usage` rows the hourly cap counts, now that failures land
@@ -1274,6 +1283,7 @@ export class AiService {
         status: 'succeeded',
         // What it cost in AI credits (`creditsFor`): what the month's credits are spent by.
         credits: creditsFor(model, inputTokens, outputTokens),
+        agentRunId: ctx.agentRunId ?? null,
       })
     } catch {
       // Usage tracking must never break an AI response.
@@ -1311,6 +1321,7 @@ export class AiService {
         status: 'failed',
         errorCode,
         errorMessage: (errorMessage ?? '').slice(0, 500) || null,
+        agentRunId: ctx.agentRunId ?? null,
       })
     } catch {
       // Recording a failure must never become a second failure.
@@ -1466,7 +1477,7 @@ export class AiService {
   async updateValueBenchmark(
     workspaceId: string,
     actor: { id: string; role?: string },
-    patch: { minutesSavedPerRun?: number; hourlyRateCents?: number },
+    patch: { minutesSavedPerRun?: number; hourlyRateCents?: number; minutesSavedPerAgentAction?: number },
   ) {
     if (actor.role !== 'super_admin') {
       const [member] = await this.db
@@ -1485,13 +1496,15 @@ export class AiService {
     const set: Record<string, unknown> = { updatedAt: new Date() }
     if (patch.minutesSavedPerRun !== undefined) set.aiMinutesSavedPerRun = patch.minutesSavedPerRun
     if (patch.hourlyRateCents !== undefined) set.aiHourlyRateCents = patch.hourlyRateCents
+    // My Agent Performance's own benchmark, beside the same hourly rate (`found-14-oct/agent-performance-carried-and-unbuilt`).
+    if (patch.minutesSavedPerAgentAction !== undefined) set.aiMinutesSavedPerAgentAction = patch.minutesSavedPerAgentAction
     const [row] = await this.db
       .update(workspaces)
       .set(set)
       .where(eq(workspaces.id, workspaceId))
-      .returning({ minutes: workspaces.aiMinutesSavedPerRun, rate: workspaces.aiHourlyRateCents })
+      .returning({ minutes: workspaces.aiMinutesSavedPerRun, rate: workspaces.aiHourlyRateCents, perAction: workspaces.aiMinutesSavedPerAgentAction })
     if (!row) throw new NotFoundException('Workspace not found')
-    return { minutesSavedPerRun: row.minutes, hourlyRateCents: row.rate }
+    return { minutesSavedPerRun: row.minutes, hourlyRateCents: row.rate, minutesSavedPerAgentAction: row.perAction }
   }
 
   /**

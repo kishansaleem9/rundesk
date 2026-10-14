@@ -2,6 +2,7 @@ import { pgTable, text, timestamp, uuid, integer, index, uniqueIndex, check } fr
 import { relations, sql } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { users } from './users'
+import { superAgentRuns } from './super-agents'
 
 /**
  * One row per Claude API call (Plan §7.15). Token counts drive per-user and
@@ -47,6 +48,13 @@ export const aiUsage = pgTable(
      * failure: a call that never reached the model used no credits.
      */
     credits:      integer('credits').notNull().default(0),
+    /**
+     * THE SUPER AGENT RUN THE CALL WAS MADE IN, if any (migration 0193). A run
+     * acts for the person who started it, so `user_id` names them; this names
+     * the agent's run, which is how an agent's own cost is told from theirs
+     * (ClickUp's Agent Performance; `found-14-oct/agent-performance-carried-and-unbuilt`).
+     */
+    agentRunId:   uuid('agent_run_id').references(() => superAgentRuns.id, { onDelete: 'set null' }),
     createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -55,6 +63,8 @@ export const aiUsage = pgTable(
     // The activity log's default read is "this workspace, newest first, of this
     // status"; without the status leg it is a filter applied after the scan.
     index('idx_ai_usage_workspace_status').on(t.workspaceId, t.status, t.createdAt),
+    // An agent's cost is read run by run.
+    index('idx_ai_usage_agent_run').on(t.agentRunId),
     // Made by 0150. Declared here as well: a database built by
     // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
     check('ai_usage_status_check', sql`${t.status} IN ('succeeded', 'failed')`),

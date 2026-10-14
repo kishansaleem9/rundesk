@@ -5,12 +5,14 @@
 # ClickUp keeps Email from guests; here a guest who may comment sends it.
 #
 # Re-aimed 12 October: a refusal now names the task's workspace too.
+# Re-aimed 14 October: the refusal is taken out rather than guarded by `&& false`, which TypeScript
+# reads as unreachable code and so drops the narrowing that makes `workspaceId` a string there.
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/comment-email.service.ts'
 s = io.open(p, encoding='utf-8').read()
 for a, b in [
     ("    if (membership?.role === 'guest') return { task, workspaceId, refusal: { reason: 'guest', message: COMMENT_EMAIL_REFUSALS.guest, status: 403 } }\n",
-     "    if (membership?.role === 'guest' && false) return { task, workspaceId, refusal: { reason: 'guest', message: COMMENT_EMAIL_REFUSALS.guest, status: 403 } } // BROKEN: guests send\n"),
+     ""),
 ]:
     assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
     s = s.replace(a, b)

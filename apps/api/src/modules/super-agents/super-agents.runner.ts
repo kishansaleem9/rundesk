@@ -282,6 +282,8 @@ export class SuperAgentsRunner implements OnModuleInit {
         input: job.input.slice(0, 4000),
       })
       .returning()
+    // What it carried out, kept with the run whether it then finishes or fails: work done is done.
+    let actionsCompleted = 0
     try {
       const memories = await this.db
         .select({ kind: superAgentMemories.kind, content: superAgentMemories.content })
@@ -305,13 +307,18 @@ export class SuperAgentsRunner implements OnModuleInit {
       const turn = await this.ai.agentTurn(
         agent.workspaceId,
         { system, message: job.input || 'Do what you are for.', tools: agent.skills, listIds: await this.knowledgeLists(agent) },
-        { workspaceId: agent.workspaceId, userId: actorId },
+        // Its calls are written down as this run's, so what the agent costs is its own.
+        { workspaceId: agent.workspaceId, userId: actorId, agentRunId: run.id },
       )
       // What it asked to do, done as the person it acts for, and said beside its answer.
       const done: string[] = []
       if (turn.plan?.actions.length) {
         const results = await this.ai.executeActions(turn.plan.actions, actorId)
-        for (const r of results.results) done.push(r.status === 'succeeded' || (r.status as string) === 'done' ? `✓ ${r.humanLabel}` : `✗ ${r.humanLabel} — ${r.reason ?? r.status}`)
+        for (const r of results.results) {
+          const carriedOut = r.status === 'succeeded' || (r.status as string) === 'done'
+          if (carriedOut) actionsCompleted += 1
+          done.push(carriedOut ? `✓ ${r.humanLabel}` : `✗ ${r.humanLabel} — ${r.reason ?? r.status}`)
+        }
       }
       // What it was asked for and could not do is said too, as the command assistant's plan says it.
       const skipped = (turn.plan?.warnings ?? []).map((w) => `⚠ ${w}`)
@@ -323,7 +330,7 @@ export class SuperAgentsRunner implements OnModuleInit {
       await this.remember(agent, job.trigger, answer)
       const [finished] = await this.db
         .update(superAgentRuns)
-        .set({ status: 'completed', output: answer.slice(0, 8000), finishedAt: new Date() })
+        .set({ status: 'completed', output: answer.slice(0, 8000), finishedAt: new Date(), actionsCompleted })
         .where(eq(superAgentRuns.id, run.id))
         .returning()
       return finished
@@ -332,7 +339,7 @@ export class SuperAgentsRunner implements OnModuleInit {
       this.log.warn(`Super Agent ${agent.id} failed: ${why}`)
       const [failed] = await this.db
         .update(superAgentRuns)
-        .set({ status: 'failed', error: why.slice(0, 500), finishedAt: new Date() })
+        .set({ status: 'failed', error: why.slice(0, 500), finishedAt: new Date(), actionsCompleted })
         .where(eq(superAgentRuns.id, run.id))
         .returning()
       return failed

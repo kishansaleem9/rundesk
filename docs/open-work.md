@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 569 items: 0 open · 0 partly fixed · 559 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 570 items: 1 open · 0 partly fixed · 559 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 14 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 105, each reproduced
+## Found by the triage, 5 October, and since — 106, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10627,6 +10627,22 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 - `ai_usage` shows the cap refusing the same admin on earlier days as well.
 
 *Closed, 13 October.* A lane with a model raises the cap to 100,000 calls an hour (`lane_model_env`, `lane-env.sh`). A lane's admin is not a person, and the refusal itself is held by `chat-trace.test.ts`. The runs it spoiled, re-run on it on lane 2 at `0e01918` (baseline 29 of 29): `bcd-29`, `bcd-31` and `bcd-33` 28 of 29 each, each reddening only the check it names.
+
+### `found-14-oct/agent-performance-carried-and-unbuilt` — **open** (feature, medium; found reconciling the video-2 ledger) · reproduced 14 October
+
+**My Agent Performance, the Credits tab's table of Super Agents, was carried to Super Agents and closed with them unbuilt**
+
+*Evidence, 14 October:*
+- Frame `19:00` draws the Credits Usage tab with **My Agent Performance** under the usage trend: Find agent · Edit benchmark, over a row per agent (`docs/clickup-research.md` §4).
+- `commit-log/log-3943965-1` closed the Credits tab on 12 October and sent My Agent Performance to `ledger-rows/row-852` ("it goes with them"). `row-852` took it ("built with them") and closed on 13 October with the hub, the profile and Activity, and no word of it.
+- Nothing in the tree draws it: no "Agent Performance" in `apps/web` or `apps/api`, nothing about agents in `ai-credits.tsx`, nothing about credits in `super-agents-hub.tsx`.
+- Nor could anything. An agent's model calls are kept in `ai_usage` under the person it acted for (`agent.run`, `super-agents.runner.ts`), with nothing naming the agent or its run, and a run keeps no count of what it did. Neither its cost nor its actions can be told from anybody else's.
+
+*To close:* ClickUp's Agent Performance table, as its help centre has it (through search excerpts, 14 October: "Track your Workspace's Brain AI usage", "How are AI Super Credits consumed?", "Super Agent privacy, security, and permissions"):
+- a row per Super Agent with the actions it completed, the time they saved (each action times a per-action time benchmark), the value created (that time at an hourly rate), its cost, its ROI (value ÷ cost, as a multiple) and who made it;
+- admins see every agent of the workspace, members the ones they made.
+
+Record each run's credits and completed actions; then draw the table with Find agent and Edit benchmark, with a suite and break patches.
 
 ## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 46
 

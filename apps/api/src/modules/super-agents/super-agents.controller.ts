@@ -54,6 +54,17 @@ export class WorkspaceSuperAgentsController {
     return this.agents.activity(workspaceId, user, { status, mine: mine === 'true', agentId, from, to })
   }
 
+  /**
+   * MY AGENT PERFORMANCE (`found-14-oct/agent-performance-carried-and-unbuilt`):
+   * this month's runs, actions, time saved, value, cost and return of each
+   * Super Agent — every one to a workspace admin, theirs to a member.
+   */
+  @Get('performance')
+  @ApiOperation({ summary: 'This month’s performance of each Super Agent: actions, time saved, value, cost and return' })
+  performance(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.agents.performance(workspaceId, user)
+  }
+
   @Post('build')
   @HttpCode(200)
   @ApiOperation({ summary: 'The builder: a drafted profile from a description, not saved' })

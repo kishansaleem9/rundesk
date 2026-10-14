@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { AiCreditsCard } from '../components/ai-credits'
+import { AgentPerformanceCard } from '../components/agent-performance'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Dialog, DialogContent, DialogHeader, DialogTitle, Input, Label, Popover, PopoverContent, PopoverTrigger, Switch, cn, toast } from '@rundesk/ui'
@@ -1537,8 +1538,9 @@ function AiUsageTab({ workspaceId }: { workspaceId: string }) {
 
   return (
     <div className="space-y-4">
-      {/* This month's AI credits, ClickUp's (`commit-log/log-3943965-1`). */}
+      {/* This month's AI credits, ClickUp's (`commit-log/log-3943965-1`), and its agents' share of them. */}
       <AiCreditsCard workspaceId={workspaceId} />
+      <AgentPerformanceCard workspaceId={workspaceId} />
       <Card className="p-4">
         <div className="flex items-start justify-between gap-4">
           <div>

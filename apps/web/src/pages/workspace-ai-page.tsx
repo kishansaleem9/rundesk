@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AiCreditsCard } from '../components/ai-credits'
+import { AgentPerformanceCard } from '../components/agent-performance'
 import { SuperAgentsHub } from '../components/super-agents/super-agents-hub'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery } from '@tanstack/react-query'
@@ -305,8 +306,10 @@ export function AiPage() {
         {activeTab === 'writing' && <WritingTab />}
         {activeTab === 'analytics' && <AiValuePanel workspaceId={workspaceId} />}
         {activeTab === 'credits' && (
-          <div className="h-full overflow-auto p-4">
+          <div className="h-full overflow-auto p-4 space-y-4">
             <AiCreditsCard workspaceId={workspaceId} />
+            {/* My Agent Performance, under the month's credits as ClickUp's Credits tab has it (frame `19:00`). */}
+            <AgentPerformanceCard workspaceId={workspaceId} />
           </div>
         )}
         {activeTab === 'artifacts' && <ArtifactsTab workspaceId={workspaceId} />}

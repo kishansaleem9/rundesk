@@ -4147,6 +4147,17 @@ jobs:
         timeout-minutes: 15
         run: node test/e2e/ai-credits.mjs --api 3011 --dist apps/web/dist
 
+      # My Agent Performance (`found-14-oct/agent-performance-carried-and-unbuilt`):
+      # a row per Super Agent on the Credits tab — its actions, the time they
+      # saved, their value, its cost and return — every agent to an admin, theirs
+      # to a member; with no model here the agent's run is refused and counts nothing.
+      - name: My Agent Performance, each Super Agent's month on the Credits tab
+        timeout-minutes: 15
+        run: node test/e2e/agent-performance.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # Video 1 acceptance walk — ONE session touching every shipped surface in
       # the order a person meets them. The per-feature suites own correctness;
       # this owns "they are all really there, together, in one running product",

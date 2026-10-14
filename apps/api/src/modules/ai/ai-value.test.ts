@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   MAX_HOURLY_RATE_CENTS,
+  MAX_MINUTES_PER_AGENT_ACTION,
   MAX_MINUTES_PER_RUN,
   formatMinutes,
+  summariseAgent,
   summariseValue,
   validateBenchmark,
 } from './ai-value'
@@ -107,4 +109,50 @@ test('a partial benchmark validates only what it carries', () => {
   // the rate also re-assert the minutes.
   assert.equal(validateBenchmark({ hourlyRateCents: 7500 }), null)
   assert.equal(validateBenchmark({}), null)
+})
+
+/*
+ * MY AGENT PERFORMANCE (`found-14-oct/agent-performance-carried-and-unbuilt`):
+ * a row per Super Agent — actions, time saved at the per-action benchmark, the
+ * value of that time, the cost of its credits, and the return.
+ */
+const AGENT_BENCH = { minutesSavedPerAction: 6, hourlyRateCents: 5000 }
+
+test('an agent’s row: actions × minutes, at the hourly rate, over what its credits cost', () => {
+  // 5 actions × 6 min = 30 min; ½ h × $50 = $25; 2,000 credits at a tenth of a cent = $2; $25 / $2 = 12.5×.
+  const a = summariseAgent(5, 2000, AGENT_BENCH)
+  assert.deepEqual(a, { actions: 5, credits: 2000, costUsd: 2, minutesSaved: 30, valueUsd: 25, roi: 12.5 })
+})
+
+test('an agent that cost nothing has no return, rather than ∞ or 0', () => {
+  assert.equal(summariseAgent(3, 0, AGENT_BENCH).roi, null)
+  assert.equal(summariseAgent(0, 0, AGENT_BENCH).roi, null)
+})
+
+test('an agent that did nothing saved nothing, and its return says so', () => {
+  const a = summariseAgent(0, 500, AGENT_BENCH)
+  assert.equal(a.minutesSaved, 0)
+  assert.equal(a.valueUsd, 0)
+  assert.equal(a.costUsd, 0.5)
+  assert.equal(a.roi, 0)
+})
+
+test('the return is reckoned from what the credits cost exactly, not from a cost rounded to a cent', () => {
+  // 3 credits are $0.003, shown as $0.00; one action is worth $5: 5 / 0.003 = 1666.7×, not a division by zero.
+  const a = summariseAgent(1, 3, AGENT_BENCH)
+  assert.equal(a.costUsd, 0)
+  assert.equal(a.roi, 1666.7)
+})
+
+test('nonsense in an agent’s counts or benchmark is nothing, never NaN', () => {
+  const a = summariseAgent(Number.NaN, -4, { minutesSavedPerAction: -1, hourlyRateCents: Number.NaN })
+  assert.deepEqual(a, { actions: 0, credits: 0, costUsd: 0, minutesSaved: 0, valueUsd: 0, roi: null })
+})
+
+test('the minutes per agent action are a whole number from 0 to the ceiling', () => {
+  assert.equal(validateBenchmark({ minutesSavedPerAgentAction: 0 }), null)
+  assert.equal(validateBenchmark({ minutesSavedPerAgentAction: MAX_MINUTES_PER_AGENT_ACTION }), null)
+  assert.match(validateBenchmark({ minutesSavedPerAgentAction: MAX_MINUTES_PER_AGENT_ACTION + 1 }) ?? '', /agent action/)
+  assert.match(validateBenchmark({ minutesSavedPerAgentAction: 2.5 }) ?? '', /whole number/)
+  assert.match(validateBenchmark({ minutesSavedPerAgentAction: -1 }) ?? '', /agent action/)
 })

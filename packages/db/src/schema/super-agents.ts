@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, jsonb, boolean, index, uniqueIndex, primaryKey, check } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, uuid, jsonb, boolean, integer, index, uniqueIndex, primaryKey, check } from 'drizzle-orm/pg-core'
 import { relations, sql } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { users } from './users'
@@ -116,6 +116,12 @@ export const superAgentRuns = pgTable(
     input:         text('input').notNull().default(''),
     output:        text('output'),
     error:         text('error'),
+    /**
+     * What it did: the actions of its turn that were carried out — a task
+     * made, a field set — and not the ones refused or skipped (migration 0193).
+     * ClickUp's Agent Performance counts an agent's work in these.
+     */
+    actionsCompleted: integer('actions_completed').notNull().default(0),
     startedAt:     timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
     finishedAt:    timestamp('finished_at', { withTimezone: true }),
   },
@@ -124,6 +130,7 @@ export const superAgentRuns = pgTable(
     byAgent:     index('super_agent_runs_agent_idx').on(t.agentId, t.startedAt),
     triggerCheck: check('super_agent_runs_trigger_check', sql`${t.trigger} IN ('mention', 'dm', 'assign', 'schedule', 'automation', 'manual')`),
     statusCheck:  check('super_agent_runs_status_check', sql`${t.status} IN ('running', 'completed', 'failed', 'skipped')`),
+    actionsCheck: check('super_agent_runs_actions_check', sql`${t.actionsCompleted} >= 0`),
   }),
 )
 

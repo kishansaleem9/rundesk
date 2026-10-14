@@ -750,7 +750,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Activity names the item and the checklist it went into (frame `02:47`) |
 | B | Attachment thumbnail hover actions; attachments header ~~view-toggle~~ **count** — closed by `task-attachments.mjs`, 13 checks. The frames moved this row: at `01:55` the magnifier / expand / `+` cluster is on the **Fields** header, and the Attachments header three rows below carries a disclosure triangle and the count `1` and nothing else. Building a toggle would have been building to a summary of the frame instead of to the frame |
 | B | Cover: Gallery / Upload / Link / Attachments / Remove, Reposition, Change cover |
-| P | Cover: Gallery "Custom" swatch built. Search tab still absent — the recorded reason was re-checked against the tree rather than trusted, and still holds: one grep finds no image provider anywhere |
+| B | Cover: Gallery "Custom" swatch built. Search tab still absent — the recorded reason was re-checked against the tree rather than trusted, and still holds: one grep finds no image provider anywhere. **THAT REASON WENT ON 8 OCTOBER**: the Search tab searches a stock-photo library as ClickUp's covers do ("Search images"), behind `UNSPLASH_ACCESS_KEY` and saying so where none is set (`cover-photo-search.mjs`, 8 checks; `commit-log/log-601eacc-1`, `ledger-rows/row-739`). Moved here on 14 October; it was not moved when it closed |
 | B | Task type "✦ Fill with AI" — closed by `task-ai-bar.mjs`, 18 checks (frame `03:25`, the foot of the Task Types popover) |
 | B | **Activity panel toggles to a rail** beside the fields; the tab drops out while it is up |
 | B | Task header **"Created `<date>`" chip** — the API returned it all along |
@@ -852,7 +852,7 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 | B | Appearance: **Grid size** — frame `14:05`'s first control, three swatches (Default · Large · XL) over *"Choose how large events and time slots appear in the grid"*. Closed by `planner-appearance-toggles.mjs`, 3 of its 20 checks, **re-run green at HEAD**. THIS ROW WAS STALE, not missing: the control, the API's validation and the reader all exist. `const hourPx = GRID_SIZES[gridSize]` is the reader and every block's `top` and `height` is computed from it, and `GRID_SIZES` is imported FROM the settings dialog rather than re-declared, so the swatch and the grid cannot disagree about what "Large" means |
 | B | Timezone — the control the validated server support was missing |
 | B | Sidebar page: show/hide rail sections |
-| P | Sidebar: **drag-reorder closed** by `sidebar-reorder.mjs`, **23 checks** — 21, plus the two added when a break patch aimed at something else deleted `canDropOn`'s entire list rule and all 21 stayed green: the suite asserted that a FOLDER dropped on a project row sends nothing and never that a LIST dropped on one sends something (§8). `+ Add a new section` still open, and **blocked rather than pending** — the distinction matters because "still open" invites somebody to build it. It is on Calendar settings › Sidebar, over the planner rail, not on the tree; the five named sections of frame `14:10` are built there with show, hide and reorder, from one shared list the planner page imports rather than the hardcoded copy it used to keep. **THAT SENTENCE WAS FALSE WHEN IT WAS WRITTEN, and stayed false until 29 September: reorder did not exist** (`ledger-rows/row-835-reorder`). The page drew a switch per section and no grip, the rail was drawn in a fixed order, and `railSections` kept an order only `.includes()` read — the mirror defect, recorded as built. The page is drawn at `14:13`–`14:16` (`14:10` itself still shows Appearance): a box and a grip on each row, and at `14:13` the open hand over Priorities' name. Now each row is dragged by itself, or moved with ↑/↓ on its grip, the order is saved, and the rail draws the stored order, with the frame's as the default — closed by `rail-reorder.mjs`, 12 checks, patches `rro-1..9`. What no frame supplies is what a NEW section would contain: `14:10` draws the button and nothing opens it, so a name and a rule for what falls into it would both be mine. Same class as Super Agents at `16:30` — a control the frames draw over a decision they never make. `projects.position` had existed since the table did with neither end attached — `updateProject` left it out of its whitelist and `getProjectsBySpace` had no `ORDER BY` at all, so the tree drew whatever the query plan produced, which changes as rows are updated and after a vacuum. A column with no writer and no reader is the mirror defect with the mirror missing too |
+| B | Sidebar: **drag-reorder closed** by `sidebar-reorder.mjs`, **23 checks** — 21, plus the two added when a break patch aimed at something else deleted `canDropOn`'s entire list rule and all 21 stayed green: the suite asserted that a FOLDER dropped on a project row sends nothing and never that a LIST dropped on one sends something (§8). `+ Add a new section` still open, and **blocked rather than pending** — the distinction matters because "still open" invites somebody to build it. It is on Calendar settings › Sidebar, over the planner rail, not on the tree; the five named sections of frame `14:10` are built there with show, hide and reorder, from one shared list the planner page imports rather than the hardcoded copy it used to keep. **THAT SENTENCE WAS FALSE WHEN IT WAS WRITTEN, and stayed false until 29 September: reorder did not exist** (`ledger-rows/row-835-reorder`). The page drew a switch per section and no grip, the rail was drawn in a fixed order, and `railSections` kept an order only `.includes()` read — the mirror defect, recorded as built. The page is drawn at `14:13`–`14:16` (`14:10` itself still shows Appearance): a box and a grip on each row, and at `14:13` the open hand over Priorities' name. Now each row is dragged by itself, or moved with ↑/↓ on its grip, the order is saved, and the rail draws the stored order, with the frame's as the default — closed by `rail-reorder.mjs`, 12 checks, patches `rro-1..9`. What no frame supplies is what a NEW section would contain: `14:10` draws the button and nothing opens it, so a name and a rule for what falls into it would both be mine. Same class as Super Agents at `16:30` — a control the frames draw over a decision they never make. `projects.position` had existed since the table did with neither end attached — `updateProject` left it out of its whitelist and `getProjectsBySpace` had no `ORDER BY` at all, so the tree drew whatever the query plan produced, which changes as rows are updated and after a vacuum. A column with no writer and no reader is the mirror defect with the mirror missing too. **`+ Add a new section` CLOSED ON 8 OCTOBER**, as ClickUp's calendar sidebar has its custom sections — a name, and the rule for what falls into one — kept, drawn on the rail and reordered with the rest (`planner-rail-sections.mjs`, 11 checks; `commit-log/log-716d25c-1`, `ledger-rows/row-835`). Moved here on 14 October; it was not moved when it closed |
 | B | **Upcoming meeting page** — time left, quick-join, and desktop notification |
 | B | Time blocking + the five settings that were STORED AND READ BY NOTHING — showWeekNumbers, alwaysOpenAtStartOfWeek, darkenNonWorkingHours, savePersonalEventsQuickly, showRecurring — each now has a reader that changes the grid |
 | B | `showOverdue` — now read by the backlog |
@@ -862,7 +862,7 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 | B | Favorite in the task menu (same hook as the star) |
 | B | Archive in the task menu — and named honestly for the first time |
 | B | A PERMANENT delete for a task — `deletedAt` into the same Trash the other entities use, restorable there, purged by the same cron after the same 30 days. Archive is never purged. An archived task must NOT appear in the Trash, and that check was impossible to satisfy before |
-| M | "Add to ›" — frame `15:35` draws the row and its chevron; **no frame opens the submenu and the transcript never speaks the item**, so what it adds a task TO is unspecified. The gloss this row carried for six weeks — *"a task in more than one list"* — is ClickUp's real product, not anything in the video, and it is what kept the row on the buildable side. Blocked on the reference, not on Rundesk. See §6 |
+| B | "Add to ›" — frame `15:35` draws the row and its chevron; **no frame opens the submenu and the transcript never speaks the item**, so what it adds a task TO is unspecified. The gloss this row carried for six weeks — *"a task in more than one list"* — is ClickUp's real product, not anything in the video, and it is what kept the row on the buildable side. Blocked on the reference, not on Rundesk. See §6. **BUILT AS CLICKUP'S TASK MENU HAS IT**, once the owner asked for ClickUp's product where the frames stop: Add to › Personal Priorities (`ledger-rows/row-845`, 29 September) and Add to › Another List, ClickUp's Tasks in Multiple Lists (`tasks-in-multiple-lists.mjs`, 14 checks; `commit-log/log-713a611-1`, 12 October). Moved here on 14 October |
 | B | Assignee picker: search box, **Me** first, invite-by-email |
 | B | "⚡ Assign with AI" — the ranking closed by `ai-assign.mjs`, 23 checks. The ranking is the feature: the suite adds work to the first pick and requires the suggestion to **name somebody else**, with no escape hatch — the subject's list is the run's own, so every candidate starts at `inList = 0` and only load moved. It recommends and does not assign, which is asserted by re-reading the task. Until 29 September no page asked it; the picker's footer, where frame `15:45` draws it, now does, and assigns on confirm (`assign-with-ai-picker.mjs`, 2 checks) |
 | B | Agents / "+ Create Agent" — excluded until 13 October, when Rundesk had no agents; Super Agents are built (`ledger-rows/row-852`), New Super Agent is the hub's first row, and the row is counted. Closed by `super-agents.mjs`. |
@@ -886,8 +886,8 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 | B | Success message with clickable path chips (`rundesk › ddddd › List`) — closed by `ai-answer-rendering.mjs`, 51 checks (frame `18:48`). The chip was a `<span>`: a path that looked like a link, could not be pressed, could not be middle-clicked and did not exist to a keyboard — the dead control, in the one place the answer is telling you to act. A view the space cannot draw degrades to the list rather than being offered |
 | B | AI Analytics: Time Saved with its working, Human Cost Savings, editable rate, Edit benchmark, validation, net-can-be-negative |
 | B | "Actions completed" — the 24 raw feature values grouped into the frames' 8 categories, server-side. Three categories cannot be filled at all and print a reason rather than `0`: a zero meaning "impossible" and a zero meaning "you did none" look identical on screen. The unit stays a run, not an "action" |
-| M | **Credits entirely**: tab, category→credits table, usage-trend chart with limit line, Add credits, My Agent Performance |
-| M | Image generation |
+| B\* | **Credits**: tab, category→credits table, usage-trend chart with limit line, Add credits — built on 12 October as ClickUp counts them (`ai-credits.mjs`, 18 checks; `commit-log/log-3943965-1`), and moved here on 14 October. **My Agent Performance is not there**: that closure carried it to Super Agents (`ledger-rows/row-852`), which closed on 13 October without it, and nothing in the tree draws an agent's cost, actions or time saved (`found-14-oct/agent-performance-carried-and-unbuilt`) |
+| B | Image generation — from a task's comment box, a Chat or DM message field and the Ask dock, as ClickUp's Brain makes images (`ai-image-generation.mjs`, 9 checks; `ledger-rows/row-870`, 8 October). Moved here on 14 October; it was not moved when it closed |
 | B | App Center with categories, per-app descriptions, connection health |
 | B | Apps — Box, Confluence, Jira, Gmail, SharePoint, Outlook Mail. **THIS ROW WAS STALE**: all six are in `INTEGRATIONS` and have been, among 48 tiles. The work was done and the row was never re-read — the stale reason again, this time hiding a closure rather than a gap. They are built as TWO features, because "what happens when somebody presses it" has two honest answers. **Gmail and SharePoint are connectable**: `listSupportedProviders()` holds a provider for each and `search.service.ts` a query path, so Connect starts a real grant and the palette tab it feeds can answer. **Box, Confluence, Jira and Outlook Mail are not, and say so** — nothing in this product reads a Box or an Atlassian token, so a grant stored for one is the mirror defect, and worse than the gap because the gap is visible. Those tiles carry the plain sentence and the one action that is real: telling the admins you want it. `comingSoon` is gone with them: it was a hand-kept second opinion about connectability that had drifted from the server's, drawing OneDrive, Linear and Salesforce as "Soon" over three working connectors |
 | B | "Suggest an app" (the `+` is inside the glyph, not a literal prefix) and the "Connect Custom MCP Servers" banner — closed by `app-catalogue.mjs`, 25 checks (frame `19:07`). Both are live controls that record a real request. The MCP **capability** is recorded as a decision, not built: no AI tool in this product reaches outside the workspace, so registering a server would store a value no reader honours |
@@ -915,7 +915,7 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 
 ## 4. Counts
 
-**174 rows: 167 built · 3 partial · 4 missing.**
+**174 rows: 174 built · 0 partial · 0 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -951,9 +951,9 @@ rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 128 | 2 | 3 | 133 |
-| §5, recovered from the frame observations | 39 | 1 | 1 | 41 |
-| **consolidated** | **167** | **3** | **4** | **174** |
+| §2, the sections table | 133 | 0 | 0 | 133 |
+| §5, recovered from the frame observations | 41 | 0 | 0 | 41 |
+| **consolidated** | **174** | **0** | **0** | **174** |
 
 BRAIN² IS BUILT, 13 OCTOBER: the @ picker's row moves from `P` to `B` with
 its Brain section (`ledger-rows/row-745`), and frame `16:50`'s row — the
@@ -1058,13 +1058,36 @@ AI works through a person's own connections (`ai-connected-apps.mjs`, 11
 checks; `ledger-rows/row-2294`). So §5 moves `38 · 1 · 2` → `39 · 1 · 1`, and
 the total stays 174.
 
-§2's 128 built includes the one marked `B*` — built, but the row also records
+SEVEN ROWS MOVED TO `B` ON 14 OCTOBER, AND THE TOTAL DID NOT. Each was built
+between 8 and 12 October and closed in the ledger then, and none was moved
+here when it was — found reading this table's last partial and missing rows
+against the ledger, which this records rather than hides. In §2: the cover's
+Search tab (`cover-photo-search.mjs`, 8 checks; `commit-log/log-601eacc-1`,
+`ledger-rows/row-739`); the planner sidebar's `+ Add a new section`
+(`planner-rail-sections.mjs`, 11 checks; `commit-log/log-716d25c-1`,
+`ledger-rows/row-835`); "Add to ›" as ClickUp's task menu has it, Another List
+and Personal Priorities (`tasks-in-multiple-lists.mjs`, 14 checks;
+`commit-log/log-713a611-1`, `ledger-rows/row-845`); image generation
+(`ai-image-generation.mjs`, 9 checks; `ledger-rows/row-870`); and Credits
+(`ai-credits.mjs`, 18 checks; `commit-log/log-3943965-1`) — `B*`, because its My
+Agent Performance is still not there: the Credits closure carried it to Super
+Agents, whose closure did not build it
+(`found-14-oct/agent-performance-carried-and-unbuilt`). In §5: the planner's
+Sync now (`planner-sync-now.mjs`, 5 checks; `ledger-rows/row-1904`) and the
+calendar's Automations page (`calendar-sync-rules.mjs`, 12 checks;
+`ledger-rows/row-1962`). So §2 moves `128 · 2 · 3` → `133 · 0 · 0` and §5
+`39 · 1 · 1` → `41 · 0 · 0`, and the total stays 174: 131 `B`, 2 `B*` and no `P`
+or `M` in §2's tables.
+
+§2's 133 built includes the two marked `B*` — built, but each row also records
 something the frame asks for that is not there. It is counted as built
 because that is what it is; the asterisk is where the remainder is written
 down. This read "the four" until 29 September while §2 held six: the two that
 were left, and four whose asterisk meant something else — a suite not yet run —
 which had stopped being true (the legend under §2 records it); and "the two"
-until 9 October, when the `Comment ▾` row's Email mode was built. §5's 39 built
+until 9 October, when the `Comment ▾` row's Email mode was built; and "the one"
+until 14 October, when Credits was moved here with My Agent Performance as its
+remainder. §5's 41 built
 includes one `B*` of its own, the busy state, whose remainder is the frame's own
 words.
 
@@ -1142,21 +1165,23 @@ said so. §4's table credits §5 with **31 · 4 · 6**; the line above says
 survived several readings — which is precisely how the 173-that-was-two-numbers
 got as far as it did, recorded at the top of §4.
 
-They are the same forty-one rows at two moments. Twenty-four have closed
-since this section was written — twenty that were missing and four that
-were partial — and twenty-four is the whole difference. (Seventeen until 29
+They are the same forty-one rows at two moments. Twenty-six have closed
+since this section was written — twenty-one that were missing and five that
+were partial — and twenty-six is the whole difference. (Seventeen until 29
 September, when the project-status breakdown and the busy state were read
 against the tree and found built and measured; nineteen until 30 September,
 when the create modal's Templates menu was built, twenty until the
 Template Center's Tags and Created-by facets were, twenty-one until 9
 October, when a pasted clip link and the composer's Email were, and
-twenty-three until 13 October, when the AI acting in a connected app was.)
+twenty-three until 13 October, when the AI acting in a connected app was,
+and twenty-four until 14 October, when the planner's Sync now and the
+calendar's Automations page, built on 8 October, were moved here.)
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
 | as recovered (this section, and the three appendices below) | 15 | 5 | 21 | 41 |
-| closed since, each named on its own row by the suite that proves it | +24 | −4 | −20 | 0 |
-| **live (what §4 credits §5 with)** | **39** | **1** | **1** | **41** |
+| closed since, each named on its own row by the suite that proves it | +26 | −5 | −21 | 0 |
+| **live (what §4 credits §5 with)** | **41** | **0** | **0** | **41** |
 
 Both numbers are kept rather than one being overwritten, because the
 as-recovered split is what the three appendices below add up to, and a section
@@ -2054,7 +2079,8 @@ file never transcribed (`Card size`, `Card cover`).
   Google Calendar reaches the planner only if somebody navigates to Settings →
   Integrations and presses a button. There is no `@Cron` in the calendar-sync
   module.
-- status: M
+- status: B
+- closed by: planner-sync-now 5/5 (8 October; `ledger-rows/row-1904`; moved here 14 October)
 - defect class: none for the missing control — but the service's own header,
   `calendar-sync.service.ts:25`, reads *"Inbound: a **manual or scheduled**
   `pullEvents` call fetches recent events"*, and nothing in the repository
@@ -2115,7 +2141,8 @@ file never transcribed (`Card size`, `Card cover`).
   carries five pages and no Automations page. The frame's default state is
   "nothing is syncing"; Rundesk's is "everything is, and there is no page that
   says so".
-- status: P
+- status: B
+- closed by: calendar-sync-rules 12/12 (8 October; `ledger-rows/row-1962`; moved here 14 October)
 - defect class: none
 - why not already a row: §3 of the ledger parks **Automations** on `[14:29]`,
   and that parking is about the automation *builder* she promises to return to.
