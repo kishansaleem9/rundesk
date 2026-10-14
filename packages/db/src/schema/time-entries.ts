@@ -2,6 +2,7 @@ import { pgTable, text, timestamp, uuid, integer, boolean } from 'drizzle-orm/pg
 import { relations } from 'drizzle-orm'
 import { tasks } from './tasks'
 import { users } from './users'
+import { clickupImportJobs } from './clickup-import-jobs'
 
 export const timeEntries = pgTable('time_entries', {
   id:          uuid('id').primaryKey().defaultRandom(),
@@ -16,6 +17,8 @@ export const timeEntries = pgTable('time_entries', {
   // invoice, so it is never double-invoiced. Plain column; the FK to
   // client_invoices is added in the migration to avoid a schema import cycle.
   clientInvoiceId: uuid('client_invoice_id'),
+  // Which import made this row (Settings › Imports / Exports); null for everything else.
+  importId: uuid('import_id').references(() => clickupImportJobs.id, { onDelete: 'set null' }),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

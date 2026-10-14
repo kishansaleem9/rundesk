@@ -56,6 +56,7 @@ import { ClickUpImportModule } from './modules/integrations/clickup-import/click
 import { SlackImportModule } from './modules/chat/slack-import.module'
 import { BasecampImportModule } from './modules/integrations/basecamp-import/basecamp-import.module'
 import { AppImportModule } from './modules/integrations/app-import/app-import.module'
+import { ImportsModule } from './modules/imports/imports.module'
 import { IntegrationConnectionsModule } from './modules/integrations/connections/integration-connections.module'
 import { ExternalLinkSyncModule } from './modules/integrations/external-link-sync/external-link-sync.module'
 import { ProjectTemplatesModule } from './modules/project-templates/project-templates.module'
@@ -155,6 +156,7 @@ import { TenantDatabasesModule } from './modules/tenant-databases/tenant-databas
     SlackImportModule,
     BasecampImportModule,
     AppImportModule,
+    ImportsModule,
     IntegrationConnectionsModule,
     ExternalLinkSyncModule,
     ProjectTemplatesModule,

@@ -16,6 +16,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@rundesk/feature-flags": "workspace:*",
+    "@rundesk/imports": "workspace:*",
     "@rundesk/ui": "workspace:*",
     "@tanstack/react-query": "^5.59.16",
     "@tanstack/react-router": "^1.81.9",

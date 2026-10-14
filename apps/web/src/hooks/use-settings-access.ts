@@ -15,10 +15,11 @@ export const SETTINGS_TABS = [
   'sso',
   'features',
   'announcements',
-  'integrations',
   'labels',
   'taskTypes',
   'aiUsage',
+  'integrations',
+  'importsExports',
   'archived',
   'trash',
 ] as const
@@ -49,6 +50,8 @@ const TAB_KEYS: Partial<Record<SettingsTabId, WorkspacePermission[]>> = {
   // The workspace's data export sits on Integrations.
   integrations: ['webhook.manage', 'integrations.manage', 'workspace.export'],
   sso: ['sso.manage'],
+  // Settings › Imports / Exports: the Import side asks the one, the Export side the other.
+  importsExports: ['workspace.import', 'workspace.export'],
 }
 
 /**

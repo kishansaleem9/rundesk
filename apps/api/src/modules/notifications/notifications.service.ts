@@ -218,6 +218,12 @@ type NotificationType =
   | 'comment_resolved'
   // G10-11 [12:38–12:41] — a subtask appearing under a task you are on.
   | 'subtask_created'
+  // Settings › Imports / Exports — to whoever started the run: "Your
+  // Spreadsheet import has finished: 1,240 tasks imported", the same when it
+  // failed, and an export's download link. General activity, as a briefing is.
+  | 'import_completed'
+  | 'import_failed'
+  | 'export_ready'
 
 type NotificationEventKey =
   | 'mention'
@@ -1424,6 +1430,21 @@ export class NotificationsService {
           taskUrl,
           workspaceName,
           ...threaded,
+        })
+        break
+
+      // Settings › Imports / Exports: the run's own words, and a link to its
+      // report (or the export's download), not "triggered a new activity".
+      case 'import_completed':
+      case 'import_failed':
+      case 'export_ready':
+        await this.email.sendImportExportUpdate({
+          to: recipient.email,
+          recipientName: recipient.displayName,
+          title: data.title,
+          body: data.body,
+          url: taskUrl,
+          ctaLabel: data.type === 'export_ready' ? 'Download export' : 'View details',
         })
         break
 

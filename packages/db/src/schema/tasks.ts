@@ -1,9 +1,10 @@
 import { pgTable, text, timestamp, uuid, boolean, integer, index, uniqueIndex, jsonb, type AnyPgColumn } from 'drizzle-orm/pg-core'
-import { relations } from 'drizzle-orm'
+import { relations, sql } from 'drizzle-orm'
 import { lists } from './lists'
 import { users } from './users'
 import { taskPriorityEnum, containerVisibilityEnum } from './enums'
 import { taskTypes } from './task-types'
+import { clickupImportJobs } from './clickup-import-jobs'
 
 /**
  * Status workflow buckets. Every per-list custom status (in `list_statuses`)
@@ -126,6 +127,8 @@ export const tasks = pgTable('tasks', {
   // §2 per-item privacy: a 'private' task is visible only to its creator, its
   // assignees, and workspace managers/admins (enforced on every read path).
   visibility:    containerVisibilityEnum('visibility').notNull().default('public'),
+  // Which import made this row (Settings › Imports / Exports); null for everything else.
+  importId: uuid('import_id').references(() => clickupImportJobs.id, { onDelete: 'set null' }),
   createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
@@ -137,6 +140,8 @@ export const tasks = pgTable('tasks', {
   // Made by 0084. Declared here as well: a database built by
   // `drizzle-kit push` (the lanes, CI, a fresh deploy) reads only this file.
   index('idx_tasks_archived').on(t.isArchived, t.archivedAt),
+  // Made by 0175: an import's tasks, found for its report and its Delete.
+  index('idx_tasks_import').on(t.importId).where(sql`import_id IS NOT NULL`),
 ])
 
 export const taskAssignees = pgTable('task_assignees', {

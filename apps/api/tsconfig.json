@@ -6,7 +6,8 @@
     "baseUrl": ".",
     "paths": {
       "@rundesk/db": ["../../packages/db/src/index.ts"],
-      "@rundesk/feature-flags": ["../../packages/feature-flags/src/index.ts"]
+      "@rundesk/feature-flags": ["../../packages/feature-flags/src/index.ts"],
+      "@rundesk/imports": ["../../packages/imports/src/index.ts"]
     }
   },
   "include": ["src/**/*"],

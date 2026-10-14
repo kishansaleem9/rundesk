@@ -1,0 +1,8 @@
+Task Name,Task ID,Subtask IDs,Description content,Task assignee,Status,Due Date,Start Date,Priority,Tags,Time Estimate,Time Tracked,Checklist,Task Type,List,Budget
+Launch website,T1,"T2,T3",Ship the new site,ann@example.com,In progress,2025-12-31,2025-12-01,1,"web,launch",2h 30m,1h,"Copy,Images,QA",Task,Q4,1500
+Write copy,T2,T4,,Ann Lee,To do,2025-12-15,,2,web,90m,,,,Q4,200
+Design images,T3,,,bo@example.com,Done,2025-12-10,,normal,,1:30,30m,,,Q4,
+Proofread,T4,T5,Second pair of eyes,,To do,,,3,,,,,,Q4,
+Final sign-off,T5,,,,To do,2026-01-05,,4,,,,,,Q4,
+,T6,,This row has no name and is not imported,,,,,,,,,,,Q4,
+Bad cells,T7,,,,Blocked,31/12/2025,,9,,soon,,,,Q1,abc

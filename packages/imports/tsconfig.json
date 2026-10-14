@@ -1,0 +1,12 @@
+{
+  "extends": "@rundesk/typescript-config/base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "ES2021",
+    "lib": ["ES2021"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["src"]
+}

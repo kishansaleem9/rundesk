@@ -1670,6 +1670,38 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
         )}
         {openSwitcher && (
           <div className="mt-2 max-h-72 overflow-auto rounded-lg border border-border/60 bg-card p-1">
+            {/* ClickUp opens Settings from this menu; so does this one, for whoever
+                Settings lets in — and Imports / Exports for whoever may use it. */}
+            {workspaceId && settingsAccess.mayOpen && (
+              <div className="mb-1 border-b border-border/60 pb-1">
+                <button
+                  type="button"
+                  data-testid="switcher-menu-settings"
+                  onClick={() => {
+                    setOpenSwitcher(false)
+                    navigate({ to: '/app/$workspaceId/settings', params: { workspaceId } })
+                  }}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent/10"
+                >
+                  <Settings className="h-3.5 w-3.5 text-muted-foreground" />
+                  {t('nav.workspaceSettingsShortcut')}
+                </button>
+                {settingsAccess.tabs.includes('importsExports') && (
+                  <button
+                    type="button"
+                    data-testid="switcher-menu-imports"
+                    onClick={() => {
+                      setOpenSwitcher(false)
+                      navigate({ to: '/app/$workspaceId/settings', params: { workspaceId }, search: { tab: 'importsExports' } })
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent/10"
+                  >
+                    <Import className="h-3.5 w-3.5 text-muted-foreground" />
+                    {t('settings.tabImportsExports')}
+                  </button>
+                )}
+              </div>
+            )}
             {/* Only once scanning the list is actually work. */}
             {workspaces.length > 5 && (
               <input
@@ -2638,7 +2670,15 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                           <DropdownMenuItem
                             data-testid="space-create-imports"
                             onClick={() =>
-                              navigate({ to: '/app/$workspaceId/import', params: { workspaceId } })
+                              // Settings › Imports / Exports, with this space as the destination,
+                              // for whoever may import; the importers' page answers everybody else.
+                              permissions.can('workspace.import')
+                                ? navigate({
+                                    to: '/app/$workspaceId/settings',
+                                    params: { workspaceId },
+                                    search: { tab: 'importsExports', locationType: 'space', locationId: space.id },
+                                  })
+                                : navigate({ to: '/app/$workspaceId/import', params: { workspaceId } })
                             }
                           >
                             <Import className="h-3.5 w-3.5 shrink-0" />

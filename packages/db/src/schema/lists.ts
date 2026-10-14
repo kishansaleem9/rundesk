@@ -5,6 +5,7 @@ import { spaces } from './spaces'
 import { tasks } from './tasks'
 import { users } from './users'
 import { containerVisibilityEnum } from './enums'
+import { clickupImportJobs } from './clickup-import-jobs'
 
 export const lists = pgTable('lists', {
   id:         uuid('id').primaryKey().defaultRandom(),
@@ -47,6 +48,8 @@ export const lists = pgTable('lists', {
    * in the workspace's personal space (`spaces.is_personal`).
    */
   personalOf: uuid('personal_of').references(() => users.id, { onDelete: 'cascade' }),
+  // Which import made this row (Settings › Imports / Exports); null for everything else.
+  importId: uuid('import_id').references(() => clickupImportJobs.id, { onDelete: 'set null' }),
   createdAt:  timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:  timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({

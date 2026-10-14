@@ -1,0 +1,4 @@
+[
+  { "Name": "Call supplier", "Owner": "ann@example.com", "Deadline": "2025-12-31", "Labels": ["ops", "calls"], "Notes": "Ask about lead times" },
+  { "Name": "Order samples", "Deadline": "2026-01-10", "Priority": "high" }
+]

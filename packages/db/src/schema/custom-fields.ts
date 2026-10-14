@@ -3,6 +3,7 @@ import { relations } from 'drizzle-orm'
 import { projects } from './projects'
 import { lists } from './lists'
 import { tasks } from './tasks'
+import { clickupImportJobs } from './clickup-import-jobs'
 
 export const customFieldTypeEnum = pgEnum('custom_field_type', [
   'text',
@@ -96,6 +97,8 @@ export const customFieldDefinitions = pgTable(
      *                  fields live within Short Text, Long Text and Dropdown
      */
     config:       jsonb('config').$type<Record<string, unknown>>(),
+    // Which import made this row (Settings › Imports / Exports); null for everything else.
+    importId: uuid('import_id').references(() => clickupImportJobs.id, { onDelete: 'set null' }),
     createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt:    timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

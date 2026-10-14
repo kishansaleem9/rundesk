@@ -144,6 +144,11 @@ jobs:
       - name: And a unit run fails on a suite that never ran
         run: node scripts/unit-tests-pass.mjs --mutate
 
+      # The import parsers, the review grid's rules and the export format,
+      # shared by the API and the web app.
+      - name: Import/export package tests
+        run: pnpm --filter @rundesk/imports test
+
       - name: Migration sequence guardrail
         run: node scripts/check-migration-order.mjs
 

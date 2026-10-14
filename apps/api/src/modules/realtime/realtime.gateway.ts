@@ -84,6 +84,12 @@ export type RealtimeEvent =
   | { type: 'presence.leave'; room: RoomKey; userId: string }
   // Notifications
   | { type: 'notification.created'; userId: string; notification: unknown }
+  // Settings › Imports / Exports — sent to whoever started the run, so the
+  // history's chips move without waiting for the five-second poll.
+  | { type: 'import.progress'; workspaceId: string; jobId: string; status: string; phase: string | null; processed: number; total: number }
+  | { type: 'import.completed'; workspaceId: string; jobId: string }
+  | { type: 'import.failed'; workspaceId: string; jobId: string; error: string | null }
+  | { type: 'export.ready'; workspaceId: string; exportId: string }
   // Chat events
   | { type: 'chat.channel.created'; workspaceId: string; channel: unknown }
   | { type: 'chat.channel.members.added'; workspaceId: string; channelId: string }

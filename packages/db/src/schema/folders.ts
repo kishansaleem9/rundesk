@@ -4,6 +4,7 @@ import { spaces } from './spaces'
 import { projects } from './projects'
 import { users } from './users'
 import { containerVisibilityEnum } from './enums'
+import { clickupImportJobs } from './clickup-import-jobs'
 
 /**
  * A Folder groups multiple projects inside a Space — the plan's Level-4
@@ -64,6 +65,8 @@ export const folders = pgTable(
     // §2 per-item privacy: a 'private' folder is visible only to its creator and
     // workspace managers/admins (enforced on every read path).
     visibility:  containerVisibilityEnum('visibility').notNull().default('public'),
+    // Which import made this row (Settings › Imports / Exports); null for everything else.
+    importId: uuid('import_id').references(() => clickupImportJobs.id, { onDelete: 'set null' }),
     createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

@@ -643,7 +643,21 @@ try {
    * destination is not reported as a working menu.
    */
   console.log('\n▶ and the footer two actually go where they say')
-  for (const [kind, tail] of [['imports', '/import'], ['templates', '/templates']]) {
+  /*
+   * Imports, for whoever may import (this run's admin), is Settings › Imports / Exports with this
+   * space already its destination, as ClickUp's space menu hands the space to its importer; the
+   * importers' page answers everybody else. The tab is read as well as the address: an address the
+   * page does not honour is the dead control again.
+   */
+  const footer = [
+    ['imports', 'Settings › Imports / Exports, this space its destination', () => {
+      const url = new URL(page.url())
+      return url.pathname.endsWith('/settings') && url.searchParams.get('tab') === 'importsExports' &&
+        url.searchParams.get('locationType') === 'space' && url.searchParams.get('locationId') === SPACE
+    }, 'imports-exports'],
+    ['templates', '/templates', () => page.url().endsWith('/templates'), null],
+  ]
+  for (const [kind, where, arrived, shows] of footer) {
     await dismissAll()
     // Back to the space route each time: the previous iteration navigated away,
     // and `openMenu` needs the space's row in the sidebar to hover.
@@ -651,12 +665,15 @@ try {
     await page.waitForSelector(`[data-testid="space-link-${SPACE}"]`, { timeout: 15_000 })
     await openMenu()
     await page.getByTestId(`space-create-${kind}`).click({ timeout: 15_000 })
-    const landed = await waitUntil(() => page.url().endsWith(tail), { timeoutMs: 10_000 })
+    const landed = await waitUntil(arrived, { timeoutMs: 10_000 })
+    const shown = !shows || (landed && (await waitUntil(() => page.getByTestId(shows).isVisible().catch(() => false), { timeoutMs: 10_000 })))
     chk(
-      landed,
-      `"${kind}" goes to ${tail}`,
-      `"${kind}" left the page at ${page.url()}, which does not end ${tail} — an item that opens the ` +
-        'menu and then does nothing is the dead control the sidebar comment promises it is not',
+      landed && shown,
+      `"${kind}" goes to ${where}`,
+      landed
+        ? `the address is ${page.url()}, but [data-testid="${shows}"] never showed — the page did not open what the address names`
+        : `"${kind}" left the page at ${page.url()}, which is not ${where} — an item that opens the ` +
+          'menu and then does nothing is the dead control the sidebar comment promises it is not',
     )
   }
 

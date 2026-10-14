@@ -479,6 +479,34 @@ export class EmailService {
   }
 
   /** Send a generic activity notification email */
+  /**
+   * Settings › Imports / Exports — "Your Spreadsheet import has finished:
+   * 1,240 tasks imported. View details", the same when it failed, and an
+   * export's link (which expires an hour after it was made, and says so).
+   */
+  async sendImportExportUpdate(opts: {
+    to: string
+    recipientName: string
+    title: string
+    body?: string
+    url: string
+    ctaLabel: string
+  }) {
+    return this.send({
+      to: opts.to,
+      subject: `[Rundesk] ${opts.title}`,
+      html: this.layout({
+        heading: opts.title,
+        body: `
+          <p>Hi ${this.esc(opts.recipientName)},</p>
+          ${opts.body ? `<p>${this.esc(opts.body)}</p>` : ''}
+        `,
+        ctaUrl: opts.url,
+        ctaLabel: opts.ctaLabel,
+      }),
+    })
+  }
+
   async sendActivity(opts: {
     to: string
     recipientName: string

@@ -89,7 +89,8 @@ const IMPORT_TABS: ImportTab[] = ['sheet', 'doc', 'confluence', 'basecamp', 'app
 export function ImportPage() {
   const { t } = useTranslation()
   // A tab named in the address opens on it: Basecamp's sign-in comes back to `?tab=basecamp`, the
-  // other tools' to `?tab=apps&app=<tool>` (`found-13-oct/importers-by-sign-in-unbuilt`).
+  // other tools' to `?tab=apps&app=<tool>` (`found-13-oct/importers-by-sign-in-unbuilt`), and
+  // Settings › Imports / Exports links to `?tab=doc` and `?tab=clickup`.
   const [landing] = useState(() => {
     const q = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search)
     const named = q.get('tab') as ImportTab | null

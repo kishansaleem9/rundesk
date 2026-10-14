@@ -26,6 +26,7 @@ step "typecheck (turbo run typecheck)"  bash -c 'pnpm exec turbo run typecheck >
 step "api unit tests"                   node scripts/unit-tests-pass.mjs --log /tmp/preflight-api.log -- bash -c 'cd apps/api && pnpm exec tsx --test $(find src -name "*.test.ts")'
 step "web unit tests"                   node scripts/unit-tests-pass.mjs --log /tmp/preflight-web.log -- bash -c 'cd apps/web && ../../packages/db/node_modules/.bin/tsx --test $(find src -name "*.test.ts" -o -name "*.test.tsx" | tr "\n" " ")'
 step "and a unit run fails on a suite that never ran" node scripts/unit-tests-pass.mjs --mutate
+step "import/export package tests"       bash -c 'pnpm --filter @rundesk/imports test > /tmp/preflight-imports.log 2>&1'
 step "migration guardrail"              node scripts/check-migration-order.mjs
 step "what a migration makes, the schema declares" node scripts/check-schema-declares-migrations.mjs
 step "and the schema gate can fail too"  node scripts/check-schema-declares-migrations-cases.mjs --mutate

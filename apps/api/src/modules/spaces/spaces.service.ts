@@ -337,7 +337,7 @@ export class SpacesService {
         .from(folders)
         .where(and(inArray(folders.spaceId, spaceIds), eq(folders.isArchived, false))),
       this.db
-        .select({ id: projects.id, name: projects.name, spaceId: projects.spaceId, folderId: projects.folderId })
+        .select({ id: projects.id, name: projects.name, spaceId: projects.spaceId, folderId: projects.folderId, isDefaultContainer: projects.isDefaultContainer })
         .from(projects)
         .where(and(inArray(projects.spaceId, spaceIds), eq(projects.isArchived, false))),
     ])
@@ -360,7 +360,8 @@ export class SpacesService {
         icon: sp.icon,
         color: sp.color,
         folders: folderRows.filter((f) => f.spaceId === sp.id).map((f) => ({ id: f.id, name: f.name })),
-        projects: spProjects.map((pr) => ({ id: pr.id, name: pr.name, folderId: pr.folderId })),
+        // The space's hidden list container is flagged, so a picker can draw its lists under the space itself.
+        projects: spProjects.map((pr) => ({ id: pr.id, name: pr.name, folderId: pr.folderId, isDefaultContainer: pr.isDefaultContainer })),
         lists: listRows
           .filter((l) => spProjectIds.has(l.projectId))
           .map((l) => ({ id: l.id, name: l.name, projectId: l.projectId })),
