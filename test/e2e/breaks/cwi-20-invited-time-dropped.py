@@ -7,7 +7,7 @@ p = '/home/user/rundesk/apps/api/src/modules/integrations/app-import/import-tree
 s = io.open(p, encoding='utf-8').read()
 for a, b in [
     ('      } else if (invitedAs) {\n        await this.db.insert(importPendingTimeEntries)',
-     '      } else if (invitedAs && false) {\n        await this.db.insert(importPendingTimeEntries)'),
+     "      } else if (invitedAs === '\\u0000') {\n        await this.db.insert(importPendingTimeEntries)"),
 ]:
     assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
     s = s.replace(a, b)
