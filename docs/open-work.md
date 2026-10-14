@@ -10596,7 +10596,7 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 
 *Closed, 14 October.* The tab says when its view is current (`aria-current`), so the suite presses it until it does, and a card that still never draws now says which of the two it was. 42 of 42 on lane 3 at `4a304ba`.
 
-*Again, rehearsal 17 at `5e4d5ec`:* 41 of 42 in 54.4 s, the first board drawn and the teammate's not: "the second board never drew the task's card". A fresh context's first board, under the rehearsal's load, outlasted the 30 s. Each board is now opened once more from a reload before the run says so; the log says when that was needed, and a board that never draws says, for itself, whether its tab was current and how many cards it drew.
+*Again, rehearsal 17 at `5e4d5ec`:* 41 of 42 in 54.4 s, the first board drawn and the teammate's not: "the second board never drew the task's card". A fresh context's first board, under the rehearsal's load, outlasted the 30 s. Each board is now opened once more from a reload before the run says so; the log says when that was needed, and a board that never draws says, for itself, whether its tab was current and how many cards it drew. 42 of 42 on lane 3 at `441551f`, neither board needing the reload.
 
 ### `found-14-oct/time-estimate-registers-after-it-deletes` — **closed** (test tooling, small; found by rehearsal 17) · reproduced 14 October
 
@@ -10604,7 +10604,7 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 
 *Evidence, 14 October:* rehearsal 17 at `5e4d5ec`, "Time estimate": 13 of 13 checks, then "localhost:5432/rundesk_calls, the database this run cleans, has no tasks row ed311c24…, made a moment ago: this run's rows are made in another database (the API's)", and the run exited 1. The suite makes its fixtures by SQL and removes them by SQL in its `finally`, so the first row it registers is the task the quick-create modal makes, registered when the page's answer is read (`lib/fixture.mjs`'s watcher). The first row a run registers is looked up where the sweep will look (`lib/made.mjs`). Under load the answer was read after the `finally` had deleted the task, and the lookup found nothing. Rehearsals 15 and 16 passed the step.
 
-*Closed, 14 October.* The suite registers the quick-made task itself once it has read it back, while it is there (`madeRow`).
+*Closed, 14 October.* The suite registers the quick-made task itself once it has read it back, while it is there (`madeRow`): 13 of 13 on lane 3 at `441551f`, and its cleanup left nothing.
 
 ### `found-14-oct/leftover-audit-blames-the-nightly-scores` — **closed** (test tooling, small; found by rehearsal 16) · reproduced 14 October
 
