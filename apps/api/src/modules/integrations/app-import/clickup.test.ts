@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ClickUpApi, ClickUpReader, cuDoc, cuField, cuGoal, cuKeyResult, cuStatuses, cuTime, docIn, msDate } from './clickup'
+import { ClickUpApi, ClickUpReader, cuChatMessage, cuChatText, cuDoc, cuField, cuGoal, cuKeyResult, cuStatuses, cuTime, docIn, msDate } from './clickup'
+import { mentionToken } from './import-tree'
 import { inviteAs } from './app-import.service'
 import { roleRank } from '../../../common/permissions/workspace-roles'
 
@@ -281,4 +282,50 @@ test('the Workspace’s Goals come once, each read whole for its Targets, an arc
   assert.deepEqual(x.docs?.map((d) => d.title), ['The Workspace’s'])
   const none = await workspace().reader.extras('t1', { docs: 'spaces', goals: 'no' })
   assert.deepEqual([none.docs, none.goals], [[], []])
+})
+
+/* ITS CHAT (`found-14-oct/clickup-chat-unimported`), in the shape ClickUp's v3 Chat API was read in. */
+
+test('a Chat message’s mention of a person is a token for the writer; a group’s is its name; a task’s anchor its words', () => {
+  const ana = { key: 'clickup:1', name: 'Ana', email: 'ana@x.test' }
+  const who = (id: string) => (id === '1' ? ana : null)
+  const said = cuChatText('[@Ana](#user_mention#1) and [@Zed](#user_mention#9), see [@team](#user_group_mention#ab-12) on [Ship it](#task_mention#86x)', who)
+  assert.equal(said.text, `${mentionToken(0)} and ${mentionToken(1)}, see @team on Ship it`)
+  assert.deepEqual(said.mentions, [{ person: ana, name: 'Ana' }, { person: null, name: 'Zed' }])
+})
+
+test('a Chat message is under its author when they are of the Workspace, under ClickUp for its own posts, at its moment', () => {
+  const ana = { key: 'clickup:1', name: 'Ana', email: 'ana@x.test' }
+  const who = (id: string) => (id === '1' ? ana : null)
+  const mine = cuChatMessage({ id: 'm1', content: 'hello', user_id: '1', date: 1791985502627 }, null, who)
+  assert.deepEqual([mine.author, mine.authorName, mine.at.getTime(), mine.parent], [ana, 'Ana', 1791985502627, null])
+  assert.deepEqual([cuChatMessage({ id: 'm2', content: 'Reminder', user_id: '-1', date: '1791985502627' }, null, who).authorName], ['ClickUp'])
+  assert.deepEqual([cuChatMessage({ id: 'm3', content: 'x', user_id: '77', date: 1 }, 'm1', who).authorName], ['ClickUp user 77'])
+})
+
+test('Chat is read whole: every page of channels and of messages, each thread’s replies after its first message, oldest first; a direct message is not read', async () => {
+  const msgs = (ids: number[]) => ids.map((n) => ({ id: `m${n}`, content: `note ${n}`, user_id: '1', date: 1790000000000 + n * 1000, has_replies: n === 1 }))
+  const { reader, asked } = clickup((path, q) => {
+    if (path === '/team') return { teams: [{ id: 't1', name: 'Acme', members: [{ user: { id: 1, username: 'Ana', email: 'ana@x.test', role: 1 } }] }] }
+    if (path === '/team/t1/goal') return { goals: [] }
+    if (path === '/api/v3/workspaces/t1/chat/channels')
+      return q.get('cursor') === 'c2'
+        ? { data: [{ id: 'dm1', name: 'Ana, Ben', type: 'DM', visibility: 'PRIVATE' }], next_cursor: null }
+        : { data: [{ id: 'ch1', name: 'General talk', type: 'CHANNEL', visibility: 'PUBLIC' }, { id: 'ch2', name: 'Leads', type: 'CHANNEL', visibility: 'PRIVATE' }], next_cursor: 'c2' }
+    // Newest first, two a page.
+    if (path === '/api/v3/workspaces/t1/chat/channels/ch1/messages') return q.get('cursor') === 'p2' ? { data: msgs([1]), next_cursor: null } : { data: msgs([3, 2]), next_cursor: 'p2' }
+    if (path === '/api/v3/workspaces/t1/chat/channels/ch2/messages') return { data: [], next_cursor: null }
+    if (path === '/api/v3/workspaces/t1/chat/messages/m1/replies') return { data: [{ id: 'r1', content: 'reply', user_id: '1', date: 1790000001500 }], next_cursor: null }
+    if (path === '/api/v3/workspaces/t1/chat/channels/ch2/members') return { data: [{ id: 1 }], next_cursor: null }
+    return undefined
+  })
+  const x = await reader.extras('t1', { goals: 'no' })
+  assert.deepEqual(x.chat?.map((c) => `${c.name}:${c.private}:${c.members.map((p) => p.email).join()}`), ['General talk:false:', 'Leads:true:ana@x.test'])
+  assert.deepEqual(x.chat?.[0].messages.map((m) => `${m.ref}<${m.parent ?? '-'}`), ['m1<-', 'r1<m1', 'm2<-', 'm3<-'])
+  assert.ok(asked.some((a) => a.startsWith('/api/v3/workspaces/t1/chat/channels/ch1/messages?') && a.includes('content_format=text%2Fmd')))
+  assert.equal(asked.some((a) => a.includes('/channels/dm1/')), false)
+  // Turned off, nothing of Chat is asked.
+  const off = clickup((path) => (path === '/team' ? { teams: [{ id: 't1', members: [] }] } : undefined))
+  assert.deepEqual((await off.reader.extras('t1', { goals: 'no', chat: 'no' })).chat, [])
+  assert.equal(off.asked.some((a) => a.includes('/chat/')), false)
 })

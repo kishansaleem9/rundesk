@@ -2,6 +2,9 @@ import { AppError, AppHttp } from './app-http'
 import { person, setting, type AppDef, type AppProject, type AppReader, type AppSource, type GrantToken } from './app-def'
 import {
   imTask,
+  mentionToken,
+  type ImChannel,
+  type ImChatMessage,
   type ImChecklist,
   type ImComment,
   type ImDoc,
@@ -78,6 +81,24 @@ import {
  * page the Doc's own and the rest nested under it as ClickUp nests them; the
  * Workspace's own Docs only when asked. Goals are the Workspace's, so they come
  * in once a run, the workspace's here.
+ *
+ * AND ITS CHAT (`found-14-oct/clickup-chat-unimported`), read through ClickUp's
+ * v3 Chat API, which ClickUp calls experimental. Its shape was read on 14 October
+ * through the owner's own ClickUp account (read only, at their word: a channel's
+ * `id`, `name`, `type` CHANNEL or a direct message's, `visibility`; a message's
+ * `id`, `content` in Markdown with a mention as `[@Name](#user_mention#<id>)`,
+ * `user_id` — `-1` for ClickUp's own posts — `date` in milliseconds and
+ * `has_replies`; newest first, a page at a time by `next_cursor`):
+ *
+ *   v3 `GET /workspaces/{id}/chat/channels`                   its channels
+ *   v3 `GET …/chat/channels/{id}/messages`                    a channel's messages
+ *   v3 `GET …/chat/messages/{id}/replies`                     a thread's replies
+ *   v3 `GET …/chat/channels/{id}/members`                     its members, where it says
+ *
+ * Each channel — not a direct message, as the Slack import leaves those — comes
+ * in as a Chat channel here, private when it was, with its messages at their
+ * moments, a thread's replies in its thread, and its people mapped as a task's
+ * are; somebody who is not a member here is drawn under the name they wrote as.
  */
 
 const apiUrl = () => setting('CLICKUP_API_URL', 'https://api.clickup.com/api/v2')
@@ -89,6 +110,8 @@ const CLICKUP_EPOCH = Date.UTC(2017, 0, 1)
 const TIME_ASSIGNEES = 50
 /** The most pages of Docs one run brings: a Workspace's worth, and a bound on what one run holds. */
 const MAX_DOC_PAGES = 5_000
+/** The newest messages of a channel one run brings, as the Slack import brings a channel's. */
+const MAX_CHAT_MESSAGES = 10_000
 
 /** ClickUp's 100 tasks a page; a page short of it, or `last_page`, is the last. */
 const TASK_PAGE = 100
@@ -151,6 +174,11 @@ type CuKeyResult = {
   owners?: CuUser[]
   last_action?: { steps_current?: string | number | null } | null
 }
+type CuChannel = { id: string; name?: string | null; description?: string | null; topic?: string | null; type?: string | null; visibility?: string | null; archived?: boolean | null; is_archived?: boolean | null }
+type CuChatMessage = { id: string; content?: string | null; text?: string | null; user_id?: string | number | null; date?: string | number | null; has_replies?: boolean | null; replies_count?: number | string | null }
+type CuChatMember = { id?: string | number | null; user_id?: string | number | null; user?: { id?: string | number | null } | null }
+/** A page of a Chat listing: the API gives its rows as `data`; the owner's connector names them. */
+type CuChatPage<T> = { data?: T[]; channels?: T[]; messages?: T[]; replies?: T[]; members?: T[]; next_cursor?: string | null }
 type CuGoal = {
   id: string
   name?: string
@@ -289,8 +317,14 @@ export const CLICKUP: AppDef = {
     { key: 'docs', choices: ['spaces', 'workspace', 'none'], default: 'spaces' },
     { key: 'time', choices: ['yes', 'no'], default: 'yes' },
     { key: 'goals', choices: ['yes', 'no'], default: 'yes' },
+    { key: 'chat', choices: ['yes', 'no'], default: 'yes' },
   ],
-  notImported: ['Whiteboards, Chat, Dashboards and views', 'Reminders, and Goal Folders (their Goals come in)', 'Files in Custom Fields'],
+  notImported: [
+    'Whiteboards, Dashboards and views',
+    'Reminders, and Goal Folders (their Goals come in)',
+    'Direct messages, and files and reactions in Chat',
+    'Files in Custom Fields',
+  ],
   identify: async (token: GrantToken) => {
     const me = await new ClickUpApi(token.accessToken).get<{ user?: CuUser }>('/user')
     const name = me.user?.username || me.user?.email || 'ClickUp'
@@ -395,7 +429,7 @@ export class ClickUpReader implements AppReader {
     return { kind: 'space', name: space.name || project.name, folders: outFolders, lists: outLists, docs, errors }
   }
 
-  /** The Workspace's own Docs, when asked for, and its Goals, once a run. */
+  /** The Workspace's own Docs, when asked for, and its Goals and its Chat, once a run. */
   async extras(source: string, options: Record<string, string> = {}): Promise<ImExtras> {
     const errors: string[] = []
     const members = new Map((await this.people(source)).map((p) => [p.key, p]))
@@ -409,7 +443,82 @@ export class ClickUpReader implements AppReader {
         errors.push(`Goals could not be read from ClickUp: ${e.message}`)
       }
     }
-    return { docs, goals, errors }
+    const chat = options.chat === 'no' ? [] : await this.chat(source, members, errors)
+    return { docs, goals, chat, errors }
+  }
+
+  /** The Workspace's Chat channels, not its direct messages, each with its members and its messages, oldest first. */
+  private async chat(team: string, members: Map<string, ImPerson>, errors: string[]): Promise<ImChannel[]> {
+    const who = (id: string) => members.get(`clickup:${id}`) ?? null
+    const base = `/workspaces/${encodeURIComponent(team)}/chat`
+    let channels: CuChannel[]
+    try {
+      channels = await this.chatPages<CuChannel>(`${base}/channels`, {}, 'channels', 1_000)
+    } catch (e) {
+      if (!(e instanceof AppError)) throw e
+      errors.push(`Chat could not be read from ClickUp: ${e.message}`)
+      return []
+    }
+    const out: ImChannel[] = []
+    for (const c of channels) {
+      if (!c?.id || String(c.type ?? 'CHANNEL').toUpperCase() !== 'CHANNEL') continue
+      try {
+        const messages = await this.chatMessages(base, String(c.id), who)
+        out.push({
+          name: (c.name ?? '').trim() || 'channel',
+          description: typeof c.description === 'string' && c.description.trim() ? c.description.trim() : null,
+          topic: typeof c.topic === 'string' && c.topic.trim() ? c.topic.trim() : null,
+          private: String(c.visibility ?? '').toUpperCase() === 'PRIVATE',
+          archived: c.archived === true || c.is_archived === true,
+          members: await this.chatMembers(base, String(c.id), who),
+          messages,
+        })
+      } catch (e) {
+        if (!(e instanceof AppError)) throw e
+        errors.push(`The channel "${c.name ?? c.id}" could not be read from ClickUp: ${e.message}`)
+      }
+    }
+    return out
+  }
+
+  /** Every page of a Chat listing, up to a bound: ClickUp's 100 a page, the next asked by its cursor. */
+  private async chatPages<T>(path: string, query: Record<string, string | number>, key: 'channels' | 'messages' | 'replies' | 'members', pages: number, most = Infinity): Promise<T[]> {
+    const out: T[] = []
+    let cursor: string | null = null
+    for (let n = 0; n < pages && out.length < most; n++) {
+      const body: CuChatPage<T> = await this.api.get3(path, { limit: 100, ...query, ...(cursor ? { cursor } : {}) })
+      const rows = body.data ?? body[key] ?? []
+      out.push(...rows)
+      const next = typeof body.next_cursor === 'string' && body.next_cursor ? body.next_cursor : null
+      if (!next || !rows.length || next === cursor) break
+      cursor = next
+    }
+    return out
+  }
+
+  /** A channel's newest messages, as Markdown, each thread's replies after its first message; oldest first. */
+  private async chatMessages(base: string, channelId: string, who: (id: string) => ImPerson | null): Promise<ImChatMessage[]> {
+    const top = (await this.chatPages<CuChatMessage>(`${base}/channels/${encodeURIComponent(channelId)}/messages`, { content_format: 'text/md' }, 'messages', 200, MAX_CHAT_MESSAGES)).slice(0, MAX_CHAT_MESSAGES)
+    const out: ImChatMessage[] = []
+    for (const m of top) {
+      if (!m?.id) continue
+      out.push(cuChatMessage(m, null, who))
+      if (m.has_replies !== true && !(Number(m.replies_count) > 0)) continue
+      const replies = await this.chatPages<CuChatMessage>(`${base}/messages/${encodeURIComponent(String(m.id))}/replies`, { content_format: 'text/md' }, 'replies', 100)
+      for (const r of replies) if (r?.id) out.push(cuChatMessage(r, String(m.id), who))
+    }
+    return out.sort((a, b) => a.at.getTime() - b.at.getTime())
+  }
+
+  /** A channel's members where ClickUp says them; where it does not, the channel keeps those it heard from. */
+  private async chatMembers(base: string, channelId: string, who: (id: string) => ImPerson | null): Promise<ImPerson[]> {
+    try {
+      const rows = await this.chatPages<CuChatMember>(`${base}/channels/${encodeURIComponent(channelId)}/members`, {}, 'members', 50)
+      return rows.map((r) => who(String(r?.id ?? r?.user_id ?? r?.user?.id ?? ''))).filter((p): p is ImPerson => !!p)
+    } catch (e) {
+      if (!(e instanceof AppError)) throw e
+      return []
+    }
   }
 
   /**
@@ -724,4 +833,30 @@ export function cuGoal(g: CuGoal, who: (u: CuUser | null | undefined) => ImPerso
     done: percent >= 100,
     keyResults,
   }
+}
+
+/**
+ * A Chat message's Markdown as Rundesk keeps it: each mention of a person (`[@Name](#user_mention#<id>)`)
+ * a token the writer fills with a mention of the member they are here, or their name; a group's mention
+ * its name; any other of ClickUp's own anchors (`#task_mention#…`) its words.
+ */
+export function cuChatText(content: string, who: (id: string) => ImPerson | null): { text: string; mentions: ImChatMessage['mentions'] } {
+  const mentions: ImChatMessage['mentions'] = []
+  const text = content
+    .replace(/\[@([^\]]*)\]\(#user_mention#([^)\s]+)\)/g, (_whole, name: string, id: string) => {
+      mentions.push({ person: who(id), name: name.trim() || 'someone' })
+      return mentionToken(mentions.length - 1)
+    })
+    .replace(/\[@([^\]]*)\]\(#user_group_mention#[^)]*\)/g, (_whole, name: string) => `@${name.trim() || 'group'}`)
+    .replace(/\[([^\]]*)\]\(#[a-z_]+#[^)]*\)/g, (_whole, words: string) => words)
+  return { text, mentions }
+}
+
+/** A Chat message: its author when they are a person of the Workspace, else the name it is drawn under — ClickUp itself for its own posts. */
+export function cuChatMessage(m: CuChatMessage, parent: string | null, who: (id: string) => ImPerson | null): ImChatMessage {
+  const userId = m.user_id === undefined || m.user_id === null ? '' : String(m.user_id)
+  const author = userId && userId !== '-1' ? who(userId) : null
+  const authorName = author?.name ?? author?.email ?? (!userId || userId === '-1' ? 'ClickUp' : `ClickUp user ${userId}`)
+  const { text, mentions } = cuChatText(String(m.content ?? m.text ?? ''), who)
+  return { ref: String(m.id), parent, author, authorName, text, mentions, at: msDate(m.date) ?? new Date() }
 }

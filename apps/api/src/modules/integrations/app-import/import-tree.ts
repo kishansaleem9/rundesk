@@ -1,5 +1,9 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { randomUUID } from 'node:crypto'
 import {
+  chatChannelMembers,
+  chatChannels,
+  chatMessages,
   clickupImportJobs,
   customFieldDefinitions,
   goalKeyResults,
@@ -60,8 +64,18 @@ export type ImDoc = { title: string; pages: ImDocPage[] }
 /** A target of a Goal: how far it is to go, how far it has gone, and whether it is done. */
 export type ImKeyResult = { name: string; unit: string | null; target: number; current: number; done: boolean; owner: ImPerson | null }
 export type ImGoal = { name: string; description: string | null; start: Date | null; due: Date | null; owner: ImPerson | null; percent: number; done: boolean; keyResults: ImKeyResult[] }
-/** What a tool keeps for the whole account, not in one project: ClickUp's Workspace Docs and its Goals; and what could not be read of it, in words. */
-export type ImExtras = { docs?: ImDoc[]; goals?: ImGoal[]; errors?: string[] }
+/**
+ * A Chat message: its author (none for the tool's own posts) and the name it was written under, its
+ * thread's first message by ref, and its text in Markdown, each person it mentions held as a token
+ * (`mentionToken(n)`) that the writer makes a mention of a member here, or their name.
+ */
+export type ImChatMessage = { ref: string; parent: string | null; author: ImPerson | null; authorName: string; text: string; mentions: Array<{ person: ImPerson | null; name: string }>; at: Date }
+export type ImChannel = { name: string; description: string | null; topic: string | null; private: boolean; archived: boolean; members: ImPerson[]; messages: ImChatMessage[] }
+/** What a tool keeps for the whole account, not in one project: ClickUp's Workspace Docs, its Goals and its Chat; and what could not be read of it, in words. */
+export type ImExtras = { docs?: ImDoc[]; goals?: ImGoal[]; chat?: ImChannel[]; errors?: string[] }
+
+/** The place of a mention in a Chat message's text, filled in by the writer. */
+export const mentionToken = (n: number) => `\u0001mention:${n}\u0001`
 
 export type ImTask = {
   /** The tool's own id, for a link from another task. */
@@ -162,6 +176,12 @@ export type AppImportSummary = {
   /** The Goals, and their targets. */
   goalsImported?: number
   keyResultsImported?: number
+  /** Chat: its channels, their messages, and how many of those are replies in a thread. */
+  chatChannelsImported?: number
+  chatMessagesImported?: number
+  chatRepliesImported?: number
+  /** The Chat channels made, to open from the report. */
+  channels?: Array<{ id: string; name: string }>
 }
 
 export const emptySummary = (source: string, notImported: string[] = []): AppImportSummary => ({
@@ -266,6 +286,7 @@ export function placeStatus(rows: StatusRow[], status: string | null, done: bool
 export class TreeWriter {
   readonly summary: AppImportSummary
   private readonly madeGoals: string[] = []
+  private readonly madeChannels: string[] = []
   private readonly madeSpaces: string[] = []
   private readonly madeProjects: string[] = []
   private readonly madeLists: string[] = []
@@ -386,6 +407,79 @@ export class TreeWriter {
     }
   }
 
+  /**
+   * THE TOOL'S CHAT, AS CHAT HERE (`found-14-oct/clickup-chat-unimported`), as the Slack import
+   * writes a channel (`SlackImportService.run`): each a channel of the workspace, under its own
+   * name — or with the tool's name after it when the workspace has one so called — private when it
+   * was, archived when it was. Its members are the importer and every member here it had or heard
+   * from. Each message is at its moment, under its author when they are a member here, else under
+   * the importer, drawn with the name it was written under (`imported_author`). A reply is in its
+   * thread, and a mention of a member here is a mention of them, of anyone else their name.
+   */
+  async writeChat(all: ImChannel[]) {
+    const taken = new Set(
+      (await this.db.select({ name: chatChannels.name }).from(chatChannels).where(eq(chatChannels.workspaceId, this.target.workspaceId))).map((r) => r.name.toLowerCase()),
+    )
+    for (const c of all) {
+      const name = freeChannelName(c.name, taken, this.target.source)
+      taken.add(name)
+      const [channel] = await this.db
+        .insert(chatChannels)
+        .values({
+          workspaceId: this.target.workspaceId,
+          spaceId: null,
+          name,
+          description: c.description?.trim() ? storable(c.description.trim()) : null,
+          topic: c.topic?.trim() ? c.topic.trim().slice(0, 250) : null,
+          isPrivate: c.private,
+          createdById: this.target.importer.id,
+          archivedAt: c.archived ? new Date() : null,
+        })
+        .returning({ id: chatChannels.id })
+      this.madeChannels.push(channel.id)
+      this.summary.chatChannelsImported = (this.summary.chatChannelsImported ?? 0) + 1
+      const memberIds = new Set<string>([this.target.importer.id])
+      for (const p of [...c.members, ...c.messages.map((m) => m.author)]) {
+        const id = this.whom(p)
+        if (id) memberIds.add(id)
+      }
+      await this.db
+        .insert(chatChannelMembers)
+        .values([...memberIds].map((userId) => ({ channelId: channel.id, userId })))
+        .onConflictDoNothing()
+      // Each message its id before it is written, so a reply names its thread's first message.
+      const idOf = new Map(c.messages.map((m) => [m.ref, randomUUID()]))
+      const rows = c.messages.map((m) => {
+        const author = this.whom(m.author)
+        const mentioned = new Set<string>()
+        let body = m.text
+        m.mentions.forEach((x, n) => {
+          const member = this.whom(x.person)
+          if (member) mentioned.add(member)
+          body = body.split(mentionToken(n)).join(member ? `<@${member}>` : `@${x.name}`)
+        })
+        const parent = m.parent ? idOf.get(m.parent) ?? null : null
+        return {
+          id: idOf.get(m.ref)!,
+          channelId: channel.id,
+          authorId: author ?? this.target.importer.id,
+          importedAuthor: author ? null : m.authorName.slice(0, 200),
+          parentMessageId: parent,
+          body: storable(body.trim() || '_(a file, left in the tool)_'),
+          mentions: mentioned.size ? [...mentioned].map((userId) => ({ userId })) : null,
+          createdAt: m.at,
+        }
+      })
+      // A thread's first message before its replies, which name it.
+      for (const group of [rows.filter((r) => !r.parentMessageId), rows.filter((r) => r.parentMessageId)]) {
+        for (let k = 0; k < group.length; k += 500) await this.db.insert(chatMessages).values(group.slice(k, k + 500))
+      }
+      this.summary.chatMessagesImported = (this.summary.chatMessagesImported ?? 0) + rows.length
+      this.summary.chatRepliesImported = (this.summary.chatRepliesImported ?? 0) + rows.filter((r) => r.parentMessageId).length
+      this.summary.channels = [...(this.summary.channels ?? []), { id: channel.id, name }].slice(0, MAX_REPORTED)
+    }
+  }
+
   /** The links between tasks, once every task they name is here; and the job, done. */
   async finish() {
     for (const l of this.links) {
@@ -414,6 +508,7 @@ export class TreeWriter {
   /** What the run made, taken away; and the job, failed in the tool's words. */
   async fail(e: unknown) {
     try {
+      if (this.madeChannels.length) await this.db.delete(chatChannels).where(inArray(chatChannels.id, this.madeChannels))
       if (this.madeGoals.length) await this.db.delete(goals).where(inArray(goals.id, this.madeGoals))
       if (this.madeLists.length) await this.db.delete(lists).where(inArray(lists.id, this.madeLists))
       if (this.madeProjects.length) await this.db.delete(projects).where(inArray(projects.id, this.madeProjects))
@@ -810,4 +905,13 @@ export function valueFor(type: ImFieldType, raw: string | number | boolean): str
       return s ? s.slice(0, 5000) : null
     }
   }
+}
+
+/** A channel name nobody in the workspace has yet, as the Slack import names one (`freeName`): the tool's, else with the tool's name after it, then a number. */
+export function freeChannelName(name: string, taken: Set<string>, tool: string): string {
+  const base = name.trim().replace(/^#/, '').toLowerCase().replace(/\s+/g, '-').slice(0, 70) || tool
+  if (!taken.has(base)) return base
+  const first = `${base}-${tool}`
+  if (!taken.has(first)) return first
+  for (let n = 2; ; n++) if (!taken.has(`${first}-${n}`)) return `${first}-${n}`
 }

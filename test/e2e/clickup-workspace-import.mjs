@@ -36,7 +36,7 @@ const argOf = (name, fallback) => {
   return i === -1 ? fallback : process.argv[i + 1]
 }
 
-const EXPECTED_CHECKS = 20
+const EXPECTED_CHECKS = 22
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -197,6 +197,28 @@ try {
         { id: 'te2', task: { id: 'cu7' }, user: lite(nina), billable: false, start: MS('2026-10-07T09:00:00Z'), end: MS('2026-10-07T09:30:00Z'), duration: '1800000', description: '' },
         { id: 'te3', task: { id: 'cu1' }, user: { id: 950, username: 'Gone Person', email: `${TAG}-gone@clickup.invalid` }, billable: false, start: MS('2026-10-08T09:00:00Z'), end: MS('2026-10-08T09:10:00Z'), duration: '600000' },
         { id: 'te4', task: { id: 'cu4' }, user: lite(anaCu), billable: false, start: MS('2026-10-14T08:00:00Z'), end: null, duration: `-${MS('2026-10-14T08:00:00Z')}` },
+      ],
+      // Its Chat (`found-14-oct/clickup-chat-unimported`): a public channel of seven messages — more than the
+      // stub's page of three — one with a thread of two replies, one by Nina (invited) mentioning Ana, one ClickUp's
+      // own; a private channel with Ana in it; and a direct message, which stays behind.
+      chat: [
+        {
+          id: 'ch1',
+          name: `General ${TAG}`,
+          type: 'CHANNEL',
+          visibility: 'PUBLIC',
+          messages: [
+            { id: 'k1', content: `Kickoff at ten ${TAG}`, user_id: 901, date: MS('2026-10-08T09:00:00Z'), replies: [
+              { id: 'k1r1', content: `On it ${TAG}`, user_id: 901, date: MS('2026-10-08T09:05:00Z') },
+              { id: 'k1r2', content: `Booked the room ${TAG}`, user_id: 900, date: MS('2026-10-08T09:06:00Z') },
+            ] },
+            { id: 'k2', content: `Thanks [@${ANA_NAME}](#user_mention#901), see [@leads](#user_group_mention#g-1)`, user_id: 902, date: MS('2026-10-08T09:10:00Z') },
+            { id: 'k3', content: 'Daily reminder', user_id: -1, date: MS('2026-10-08T09:20:00Z') },
+            ...[4, 5, 6, 7].map((n) => ({ id: `k${n}`, content: `Note ${n} ${TAG}`, user_id: 901, date: MS(`2026-10-08T10:0${n}:00Z`) })),
+          ],
+        },
+        { id: 'ch2', name: `Leads ${TAG}`, type: 'CHANNEL', visibility: 'PRIVATE', members: [901, 900], messages: [{ id: 'l1', content: `Lead from Acme ${TAG}`, user_id: 901, date: MS('2026-10-09T09:00:00Z') }] },
+        { id: 'dm1', name: 'Ana, Nina', type: 'DM', visibility: 'PRIVATE', messages: [{ id: 'd1', content: `Just us ${TAG}`, user_id: 902, date: MS('2026-10-09T10:00:00Z') }] },
       ],
       goals: [{
         id: 'g1',
@@ -461,6 +483,30 @@ try {
     JSON.stringify({ goal, krs }),
   )
 
+  // ══ 9c. ITS CHAT ══════════════════════════════════════════════════════════
+  console.log('\n▶ Its Chat: channels, their messages, threads and mentions')
+  const chatChannelsHere = await sql`select id, name, is_private from chat_channels where workspace_id = ${WS}`
+  const general = chatChannelsHere.find((c) => c.name === `general-${TAG}`)
+  const leads = chatChannelsHere.find((c) => c.name === `leads-${TAG}`)
+  const generalMessages = general ? await sql`select id, author_id, imported_author, parent_message_id, body, mentions, created_at from chat_messages where channel_id = ${general.id} order by created_at` : []
+  const byText = (re) => generalMessages.find((m) => re.test(m.body))
+  const kickoff = byText(/^Kickoff at ten/)
+  const thanks = byText(/^Thanks/)
+  const reminder = byText(/^Daily reminder/)
+  const replies = kickoff ? generalMessages.filter((m) => m.parent_message_id === kickoff.id).map((m) => `${m.body.split(' ')[0]}:${m.author_id === ana.id ? 'ana' : m.author_id === me.id ? 'admin' : m.author_id}`) : []
+  const leadsMembers = leads ? (await sql`select user_id from chat_channel_members where channel_id = ${leads.id}`).map((r) => r.user_id) : []
+  const chatFigure = await figure('import-app-r-chat')
+  chk(
+    !!general && general.is_private === false && generalMessages.length === 9 && kickoff?.author_id === ana.id && kickoff?.imported_author === null &&
+      kickoff?.created_at?.toISOString() === '2026-10-08T09:00:00.000Z' && replies.sort().join() === 'Booked:admin,On:ana' &&
+      thanks?.author_id === me.id && thanks?.imported_author === `Nina New ${stamp}` && thanks?.body === `Thanks <@${ana.id}>, see @leads` &&
+      JSON.stringify(thanks?.mentions) === JSON.stringify([{ userId: ana.id }]) && reminder?.imported_author === 'ClickUp' &&
+      !!leads && leads.is_private === true && leadsMembers.includes(ana.id) && leadsMembers.includes(me.id) &&
+      !chatChannelsHere.some((c) => /nina/.test(c.name)) && chatFigure === 10,
+    'its Chat comes over: a public channel public and a private one private with its people, every page of messages each at its moment, a thread’s replies in its thread, Nina’s message (not a member yet) drawn under her name and its mention of Ana a mention of her, ClickUp’s own post under ClickUp; a direct message stays behind, and the report says ten messages',
+    JSON.stringify({ channels: chatChannelsHere.map((c) => [c.name, c.is_private]), messages: generalMessages.length, kickoff: kickoff && { author: kickoff.author_id === ana.id, at: kickoff.created_at }, replies, thanks: thanks && { author: thanks.author_id === me.id, as: thanks.imported_author, body: thanks.body, mentions: thanks.mentions }, reminder: reminder?.imported_author, leadsMembers: leadsMembers.length, chatFigure }),
+  )
+
   // ══ 10. JOINING TAKES THEIR TASKS ═════════════════════════════════════════
   console.log('\n▶ Accepting the invitation: their tasks are theirs')
   const claim = async (who, token) => {
@@ -538,7 +584,8 @@ try {
   console.log('\n▶ Asked for the Workspace’s own Docs, with time and Goals turned off')
   const goalsBefore = (await sql`select count(*)::int as n from goals where workspace_id = ${WS}`)[0]?.n
   const askedBefore = ((await appAsked(STUB, 'clickup', CU)) ?? []).length
-  const wide = await A(`/workspaces/${WS}/import/apps/clickup`, { method: 'POST', body: { source: 't1', projectIds: ['s1'], spaceId: SPACE_ID ?? null, people: {}, options: { docs: 'workspace', time: 'no', goals: 'no' } } })
+  const channelsBefore = (await sql`select count(*)::int as n from chat_channels where workspace_id = ${WS}`)[0]?.n
+  const wide = await A(`/workspaces/${WS}/import/apps/clickup`, { method: 'POST', body: { source: 't1', projectIds: ['s1'], spaceId: SPACE_ID ?? null, people: {}, options: { docs: 'workspace', time: 'no', goals: 'no', chat: 'no' } } })
   const wideJob = wide.data?.jobId ? await job(wide.data.jobId) : null
   const [book] = await sql`select space_id, plaintext from docs where workspace_id = ${WS} and title = ${`Handbook ${TAG}`}`
   const wideTime = wide.data?.jobId ? (await sql`select count(*)::int as n from time_entries where import_id = ${wide.data.jobId}`)[0]?.n : -1
@@ -549,6 +596,12 @@ try {
       !askedNow.some((a) => a.includes('/time_entries') || a.includes('/goal')),
     'asked for them, the Workspace’s own Docs come in beside the workspace’s other Docs; time and Goals turned off are neither read nor made',
     JSON.stringify({ start: said(wide), job: wideJob?.status, error: wideJob?.error, book: book ? { space: book.space_id, text: book.plaintext?.slice(0, 20) } : null, wideTime, goals: [goalsBefore, goalsAfter], asked: askedNow.filter((a) => /time_entries|goal/.test(a)) }),
+  )
+  const channelsAfter = (await sql`select count(*)::int as n from chat_channels where workspace_id = ${WS}`)[0]?.n
+  chk(
+    wideJob?.status === 'completed' && channelsAfter === channelsBefore && !askedNow.some((a) => a.includes('/chat/')),
+    'and Chat turned off is neither read nor made',
+    JSON.stringify({ job: wideJob?.status, channels: [channelsBefore, channelsAfter], asked: askedNow.filter((a) => a.includes('/chat/')) }),
   )
 } catch (e) {
   failed += 1

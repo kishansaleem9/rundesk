@@ -380,7 +380,7 @@ export class AppImportService {
   /**
    * Awaitable, so a test can run it and read the summary: each project read, then written, one at a
    * time, and its Docs into the Space it became; what the tool keeps for the whole account — ClickUp's
-   * Goals, its Workspace's own Docs — last. A run that fails takes its Docs away with the rest.
+   * Goals, its Chat, its Workspace's own Docs — last. A run that fails takes its Docs away with the rest.
    */
   async run(writer: TreeWriter, total: number, reads: Array<() => Promise<ImNode>>, extras?: () => Promise<ImExtras>) {
     const madeDocs: string[] = []
@@ -395,6 +395,7 @@ export class AppImportService {
         const x = await extras()
         for (const e of x.errors ?? []) writer.summary.errors.push(e)
         if (x.goals?.length) await writer.writeGoals(x.goals)
+        if (x.chat?.length) await writer.writeChat(x.chat)
         if (x.docs?.length) await this.writeDocs(writer, null, x.docs, madeDocs)
       }
       return await writer.finish()

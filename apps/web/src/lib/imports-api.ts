@@ -296,6 +296,11 @@ export type AppSummary = {
   timeEntriesUnmatched?: number
   goalsImported?: number
   keyResultsImported?: number
+  /** Chat: its channels, their messages, and the replies among them; the channels made. */
+  chatChannelsImported?: number
+  chatMessagesImported?: number
+  chatRepliesImported?: number
+  channels?: Array<{ id: string; name: string }>
 }
 
 const apps = (workspaceId: string) => `/workspaces/${workspaceId}/import/apps`

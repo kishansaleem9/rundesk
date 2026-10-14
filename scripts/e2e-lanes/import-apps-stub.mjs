@@ -42,6 +42,8 @@
  *           a team's docs: [{id, name, parent: {id, type}, pages: [{id, name, content, pages}]}] (v3), its
  *                  time_entries: [{id, task: {id}, user, billable, start, end, duration, description}] and its
  *                  goals: [{id, name, …, key_results}]   (`found-14-oct/clickup-docs-time-goals-unimported`)
+ *           and its chat: [{id, name, type CHANNEL|DM, visibility, members?: [userId], messages: [{id, content,
+ *                  user_id, date, replies?: [message]}]}] (v3, `found-14-oct/clickup-chat-unimported`)
  *   monday  data: {me: {id, name, email, account: {name}}, users: [user], boards: [{id, name, type?, workspace?,
  *                  columns, groups, items}]}
  *
@@ -484,6 +486,8 @@ async function monday(req, res, url) {
 
 /** ClickUp's own: 25 comments a page, newest first. */
 const CLICKUP_COMMENTS = 25
+/** The stub's Chat pages, smaller than ClickUp's 100 so the suite's few messages span several. */
+const CLICKUP_CHAT_PAGE = 3
 
 const cuStatusOf = (space, folder, list) => (list.override_statuses && list.statuses?.length ? list.statuses : folder?.override_statuses && folder.statuses?.length ? folder.statuses : space.statuses ?? [])
 
@@ -545,6 +549,36 @@ async function clickup(req, res, url, ctx) {
       const md = url.searchParams.get('content_format') === 'text/md'
       const shape = (p) => ({ id: p.id, doc_id: doc.id, name: p.name, content: md ? p.content ?? '' : String(p.content ?? '').replace(/[#*_`>]/g, ''), pages: (p.pages ?? []).map(shape) })
       return send(res, 200, (doc.pages ?? []).map(shape))
+    }
+    // Chat, as ClickUp's v3 Chat API answers: a page of rows as `data`, newest first, the next by `next_cursor`.
+    // Three a page whatever is asked, so a reader that stops at its first page is seen to.
+    const chatPage = (rows) => {
+      const from = Number(url.searchParams.get('cursor') ?? 0) || 0
+      const size = Math.min(Number(url.searchParams.get('limit') ?? 100) || 100, CLICKUP_CHAT_PAGE)
+      return { data: rows.slice(from, from + size), next_cursor: from + size < rows.length ? String(from + size) : null }
+    }
+    const chatOf = (team) => team?.chat ?? []
+    const messageRow = (msg) => ({ id: msg.id, type: 'message', content: msg.content ?? '', user_id: String(msg.user_id), date: Number(msg.date), has_replies: (msg.replies ?? []).length > 0 })
+    const newestFirst = (rows) => [...rows].sort((a, b) => Number(b.date) - Number(a.date))
+    if ((m = /^\/workspaces\/([^/]+)\/chat\/channels$/.exec(path))) {
+      const team = teamOf(m[1])
+      if (!team) return send(res, 401, { err: 'Team not authorized', ECODE: 'OAUTH_027' })
+      return send(res, 200, chatPage(chatOf(team).map((c) => ({ id: c.id, name: c.name, type: c.type ?? 'CHANNEL', visibility: c.visibility ?? 'PUBLIC', creator: String(data.user?.id ?? ''), created_at: String(Date.now()) }))))
+    }
+    if ((m = /^\/workspaces\/([^/]+)\/chat\/channels\/([^/]+)\/messages$/.exec(path))) {
+      const channel = chatOf(teamOf(m[1])).find((c) => c.id === m[2])
+      if (!channel) return send(res, 404, { err: 'Channel not found', ECODE: 'CHAT_404' })
+      return send(res, 200, chatPage(newestFirst(channel.messages ?? []).map(messageRow)))
+    }
+    if ((m = /^\/workspaces\/([^/]+)\/chat\/messages\/([^/]+)\/replies$/.exec(path))) {
+      const msg = chatOf(teamOf(m[1])).flatMap((c) => c.messages ?? []).find((x) => x.id === m[2])
+      if (!msg) return send(res, 404, { err: 'Message not found', ECODE: 'CHAT_404' })
+      return send(res, 200, chatPage(newestFirst(msg.replies ?? []).map(messageRow)))
+    }
+    if ((m = /^\/workspaces\/([^/]+)\/chat\/channels\/([^/]+)\/members$/.exec(path))) {
+      const channel = chatOf(teamOf(m[1])).find((c) => c.id === m[2])
+      if (!channel?.members) return send(res, 404, { err: 'Members not found', ECODE: 'CHAT_404' })
+      return send(res, 200, chatPage(channel.members.map((id) => ({ id: String(id) }))))
     }
     return send(res, 404, { err: 'Route not found', ECODE: 'APP_001' })
   }

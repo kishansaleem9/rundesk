@@ -127,6 +127,7 @@ function Report({ result, label }: { result: AppSummary; label: string }) {
         {result.timeEntriesImported !== undefined && <Figure testid="import-app-r-time" label={t('import.appTime')} value={result.timeEntriesImported} />}
         {(result.timeEntriesPending ?? 0) > 0 && <Figure testid="import-app-r-time-waiting" label={t('import.appTimeWaiting')} value={result.timeEntriesPending ?? 0} />}
         {result.goalsImported !== undefined && <Figure testid="import-app-r-goals" label={t('import.appGoals')} value={result.goalsImported} />}
+        {result.chatMessagesImported !== undefined && <Figure testid="import-app-r-chat" label={t('import.appChat')} value={result.chatMessagesImported} />}
       </div>
       {result.made.lists.length > 0 && (
         <ul className="text-sm space-y-1" data-testid="import-app-r-made">
