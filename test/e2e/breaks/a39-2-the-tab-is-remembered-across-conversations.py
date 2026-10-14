@@ -21,11 +21,14 @@
 # because the strip's own guard is untouched; and every tab switch inside the
 # one DM still works.
 #
+# RE-AIMED 14 October: the reset now resets a Space channel's Views tab beside the DM's tab
+# (`found-14-oct/space-channel-views-unbuilt`); the DM's line goes, the channel's stays.
+#
 # Reddens: a39-dm-tabs: "coming back to the DM lands on Chat, not on stale Tasks"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-chat-page.tsx'
-a = "  useEffect(() => { setDmTab('chat') }, [selectedId])\n"
-b = ""
+a = "  useEffect(() => {\n    setDmTab('chat')\n    setChannelTab('chat')\n  }, [selectedId])\n"
+b = "  useEffect(() => {\n    setChannelTab('chat')\n  }, [selectedId])\n"
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))
