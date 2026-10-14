@@ -10570,7 +10570,7 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 - Rehearsal 16 at `ce4b825`, "Webhooks and their secrets belong to webhook.manage", 13 of 15: "a webhook made on the page shows its signing secret — the one stored — and joins the list — shown 40 characters; stored 97 characters; the same: false", and the admin's twin. Batch 42 seals `webhooks.secret`; the suite read it as given. Batch 42's lane runs had not included the suite.
 - Reading every suite for the columns batch 42 seals found one more: `connected-calendars` checked the refreshed calendar's token with `!== TOKENS.stale`, which any sealed value passes, the expired token sealed again among them. Its refresh check could no longer fail on the token.
 
-*Closed, 14 October.* Both open what they read with `openKept` (`lib/sealed.mjs`), as the suites batch 42 changed do, and the calendar's check asks for the token its token address gave (`refreshed-…`), not merely another.
+*Closed, 14 October.* Both open what they read with `openKept` (`lib/sealed.mjs`), as the suites batch 42 changed do, and the calendar's check asks for the token its token address gave (`refreshed-…`), not merely another. On lane 3 at `61f77ea`, whose key seals as CI's does: `webhook-access` 15 of 15, `connected-calendars` 11 of 11.
 
 ### `found-14-oct/planner-rail-read-before-its-order` — **closed** (test tooling, small; found by rehearsal 16) · reproduced 14 October
 
@@ -10578,7 +10578,7 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 
 *Evidence, 14 October:* rehearsal 16, "A planner rail section of one's own holds the tasks put in it, where its maker places it", 10 of 11: "an order saved from the other workspace keeps this one's section where it stood, and each rail draws only its own — … stored ["section:…","priorities","section:…","meetWith",…]; this rail ["priorities","meetWith","assignedToMe","todayOverdue","backlog"]". The stored order was right. The planner draws its rail from two answers, the stored order (`/settings`) and this workspace's sections (`/sections`), and until both land it holds the five built in. `openPlanner` waited for the sections' answer and for any row drawn, which the five are at once. Rehearsal 15 passed the step.
 
-*Closed, 14 October.* The rail is `aria-busy` until both have answered (`workspace-planner-page.tsx`), and the suite waits until it is not.
+*Closed, 14 October.* The rail is `aria-busy` until both have answered (`workspace-planner-page.tsx`), and the suite waits until it is not: 11 of 11 on lane 3 at `61f77ea`.
 
 ### `found-14-oct/brain-row-read-before-the-status` — **closed** (test tooling, small; found by rehearsal 16) · reproduced 14 October
 
@@ -10586,7 +10586,7 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 
 *Evidence, 14 October:* rehearsal 16, without a model, 28 of 29: "the @ picker opens with frame 04:00's Brain section … — where no model answers it is offered disabled and says why: disabled false, note 0". The row is disabled once `/ai/status` says there is no model; before it answers, the row is offered. The suite read it as soon as it was drawn. Rehearsal 15 and the lanes passed the step.
 
-*Closed, 14 October.* The row is `aria-busy` until the status has answered (`task-detail-sheet.tsx`), and the suite reads it after.
+*Closed, 14 October.* The row is `aria-busy` until the status has answered (`task-detail-sheet.tsx`), and the suite reads it after: 29 of 29 on lane 3 without a model and on lane 2 with one, at `61f77ea`.
 
 ### `found-14-oct/task-cover-board-press-lost` — **closed** (test tooling, small; found by rehearsal 16) · reproduced 14 October
 
@@ -10594,7 +10594,7 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 
 *Evidence, 14 October:* rehearsal 16, "Task cover", 40 of 42 in 122.7 s (24.1 s in rehearsal 15): "the Board never drew the task's card (…), so there was nothing to take off", and the teammate's board the same. The API's log shows nothing failing then. The press was caught and forgotten, so the run cannot say whether it was lost on a tab strip drawn again under it or the board drew late.
 
-*Closed, 14 October.* The tab says when its view is current (`aria-current`), so the suite presses it until it does, and a card that still never draws now says which of the two it was.
+*Closed, 14 October.* The tab says when its view is current (`aria-current`), so the suite presses it until it does, and a card that still never draws now says which of the two it was. 42 of 42 on lane 3 at `4a304ba`.
 
 ### `found-14-oct/leftover-audit-blames-the-nightly-scores` — **closed** (test tooling, small; found by rehearsal 16) · reproduced 14 October
 
@@ -10602,7 +10602,7 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 
 *Evidence, 14 October:* rehearsal 16, "ClickApps are switched by workspace.clickapps.manage": 7 of 7 checks, and failed on "this run left 2 rows that nothing it registered removes: 2 project_health_scores rows". The API scores every project daily at 2 AM (`project-health.service.ts`, `@Cron(EVERY_DAY_AT_2AM)`), and the step ran then. The audit counts every row made while a run runs, so a CI run crossing 02:00 UTC fails whichever suite runs then.
 
-*Closed, 14 October.* The audit leaves `project_health_scores` to the schedule (`LEFT_BY_USE`, `lib/made-sweep.mjs`; `check-made-sweep.mjs` 50 of 50). A score about a project the run removes goes with it.
+*Closed, 14 October.* The audit leaves `project_health_scores` to the schedule (`LEFT_BY_USE`, `lib/made-sweep.mjs`; `check-made-sweep.mjs` 50 of 50). A score about a project the run removes goes with it. `clickapp-flags-access` 7 of 7 on lane 3 at `61f77ea`.
 
 ### `found-13-oct/lane-admin-meets-the-hourly-ai-cap` — **closed** (test tooling, small; found by batch 40b's break runs) · reproduced 13 October
 
