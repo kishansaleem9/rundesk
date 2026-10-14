@@ -645,6 +645,8 @@ export const LEFT_BY_USE = {
   flag_audit_log: "the feature flags' audit trail",
   search_engagement: 'what somebody opened from a search (one about a row the run removes goes with it)',
   personal_tasks: "Home's old to-dos, which nothing writes now: a person's first Personal List takes theirs in as its tasks, and removes them here",
+  // Not a run's: the API's own 2 AM schedule scores every project, and blamed the run going then (`found-14-oct/leftover-audit-blames-the-nightly-scores`).
+  project_health_scores: "a project's daily health score, which the API's own schedule writes for every project at 2 AM (one about a project the run removes goes with it)",
 }
 /*
  * And a notification the API's own schedules write (task reminders every
