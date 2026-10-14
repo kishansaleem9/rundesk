@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 575 items: 2 open · 0 partly fixed · 563 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 14 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 575 items: 0 open · 0 partly fixed · 565 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 14 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -10687,7 +10687,7 @@ Measured:
 - Its package's tests run in the preflight (`import/export package tests`) and in CI.
 - Measured on lane 3 at `b2eed3f`: `space-create-menu` 32 of 32, `importers-by-sign-in` 26 of 26, `importers` 25 of 25, `imports` 60 of 60.
 
-### `found-14-oct/clickup-workspace-import-and-people-unbuilt` — **open** (feature, large; found reviewing what moving a team off ClickUp needs) · reproduced 14 October
+### `found-14-oct/clickup-workspace-import-and-people-unbuilt` — **closed** (feature, large; found reviewing what moving a team off ClickUp needs) · reproduced 14 October
 
 **A team moving off ClickUp brings its work but not its people: nobody is invited, and a whole Workspace cannot be read at once**
 
@@ -10700,6 +10700,20 @@ Measured:
 - sign in to ClickUp by its personal API token and read a Workspace's Spaces whole over API v2;
 - match its people to members by email, and invite the ones who are not here with ClickUp's role for them, by somebody who may invite, at no role above their own;
 - hold their tasks for them and make them theirs when they accept, where the assignee route would put them on them.
+
+*Closed, 14 October* (batch 45, `cdc5e44`, and what measuring it found):
+- **Signed in by its token.** The ClickUp tab takes a personal API token ("Settings › Apps"), asks ClickUp whose it is, and keeps it sealed for the person who pasted it (`import_grants`, provider `clickup`). A token ClickUp refuses is said in the form, and nothing is kept.
+- **Read whole** over API v2 (`clickup.ts`): a Workspace's Spaces, each with its Folders and Lists, and each List with its statuses (the List's own, else its Folder's, else its Space's), in ClickUp's order. Tasks are read 100 a page until `last_page`, closed ones and subtasks asked for. A subtask comes in under its task (one level here). A task keeps its description, dates, priority, estimate, tags, checklists, Custom Fields, comments (25 a page, newest first, each page asked from the oldest of the last), files, and links and dependencies as related tasks.
+- **Its people.** Each is matched to a member by email. Anyone who is not here is offered an invitation with their ClickUp role (1 and 2 an admin, 3 a member, 4 a guest), and "Invite everyone who is not here" sets them all. The invitations go out as `POST /invitations` sends them: only by somebody with `members.invite`, at no role above their own, never twice to an address with one open. The tasks of the people invited are held for them (`import_pending_assignees`, migration `0195`) and become theirs when they accept, where the assignee route would put them on them. A guest is put on nothing that is not shared with them.
+- **Found measuring it:**
+  - the lanes' databases kept `import_grants`' old provider check, which `drizzle-kit push` does not rewrite, so a ClickUp sign-in failed on a constraint. 0195's check is applied to every lane, as `0191` and `0192` were; production's `migrate` applies it, and CI starts from an empty database;
+  - the suite read a checklist column that does not exist (`is_completed`);
+  - the suite looked for the invitation's token in a text part the email does not have.
+
+Measured:
+- `clickup-workspace-import` 14 of 14 on lane 3 at `83a6bc1`, 20 of 20 with batch 47 at `6efcf8c` and again at `93890fd`. `clickup.test.ts`: 7 unit tests, of 15 since batch 47.
+- Patches `cwi-1` to `cwi-16`, 16 at `6efcf8c` on lane 3, baseline 20 of 20: each reddens a check it names. `cwi-9` was re-aimed at the claim's held-tasks line inside its block.
+- Beside it: `importers-by-sign-in` 26 of 26 at `2f2a0bb`, and `isi-w2`, re-aimed at the wizard's people choice, reddens the check it names; `importers` 25 of 25 and `imports` 60 of 60 at `b2eed3f`.
 
 ### `found-14-oct/lane-tooling-misses-the-imports-package` — **closed** (harness, medium; found integrating `found-14-oct/imports-exports-branch-unmerged`) · reproduced 14 October
 
@@ -10745,7 +10759,7 @@ Measured:
 - `automation-conditions` 9 of 9 on lane 4 at `281a101` and again at `ec66732`. Its unit file, `automation-conditions.test.ts`, 5 of 5.
 - Patches `acn-1` to `acn-10` (the API) and `acn-w1` to `acn-w4` (the web), 14 at `ec66732` on lane 4, baseline 9 of 9: each reddens a check it names (`break-report.sh`: 14 reddened). `acn-1`, conditions ignored, is the rule as it stood before: 6 of 9.
 
-### `found-14-oct/clickup-docs-time-goals-unimported` — **open** (feature, large; found closing `found-14-oct/clickup-workspace-import-and-people-unbuilt`, at the owner's word "we need to import their full data too") · reproduced 14 October
+### `found-14-oct/clickup-docs-time-goals-unimported` — **closed** (feature, large; found closing `found-14-oct/clickup-workspace-import-and-people-unbuilt`, at the owner's word "we need to import their full data too") · reproduced 14 October
 
 **A ClickUp Workspace comes over without its Docs, the time its people tracked, or its Goals**
 
@@ -10756,6 +10770,18 @@ Measured:
 - tracked time under whoever tracked it, held for somebody invited until they join; a timer still running is not time; a token that may not read others' time brings its own and says so;
 - the Workspace's Goals with their Targets, its owner and theirs mapped; each of the three a choice on the import page, on unless turned off;
 - a People field as its people's names, a Task or Relationship field as its tasks', a Formula as its value.
+
+*Closed, 14 October* (batch 47, `ec66732`, and `6efcf8c`), as the item's "To close" says, each of the three a choice on the import page:
+- **Docs** (`clickup.ts`, API v3): a Doc in the Space, one of its Folders or one of its Lists comes into the Space (`DocsService.importPageTree`, as Notion's pages come in). Its first page is the Doc's own body, and the Doc's other pages, and their pages, nest under it as ClickUp nests them. The Workspace's own Docs come in, beside the workspace's other Docs, only when asked. A Doc that cannot be read or made is said, and the others come in.
+- **Tracked time:** read once a Space (`space_id`), everyone's by `assignee`, 50 people an ask. Each entry comes in as a time entry under whoever tracked it, billable as it was, marked as the run's (`time_entries.import_id`). An entry of somebody the run invited is held by their address (`import_pending_time_entries`, migration `0196`) and is theirs when they accept, on a task the assignee route would put them on. A running timer is not time. A token that may not read others' time brings its owner's own, and the run says so.
+- **Goals:** read once a run, those in Goal Folders too, each whole for its Targets. Each comes in with its owner mapped, as a percentage from its Targets (or as ClickUp says it), done at a hundred. Each Target counts from nothing to its target: a number, currency or percentage from its start to its end, down as well as up; true/false as one to do; a tasks Target as its tasks done of its tasks.
+- **Fields:** a People field comes in as its people's names, a Task or Relationship field as its tasks', a Formula as its value.
+- **The report** says the pages of Docs, the time entries made and held, and the Goals. The run's "not imported" names what is left: Whiteboards, Chat, Dashboards and views; reminders, and Goal Folders (their Goals come in); files in Custom Fields.
+
+Measured:
+- `clickup-workspace-import` 20 of 20 on lane 3 at `6efcf8c` and `93890fd`: six checks are new, and the Custom Fields check now reads the People field.
+- `clickup.test.ts` 15 of 15: eight new unit tests.
+- Patches `cwi-17` to `cwi-30` and `cwi-w1`: 15 on lane 3 at `6efcf8c`, baseline 20 of 20, each reddens a check it names. `cwi-20` did not build there (TypeScript drops a branch's narrowing on `&& false`, as `cem-2` found); re-aimed, it reddens its three checks at `93890fd`.
 
 *Found measuring it, 14 October:* a Space imported a third time into the Space chosen before failed whole — "duplicate key value violates unique constraint `uq_lists_project_name_active`" — as its List in no Folder had the name of the one the first run made there. A List now comes in beside it as "Inbox (2)", the name a person making it would be asked to change it to.
 
