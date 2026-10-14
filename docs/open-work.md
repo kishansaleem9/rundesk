@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 576 items: 1 open · 0 partly fixed · 565 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 14 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 576 items: 0 open · 0 partly fixed · 566 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 14 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -10785,13 +10785,29 @@ Measured:
 
 *Found measuring it, 14 October:* a Space imported a third time into the Space chosen before failed whole — "duplicate key value violates unique constraint `uq_lists_project_name_active`" — as its List in no Folder had the name of the one the first run made there. A List now comes in beside it as "Inbox (2)", the name a person making it would be asked to change it to.
 
-### `found-14-oct/clickup-chat-unimported` — **open** (feature, medium; found closing `found-14-oct/clickup-docs-time-goals-unimported`; built at the owner's word, 14 October: "sure do it") · reproduced 14 October
+### `found-14-oct/clickup-chat-unimported` — **closed** (feature, medium; found closing `found-14-oct/clickup-docs-time-goals-unimported`; built at the owner's word, 14 October: "sure do it") · reproduced 14 October
 
 **A ClickUp Workspace comes over without its Chat**
 
 *Evidence, 14 October:* the token import's run says "Whiteboards, Chat, Dashboards and views" stay behind (`CLICKUP.notImported`), and nothing reads ClickUp's Chat: a team's channels and their history are left in ClickUp. Rundesk imports Slack's channels into Chat (`SlackImportService`), and ClickUp's not at all.
 
 *To close:* as ClickUp's v3 Chat API answers — which ClickUp calls experimental, so its shape is read first, read only, through the owner's own ClickUp account, with their leave — each channel (not a direct message, as the Slack import leaves those) a Chat channel here: private when it was, with its people; every page of its messages, each at its moment and under its author when they are a member here, else drawn under their name; a thread's replies in its thread; a mention of a member a mention of them. A choice on the import page, on unless turned off.
+
+*Closed, 14 October* (batch 48, `dd78db8`):
+- **Its shape, read first:** with the owner's leave, ClickUp's Chat was read through their own ClickUp account, read only and for its shape alone, nothing of what it said kept or copied. A channel is `id`, `name`, `type` (`CHANNEL`, or a direct message's) and `visibility`. A message is `id`, `content` in Markdown (a mention `[@Name](#user_mention#<id>)`, a group's `#user_group_mention#`), `user_id` (`-1` for ClickUp's own posts), `date` in milliseconds and `has_replies`. Messages and a thread's replies come newest first, a page at a time by `next_cursor`, and a message may have no text (a file).
+- **The reader** (`clickup.ts`, v3): the Workspace's channels, its messages (the newest 10 000 a channel, as the Slack import takes), each thread's replies, and its members where ClickUp says them. It takes the API's own pages (`data`) and the connector's named ones, and skips a direct message. A channel that cannot be read is said, and the others come in.
+- **The writer** (`TreeWriter.writeChat`), as the Slack import writes a channel:
+  - a channel takes its own name, or with `-clickup` after it when the workspace has that name, and is private when it was, archived when it was;
+  - its members are the importer and every member here it had or heard from;
+  - each message keeps its moment and its author when they are a member here, else it goes under the importer, drawn with the name it was written under (`imported_author`);
+  - a reply is in its thread, and a mention of a member here is a mention of them, of anyone else their name;
+  - a message with no text says it held a file left in ClickUp. A run that fails takes its channels away.
+- **The import page** offers Chat on the ClickUp tab, on unless turned off, and the report says the messages. The run's "not imported" now names direct messages, and files and reactions in Chat.
+
+Measured:
+- `clickup-workspace-import` 22 of 22 on lane 3 at `dd78db8` and `d91b749`. Two checks are new: the Chat that comes over, read in its rows (a public channel of seven messages over three of the stub's pages with a thread of two replies, a private channel, a direct message that stays behind); and Chat turned off, neither read nor made.
+- `clickup.test.ts` 18 of 18: three new unit tests.
+- Patches `cwi-31` to `cwi-38` and `cwi-w2`, 9 on lane 3 at `d91b749`, baseline 22 of 22: each reddens the check it names.
 
 ## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 46
 
