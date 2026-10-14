@@ -25,7 +25,7 @@ WT="$(cd "$WT" && pwd)"
 MODE="${2:-link}"
 REPO="${RUNDESK_MAIN:-/home/user/rundesk}"
 if [ "$WT" = "$REPO" ]; then echo "link-worktree: $WT is the main checkout, not a worktree" >&2; exit 2; fi
-DIRS=". apps/web apps/api packages/ui packages/db packages/feature-flags packages/eslint-config"
+DIRS=". apps/web apps/api packages/ui packages/db packages/feature-flags packages/eslint-config packages/imports"
 
 if [ "$MODE" = "--check" ]; then
   bad=0; seen=0

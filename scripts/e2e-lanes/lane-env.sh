@@ -659,6 +659,8 @@ lane_calendar_env () {
   export WRIKE_AUTH_URL="$base/wrike/oauth2/authorize/v4" WRIKE_TOKEN_URL="$base/wrike/oauth2/token" WRIKE_API_URL="$base/wrike/api/v4"
   export WRIKE_CLIENT_ID="${WRIKE_CLIENT_ID:-stub-wrike}" WRIKE_CLIENT_SECRET="${WRIKE_CLIENT_SECRET:-stub-wrike-secret}"
   export MONDAY_API_URL="$base/monday/v2"
+  # And ClickUp, a whole Workspace by its token (`found-14-oct/clickup-workspace-import-and-people-unbuilt`).
+  export CLICKUP_API_URL="$base/clickup/api/v2"
 }
 
 lane_calendar_up () {
@@ -1155,7 +1157,7 @@ LANE_SUITE_LOCALE=(LANG=C.UTF-8 LC_ALL=C.UTF-8)
 # `refresh-dists.sh` writes it into the bundle (`.sources-hash`); `verify.sh`
 # asks it again. Run in `$1`, or in the tree this file is in when none is
 # given — not the main checkout (`found-5-oct/lane-scripts-build-the-main-checkout`).
-WEB_SOURCE_PATHS="apps/web/src packages/ui/src packages/feature-flags/src apps/web/index.html apps/web/vite.config.ts apps/web/tailwind.config.ts apps/web/postcss.config.js apps/web/public"
+WEB_SOURCE_PATHS="apps/web/src packages/ui/src packages/feature-flags/src packages/imports/src apps/web/index.html apps/web/vite.config.ts apps/web/tailwind.config.ts apps/web/postcss.config.js apps/web/public"
 web_sources_hash () {
   # shellcheck disable=SC2086
   ( cd "${1:-$LANE_ENV_DIR/../..}" && python3 - $WEB_SOURCE_PATHS <<'PY'

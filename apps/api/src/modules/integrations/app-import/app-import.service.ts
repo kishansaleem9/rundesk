@@ -1,8 +1,8 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional, UnauthorizedException } from '@nestjs/common'
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional, UnauthorizedException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { and, eq, inArray } from 'drizzle-orm'
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { clickupImportJobs, docs, importGrants, users, workspaceMembers } from '@rundesk/db'
+import { clickupImportJobs, docs, importGrants, invitations, users, workspaceMembers, workspaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../../common/database/database.module'
 import { R2Service } from '../../../common/storage/r2.service'
@@ -10,11 +10,14 @@ import { IMPORT_ACCESS, type Importer } from '../clickup-import/import-access'
 import { assertImportTarget } from '../clickup-import/import-target'
 import { ImportFilesService } from '../clickup-import/import-files'
 import { DocsService } from '../../docs/docs.service'
+import { InvitationsService } from '../../invitations/invitations.service'
+import { CustomRolesService } from '../../custom-roles/custom-roles.service'
+import { ASSIGNABLE_WORKSPACE_ROLES, roleRank } from '../../../common/permissions/workspace-roles'
 import { markdownToTiptap } from '../../docs/tiptap-markdown'
 import { AppError } from './app-http'
 import { envMissing, isAppKey, type AppDef, type AppGrant, type AppKey, type GrantToken } from './app-def'
-import { APPS } from './apps'
-import { imTask, TreeWriter, type ImNode } from './import-tree'
+import { APPS, APPS_TAB } from './apps'
+import { imTask, TreeWriter, type ImNode, type ImPerson } from './import-tree'
 import { NotionReadError, readNotionExport } from './notion-export'
 
 /**
@@ -36,6 +39,13 @@ import { NotionReadError, readNotionExport } from './notion-export'
 
 type State = { ws: string; user: string; app: AppKey; ts: number }
 
+/** What somebody of the tool is invited as: their role there (a member when it does not say), and never above the inviter's. */
+export function inviteAs(role: ImPerson['role'], inviterRank: number): string | null {
+  const wanted = role === 'admin' ? 'workspace_admin' : role === 'guest' ? 'guest' : 'member'
+  if (roleRank(wanted) <= inviterRank) return wanted
+  return roleRank('member') <= inviterRank ? 'member' : null
+}
+
 export const APP_IMPORT_REFUSALS = {
   unknownApp: 'There is no importer for that tool here',
   notConfigured: (label: string, missing: string[]) => `${label} is not set up on this server — missing backend configuration: ${missing.join(', ')}`,
@@ -47,6 +57,10 @@ export const APP_IMPORT_REFUSALS = {
   noProjects: (label: string) => `Choose at least one thing in ${label} to import`,
   notThere: (label: string) => `None of what was chosen is in that ${label} account`,
   notAMember: 'Each person is mapped to a member of this workspace, or to nobody',
+  inviteWho: (label: string) => `Only a person of ${label} with an email, who is not a member here yet, can be invited`,
+  inviteRole: 'An invitation makes someone a workspace admin, a manager, a member or a guest',
+  mayNotInvite: 'Missing required permission: members.invite',
+  aboveOwn: (role: string) => `You cannot invite ${role}: it is above your own role`,
 } as const
 
 @Injectable()
@@ -57,6 +71,8 @@ export class AppImportService {
     @Optional() private readonly r2?: R2Service,
     @Optional() private readonly files?: ImportFilesService,
     @Optional() private readonly docsService?: DocsService,
+    @Optional() private readonly invitationsService?: InvitationsService,
+    @Optional() private readonly roles?: CustomRolesService,
   ) {}
 
   def(app: unknown): AppDef {
@@ -106,14 +122,14 @@ export class AppImportService {
     return `${web}/app/${workspaceId}/import?${params.toString()}`
   }
 
-  /** Every tool, whether the server can sign in to it, and whether this person has. */
+  /** Every tool of the Apps tab, whether the server can sign in to it, and whether this person has. */
   async catalogue(workspaceId: string, importer: Importer) {
     await IMPORT_ACCESS.assertMayImport(this.db, { workspaceId, actorId: importer.id })
     const grants = await this.db
       .select({ provider: importGrants.provider, account: importGrants.account })
       .from(importGrants)
       .where(and(eq(importGrants.workspaceId, workspaceId), eq(importGrants.userId, importer.id)))
-    return Object.values(APPS).map((d) => {
+    return APPS_TAB.map((d) => {
       const grant = grants.find((g) => g.provider === d.key)
       return { key: d.key, label: d.label, auth: d.auth, configured: envMissing(d.env).length === 0, connected: !!grant, name: grant ? String((grant.account as { name?: string }).name ?? '') : null }
     })
@@ -263,10 +279,46 @@ export class AppImportService {
     const found = await this.translate(() => d.reader(grant).people(String(source ?? ''), ids))
     const members = await this.members(workspaceId)
     const byEmail = new Map(members.filter((m) => m.email).map((m) => [m.email!.toLowerCase(), m.id]))
+    // Anybody with an address here at all — a guest too — is not somebody to invite.
+    const here = await this.addressesHere(workspaceId)
+    const inviter = await this.inviteRank(workspaceId, importer)
     return {
-      people: found.map((p) => ({ key: p.key, name: p.name, email: p.email, match: p.email ? byEmail.get(p.email) ?? null : null })),
+      people: found.map((p) => {
+        const match = p.email ? byEmail.get(p.email) ?? null : null
+        // Whom the importer may invite instead, and as what: the tool's role for them, no higher than the importer's own.
+        const invite = inviter && p.email && !here.has(p.email) ? inviteAs(p.role, inviter.rank) : null
+        return { key: p.key, name: p.name, email: p.email, match, role: p.role ?? null, invite }
+      }),
       members: members.map((m) => ({ id: m.id, name: m.name, email: m.email })),
+      mayInvite: !!inviter,
     }
+  }
+
+  /** Every address with a membership here, guests' too, in lower case. */
+  private async addressesHere(workspaceId: string): Promise<Set<string>> {
+    const rows = await this.db
+      .select({ email: users.email })
+      .from(workspaceMembers)
+      .innerJoin(users, eq(users.id, workspaceMembers.userId))
+      .where(eq(workspaceMembers.workspaceId, workspaceId))
+    return new Set(rows.map((r) => r.email?.trim().toLowerCase()).filter((e): e is string => !!e))
+  }
+
+  /**
+   * Whether the importer may invite here, and the rank they may invite up to: `POST /invitations`'s
+   * rule (`InvitationsController.createSingular`) — `members.invite`, and nobody above their own role.
+   */
+  private async inviteRank(workspaceId: string, importer: Importer): Promise<{ rank: number } | null> {
+    if (!this.invitationsService || !this.roles) return null
+    const [m] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, importer.id)))
+      .limit(1)
+    const superAdmin = importer.role === 'super_admin'
+    if (!m && !superAdmin) return null
+    if (!superAdmin && !(await this.roles.hasPermission(workspaceId, importer.id, 'members.invite'))) return null
+    return { rank: superAdmin ? roleRank('super_admin') : roleRank(m?.role) }
   }
 
   /** The workspace's members, guests aside: whom a person of the tool may be mapped to. */
@@ -285,7 +337,7 @@ export class AppImportService {
     workspaceId: string,
     importer: Importer,
     app: unknown,
-    dto: { source?: unknown; projectIds?: unknown; spaceId?: unknown; options?: unknown; people?: unknown },
+    dto: { source?: unknown; projectIds?: unknown; spaceId?: unknown; options?: unknown; people?: unknown; invite?: unknown },
   ) {
     const d = this.def(app)
     await IMPORT_ACCESS.assertMayImport(this.db, { workspaceId, actorId: importer.id })
@@ -304,13 +356,24 @@ export class AppImportService {
     const all = await this.translate(() => reader.projects(from.id))
     const chosen = all.filter((p) => ids.includes(p.id))
     if (!chosen.length) throw new BadRequestException(APP_IMPORT_REFUSALS.notThere(d.label))
+    const wanted = this.inviteWanted(dto.invite)
+    const tool = wanted.size ? await this.translate(() => reader.people(from.id, chosen.map((p) => p.id))) : []
+    const invited = await this.invite(workspaceId, importer, d.label, wanted, tool, people)
     const [job] = await this.db
       .insert(clickupImportJobs)
       .values({ workspaceId, createdById: importer.id, status: 'pending', total: chosen.length, source: d.key })
       .returning({ id: clickupImportJobs.id })
-    const writer = new TreeWriter(this.db, this.r2 ?? null, { jobId: job.id, workspaceId, importer, spaceId, newSpaceName: from.name, source: d.key, label: d.label, icon: d.icon }, people, d.notImported)
+    const writer = new TreeWriter(
+      this.db,
+      this.r2 ?? null,
+      { jobId: job.id, workspaceId, importer, spaceId, newSpaceName: from.name, source: d.key, label: d.label, icon: d.icon },
+      people,
+      d.notImported,
+      new Map(invited.map((i) => [i.key, i.email])),
+    )
+    writer.summary.invited = invited.map((i) => ({ name: i.name, email: i.email, role: i.role }))
     void this.run(writer, chosen.length, chosen.map((p) => () => reader.read(from.id, p, options))).catch(() => undefined)
-    return { jobId: job.id }
+    return { jobId: job.id, invited: invited.length }
   }
 
   /** Awaitable, so a test can run it and read the summary: each project read, then written, one at a time. */
@@ -329,6 +392,64 @@ export class AppImportService {
   private options(d: AppDef, raw: unknown): Record<string, string> {
     const given = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
     return Object.fromEntries(d.options.map((o) => [o.key, typeof given[o.key] === 'string' && o.choices.includes(given[o.key] as string) ? (given[o.key] as string) : o.default]))
+  }
+
+  /** Whom the importer chose to invite, by the tool's key, and as what. */
+  private inviteWanted(raw: unknown): Map<string, string> {
+    const out = new Map<string, string>()
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+    for (const [key, role] of Object.entries(raw as Record<string, unknown>).slice(0, 2000)) {
+      if (typeof role !== 'string' || !(ASSIGNABLE_WORKSPACE_ROLES as readonly string[]).includes(role)) throw new BadRequestException(APP_IMPORT_REFUSALS.inviteRole)
+      out.set(key.slice(0, 300), role)
+    }
+    return out
+  }
+
+  /**
+   * THE TOOL'S PEOPLE ASKED TO JOIN (`found-14-oct/clickup-workspace-import-and-people-unbuilt`).
+   *
+   * Each one the importer chose — a person of the tool with an email, not a member here and
+   * mapped to nobody — is invited into this workspace as `POST /invitations` invites: by somebody
+   * holding `members.invite`, at no role above their own, the invitation sent by email. An open
+   * invitation of the same address into this workspace is theirs already, and is not sent twice.
+   * Their tasks wait for them (`import_pending_assignees`) until they accept it.
+   */
+  private async invite(
+    workspaceId: string,
+    importer: Importer,
+    label: string,
+    wanted: Map<string, string>,
+    tool: ImPerson[],
+    people: Map<string, string | null>,
+  ): Promise<Array<{ key: string; name: string | null; email: string; role: string }>> {
+    if (!wanted.size) return []
+    const inviter = await this.inviteRank(workspaceId, importer)
+    if (!inviter) throw new ForbiddenException(APP_IMPORT_REFUSALS.mayNotInvite)
+    const byKey = new Map(tool.map((p) => [p.key, p]))
+    const here = await this.addressesHere(workspaceId)
+    const chosen: Array<{ key: string; name: string | null; email: string; role: string }> = []
+    for (const [key, role] of wanted) {
+      const p = byKey.get(key)
+      if (!p?.email || here.has(p.email) || people.get(key)) throw new BadRequestException(APP_IMPORT_REFUSALS.inviteWho(label))
+      if (roleRank(role) > inviter.rank) throw new ForbiddenException(APP_IMPORT_REFUSALS.aboveOwn(role))
+      chosen.push({ key, name: p.name, email: p.email, role })
+    }
+    const [ws] = await this.db.select({ organizationId: workspaces.organizationId }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1)
+    if (!ws) throw new NotFoundException('Workspace not found')
+    const open = await this.db
+      .select({ email: invitations.email, memberships: invitations.workspaceMemberships })
+      .from(invitations)
+      .where(and(eq(invitations.organizationId, ws.organizationId), eq(invitations.status, 'pending'), inArray(invitations.email, chosen.map((c) => c.email))))
+    const already = new Set(
+      open
+        .filter((o) => Array.isArray(o.memberships) && (o.memberships as Array<{ workspaceId?: string }>).some((m) => m?.workspaceId === workspaceId))
+        .map((o) => o.email.toLowerCase()),
+    )
+    for (const c of chosen) {
+      if (already.has(c.email)) continue
+      await this.invitationsService!.create(ws.organizationId, importer.id, { email: c.email, orgRole: 'member', workspaceMemberships: [{ workspaceId, role: c.role }] })
+    }
+    return chosen
   }
 
   /** Whom the importer mapped each person to: a member here (not a guest), or nobody. */

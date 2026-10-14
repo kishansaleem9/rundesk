@@ -1066,6 +1066,7 @@ jobs:
           WRIKE_CLIENT_ID: stub-wrike
           WRIKE_CLIENT_SECRET: stub-wrike-secret
           MONDAY_API_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/monday/v2
+          CLICKUP_API_URL: http://127.0.0.1:${{ env.E2E_CALENDAR_PORT }}/clickup/api/v2
           # The photo library started above — the two variables `lane_media_env`
           # exports. Not a credential: the stub takes this one key.
           UNSPLASH_API_URL: http://127.0.0.1:${{ env.E2E_MEDIA_PORT }}/unsplash
@@ -2263,6 +2264,16 @@ jobs:
       - name: Other tools are imported as ClickUp signs in to them
         timeout-minutes: 20
         run: node test/e2e/importers-by-sign-in.mjs --api 3011 --dist apps/web/dist
+
+      # `found-14-oct/clickup-workspace-import-and-people-unbuilt` — a ClickUp
+      # Workspace imported whole by its API token: Spaces, Folders, Lists and
+      # their statuses, every page of tasks with subtasks, fields, comments and
+      # files; its people matched by email or invited with ClickUp's role, their
+      # tasks held for them and theirs when they accept. ClickUp is the calendar
+      # stub's (`import-apps-stub.mjs`); the invitations go to the mail stub.
+      - name: A ClickUp Workspace and its people come over
+        timeout-minutes: 15
+        run: node test/e2e/clickup-workspace-import.mjs --api 3011 --dist apps/web/dist
 
       # `ledger-rows/row-2294` — the AI acts in the asker's own connected apps, as
       # ClickUp's does: an event in their calendar, inviting people; a draft in a

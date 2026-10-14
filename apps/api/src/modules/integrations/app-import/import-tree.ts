@@ -2,6 +2,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm'
 import {
   clickupImportJobs,
   customFieldDefinitions,
+  importPendingAssignees,
   customFieldValues,
   labels,
   listStatuses,
@@ -37,7 +38,8 @@ import { AppError, type AppFile } from './app-http'
  * at a time, never the whole account.
  */
 
-export type ImPerson = { key: string; name: string | null; email: string | null }
+/** `role`: what the tool makes them, when it says — whom the importer invites, and as what. */
+export type ImPerson = { key: string; name: string | null; email: string | null; role?: 'admin' | 'member' | 'guest' }
 export type ImComment = { author: ImPerson | null; text: string; at: Date | null }
 export type ImFileRef = { name: string; size: number | null; fetch: () => Promise<AppFile | null> }
 export type ImChecklist = { name: string; items: Array<{ name: string; done: boolean }> }
@@ -60,6 +62,8 @@ export type ImTask = {
   dueHasTime: boolean
   created: Date | null
   priority: ImPriority | null
+  /** How long it is expected to take, in seconds. */
+  estimateSeconds?: number | null
   assignees: ImPerson[]
   tags: string[]
   checklists: ImChecklist[]
@@ -113,6 +117,10 @@ export type AppImportSummary = {
   statusesCreated: number
   assigneesLinked: number
   assigneesUnmatched: number
+  /** Assignments held for people invited by this run, made when each joins. */
+  assigneesPending: number
+  /** The people this run invited, and as what. */
+  invited: Array<{ name: string | null; email: string; role: string }>
   tagsApplied: number
   labelsCreated: number
   checklistsImported: number
@@ -144,6 +152,8 @@ export const emptySummary = (source: string, notImported: string[] = []): AppImp
   statusesCreated: 0,
   assigneesLinked: 0,
   assigneesUnmatched: 0,
+  assigneesPending: 0,
+  invited: [],
   tagsApplied: 0,
   labelsCreated: 0,
   checklistsImported: 0,
@@ -251,6 +261,8 @@ export class TreeWriter {
     /** Whom the importer mapped each of the tool's people to; a person not in it is matched by email. */
     private readonly people: Map<string, string | null>,
     notImported: string[] = [],
+    /** The people of the tool invited for this run, by key: their email, the address their invitation went to. */
+    private readonly invited: Map<string, string> = new Map(),
   ) {
     this.summary = emptySummary(target.source, notImported)
   }
@@ -451,6 +463,7 @@ export class TreeWriter {
           dueDate: t.due,
           dueDateHasTime: !!t.due && t.dueHasTime,
           startDate: t.start,
+          ...(t.estimateSeconds ? { timeEstimate: t.estimateSeconds } : {}),
           ...(t.priority ? { priority: t.priority } : {}),
           ...(t.created ? { createdAt: t.created } : {}),
         })
@@ -494,6 +507,17 @@ export class TreeWriter {
   private async assign(taskId: string, title: string, assignees: ImPerson[]) {
     for (const p of assignees) {
       const userId = this.whom(p)
+      const invitedAs = !userId ? this.invited.get(p.key) : undefined
+      if (invitedAs) {
+        // Somebody invited by this run is not a member yet: their task waits for them, and is
+        // theirs when they join (`InvitationsService.claim`), if the assignee route would put them on it then.
+        await this.db
+          .insert(importPendingAssignees)
+          .values({ workspaceId: this.target.workspaceId, email: invitedAs, taskId, jobId: this.target.jobId })
+          .onConflictDoNothing()
+        this.summary.assigneesPending++
+        continue
+      }
       if (!userId) {
         this.summary.assigneesUnmatched++
         continue

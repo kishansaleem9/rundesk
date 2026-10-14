@@ -35,7 +35,9 @@ import {
 
 type Tile = AppKey | 'notion'
 const TILES: Tile[] = ['asana', 'jira', 'monday', 'notion', 'todoist', 'trello', 'wrike']
-const LABEL: Record<Tile, string> = { asana: 'Asana', jira: 'Jira', monday: 'Monday', notion: 'Notion', todoist: 'Todoist', trello: 'Trello', wrike: 'Wrike' }
+const LABEL: Record<Tile, string> = { asana: 'Asana', jira: 'Jira', monday: 'Monday', notion: 'Notion', todoist: 'Todoist', trello: 'Trello', wrike: 'Wrike', clickup: 'ClickUp' }
+/** A person's choice in the people step: a member's id, nobody (''), or an invitation as a role. */
+const INVITE = 'invite:'
 type Space = { id: string; name: string }
 
 function ErrorLine({ message, testid }: { message: string; testid: string }) {
@@ -116,6 +118,8 @@ function Report({ result, label }: { result: AppSummary; label: string }) {
         <Figure testid="import-app-r-comments" label={t('import.commentsImported')} value={result.commentsImported} />
         <Figure testid="import-app-r-files" label={t('import.appAttachments')} value={result.attachmentsImported} />
         <Figure testid="import-app-r-assignees" label={t('import.assignees')} value={result.assigneesLinked} />
+        {(result.invited?.length ?? 0) > 0 && <Figure testid="import-app-r-invited" label={t('import.appInvited')} value={result.invited!.length} />}
+        {(result.invited?.length ?? 0) > 0 && <Figure testid="import-app-r-waiting" label={t('import.appWaiting')} value={result.assigneesPending ?? 0} />}
         <Figure testid="import-app-r-tags" label={t('import.appTags')} value={result.tagsApplied} />
         <Figure testid="import-app-r-checklists" label={t('import.appChecklists')} value={result.checklistsImported} />
         <Figure testid="import-app-r-fields" label={t('import.appFields')} value={result.fieldValuesSet} />
@@ -180,7 +184,7 @@ function Progressing({ job }: { job: ReturnType<typeof useJob> }) {
 }
 
 /** One tool, signed in to, chosen from, mapped and imported. */
-function AppFlow({ app, signInError }: { app: AppKey; signInError: string | null }) {
+export function AppFlow({ app, signInError }: { app: AppKey; signInError: string | null }) {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/import' })
   const [token, setToken] = useState('')
@@ -236,10 +240,23 @@ function AppFlow({ app, signInError }: { app: AppKey; signInError: string | null
   })
   const disconnect = useMutation({ mutationFn: () => disconnectApp(workspaceId, app), onSuccess: () => status.refetch() })
   const chosenOptions = Object.fromEntries((status.data?.options ?? []).map((o) => [o.key, options[o.key] ?? o.default]))
-  const peopleMap = Object.fromEntries((people.data?.people ?? []).map((p) => [p.key, p.key in mapped ? mapped[p.key] : p.match]))
+  const choiceOf = (p: { key: string; match: string | null }) => (p.key in mapped ? mapped[p.key] : p.match) ?? ''
+  // Somebody to be invited is mapped to nobody here: they are not a member until they accept.
+  const peopleMap = Object.fromEntries((people.data?.people ?? []).map((p) => [p.key, choiceOf(p).startsWith(INVITE) ? null : choiceOf(p) || null]))
+  const inviteMap = Object.fromEntries(
+    (people.data?.people ?? []).filter((p) => choiceOf(p).startsWith(INVITE)).map((p) => [p.key, choiceOf(p).slice(INVITE.length)]),
+  )
+  const invitable = (people.data?.people ?? []).filter((p) => p.invite && !choiceOf(p))
   const start = useMutation({
     mutationFn: () =>
-      startAppImport(workspaceId, app, { source: sourceId!, projectIds: pickedList, spaceId: into === 'space' ? spaceId : null, options: chosenOptions, people: peopleMap }),
+      startAppImport(workspaceId, app, {
+        source: sourceId!,
+        projectIds: pickedList,
+        spaceId: into === 'space' ? spaceId : null,
+        options: chosenOptions,
+        people: peopleMap,
+        ...(Object.keys(inviteMap).length ? { invite: inviteMap } : {}),
+      }),
     onSuccess: (r) => setJobId(r.jobId),
   })
   const job = useJob(workspaceId, jobId)
@@ -283,7 +300,7 @@ function AppFlow({ app, signInError }: { app: AppKey; signInError: string | null
                   {t('import.appTokenSave')}
                 </Button>
               </div>
-              <p className="text-xs text-muted-foreground">{t('import.appTokenHelp')}</p>
+              <p className="text-xs text-muted-foreground">{t(app === 'clickup' ? 'import.clickupTokenHelp' : 'import.appTokenHelp')}</p>
             </form>
           ) : (
             <Button data-testid="import-app-connect" disabled={connect.isPending || fromTrello.isPending} onClick={() => connect.mutate()}>
@@ -381,6 +398,22 @@ function AppFlow({ app, signInError }: { app: AppKey; signInError: string | null
             <div className="space-y-2" data-testid="import-app-people">
               <div className="text-sm font-medium">{t('import.appPeople')}</div>
               <p className="text-xs text-muted-foreground">{t('import.appPeopleHelp', { app: label })}</p>
+              {people.data?.mayInvite && (people.data.people.some((p) => p.invite) || Object.keys(inviteMap).length > 0) && (
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" data-testid="import-app-invite-help">
+                  <span>{t('import.appInviteHelp')}</span>
+                  {invitable.length > 0 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      data-testid="import-app-invite-all"
+                      onClick={() => setMapped({ ...mapped, ...Object.fromEntries(invitable.map((p) => [p.key, INVITE + p.invite])) })}
+                    >
+                      {t('import.appInviteAll', { count: invitable.length })}
+                    </Button>
+                  )}
+                </div>
+              )}
               {people.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-label="Loading…" />
               ) : people.isError ? (
@@ -396,10 +429,15 @@ function AppFlow({ app, signInError }: { app: AppKey; signInError: string | null
                       <select
                         data-testid={`import-app-person-select-${p.key}`}
                         className="rounded-md border bg-background px-2 py-1 text-sm"
-                        value={(p.key in mapped ? mapped[p.key] : p.match) ?? ''}
+                        value={choiceOf(p)}
                         onChange={(e) => setMapped({ ...mapped, [p.key]: e.target.value || null })}
                       >
                         <option value="">{t('import.appNobody')}</option>
+                        {p.invite && (
+                          <option value={INVITE + p.invite}>
+                            {t('import.appInviteAs', { role: t(`import.appRole.${p.invite}` as 'import.appRole.member') })}
+                          </option>
+                        )}
                         {people.data.members.map((m) => (
                           <option key={m.id} value={m.id}>
                             {m.name}

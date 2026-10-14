@@ -229,7 +229,9 @@ link_own_packages() {
   # `$WT/packages/ui/` and found no `node_modules` at all — so the fix for one
   # resolution bug produced a build failure, which is the honest version of the
   # same problem and took ten seconds to read.
-  for dir in . apps/web apps/api packages/ui packages/db packages/feature-flags packages/eslint-config; do
+  # `packages/imports` since the imports/exports merge (`found-14-oct/lane-tooling-misses-the-imports-package`):
+  # the API and the web both read it.
+  for dir in . apps/web apps/api packages/ui packages/db packages/feature-flags packages/eslint-config packages/imports; do
     src="$REPO/$dir/node_modules"
     dst="$WT/$dir/node_modules"
     [ -d "$src" ] || continue
@@ -485,8 +487,8 @@ for b in "$@"; do
   # `packages/*` all went to the API rebuild, so a patch to `packages/ui` —
   # which only the WEB bundle consumes — rebuilt the server and left the
   # bundle untouched. Its check stayed green with the component broken.
-  case "$CHANGED" in *apps/api/*|*packages/db/*) NEEDS_API=yes ;; esac
-  case "$CHANGED" in *apps/web/*|*packages/ui/*|*packages/feature-flags/*) NEEDS_WEB=yes ;; esac
+  case "$CHANGED" in *apps/api/*|*packages/db/*|*packages/imports/*) NEEDS_API=yes ;; esac
+  case "$CHANGED" in *apps/web/*|*packages/ui/*|*packages/feature-flags/*|*packages/imports/*) NEEDS_WEB=yes ;; esac
   # `packages/db` is read by the web typecheck too, and `feature-flags` by both.
   case "$CHANGED" in *packages/feature-flags/*) NEEDS_API=yes ;; esac
   [ -z "$CHANGED" ] && { echo "== $b PATCH CHANGED NOTHING" >> "$OUT"; continue; }

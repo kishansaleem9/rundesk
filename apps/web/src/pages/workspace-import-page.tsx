@@ -22,7 +22,7 @@ import {
 } from '../lib/imports-api'
 import { createPickTurns, sheetFileKind } from '../lib/sheet-file'
 import { BasecampImportPanel, ConfluenceImportPanel, SlackImportPanel } from './import-panels'
-import { AppsImportPanel } from './import-apps'
+import { AppFlow, AppsImportPanel } from './import-apps'
 
 type ConflictStrategy = 'skip' | 'create' | 'merge'
 
@@ -210,7 +210,12 @@ export function ImportPage() {
       ) : tab === 'slack' ? (
         <SlackImportPanel />
       ) : (
-        <ClickUpImportPanel />
+        // A whole Workspace and its people by its API token, then its CSV export as before
+        // (`found-14-oct/clickup-workspace-import-and-people-unbuilt`).
+        <div className="space-y-6">
+          <AppFlow app="clickup" signInError={landing.tab === 'clickup' ? landing.error : null} />
+          <ClickUpImportPanel />
+        </div>
       )}
     </div>
   )

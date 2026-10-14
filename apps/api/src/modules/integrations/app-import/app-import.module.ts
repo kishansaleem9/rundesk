@@ -11,6 +11,7 @@ import { WorkspaceMemberGuard } from '../../auth/guards/workspace-member.guard'
 import { CustomRolesModule } from '../../custom-roles/custom-roles.module'
 import { PermissionsGuard, RequirePermissions } from '../../custom-roles/permissions.guard'
 import { DocsModule } from '../../docs/docs.module'
+import { InvitationsModule } from '../../invitations/invitations.module'
 import { ImportFilesModule } from '../clickup-import/import-files.module'
 import { isAppKey } from './app-def'
 import { AppImportService } from './app-import.service'
@@ -85,7 +86,7 @@ export class AppImportController {
     @Param('workspaceId') workspaceId: string,
     @Param('app') app: string,
     @CurrentUser() user: any,
-    @Body() body: { source?: string; projectIds?: string[]; spaceId?: string | null; options?: Record<string, string>; people?: Record<string, string | null> },
+    @Body() body: { source?: string; projectIds?: string[]; spaceId?: string | null; options?: Record<string, string>; people?: Record<string, string | null>; invite?: Record<string, string> },
   ) {
     return this.svc.start(workspaceId, { id: user.id, role: user.role }, app, body ?? {})
   }
@@ -128,7 +129,7 @@ export class AppImportCallbackController {
 }
 
 @Module({
-  imports: [DatabaseModule, CustomRolesModule, StorageModule, ImportFilesModule, DocsModule],
+  imports: [DatabaseModule, CustomRolesModule, StorageModule, ImportFilesModule, DocsModule, InvitationsModule],
   controllers: [AppImportController, AppImportCallbackController],
   providers: [AppImportService, WorkspaceMemberGuard, RateLimitGuard],
 })

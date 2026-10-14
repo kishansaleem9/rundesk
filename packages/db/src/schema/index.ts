@@ -103,6 +103,7 @@ export * from './ai-credits'
 export * from './email-accounts'
 // `commit-log/log-601eacc-2` — a person's grant to read another tool (Basecamp) for an import.
 export * from './import-grants'
+export * from './import-pending-assignees'
 // `ledger-rows/row-852` — Super Agents: their profiles, who a private one is shared with, what they remember, every run.
 export * from './super-agents'
 export * from './ai-artifacts'

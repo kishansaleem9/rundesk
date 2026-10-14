@@ -113,7 +113,7 @@ fi
 # AND THE INPUTS OUTSIDE `src`: `index.html` is Vite's entry and in Tailwind's
 # content list, and the three config files and `public/` shape the bundle too.
 if [ -f "$DIST/index.html" ]; then
-  NEWER=$( { find apps/web/src packages/ui/src packages/feature-flags/src \
+  NEWER=$( { find apps/web/src packages/ui/src packages/feature-flags/src packages/imports/src \
                \( -name '*.ts' -o -name '*.tsx' -o -name '*.css' \) -newer "$DIST/index.html" -print
              find apps/web/index.html apps/web/vite.config.ts apps/web/tailwind.config.ts \
                apps/web/postcss.config.js apps/web/public -type f -newer "$DIST/index.html" -print
@@ -193,7 +193,7 @@ API_BUILT=apps/api/dist/.built-at
 # from SOURCE under tsx, like `@rundesk/db`. And `find -newer`, for the reason
 # the web scan above gives.
 if [ -n "$API_BUILT" ]; then
-  API_NEWER=$(find apps/api/src packages/db/src packages/feature-flags/src -name '*.ts' \
+  API_NEWER=$(find apps/api/src packages/db/src packages/feature-flags/src packages/imports/src -name '*.ts' \
                 -newer "$API_BUILT" -print 2>/dev/null | head -3)
   if [ -n "$API_NEWER" ]; then
     echo "== $SUITE (lane $LANE) REFUSING — the API build is older than the source it is built from"

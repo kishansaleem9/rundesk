@@ -5,10 +5,10 @@ import io
 p = '/home/user/rundesk/apps/web/src/pages/import-apps.tsx'
 s = io.open(p, encoding='utf-8').read()
 for a, b in [
-    ('  const peopleMap = Object.fromEntries((people.data?.people ?? []).map((p) => [p.key, p.key in mapped ? mapped[p.key] : p.match]))\n',
-     '  const peopleMap = Object.fromEntries((people.data?.people ?? []).map((p) => [p.key, p.key in mapped ? mapped[p.key] : null]))\n'),
-    ("                        value={(p.key in mapped ? mapped[p.key] : p.match) ?? ''}\n",
-     "                        value={(p.key in mapped ? mapped[p.key] : null) ?? ''}\n"),
+    # One choice per person since the people step offers invitations too (`found-14-oct/clickup-workspace-import-and-people-unbuilt`):
+    # the map sent and the select shown both read it.
+    ("  const choiceOf = (p: { key: string; match: string | null }) => (p.key in mapped ? mapped[p.key] : p.match) ?? ''\n",
+     "  const choiceOf = (p: { key: string; match: string | null }) => (p.key in mapped ? mapped[p.key] : null) ?? ''\n"),
 ]:
     assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
     s = s.replace(a, b)

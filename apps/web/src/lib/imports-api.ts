@@ -238,7 +238,8 @@ export const startBasecampImport = (workspaceId: string, body: { accountId: stri
 
 // ── Asana, Jira, Monday, Todoist, Trello, Wrike — and Notion (`found-13-oct/importers-by-sign-in-unbuilt`) ──
 
-export type AppKey = 'asana' | 'jira' | 'monday' | 'todoist' | 'trello' | 'wrike'
+// ClickUp too: a whole Workspace and its people, on the ClickUp tab (`found-14-oct/clickup-workspace-import-and-people-unbuilt`).
+export type AppKey = 'asana' | 'jira' | 'monday' | 'todoist' | 'trello' | 'wrike' | 'clickup'
 export const APP_KEYS: AppKey[] = ['asana', 'jira', 'monday', 'todoist', 'trello', 'wrike']
 
 export type AppOption = { key: string; choices: string[]; default: string }
@@ -256,8 +257,10 @@ export type AppStatus = {
 export type AppSource = { id: string; name: string }
 export type AppProject = { id: string; name: string; detail?: string | null }
 export type AppPeople = {
-  people: Array<{ key: string; name: string | null; email: string | null; match: string | null }>
+  /** `invite`: the role this person may be invited as, when they are not here and the importer may invite; else null. */
+  people: Array<{ key: string; name: string | null; email: string | null; match: string | null; role?: string | null; invite?: string | null }>
   members: Array<{ id: string; name: string; email: string | null }>
+  mayInvite?: boolean
 }
 export type AppSummary = {
   source: string
@@ -271,6 +274,8 @@ export type AppSummary = {
   statusesCreated: number
   assigneesLinked: number
   assigneesUnmatched: number
+  assigneesPending?: number
+  invited?: Array<{ name: string | null; email: string; role: string }>
   tagsApplied: number
   checklistsImported: number
   fieldsCreated: number
@@ -303,8 +308,8 @@ export const fetchAppPeople = (workspaceId: string, app: AppKey, source: string,
 export const startAppImport = (
   workspaceId: string,
   app: AppKey,
-  body: { source: string; projectIds: string[]; spaceId: string | null; options: Record<string, string>; people: Record<string, string | null> },
-) => api<{ jobId: string }>(`${apps(workspaceId)}/${app}`, { method: 'POST', body })
+  body: { source: string; projectIds: string[]; spaceId: string | null; options: Record<string, string>; people: Record<string, string | null>; invite?: Record<string, string> },
+) => api<{ jobId: string; invited?: number }>(`${apps(workspaceId)}/${app}`, { method: 'POST', body })
 export const startNotionImport = (workspaceId: string, body: { fileKey: string; spaceId: string | null }) =>
   api<{ jobId: string }>(`/workspaces/${workspaceId}/import/notion`, { method: 'POST', body })
 

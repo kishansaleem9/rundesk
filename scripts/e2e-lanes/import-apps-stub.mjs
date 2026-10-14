@@ -34,6 +34,11 @@
  *   wrike   data: {host, account: {name}, contacts: [contact], workflows, customfields, spaces: [{id, title,
  *                  folders: [folder], tasks: {folderId: [task]}}], comments?: {taskId: [comment]},
  *                  files?: {taskId: [{id, name, content}]}}   (contacts[0] is whoever signed in)
+ *   clickup data: {user: {id, username, email}, teams: [{id, name, members: [{user: {id, username, email, role}}],
+ *                  spaces: [{id, name, private?, statuses, folders: [{id, name, hidden?, override_statuses?, statuses?,
+ *                  lists: [list]}], lists: [list]}]}]}   (`found-14-oct/clickup-workspace-import-and-people-unbuilt`)
+ *           list: {id, name, content?, override_statuses?, statuses?, tasks: [task]}; a task in ClickUp's own shape,
+ *                  with `comments: [{id, comment_text, user, date}]` and `attachments: [{id, title, content}]`
  *   monday  data: {me: {id, name, email, account: {name}}, users: [user], boards: [{id, name, type?, workspace?,
  *                  columns, groups, items}]}
  *
@@ -76,7 +81,7 @@ function send(res, status, body, headers = {}) {
 function authorize(app, req, res, url, token) {
   const g = grantsOf(app).get(token ?? '')
   if (!g) {
-    send(res, 401, app === 'monday' ? { errors: [{ message: 'Not Authenticated: invalid token' }] } : { error: 'invalid token' })
+    send(res, 401, app === 'monday' ? { errors: [{ message: 'Not Authenticated: invalid token' }] } : app === 'clickup' ? { err: 'Token invalid', ECODE: 'OAUTH_025' } : { error: 'invalid token' })
     return null
   }
   g.asked.push(`${req.method} ${url.pathname}${url.search}`)
@@ -472,9 +477,122 @@ async function monday(req, res, url) {
   return send(res, 200, { errors: [{ message: `the stub does not know this query: ${query.slice(0, 60)}` }] })
 }
 
+// ── ClickUp ────────────────────────────────────────────────────────────────────
+
+/** ClickUp's own: 25 comments a page, newest first. */
+const CLICKUP_COMMENTS = 25
+
+const cuStatusOf = (space, folder, list) => (list.override_statuses && list.statuses?.length ? list.statuses : folder?.override_statuses && folder.statuses?.length ? folder.statuses : space.statuses ?? [])
+
+/** Every List of the account with its Space and Folder, to answer a List's or a task's own address. */
+function clickupLists(data) {
+  const out = []
+  for (const team of data.teams ?? [])
+    for (const space of team.spaces ?? []) {
+      for (const folder of space.folders ?? []) for (const list of folder.lists ?? []) out.push({ team, space, folder, list })
+      for (const list of space.lists ?? []) out.push({ team, space, folder: null, list })
+    }
+  return out
+}
+
+/** A List as ClickUp lists it: its statuses only on its own page (`GET /list/{id}`), as a Folder's listing may leave them out. */
+const cuListRow = (l) => ({ id: l.id, name: l.name, content: l.content ?? '', override_statuses: l.override_statuses === true, task_count: (l.tasks ?? []).length })
+
+/** A task as a page of tasks gives it: no comments, and no attachments (its own page has those). */
+function cuTaskRow(t, list) {
+  const { comments: _c, attachments: _a, ...row } = t
+  return { archived: false, list: { id: list.id }, ...row }
+}
+
+async function clickup(req, res, url, ctx) {
+  if (url.pathname.startsWith('/clickup/files/')) {
+    // An attachment's address: a signed one on ClickUp's file store, here on the stub's own origin.
+    const [, , , taskId, attId] = url.pathname.split('/')
+    for (const g of grantsOf('clickup').values())
+      for (const { list } of clickupLists(g.data))
+        for (const t of list.tasks ?? []) {
+          const a = t.id === taskId ? (t.attachments ?? []).find((x) => x.id === attId) : null
+          if (a) return send(res, 200, Buffer.from(a.content ?? ''), { 'content-type': a.mimetype ?? 'text/plain' })
+        }
+    return send(res, 404, { err: 'Attachment not found', ECODE: 'ATTCH_001' })
+  }
+  const path = url.pathname.slice('/clickup/api/v2'.length)
+  // A personal token is sent as it is, with no `Bearer`.
+  const g = authorize('clickup', req, res, url, req.headers.authorization ?? '')
+  if (!g) return
+  const data = g.data
+  let m
+  if (path === '/user') return send(res, 200, { user: data.user })
+  if (path === '/team') return send(res, 200, { teams: (data.teams ?? []).map((t) => ({ id: t.id, name: t.name, color: '#7b68ee', members: t.members ?? [] })) })
+  if ((m = /^\/team\/([^/]+)\/space$/.exec(path))) {
+    const team = (data.teams ?? []).find((t) => t.id === m[1])
+    if (!team) return send(res, 401, { err: 'Team not authorized', ECODE: 'OAUTH_027' })
+    return send(res, 200, { spaces: (team.spaces ?? []).map((s) => ({ id: s.id, name: s.name, private: s.private === true, statuses: s.statuses ?? [] })) })
+  }
+  const spaceOf = (id) => (data.teams ?? []).flatMap((t) => t.spaces ?? []).find((s) => s.id === id)
+  if ((m = /^\/space\/([^/]+)$/.exec(path))) {
+    const s = spaceOf(m[1])
+    return s ? send(res, 200, { id: s.id, name: s.name, private: s.private === true, statuses: s.statuses ?? [] }) : send(res, 404, { err: 'Space not found' })
+  }
+  if ((m = /^\/space\/([^/]+)\/folder$/.exec(path))) {
+    const s = spaceOf(m[1])
+    if (!s) return send(res, 404, { err: 'Space not found' })
+    return send(res, 200, {
+      folders: (s.folders ?? []).map((f) => ({ id: f.id, name: f.name, hidden: f.hidden === true, override_statuses: f.override_statuses === true, statuses: f.statuses ?? [], lists: (f.lists ?? []).map(cuListRow) })),
+    })
+  }
+  if ((m = /^\/space\/([^/]+)\/list$/.exec(path))) {
+    const s = spaceOf(m[1])
+    return s ? send(res, 200, { lists: (s.lists ?? []).map(cuListRow) }) : send(res, 404, { err: 'Space not found' })
+  }
+  const found = (id) => clickupLists(data).find((x) => x.list.id === id)
+  if ((m = /^\/list\/([^/]+)$/.exec(path))) {
+    const x = found(m[1])
+    return x ? send(res, 200, { ...cuListRow(x.list), statuses: cuStatusOf(x.space, x.folder, x.list) }) : send(res, 404, { err: 'List not found' })
+  }
+  if ((m = /^\/list\/([^/]+)\/task$/.exec(path))) {
+    const x = found(m[1])
+    if (!x) return send(res, 404, { err: 'List not found' })
+    // Closed tasks and subtasks only when asked for, as ClickUp leaves them out by default.
+    const closed = url.searchParams.get('include_closed') === 'true'
+    const subtasks = url.searchParams.get('subtasks') === 'true'
+    const rows = (x.list.tasks ?? []).filter((t) => (closed || !['closed', 'done'].includes(t.status?.type)) && (subtasks || !t.parent))
+    const page = Number(url.searchParams.get('page') ?? 0)
+    const slice = rows.slice(page * PAGE, page * PAGE + PAGE)
+    return send(res, 200, { tasks: slice.map((t) => cuTaskRow(t, x.list)), last_page: page * PAGE + PAGE >= rows.length })
+  }
+  const taskOf = (id) => {
+    for (const x of clickupLists(data)) {
+      const t = (x.list.tasks ?? []).find((y) => y.id === id)
+      if (t) return t
+    }
+    return null
+  }
+  if ((m = /^\/task\/([^/]+)\/comment$/.exec(path))) {
+    const t = taskOf(m[1])
+    if (!t) return send(res, 404, { err: 'Task not found' })
+    // Newest first; the next page is asked from the oldest one shown, by its moment and id.
+    const all = [...(t.comments ?? [])].sort((a, b) => Number(b.date) - Number(a.date))
+    const start = url.searchParams.get('start')
+    const startId = url.searchParams.get('start_id')
+    const from = start && startId ? all.findIndex((c) => c.id === startId) + 1 : 0
+    return send(res, 200, { comments: all.slice(from, from + CLICKUP_COMMENTS) })
+  }
+  if ((m = /^\/task\/([^/]+)$/.exec(path))) {
+    const t = taskOf(m[1])
+    if (!t) return send(res, 404, { err: 'Task not found' })
+    const { comments: _c, attachments, ...row } = t
+    return send(res, 200, {
+      ...row,
+      attachments: (attachments ?? []).map((a) => ({ id: a.id, title: a.title, size: Buffer.byteLength(a.content ?? ''), url: `${ctx.base}/clickup/files/${t.id}/${a.id}` })),
+    })
+  }
+  return send(res, 404, { err: 'Route not found', ECODE: 'APP_001' })
+}
+
 // ── routing ────────────────────────────────────────────────────────────────────
 
-const PREFIXES = { '/asana/': asana, '/atlassian/media/': jiraMedia, '/atlassian/': jira, '/trello/1/': trello, '/todoist/': todoist, '/wrike/': wrike, '/monday/': monday }
+const PREFIXES = { '/asana/': asana, '/atlassian/media/': jiraMedia, '/atlassian/': jira, '/trello/1/': trello, '/todoist/': todoist, '/wrike/': wrike, '/monday/': monday, '/clickup/': clickup }
 
 /**
  * True when the request was this module's to answer. `ctx` is the calendar

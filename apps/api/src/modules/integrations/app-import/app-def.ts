@@ -6,7 +6,7 @@ import type { ImNode, ImPerson } from './import-tree'
  * (`found-13-oct/importers-by-sign-in-unbuilt`).
  */
 
-export const APP_KEYS = ['asana', 'jira', 'trello', 'todoist', 'wrike', 'monday'] as const
+export const APP_KEYS = ['asana', 'jira', 'trello', 'todoist', 'wrike', 'monday', 'clickup'] as const
 export type AppKey = (typeof APP_KEYS)[number]
 export const isAppKey = (v: unknown): v is AppKey => typeof v === 'string' && (APP_KEYS as readonly string[]).includes(v)
 

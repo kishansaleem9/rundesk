@@ -16,7 +16,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 T="$(mktemp -d /tmp/link-worktree-selfcheck.XXXXXX)"
 trap 'rm -rf "$T"' EXIT
-for dir in apps/web apps/api packages/ui packages/db packages/feature-flags packages/eslint-config; do mkdir -p "$T/$dir"; done
+for dir in apps/web apps/api packages/ui packages/db packages/feature-flags packages/eslint-config packages/imports; do mkdir -p "$T/$dir"; done
 fail=0
 check () { if eval "$2"; then echo "  ok   $1"; else echo "  FAIL $1"; fail=1; fi; }
 

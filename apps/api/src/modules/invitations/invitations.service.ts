@@ -2,7 +2,7 @@ import { ASSIGNABLE_WORKSPACE_ROLES } from '../../common/permissions/workspace-r
 import { Injectable, Inject, NotFoundException, ConflictException, ForbiddenException, GoneException, BadRequestException } from '@nestjs/common'
 import { eq, and, inArray } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
-import { organizations, invitations, organizationMembers, workspaceMembers, users, workspaces } from '@rundesk/db'
+import { organizations, invitations, organizationMembers, workspaceMembers, users, workspaces, importPendingAssignees, taskAssignees } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { passwords } from '../../common/security/password-hash'
@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config'
 import { WorkspaceSecuritySettingsService } from '../security/workspace-security-settings.service'
 import { WebhooksService } from '../webhooks/webhooks.service'
 import { PlansService } from '../plans/plans.service'
+import { IMPORT_ACCESS } from '../integrations/clickup-import/import-access'
 
 /**
  * WHAT AN INVITATION MAY GRANT.
@@ -421,6 +422,10 @@ export class InvitationsService {
       return { userId }
     })
 
+    // The tasks an import held for them, theirs now that they are a member — after the commit, as the
+    // assignee rule reads the membership just made.
+    for (const ws of grants) await this.takePendingAssignees(ws.workspaceId, invite.email, result.userId!)
+
     // Fire member.joined per workspace the invite granted (best effort). The
     // joining user is the actor. Runs after the tx commits so the membership
     // is durable before we advertise it.
@@ -436,5 +441,27 @@ export class InvitationsService {
     }
 
     return result
+  }
+
+  /**
+   * THE TASKS AN IMPORT HELD FOR SOMEBODY IT INVITED (`found-14-oct/clickup-workspace-import-and-people-unbuilt`),
+   * made theirs as they join: each where the assignee route would put them on it now (a guest only
+   * on what is shared with them), and none of them held any longer either way.
+   */
+  async takePendingAssignees(workspaceId: string, email: string, userId: string) {
+    const held = await this.db
+      .select({ taskId: importPendingAssignees.taskId })
+      .from(importPendingAssignees)
+      .where(and(eq(importPendingAssignees.workspaceId, workspaceId), eq(importPendingAssignees.email, email.toLowerCase())))
+    let assigned = 0
+    for (const h of held) {
+      if (!(await IMPORT_ACCESS.mayBeAssigned(this.db, { workspaceId, taskId: h.taskId, userId }))) continue
+      await this.db.insert(taskAssignees).values({ taskId: h.taskId, userId }).onConflictDoNothing()
+      assigned++
+    }
+    await this.db
+      .delete(importPendingAssignees)
+      .where(and(eq(importPendingAssignees.workspaceId, workspaceId), eq(importPendingAssignees.email, email.toLowerCase())))
+    return { held: held.length, assigned }
   }
 }

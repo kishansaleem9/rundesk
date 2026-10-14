@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 570 items: 0 open · 0 partly fixed · 560 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 14 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 573 items: 3 open · 0 partly fixed · 560 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 14 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 106, each reproduced
+## Found by the triage, 5 October, and since — 109, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10668,6 +10668,42 @@ Measured:
   - `agp-9`, which counts only where a model answers, and `agp-8` on lane 2 with a model (baseline 15 of 15).
 - `agp-u1` and `agp-u2` redden their unit tests in `ai-value.test.ts`, which has six new tests: 17 of 17.
 - Also green at batch 44: `ai-action-categories` 29, `ai-activity-filters` 34, `ai-button-relationship-fields` 17 and `ai-value` 23.
+
+### `found-14-oct/imports-exports-branch-unmerged` — **open** (feature, large; found reviewing the open pull requests with the owner) · reproduced 14 October
+
+**Settings › Imports / Exports was built on a branch the deploy branch never took, and its own CI was red**
+
+*Evidence, 14 October:*
+- Pull request #3 (`feature/imports-exports`, from `c13d42b`) holds the imports/exports engine: the `@rundesk/imports` package (CSV, TSV, JSON and `.xlsx` readers, auto-mapping, the review grid's rules, ClickUp's export format), an import job engine that resumes, cancels and deletes a run as a unit, the spreadsheet wizard that invites the people a sheet names who are not members, import history and reports, and the workspace export in ClickUp's columns. None of it was on `claude/peaceful-mayer-zxpP7`, the branch the owner deploys.
+- Its CI run (37828864590) failed one step, `Space create menu`: its own change sends the space menu's Imports item to Settings for whoever may import, and the suite still read `/import`.
+- Merged as it was, it conflicts with the branch in seven files, and its migration `0175` collides with the branch's numbering, which had reached `0193`.
+
+*To close:* merge it onto the deploy branch with the conflicts resolved for both sides, its migration renumbered after `0193`, its failing step brought to what it now does, and every gate and suite of the branch green over it.
+
+### `found-14-oct/clickup-workspace-import-and-people-unbuilt` — **open** (feature, large; found reviewing what moving a team off ClickUp needs) · reproduced 14 October
+
+**A team moving off ClickUp brings its work but not its people: nobody is invited, and a whole Workspace cannot be read at once**
+
+*Evidence, 14 October:*
+- The ClickUp tab imports ClickUp's CSV export, and reads its tasks' comments and files over the API when a token is given (`clickup-import.service.ts`). A person its rows name comes in only as a member already here: `applyAssigneesTagsFields` skips anybody else (`if (!uid) continue`), and nothing invites them.
+- The Spreadsheet importer of `found-14-oct/imports-exports-branch-unmerged` invites the addresses a sheet names, but a person invited there is never put on the tasks they were named on ("assign them once they have joined"), and ClickUp's export names people by name, not address.
+- Nothing reads a ClickUp Workspace as ClickUp holds it: its Spaces, Folders and Lists, each List's statuses, its members and their roles.
+
+*To close:* as ClickUp's own importers work (help centre and developer docs through search excerpts, 14 October: "Import mapping … matching imported email addresses to users who have been invited"; a Workspace's members and their roles from `GET /team`, `role` 1 owner, 2 admin, 3 member, 4 guest; tasks 100 a page from page 0 until `last_page`, closed tasks and subtasks only when asked for):
+- sign in to ClickUp by its personal API token and read a Workspace's Spaces whole over API v2;
+- match its people to members by email, and invite the ones who are not here with ClickUp's role for them, by somebody who may invite, at no role above their own;
+- hold their tasks for them and make them theirs when they accept, where the assignee route would put them on them.
+
+### `found-14-oct/lane-tooling-misses-the-imports-package` — **open** (harness, medium; found integrating `found-14-oct/imports-exports-branch-unmerged`) · reproduced 14 October
+
+**The lanes and the worktree linker do not know `packages/imports`, so a change to it is served stale**
+
+*Evidence, 14 October:* the merge adds a workspace package the API and the web both read, `packages/imports`. The lane tooling names the packages it knows, and that one is in none of the lists:
+- `wt-break.sh`'s `link_own_packages` makes no `node_modules` for it, and a patch that changes it rebuilds neither the API nor the web (`NEEDS_API`, `NEEDS_WEB`);
+- `verify.sh` does not count it as a source of either build, so a lane built before a change to it is not refused as stale;
+- `link-worktree.sh` gives a worktree no `node_modules` for it, and `lane-env.sh`'s `WEB_SOURCE_PATHS` leaves it out.
+
+*To close:* add it to each list, and to the linker's self-check.
 
 ## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 46
 
