@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 570 items: 1 open · 0 partly fixed · 559 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 14 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 570 items: 0 open · 0 partly fixed · 560 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 14 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -10628,7 +10628,7 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 
 *Closed, 13 October.* A lane with a model raises the cap to 100,000 calls an hour (`lane_model_env`, `lane-env.sh`). A lane's admin is not a person, and the refusal itself is held by `chat-trace.test.ts`. The runs it spoiled, re-run on it on lane 2 at `0e01918` (baseline 29 of 29): `bcd-29`, `bcd-31` and `bcd-33` 28 of 29 each, each reddening only the check it names.
 
-### `found-14-oct/agent-performance-carried-and-unbuilt` — **open** (feature, medium; found reconciling the video-2 ledger) · reproduced 14 October
+### `found-14-oct/agent-performance-carried-and-unbuilt` — **closed** (feature, medium; found reconciling the video-2 ledger) · reproduced 14 October
 
 **My Agent Performance, the Credits tab's table of Super Agents, was carried to Super Agents and closed with them unbuilt**
 
@@ -10643,6 +10643,27 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 - admins see every agent of the workspace, members the ones they made.
 
 Record each run's credits and completed actions; then draw the table with Find agent and Edit benchmark, with a suite and break patches.
+
+*Closed, 14 October* (lanes 2 and 3), as ClickUp's Agent Performance table has it (help centre through search excerpts, 14 October: "Track your Workspace's Brain AI usage", "How are AI Super Credits consumed?", "Super Agent privacy, security, and permissions"). Built so:
+- **An agent's calls are its own.** Each model call of a Super Agent run is written with the run it was made in (`ai_usage.agent_run_id`, migration `0193`), its turn's calls and a refused turn's failure alike. A run keeps the actions of its turn that were carried out (`super_agent_runs.actions_completed`): a task made, a field set, and not one refused or skipped. They are kept even when the run then fails.
+- **`GET /workspaces/:id/super-agents/performance`:** this month, a row per Super Agent:
+  - its runs, not counting those refused before they began;
+  - the actions it completed;
+  - its credits, which are its own runs' calls;
+  - the time saved, its actions at the minutes one action saves;
+  - the value, that time at the hourly rate;
+  - the cost, its credits at a tenth of a cent;
+  - the return, value over cost, reckoned from the exact cost and none where it cost nothing.
+  
+  A workspace admin reads every agent of the workspace, a member the ones they made, and a guest is refused in words.
+- **Edit benchmark:** the minutes one action saves (`workspaces.ai_minutes_saved_per_agent_action`, a whole number from 0 to 480, 6 until set) beside the hourly rate the value panel uses. A workspace admin sets it on the same route; the value panel's minutes per run stay its own.
+- **The Credits tab and Settings → AI usage** draw My Agent Performance under the month's credits (`agent-performance.tsx`, four locales): Find agent, Edit benchmark for an admin, and a row per agent with who made it, its actions, time saved, value, cost and return (×).
+
+Measured:
+- Before (`c37c98a`, lane 3): `agent-performance` 0 of 15. The route answered 404, and the run's columns did not exist (`super_agent_runs.actions_completed`).
+- After (`3a27eef`): 15 of 15 on lane 3 with no model, and 15 of 15 on lane 2 with one. With a model, a run that made a task counts that action and its calls' credits; without one, the refused run counts as a run that did nothing and cost nothing.
+- Beside it at `3a27eef`: `super-agents` 39 of 39, `brain-comments-and-decks` 29 of 29, `ai-connected-apps` 11 of 11, `ai-credits` 18 of 18 and `ai-image-generation` 9 of 9, all with a model; `comment-email` 18 of 18.
+- Patches `agp-1` to `agp-15` (the API) and `agp-w1` to `agp-w6` (the web) claim the suite's checks, `agp-9` only where a model answers. `agp-u1` and `agp-u2` redden their unit tests in `ai-value.test.ts`, which has six new tests: 17 of 17.
 
 ## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 46
 

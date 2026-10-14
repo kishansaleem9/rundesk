@@ -886,7 +886,7 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 | B | Success message with clickable path chips (`rundesk › ddddd › List`) — closed by `ai-answer-rendering.mjs`, 51 checks (frame `18:48`). The chip was a `<span>`: a path that looked like a link, could not be pressed, could not be middle-clicked and did not exist to a keyboard — the dead control, in the one place the answer is telling you to act. A view the space cannot draw degrades to the list rather than being offered |
 | B | AI Analytics: Time Saved with its working, Human Cost Savings, editable rate, Edit benchmark, validation, net-can-be-negative |
 | B | "Actions completed" — the 24 raw feature values grouped into the frames' 8 categories, server-side. Three categories cannot be filled at all and print a reason rather than `0`: a zero meaning "impossible" and a zero meaning "you did none" look identical on screen. The unit stays a run, not an "action" |
-| B\* | **Credits**: tab, category→credits table, usage-trend chart with limit line, Add credits — built on 12 October as ClickUp counts them (`ai-credits.mjs`, 18 checks; `commit-log/log-3943965-1`), and moved here on 14 October. **My Agent Performance is not there**: that closure carried it to Super Agents (`ledger-rows/row-852`), which closed on 13 October without it, and nothing in the tree draws an agent's cost, actions or time saved (`found-14-oct/agent-performance-carried-and-unbuilt`) |
+| B | **Credits**: tab, category→credits table, usage-trend chart with limit line, Add credits — built on 12 October as ClickUp counts them (`ai-credits.mjs`, 18 checks; `commit-log/log-3943965-1`), and moved here on 14 October. **My Agent Performance was not there**: that closure carried it to Super Agents (`ledger-rows/row-852`), which closed on 13 October without it, and nothing in the tree drew an agent's cost, actions or time saved. Built on 14 October as ClickUp's table has it — a row per Super Agent with its actions, time saved at a per-action benchmark, value, cost and return, every agent to an admin and theirs to a member, Find agent and Edit benchmark (`agent-performance.mjs`, 15 checks; `found-14-oct/agent-performance-carried-and-unbuilt`) |
 | B | Image generation — from a task's comment box, a Chat or DM message field and the Ask dock, as ClickUp's Brain makes images (`ai-image-generation.mjs`, 9 checks; `ledger-rows/row-870`, 8 October). Moved here on 14 October; it was not moved when it closed |
 | B | App Center with categories, per-app descriptions, connection health |
 | B | Apps — Box, Confluence, Jira, Gmail, SharePoint, Outlook Mail. **THIS ROW WAS STALE**: all six are in `INTEGRATIONS` and have been, among 48 tiles. The work was done and the row was never re-read — the stale reason again, this time hiding a closure rather than a gap. They are built as TWO features, because "what happens when somebody presses it" has two honest answers. **Gmail and SharePoint are connectable**: `listSupportedProviders()` holds a provider for each and `search.service.ts` a query path, so Connect starts a real grant and the palette tab it feeds can answer. **Box, Confluence, Jira and Outlook Mail are not, and say so** — nothing in this product reads a Box or an Atlassian token, so a grant stored for one is the mirror defect, and worse than the gap because the gap is visible. Those tiles carry the plain sentence and the one action that is real: telling the admins you want it. `comingSoon` is gone with them: it was a hand-kept second opinion about connectability that had drifted from the server's, drawing OneDrive, Linear and Salesforce as "Soon" over three working connectors |
@@ -1069,25 +1069,26 @@ Search tab (`cover-photo-search.mjs`, 8 checks; `commit-log/log-601eacc-1`,
 and Personal Priorities (`tasks-in-multiple-lists.mjs`, 14 checks;
 `commit-log/log-713a611-1`, `ledger-rows/row-845`); image generation
 (`ai-image-generation.mjs`, 9 checks; `ledger-rows/row-870`); and Credits
-(`ai-credits.mjs`, 18 checks; `commit-log/log-3943965-1`) — `B*`, because its My
-Agent Performance is still not there: the Credits closure carried it to Super
-Agents, whose closure did not build it
-(`found-14-oct/agent-performance-carried-and-unbuilt`). In §5: the planner's
+(`ai-credits.mjs`, 18 checks; `commit-log/log-3943965-1`) — `B*` for a few
+hours, because its My Agent Performance was not there: the Credits closure
+carried it to Super Agents, whose closure did not build it. It was built the
+same day (`agent-performance.mjs`, 15 checks;
+`found-14-oct/agent-performance-carried-and-unbuilt`), and the row is `B`. In §5: the planner's
 Sync now (`planner-sync-now.mjs`, 5 checks; `ledger-rows/row-1904`) and the
 calendar's Automations page (`calendar-sync-rules.mjs`, 12 checks;
 `ledger-rows/row-1962`). So §2 moves `128 · 2 · 3` → `133 · 0 · 0` and §5
-`39 · 1 · 1` → `41 · 0 · 0`, and the total stays 174: 131 `B`, 2 `B*` and no `P`
+`39 · 1 · 1` → `41 · 0 · 0`, and the total stays 174: 132 `B`, 1 `B*` and no `P`
 or `M` in §2's tables.
 
-§2's 133 built includes the two marked `B*` — built, but each row also records
+§2's 133 built includes the one marked `B*` — built, but the row also records
 something the frame asks for that is not there. It is counted as built
 because that is what it is; the asterisk is where the remainder is written
 down. This read "the four" until 29 September while §2 held six: the two that
 were left, and four whose asterisk meant something else — a suite not yet run —
 which had stopped being true (the legend under §2 records it); and "the two"
-until 9 October, when the `Comment ▾` row's Email mode was built; and "the one"
-until 14 October, when Credits was moved here with My Agent Performance as its
-remainder. §5's 41 built
+until 9 October, when the `Comment ▾` row's Email mode was built. Credits was a
+second `B*` for a few hours on 14 October, until its My Agent Performance was
+built. §5's 41 built
 includes one `B*` of its own, the busy state, whose remainder is the frame's own
 words.
 
