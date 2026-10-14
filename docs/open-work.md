@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 568 items: 0 open · 0 partly fixed · 558 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 569 items: 0 open · 0 partly fixed · 559 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 13 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 104, each reproduced
+## Found by the triage, 5 October, and since — 105, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10595,6 +10595,16 @@ Before the fix it named the twelve; after, none. `check-i18n-placeholders-cases.
 *Evidence, 14 October:* rehearsal 16, "Task cover", 40 of 42 in 122.7 s (24.1 s in rehearsal 15): "the Board never drew the task's card (…), so there was nothing to take off", and the teammate's board the same. The API's log shows nothing failing then. The press was caught and forgotten, so the run cannot say whether it was lost on a tab strip drawn again under it or the board drew late.
 
 *Closed, 14 October.* The tab says when its view is current (`aria-current`), so the suite presses it until it does, and a card that still never draws now says which of the two it was. 42 of 42 on lane 3 at `4a304ba`.
+
+*Again, rehearsal 17 at `5e4d5ec`:* 41 of 42 in 54.4 s, the first board drawn and the teammate's not: "the second board never drew the task's card". A fresh context's first board, under the rehearsal's load, outlasted the 30 s. Each board is now opened once more from a reload before the run says so; the log says when that was needed, and a board that never draws says, for itself, whether its tab was current and how many cards it drew.
+
+### `found-14-oct/time-estimate-registers-after-it-deletes` — **closed** (test tooling, small; found by rehearsal 17) · reproduced 14 October
+
+**`time-estimate` deleted the task the quick-create modal made before its registration was looked up, and the run read as made in another database**
+
+*Evidence, 14 October:* rehearsal 17 at `5e4d5ec`, "Time estimate": 13 of 13 checks, then "localhost:5432/rundesk_calls, the database this run cleans, has no tasks row ed311c24…, made a moment ago: this run's rows are made in another database (the API's)", and the run exited 1. The suite makes its fixtures by SQL and removes them by SQL in its `finally`, so the first row it registers is the task the quick-create modal makes, registered when the page's answer is read (`lib/fixture.mjs`'s watcher). The first row a run registers is looked up where the sweep will look (`lib/made.mjs`). Under load the answer was read after the `finally` had deleted the task, and the lookup found nothing. Rehearsals 15 and 16 passed the step.
+
+*Closed, 14 October.* The suite registers the quick-made task itself once it has read it back, while it is there (`madeRow`).
 
 ### `found-14-oct/leftover-audit-blames-the-nightly-scores` — **closed** (test tooling, small; found by rehearsal 16) · reproduced 14 October
 

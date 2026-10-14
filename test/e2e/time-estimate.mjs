@@ -24,7 +24,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
-import { apiAs as apiAsAt } from './lib/fixture.mjs'
+import { apiAs as apiAsAt, madeRow } from './lib/fixture.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -298,11 +298,17 @@ try {
   await page.getByTestId('quick-create-submit').click({ timeout: 20_000 })
 
   let quickSeconds = null
+  let quickId = null
   const quickStored = await waitUntil(async () => {
-    const rows = await sql`select time_estimate from tasks where title = ${QUICK_TITLE}`
+    const rows = await sql`select id, time_estimate from tasks where title = ${QUICK_TITLE}`
     quickSeconds = rows[0]?.time_estimate ?? null
+    quickId = rows[0]?.id ?? null
     return rows.length === 1 && quickSeconds === 5400
   }, { timeoutMs: 25_000 })
+  // The page's answer registers this task too, but when its body is read: under load, after the
+  // `finally` below has deleted it, and the first row registered is looked up where it was made —
+  // so it read as made elsewhere. Registered here, while it is there (`found-14-oct/time-estimate-registers-after-it-deletes`).
+  if (quickId) madeRow('tasks', quickId)
   chk(
     quickStored,
     'the OTHER estimate box reads `90m` the same way — 5400s',

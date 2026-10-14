@@ -824,11 +824,27 @@ try {
     boardTabSaid = current ? 'its Board tab was current' : 'its Board tab never became current'
     return waitUntil(async () => (await p.locator(`[data-testid="board-task-card"][data-task-id="${task.id}"]`).count()) > 0, { timeoutMs: 30_000 })
   }
+  // A board whose first load drew nothing is opened once more, from a reload, before the run says
+  // so: a fresh page's first board, under load, outlasted 30 s (`found-14-oct/task-cover-board-press-lost`).
+  // Said in the log when it took that, and what the board drew when it never did.
+  const boardSaidOf = new Map()
+  const openBoardOnce = async (p, who) => {
+    if (await openBoard(p)) {
+      boardSaidOf.set(p, boardTabSaid)
+      return true
+    }
+    const firstSaid = `${boardTabSaid}; ${await p.locator('[data-testid="board-task-card"]').count()} card(s) drawn`
+    await p.reload({ waitUntil: 'domcontentloaded' }).catch(() => {})
+    const drawn = await openBoard(p)
+    console.log(`  (${who}'s board drew the task's card ${drawn ? 'only after a reload' : 'neither before nor after a reload'}: first ${firstSaid})`)
+    boardSaidOf.set(p, `${firstSaid}; after a reload, ${boardTabSaid}, ${await p.locator('[data-testid="board-task-card"]').count()} card(s) drawn`)
+    return drawn
+  }
   // What the card drew instead, said when it is not the image.
   const coverDrawn = async (p) =>
     (await p.locator(`[data-testid="board-task-card"][data-task-id="${task.id}"] [data-testid="board-card-cover"]`).first().getAttribute('data-cover-kind', { timeout: 1000 }).catch(() => null)) ?? 'no cover'
   await page.goto(`${stack.base}/app/${workspaceId}/${spaceId}/${projectId}/${listId}`, { waitUntil: 'domcontentloaded' })
-  const boardOpen = await openBoard(page)
+  const boardOpen = await openBoardOnce(page, 'the first')
   const boardCard = page.locator(`[data-testid="board-task-card"][data-task-id="${task.id}"]`)
   const cardImage = boardCard.locator('[data-testid="board-card-cover"][data-cover-kind="image"] img')
   const drawnBefore = boardOpen && (await waitUntil(async () => (await cardImage.count()) > 0, { timeoutMs: 25_000 }))
@@ -847,7 +863,7 @@ try {
   await teammate.click('button[type=submit]')
   await teammate.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS }).catch(() => {})
   await teammate.goto(`${stack.base}/app/${workspaceId}/${spaceId}/${projectId}/${listId}`, { waitUntil: 'domcontentloaded' })
-  const teammateBoardOpen = await openBoard(teammate)
+  const teammateBoardOpen = await openBoardOnce(teammate, 'the second')
   const teammateImage = teammate.locator(
     `[data-testid="board-task-card"][data-task-id="${task.id}"] [data-testid="board-card-cover"][data-cover-kind="image"] img`,
   )
@@ -866,7 +882,7 @@ try {
     shownPinned.ok && drawnBefore && removedInSheet && cardCleared,
     'removing that attachment in the sheet takes the cover off the board card behind it, with no reload',
     !boardOpen
-      ? `the Board never drew the task's card (${new URL(page.url()).pathname}; ${boardTabSaid}), so there was nothing to take off`
+      ? `the Board never drew the task's card (${new URL(page.url()).pathname}; ${boardSaidOf.get(page) ?? boardTabSaid}), so there was nothing to take off`
       : !drawnBefore
         ? `the board card never drew the cover (${shown.said}, cover set ${shownPinned.status}; it drew ${drawnInstead}), so there was nothing to take off`
         : !removedInSheet
@@ -878,7 +894,7 @@ try {
     teammateDrawnBefore && removedInSheet && teammateCleared,
     'and so does a second board open at the same time, where nobody touched the sheet',
     !teammateBoardOpen
-      ? "the second board never drew the task's card, so there was nothing to take off"
+      ? `the second board never drew the task's card (${boardSaidOf.get(teammate) ?? boardTabSaid}), so there was nothing to take off`
       : !teammateDrawnBefore
         ? `the second board never drew the cover (it drew ${teammateDrawnInstead}), so there was nothing to take off`
         : !removedInSheet
