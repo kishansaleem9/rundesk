@@ -69,7 +69,7 @@ try {
   const SPACE = await make('/spaces', { workspaceId: WS, name: `${TAG} space` }, 'the space')
   const PROJECT = await make('/projects', { spaceId: SPACE, name: `${TAG} project` }, 'the project')
   const LIST = await make('/lists', { projectId: PROJECT, name: `${TAG} list` }, 'the list')
-  const CLIENT = await make(`/workspaces/${WS}/labels`, { name: `client-${stamp}` }, 'the Client tag')
+  const CLIENT = await make(`/workspaces/${WS}/labels`, { name: `client-${stamp}`, color: '#8b5cf6' }, 'the Client tag')
   const task = async (title, priority, tagged) => {
     const id = await make('/tasks', { listId: LIST, title: `${title} ${TAG}`, priority }, `the task ${title}`)
     if (tagged) must(await A(`/tasks/${id}/labels/${CLIENT}`, { method: 'POST' }), `tag ${title}`)
