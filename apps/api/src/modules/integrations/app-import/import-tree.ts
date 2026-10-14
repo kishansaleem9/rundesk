@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import {
   clickupImportJobs,
   customFieldDefinitions,
@@ -497,7 +497,7 @@ export class TreeWriter {
   // ── a List and its tasks ─────────────────────────────────────────────────────
 
   private async list(spaceId: string, containerId: string, l: ImList, position: number): Promise<number> {
-    const name = l.name.trim().slice(0, 200) || 'Imported'
+    const name = await this.freeListName(containerId, l.name.trim().slice(0, 200) || 'Imported')
     const [row] = await this.db
       .insert(lists)
       .values({ projectId: containerId, spaceId, name, description: l.description?.slice(0, 2000) || null, position, createdById: this.target.importer.id })
@@ -513,6 +513,25 @@ export class TreeWriter {
       made += await this.task(row.id, containerId, rows, t, n, null, 0)
     }
     return made
+  }
+
+  /**
+   * A name no List in the container has (`uq_lists_project_name_active`, whatever its case): the
+   * tool's own, else it with " (2)", " (3)" after it — so a Space imported again into the same
+   * place comes in beside what the first run made, instead of failing on its first List.
+   */
+  private async freeListName(containerId: string, name: string): Promise<string> {
+    const rows = await this.db
+      .select({ name: lists.name })
+      .from(lists)
+      .where(and(eq(lists.projectId, containerId), eq(lists.isArchived, false), isNull(lists.personalOf)))
+    const taken = new Set(rows.map((r) => r.name.toLowerCase()))
+    if (!taken.has(name.toLowerCase())) return name
+    for (let n = 2; ; n++) {
+      const tail = ` (${n})`
+      const candidate = `${name.slice(0, 200 - tail.length)}${tail}`
+      if (!taken.has(candidate.toLowerCase())) return candidate
+    }
   }
 
   /** A task and its subtasks; how many tasks it made. Subtasks nest one level here, so a deeper one comes in one level up. */

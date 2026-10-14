@@ -10733,6 +10733,8 @@ Measured:
 - the Workspace's Goals with their Targets, its owner and theirs mapped; each of the three a choice on the import page, on unless turned off;
 - a People field as its people's names, a Task or Relationship field as its tasks', a Formula as its value.
 
+*Found measuring it, 14 October:* a Space imported a third time into the Space chosen before failed whole — "duplicate key value violates unique constraint `uq_lists_project_name_active`" — as its List in no Folder had the name of the one the first run made there. A List now comes in beside it as "Inbox (2)", the name a person making it would be asked to change it to.
+
 ## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 46
 
 On the owner's word of 8 October ("close all of these properly … close them as they work on clickup"), the

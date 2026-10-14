@@ -433,10 +433,10 @@ try {
   const notes = docRows.find((d) => d.title === `Inbox notes ${TAG}`)
   const handbook = (await sql`select id from docs where workspace_id = ${WS} and title = ${`Handbook ${TAG}`}`).length
   chk(
-    !!brief && /We ship/.test(brief.plaintext ?? '') && under.join('|') === [`Risks ${TAG}`, `Timeline ${TAG}`].sort().join('|') && !!risks && /Late assets/.test(risks.plaintext ?? '') &&
+    !!brief && /We ship/.test(brief.plaintext ?? '') && under.join('|') === [`Risks ${TAG}`, `Timeline ${TAG}`].sort().join('|') && !!risks && /Late\s+assets/.test(risks.plaintext ?? '') &&
       !!notes && /Triage daily/.test(notes.plaintext ?? '') && handbook === 0,
     'the Space’s Docs come in it — one in the Space, one in its List — the first page a Doc’s own body and the others under it, as ClickUp nests them; the Workspace’s own Doc stays behind unless asked for',
-    JSON.stringify({ docs: docRows.map((d) => [d.title, !!d.parent_doc_id]), under, briefText: brief?.plaintext?.slice(0, 40), handbook }),
+    JSON.stringify({ docs: docRows.map((d) => [d.title, !!d.parent_doc_id]), under, briefText: brief?.plaintext?.slice(0, 40), risksText: risks?.plaintext ?? null, notesText: notes?.plaintext ?? null, handbook }),
   )
 
   const planTime = plan ? await sql`select user_id, duration_sec, is_billable, description, import_id from time_entries where task_id = ${plan.id}` : []
