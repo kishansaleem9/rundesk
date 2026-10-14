@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 575 items: 5 open · 0 partly fixed · 560 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 14 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 575 items: 2 open · 0 partly fixed · 563 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 14 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -10669,7 +10669,7 @@ Measured:
 - `agp-u1` and `agp-u2` redden their unit tests in `ai-value.test.ts`, which has six new tests: 17 of 17.
 - Also green at batch 44: `ai-action-categories` 29, `ai-activity-filters` 34, `ai-button-relationship-fields` 17 and `ai-value` 23.
 
-### `found-14-oct/imports-exports-branch-unmerged` — **open** (feature, large; found reviewing the open pull requests with the owner) · reproduced 14 October
+### `found-14-oct/imports-exports-branch-unmerged` — **closed** (feature, large; found reviewing the open pull requests with the owner) · reproduced 14 October
 
 **Settings › Imports / Exports was built on a branch the deploy branch never took, and its own CI was red**
 
@@ -10679,6 +10679,13 @@ Measured:
 - Merged as it was, it conflicts with the branch in seven files, and its migration `0175` collides with the branch's numbering, which had reached `0193`.
 
 *To close:* merge it onto the deploy branch with the conflicts resolved for both sides, its migration renumbered after `0193`, its failing step brought to what it now does, and every gate and suite of the branch green over it.
+
+*Closed, 14 October* (`b2eed3f`, "Merge feature/imports-exports (PR #3)"):
+- The seven conflicts are resolved for both sides: `lists.ts` and `spaces.ts` keep the branch's Personal List (`personalOf`, `isPersonal`) beside the merge's `importId`; `app.module.ts` keeps every import module; the create modal's footer asks the branch's `workspace.import` permission; the import page keeps the branch's landing and is linked from Settings by `?tab=`.
+- Its migration is `0194_imports_exports.sql` (journal 194), after the branch's `0193`.
+- `space-create-menu` reads what the merge's change now does: "imports" goes to Settings › Imports / Exports with this Space as the destination (`tab=importsExports`, `locationType=space`).
+- Its package's tests run in the preflight (`import/export package tests`) and in CI.
+- Measured on lane 3 at `b2eed3f`: `space-create-menu` 32 of 32, `importers-by-sign-in` 26 of 26, `importers` 25 of 25, `imports` 60 of 60.
 
 ### `found-14-oct/clickup-workspace-import-and-people-unbuilt` — **open** (feature, large; found reviewing what moving a team off ClickUp needs) · reproduced 14 October
 
@@ -10694,7 +10701,7 @@ Measured:
 - match its people to members by email, and invite the ones who are not here with ClickUp's role for them, by somebody who may invite, at no role above their own;
 - hold their tasks for them and make them theirs when they accept, where the assignee route would put them on them.
 
-### `found-14-oct/lane-tooling-misses-the-imports-package` — **open** (harness, medium; found integrating `found-14-oct/imports-exports-branch-unmerged`) · reproduced 14 October
+### `found-14-oct/lane-tooling-misses-the-imports-package` — **closed** (harness, medium; found integrating `found-14-oct/imports-exports-branch-unmerged`) · reproduced 14 October
 
 **The lanes and the worktree linker do not know `packages/imports`, so a change to it is served stale**
 
@@ -10705,7 +10712,9 @@ Measured:
 
 *To close:* add it to each list, and to the linker's self-check.
 
-### `found-14-oct/automation-conditions-and-actions-unbuilt` — **open** (feature, medium; found comparing the automations of the prototype in pull request #2 with the branch's) · reproduced 14 October
+*Closed, 14 October* (batch 45, `cdc5e44`): `packages/imports` is in `wt-break.sh`'s `link_own_packages`, and a change to it rebuilds the API and the web (`NEEDS_API`, `NEEDS_WEB`); `verify.sh` counts `packages/imports/src` as a source of both builds; `link-worktree.sh` links it and `lane-env.sh`'s `WEB_SOURCE_PATHS` names it. `link-worktree-selfcheck.sh` makes it in its fixture and passes (`ok link-worktree`, 14 October), and the lanes built since have their own `packages/imports/node_modules` (`/tmp/claude-0/wt3`).
+
+### `found-14-oct/automation-conditions-and-actions-unbuilt` — **closed** (feature, medium; found comparing the automations of the prototype in pull request #2 with the branch's) · reproduced 14 October
 
 **An automation cannot ask anything of the task it runs on, and cannot comment, add a watcher, set a due date, fill an AI field or be tested**
 
@@ -10720,6 +10729,21 @@ Measured:
 - the four actions, a watcher only somebody who may open the task, the comment under the rule's maker;
 - a test that says what a rule would do to a task and does nothing;
 - the builder's conditions, the actions' pickers, the test on a rule's card, a skipped run in its history.
+
+*Closed, 14 October* (batch 46, `fe5ff16`, and what measuring it found), as the prototype of pull request #2 has them and ClickUp's automations work:
+- **Conditions** (`automation-conditions.ts`): a rule's trigger keeps up to fifteen — a task's status, priority, assignee, List, tag, due date or title, each with the operators it takes (is, is not, any of, none of, is set, is not set, contains, before, after) — and acts when all hold, or any one, as it says. They are read from the task as it is when the event fires, and refused in words when they cannot be read. A run that did not act is logged as skipped, with each condition's verdict.
+- **Four actions:** add a comment (its `{{task.title}}` filled in, under the rule's maker); add a watcher (only somebody who may open the task); set the due date some days out; fill an AI field (only an AI field).
+- **A test** (`POST /workspaces/:id/automations/:id/test`, `automation.manage`): what a rule would do to a task, its conditions' verdicts and its actions, done to nothing and logged nowhere.
+- **The builder's** conditions with "all of these" or "any of these", the actions' pickers, the test on a rule's card, and a skipped run in its history, in four locales; two recipes that use them.
+
+Found measuring it, and fixed before it was closed:
+- the API did not start (`fe5ff16`): a static import of the AI fields' service closed a module cycle (tasks → automations → AI fields → AI → tasks), and Nest read the AI service's tasks parameter as undefined. It is loaded where the action runs (`fef3efa`);
+- testing a rule from its card sent search's name for the hit (`task-<id>`) as the task's id, and every test from the page failed with "A value has an invalid format" (`281a101`);
+- the suite's own fixtures: its tag made without the colour the labels route asks; the built rule read by a query the API's rules also match; jsonb's reordered keys compared as text; the card found by a class the page layout shares (`9839fd8`, `e05f725`, `83a6bc1`). The card, its expand button and the builder's name field have test ids now.
+
+Measured:
+- `automation-conditions` 9 of 9 on lane 4 at `281a101` and again at `ec66732`. Its unit file, `automation-conditions.test.ts`, 5 of 5.
+- Patches `acn-1` to `acn-10` (the API) and `acn-w1` to `acn-w4` (the web), 14 at `ec66732` on lane 4, baseline 9 of 9: each reddens a check it names (`break-report.sh`: 14 reddened). `acn-1`, conditions ignored, is the rule as it stood before: 6 of 9.
 
 ### `found-14-oct/clickup-docs-time-goals-unimported` — **open** (feature, large; found closing `found-14-oct/clickup-workspace-import-and-people-unbuilt`, at the owner's word "we need to import their full data too") · reproduced 14 October
 
