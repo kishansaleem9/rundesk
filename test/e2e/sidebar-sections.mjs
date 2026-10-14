@@ -406,10 +406,17 @@ try {
 
   // `sidebar-sections-8-no-imports-templates` removes the two rows, which the
   // check above reports; clicking one ended the run at 14 of 25.
+  // Imports, for whoever may import (this run's admin), is Settings › Imports / Exports with this
+  // space its destination, as `space-create-menu` reads it — the imports/exports merge
+  // (`found-14-oct/imports-exports-branch-unmerged`) moved it there from the importers' page.
   await imports.click({ timeout: 8000 }).catch(() => {})
   chk(
-    await waitUntil(() => page.url().includes(`/app/${WS}/import`), { timeoutMs: 15_000 }),
-    'Imports goes to the import page',
+    await waitUntil(() => {
+      const url = new URL(page.url())
+      return url.pathname === `/app/${WS}/settings` && url.searchParams.get('tab') === 'importsExports' &&
+        url.searchParams.get('locationType') === 'space' && url.searchParams.get('locationId') === space.id
+    }, { timeoutMs: 15_000 }),
+    'Imports goes to Settings › Imports / Exports, this space its destination',
     `it left the address at ${page.url()}`,
   )
   await page.goto(`${B}/app/${WS}`, { waitUntil: 'domcontentloaded' })
