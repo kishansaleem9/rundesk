@@ -6,7 +6,7 @@ import io
 p = '/home/user/rundesk/apps/api/src/modules/invitations/invitations.service.ts'
 s = io.open(p, encoding='utf-8').read()
 for a, b in [
-    ('    for (const ws of grants) await this.takePendingAssignees(ws.workspaceId, invite.email, result.userId!)\n',
+    ('      await this.takePendingAssignees(ws.workspaceId, invite.email, result.userId!)\n',
      ''),
 ]:
     assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
