@@ -7974,6 +7974,9 @@ function CommentsPanel({
                   type="button"
                   data-testid="mention-brain"
                   disabled={brainUnavailable}
+                  // Offered before `/ai/status` has answered, and said to be still settling until it has
+                  // (`found-14-oct/brain-row-read-before-the-status`).
+                  aria-busy={aiStatus.isPending ? 'true' : undefined}
                   onClick={() => {
                     const cut = /(@+[/#]?)([^\s@/#]*)$/.exec(text)
                     setText(`${cut ? text.slice(0, cut.index) : text}@Brain `)

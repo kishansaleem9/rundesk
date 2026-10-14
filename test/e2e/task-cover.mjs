@@ -809,10 +809,19 @@ try {
   // card is read. Rehearsing CI on 1 October, under a full run's load, the first
   // board never showed the cover in 25 s while the second did: the precondition
   // of both checks below (`found-30-sep/task-cover-second-board-reads-early`).
+  // What the last board opened saw of its tab, said when the card never drew.
+  let boardTabSaid = ''
   const openBoard = async (p) => {
     const tab = p.getByTestId('work-view-tab-type-board')
     await tab.waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {})
-    await tab.click({ timeout: 15_000 }).catch(() => {})
+    // A press on a strip that redraws under it can be lost, and was caught and forgotten: the tab
+    // says when its view is current, so it is pressed until it does (`found-14-oct/task-cover-board-press-lost`).
+    const current = await waitUntil(async () => {
+      if ((await tab.getAttribute('aria-current').catch(() => null)) === 'true') return true
+      await tab.click({ timeout: 5_000 }).catch(() => {})
+      return (await tab.getAttribute('aria-current').catch(() => null)) === 'true'
+    }, { timeoutMs: 20_000 })
+    boardTabSaid = current ? 'its Board tab was current' : 'its Board tab never became current'
     return waitUntil(async () => (await p.locator(`[data-testid="board-task-card"][data-task-id="${task.id}"]`).count()) > 0, { timeoutMs: 30_000 })
   }
   // What the card drew instead, said when it is not the image.
@@ -857,7 +866,7 @@ try {
     shownPinned.ok && drawnBefore && removedInSheet && cardCleared,
     'removing that attachment in the sheet takes the cover off the board card behind it, with no reload',
     !boardOpen
-      ? `the Board never drew the task's card (${new URL(page.url()).pathname}), so there was nothing to take off`
+      ? `the Board never drew the task's card (${new URL(page.url()).pathname}; ${boardTabSaid}), so there was nothing to take off`
       : !drawnBefore
         ? `the board card never drew the cover (${shown.said}, cover set ${shownPinned.status}; it drew ${drawnInstead}), so there was nothing to take off`
         : !removedInSheet

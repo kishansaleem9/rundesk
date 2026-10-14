@@ -32,6 +32,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
 import { openDb } from './lib/db.mjs'
+import { openKept } from './lib/sealed.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -276,7 +277,9 @@ try {
   await tab.getByTestId('webhook-form-save').click({ timeout: 10_000 }).catch(() => {})
   await waitUntil(async () => (await tab.getByTestId('webhook-secret-once').count()) > 0, { timeoutMs: 15_000 })
   const shown = ((await tab.getByTestId('webhook-secret-value').filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
-  const [stored] = await sql`select id, secret from webhooks where workspace_id = ${WS} and name = ${MADE}`
+  // Kept sealed since batch 42 (`found-14-oct/webhook-secret-read-sealed`): opened as the API opens it.
+  const [storedRow] = await sql`select id, secret from webhooks where workspace_id = ${WS} and name = ${MADE}`
+  const stored = storedRow && { ...storedRow, secret: openKept(storedRow.secret, 'webhooks.secret') }
   const madeRow = stored ? tab.getByTestId(`webhook-row-${stored.id}`) : null
   await waitUntil(async () => !madeRow || (await madeRow.count()) > 0, { timeoutMs: 10_000 })
   chk(
@@ -321,7 +324,8 @@ try {
   await tab.getByTestId('admin-webhook-create').click({ timeout: 10_000 }).catch(() => {})
   await waitUntil(async () => (await tab.getByTestId('webhook-secret-once').count()) > 0, { timeoutMs: 15_000 })
   const adminShown = ((await tab.getByTestId('webhook-secret-value').filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
-  const [adminStored] = await sql`select secret from webhooks where workspace_id = ${WS} and name = ${ADMIN_MADE}`
+  const [adminRow] = await sql`select secret from webhooks where workspace_id = ${WS} and name = ${ADMIN_MADE}`
+  const adminStored = adminRow && { secret: openKept(adminRow.secret, 'webhooks.secret') }
   chk(
     Boolean(adminStored?.secret) && adminShown.length >= 32 && adminShown === adminStored.secret,
     'made there, the secret shown is the one stored',

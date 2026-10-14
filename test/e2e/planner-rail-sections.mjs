@@ -156,7 +156,13 @@ try {
       )
       .then((res) => res.status() === 200, () => false)
     await page.goto(`${B}/app/${WS}/calendar`, { waitUntil: 'domcontentloaded' })
-    const drawn = await waitUntil(async () => (await page.locator('[data-testid="planner-rail"] [data-rail-section]').count()) > 0, { timeoutMs: 25_000 })
+    // Drawn from the stored order and this workspace's sections: until both have answered the rail
+    // holds the five built in, and says so (`found-14-oct/planner-rail-read-before-its-order`).
+    const drawn = await waitUntil(
+      async () =>
+        (await page.locator('[data-testid="planner-rail"]:not([aria-busy="true"]) [data-rail-section]').count()) > 0,
+      { timeoutMs: 25_000 },
+    )
     return (await answered) && drawn
   }
   const openSidebarPage = async () => {

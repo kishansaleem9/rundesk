@@ -23,6 +23,7 @@ import { openDb } from './lib/db.mjs'
 import { waitUntil } from './lib/wait.mjs'
 import { apiAs as apiAsAt } from './lib/fixture.mjs'
 import { calendarBase, seedCalendar, readCalendar, failCalendar, forgetCalendar } from './lib/calendar.mjs'
+import { openKept } from './lib/sealed.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -133,11 +134,14 @@ try {
     'the events of a connected calendar are read: a timed one at its instants, an all-day one by its days, each with its account',
     `answered ${read.status}; the timed one ${JSON.stringify(standup ?? null)}; the all-day one ${JSON.stringify(holiday ?? null)}`,
   )
-  const [stale] = await sql`select access_token, token_expires_at from user_calendar_accounts where id = ${ACC.stale}`
+  // Kept sealed since batch 42, so opened as the API opens it: "not the expired one" was true of any
+  // sealed value, the expired one sealed again among them (`found-14-oct/suites-read-sealed-secrets-raw`).
+  const [staleRow] = await sql`select access_token, token_expires_at from user_calendar_accounts where id = ${ACC.stale}`
+  const stale = staleRow && { ...staleRow, access_token: openKept(staleRow.access_token, 'user_calendar_accounts.access_token') }
   chk(
-    find(EVENTS.refreshed)?.accountId === ACC.stale && stale?.access_token !== TOKENS.stale && new Date(stale?.token_expires_at) > new Date(),
+    find(EVENTS.refreshed)?.accountId === ACC.stale && /^refreshed-/.test(stale?.access_token ?? '') && new Date(stale?.token_expires_at) > new Date(),
     'and a calendar whose token has expired is read with a token refreshed at its token address, which is kept',
-    `its event ${find(EVENTS.refreshed) ? 'was read' : 'was not read'}; the account's token is ${stale?.access_token === TOKENS.stale ? 'still the expired one' : 'another'}, expiring ${stale?.token_expires_at}`,
+    `its event ${find(EVENTS.refreshed) ? 'was read' : 'was not read'}; the account's token is ${stale?.access_token === TOKENS.stale ? 'still the expired one' : /^refreshed-/.test(stale?.access_token ?? '') ? 'the one the token address gave' : `neither (${stale?.access_token === null ? 'it does not open' : 'another'})`}, expiring ${stale?.token_expires_at}`,
   )
   const unread = read.data?.unread ?? []
   chk(

@@ -448,6 +448,9 @@ try {
   await box.fill('@', { timeout: 10_000 }).catch(() => {})
   const brainRow = page.getByTestId('mention-brain')
   await brainRow.waitFor({ timeout: 10_000 }).catch(() => {})
+  // Read once `/ai/status` has answered: before that the row is offered whatever the server has
+  // (`found-14-oct/brain-row-read-before-the-status`).
+  await page.locator('[data-testid="mention-brain"]:not([aria-busy="true"])').waitFor({ timeout: 15_000 }).catch(() => {})
   const brainDisabled = await brainRow.isDisabled().catch(() => true)
   chk(
     (await page.getByTestId('mention-brain-section').count()) === 1 &&

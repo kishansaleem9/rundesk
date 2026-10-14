@@ -1121,6 +1121,9 @@ export function PlannerPage() {
   // The person's own sections (`ledger-rows/row-835`), which the order places among the five.
   const ownSections = useQuery({ ...plannerSectionsQuery(workspaceId), enabled: !!workspaceId })
   const railShown = railSectionsShown(settings?.railSections, ownSections.data ?? [])
+  // Until both have answered the rail draws the five built in, in their default order: it says
+  // so (`found-14-oct/planner-rail-read-before-its-order`).
+  const railPending = (settings === undefined && !settingsFailed) || ownSections.isPending
   const blockLabel = (b: Block) => (b.taskId && b.label ? `${prefix} ${b.label}` : b.label ?? '')
 
   /*
@@ -1449,7 +1452,11 @@ export function PlannerPage() {
         </div>
       )}
       {/* ── the rail, frame 13:08 ─────────────────────────────────────── */}
-      <aside data-testid="planner-rail" className="w-64 shrink-0 border-r border-border/60 overflow-y-auto p-3 space-y-4">
+      <aside
+        data-testid="planner-rail"
+        aria-busy={railPending ? 'true' : undefined}
+        className="w-64 shrink-0 border-r border-border/60 overflow-y-auto p-3 space-y-4"
+      >
         <h1 className="text-[13px] font-semibold">{t('planner.title')}</h1>
 
         {/*
