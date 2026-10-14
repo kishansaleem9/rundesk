@@ -1387,6 +1387,13 @@
       "when": 1900000142052,
       "tag": "0197_clickup_import_rest",
       "breakpoints": true
+    },
+    {
+      "idx": 198,
+      "version": "7",
+      "when": 1900000143052,
+      "tag": "0198_task_labels_moved",
+      "breakpoints": true
     }
   ]
 }

@@ -170,6 +170,40 @@ warn_if_vhost_caches_index() {
   echo
 }
 
+# A DOMAIN ON THE PRIVATE BUCKET (`found-30-sep/domain-left-on-the-private-bucket`). Cloudflare serves
+# every object of a bucket a custom domain is connected to, unsigned, by its key. The API checks the
+# R2_PUBLIC_URL it is given at boot, refuses to send anybody there, and says so in its log; what it cannot
+# do is disconnect the domain. So the deploy reads that log and says it where the deployer is looking,
+# with the four steps, rather than leaving it in a log nobody opens. Nothing set, nothing said.
+warn_if_public_domain_on_private_bucket() {
+  local line=""
+  for i in $(seq 1 30); do
+    line=$(docker logs rundesk-api 2>&1 | grep -E "to anybody, unsigned|Could not check whether R2_PUBLIC_URL" | tail -1)
+    [ -n "$line" ] && break
+    docker logs rundesk-api 2>&1 | grep -q "Nest application successfully started" && break
+    sleep 2
+  done
+  case "$line" in
+    *"Could not check whether R2_PUBLIC_URL"*)
+      echo
+      echo "⚠ The API could not check whether R2_PUBLIC_URL serves the private bucket; pictures are signed until it can."
+      echo "  ${line#*] }"
+      echo
+      ;;
+    *"to anybody, unsigned"*)
+      echo
+      echo "⚠ R2_PUBLIC_URL is a domain of the private bucket: it serves every task file, chat file and recording to anybody with its key."
+      echo "  The API sends nobody to it, but the domain still serves them until it is disconnected:"
+      echo "    1. create the pictures' bucket, with the private bucket's CORS rule;"
+      echo "    2. set R2_PUBLIC_BUCKET_NAME in .env to it;"
+      echo "    3. connect the domain to that bucket, and disconnect it — and any r2.dev URL — from R2_BUCKET_NAME;"
+      echo "    4. ./deploy/deploy.sh rebuild (the pictures move on boot)."
+      echo "  The API's own words: ${line#*] }"
+      echo
+      ;;
+  esac
+}
+
 case "$CMD" in
   up)
     ensure_env
@@ -240,6 +274,7 @@ case "$CMD" in
     apply_schema
     systemctl reload nginx
     warn_if_vhost_caches_index
+    warn_if_public_domain_on_private_bucket
     echo "✓ Rebuild complete."
     ;;
   logs)

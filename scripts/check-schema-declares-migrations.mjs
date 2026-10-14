@@ -59,7 +59,7 @@ const BASELINE_NAMES = new Set(`
 
 /* A table a migration made that the schema no longer declares, and why it is let be. */
 const LEFT_BEHIND = new Map([
-  ['task_labels', '0001 made it; task_label_assignments replaced it, nothing reads it and no migration drops it (`found-30-sep/task-labels-left-in-production`)'],
+  // None now: 0198 moved `task_labels`' rows onto `labels` and dropped it (`found-30-sep/task-labels-left-in-production`).
 ])
 
 const problems = []

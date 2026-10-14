@@ -110,7 +110,8 @@ try {
   const folderText = await panel.locator(`[data-testid="chat-space-view-folder"][data-folder-id="${folder.id}"]`).innerText().catch(() => '')
   const streamHidden = !(await page.locator('[data-testid="chat-composer"]').isVisible().catch(() => false))
   chk(
-    listed && chipText.includes(`Sprint board ${TAG}`) && folderText.includes(`Roadmap ${TAG}`) && folderText.includes(`Q4 ${TAG}`) && streamHidden,
+    // The Folder's heading is drawn in capitals (`uppercase`), so its words are read without their case.
+    listed && chipText.includes(`Sprint board ${TAG}`) && folderText.toLowerCase().includes(`roadmap ${TAG}`.toLowerCase()) && folderText.includes(`Q4 ${TAG}`) && streamHidden,
     'a channel of a Space has Chat and Views tabs; Views lists the Space’s Folder, its List and the List’s saved view, in place of the conversation',
     JSON.stringify({ listed, chipText, folderText: folderText.slice(0, 80), streamHidden }),
   )
@@ -160,9 +161,11 @@ try {
   // ══ 4. IT LEAVES THE OTHERS' LISTS ═══════════════════════════════════════
   const anaChannels = await Ana(`/workspaces/${WS}/chat/channels`)
   const anaSees = (anaChannels.data ?? []).some((c) => c.id === doomed.id)
+  // The page's lists refetch once the delete is answered: read them when they have.
+  const leftLists = await waitUntil(async () => !(await page.locator('body').innerText().catch(() => '')).includes(`doomed-${TAG}`), { timeoutMs: 15_000 })
   const sidebarText = await page.locator('body').innerText().catch(() => '')
   chk(
-    anaChannels.ok && !anaSees && !sidebarText.includes(`doomed-${TAG}`),
+    anaChannels.ok && !anaSees && leftLists && !sidebarText.includes(`doomed-${TAG}`),
     'and it is in nobody’s list of channels any longer, the deleter’s sidebar included',
     JSON.stringify({ status: anaChannels.status, anaSees, inSidebar: sidebarText.includes(`doomed-${TAG}`) }),
   )
