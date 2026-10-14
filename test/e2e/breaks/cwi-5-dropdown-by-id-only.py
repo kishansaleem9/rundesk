@@ -1,6 +1,6 @@
 # A DROPDOWN'S VALUE IS LOOKED UP BY ITS OPTION'S ID ONLY, NOT ITS PLACE.
 # (`found-14-oct/clickup-workspace-import-and-people-unbuilt`)
-# Reddens: clickup-workspace-import: "its Custom Fields come in: a currency as a number, a dropdown by its option (ClickUp names it by its place), a link, a checkbox, a date, Labels as their names; a People field, which has nothing to hold it here, and an empty one do not"
+# Reddens: clickup-workspace-import: "its Custom Fields come in: a currency as a number, a dropdown by its option (ClickUp names it by its place), a link, a checkbox, a date, Labels as their names, a People field as its people’s names; an empty one does not"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/app-import/clickup.ts'
 s = io.open(p, encoding='utf-8').read()

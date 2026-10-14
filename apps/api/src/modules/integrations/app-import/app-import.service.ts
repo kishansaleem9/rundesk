@@ -17,7 +17,7 @@ import { markdownToTiptap } from '../../docs/tiptap-markdown'
 import { AppError } from './app-http'
 import { envMissing, isAppKey, type AppDef, type AppGrant, type AppKey, type GrantToken } from './app-def'
 import { APPS, APPS_TAB } from './apps'
-import { imTask, TreeWriter, type ImNode, type ImPerson } from './import-tree'
+import { imTask, TreeWriter, type ImDoc, type ImExtras, type ImNode, type ImPerson } from './import-tree'
 import { NotionReadError, readNotionExport } from './notion-export'
 
 /**
@@ -372,19 +372,61 @@ export class AppImportService {
       new Map(invited.map((i) => [i.key, i.email])),
     )
     writer.summary.invited = invited.map((i) => ({ name: i.name, email: i.email, role: i.role }))
-    void this.run(writer, chosen.length, chosen.map((p) => () => reader.read(from.id, p, options))).catch(() => undefined)
+    const extras = reader.extras ? () => reader.extras!(from.id, options) : undefined
+    void this.run(writer, chosen.length, chosen.map((p) => () => reader.read(from.id, p, options)), extras).catch(() => undefined)
     return { jobId: job.id, invited: invited.length }
   }
 
-  /** Awaitable, so a test can run it and read the summary: each project read, then written, one at a time. */
-  async run(writer: TreeWriter, total: number, reads: Array<() => Promise<ImNode>>) {
+  /**
+   * Awaitable, so a test can run it and read the summary: each project read, then written, one at a
+   * time, and its Docs into the Space it became; what the tool keeps for the whole account — ClickUp's
+   * Goals, its Workspace's own Docs — last. A run that fails takes its Docs away with the rest.
+   */
+  async run(writer: TreeWriter, total: number, reads: Array<() => Promise<ImNode>>, extras?: () => Promise<ImExtras>) {
+    const madeDocs: string[] = []
     try {
       await writer.begin(total)
-      for (const [n, read] of reads.entries()) await writer.node(await read(), n)
+      for (const [n, read] of reads.entries()) {
+        const node = await read()
+        const { spaceId } = await writer.node(node, n)
+        if (node.kind === 'space' && node.docs?.length) await this.writeDocs(writer, spaceId, node.docs, madeDocs)
+      }
+      if (extras) {
+        const x = await extras()
+        for (const e of x.errors ?? []) writer.summary.errors.push(e)
+        if (x.goals?.length) await writer.writeGoals(x.goals)
+        if (x.docs?.length) await this.writeDocs(writer, null, x.docs, madeDocs)
+      }
       return await writer.finish()
     } catch (e) {
+      if (madeDocs.length) await this.db.delete(docs).where(inArray(docs.id, madeDocs)).catch(() => undefined)
       await writer.fail(e)
       throw e
+    }
+  }
+
+  /**
+   * Each Doc with its pages nested as the tool nests them (`DocsService.importPageTree`, as Notion's
+   * pages come in), in the Space given — none: beside the workspace's other Docs. One that cannot be
+   * made is said, and the others still come in.
+   */
+  private async writeDocs(writer: TreeWriter, spaceId: string | null, all: ImDoc[], made: string[]) {
+    if (!this.docsService) {
+      writer.summary.errors.push('Docs are not made on this server')
+      return
+    }
+    for (const d of all) {
+      try {
+        const r = await this.docsService.importPageTree(writer.target.workspaceId, writer.target.importer.id, {
+          spaceId,
+          pages: d.pages.map((p) => ({ key: p.key, parent: p.parent, title: p.title, content: markdownToTiptap(p.markdown) })),
+        })
+        made.push(...r.docs.map((x) => x.id))
+        writer.summary.docs = [...(writer.summary.docs ?? []), ...r.docs].slice(0, 50)
+        writer.summary.pagesImported = (writer.summary.pagesImported ?? 0) + r.pagesImported
+      } catch (e: any) {
+        writer.summary.errors.push(`Doc "${d.title}": ${e?.message ?? 'it could not be made'}`)
+      }
     }
   }
 

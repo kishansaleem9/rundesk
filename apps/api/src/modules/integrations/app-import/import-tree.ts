@@ -2,7 +2,10 @@ import { and, eq, inArray, sql } from 'drizzle-orm'
 import {
   clickupImportJobs,
   customFieldDefinitions,
+  goalKeyResults,
+  goals,
   importPendingAssignees,
+  importPendingTimeEntries,
   customFieldValues,
   labels,
   listStatuses,
@@ -17,6 +20,7 @@ import {
   taskDependencies,
   taskLabelAssignments,
   tasks,
+  timeEntries,
   users,
   workspaceMembers,
 } from '@rundesk/db'
@@ -47,6 +51,17 @@ export type ImFieldType = 'text' | 'number' | 'date' | 'checkbox' | 'url' | 'dro
 export type ImFieldValue = { name: string; type: ImFieldType; value: string | number | boolean; options?: string[] }
 export type ImStatus = { name: string; category: 'open' | 'in_progress' | 'closed' }
 export type ImPriority = 'urgent' | 'high' | 'normal' | 'low'
+/** Time tracked on a task: by whom, from when to when, how long in seconds, and whether it is billable. */
+export type ImTime = { person: ImPerson | null; start: Date; end: Date | null; seconds: number; billable: boolean; description: string | null }
+/** A page of a Doc: its parent page by key (none for the Doc itself), its body in Markdown. */
+export type ImDocPage = { key: string; parent: string | null; title: string; markdown: string }
+/** A Doc, its own page first and the rest under it. */
+export type ImDoc = { title: string; pages: ImDocPage[] }
+/** A target of a Goal: how far it is to go, how far it has gone, and whether it is done. */
+export type ImKeyResult = { name: string; unit: string | null; target: number; current: number; done: boolean; owner: ImPerson | null }
+export type ImGoal = { name: string; description: string | null; start: Date | null; due: Date | null; owner: ImPerson | null; percent: number; done: boolean; keyResults: ImKeyResult[] }
+/** What a tool keeps for the whole account, not in one project: ClickUp's Workspace Docs and its Goals; and what could not be read of it, in words. */
+export type ImExtras = { docs?: ImDoc[]; goals?: ImGoal[]; errors?: string[] }
 
 export type ImTask = {
   /** The tool's own id, for a link from another task. */
@@ -71,15 +86,17 @@ export type ImTask = {
   subtasks: ImTask[]
   /** The refs of the tasks this one is related to. */
   links: string[]
+  /** The time tracked on it. */
+  time?: ImTime[]
   details?: () => Promise<{ comments: ImComment[]; files: ImFileRef[] }>
 }
 export type ImList = { name: string; description?: string | null; statuses: ImStatus[] | null; tasks: ImTask[] }
 export type ImFolder = { name: string; description?: string | null; lists: ImList[] }
-/** What one chosen project becomes: a Folder, a List, or (Wrike's spaces) a whole Space. */
+/** What one chosen project becomes: a Folder, a List, or (Wrike's spaces, ClickUp's) a whole Space with its Docs; and what of it could not be read. */
 export type ImNode =
-  | { kind: 'folder'; folder: ImFolder }
-  | { kind: 'list'; list: ImList }
-  | { kind: 'space'; name: string; folders: ImFolder[]; lists: ImList[] }
+  | { kind: 'folder'; folder: ImFolder; errors?: string[] }
+  | { kind: 'list'; list: ImList; errors?: string[] }
+  | { kind: 'space'; name: string; folders: ImFolder[]; lists: ImList[]; docs?: ImDoc[]; errors?: string[] }
 
 /** A task with nothing but its title, the rest filled in by the caller. */
 export function imTask(ref: string, title: string, rest: Partial<ImTask> = {}): ImTask {
@@ -135,9 +152,16 @@ export type AppImportSummary = {
   /** What the tool holds that comes in no other way, in words — as ClickUp's import of it leaves it. */
   notImported: string[]
   errors: string[]
-  /** Notion's pages, made Docs. */
+  /** Notion's pages, ClickUp's Docs, made Docs. */
   docs?: Array<{ id: string; title: string }>
   pagesImported?: number
+  /** Time tracked on the tasks: entries made here, held for people the run invited, and of people who are neither. */
+  timeEntriesImported?: number
+  timeEntriesPending?: number
+  timeEntriesUnmatched?: number
+  /** The Goals, and their targets. */
+  goalsImported?: number
+  keyResultsImported?: number
 }
 
 export const emptySummary = (source: string, notImported: string[] = []): AppImportSummary => ({
@@ -241,6 +265,7 @@ export function placeStatus(rows: StatusRow[], status: string | null, done: bool
  */
 export class TreeWriter {
   readonly summary: AppImportSummary
+  private readonly madeGoals: string[] = []
   private readonly madeSpaces: string[] = []
   private readonly madeProjects: string[] = []
   private readonly madeLists: string[] = []
@@ -257,7 +282,7 @@ export class TreeWriter {
   constructor(
     private readonly db: Db,
     private readonly r2: R2Service | null,
-    private readonly target: WriteTarget,
+    readonly target: WriteTarget,
     /** Whom the importer mapped each of the tool's people to; a person not in it is matched by email. */
     private readonly people: Map<string, string | null>,
     notImported: string[] = [],
@@ -280,12 +305,15 @@ export class TreeWriter {
     for (const r of rows) if (r.email && r.role !== 'guest') this.byEmail.set(r.email.trim().toLowerCase(), r.userId)
   }
 
-  /** One chosen project, written; the job says how far the run is. */
-  async node(n: ImNode, done: number) {
+  /** One chosen project, written; the job says how far the run is; the Space it went into, for its Docs. */
+  async node(n: ImNode, done: number): Promise<{ spaceId: string }> {
     let lists = 0
     let made = 0
+    let where: string
+    for (const e of n.errors ?? []) this.summary.errors.push(e)
     if (n.kind === 'space') {
       const place = this.target.spaceId ? await this.existing() : await this.newSpace(n.name)
+      where = place.spaceId
       for (const f of n.folders) {
         const r = await this.folder(place.spaceId, f)
         lists += r.lists
@@ -298,6 +326,7 @@ export class TreeWriter {
       this.summary.projects.push({ name: n.name, lists, tasks: made })
     } else {
       const place = this.target.spaceId ? await this.existing() : await this.sharedSpace()
+      where = place.spaceId
       if (n.kind === 'folder') {
         const r = await this.folder(place.spaceId, n.folder)
         this.summary.projects.push({ name: n.folder.name, lists: r.lists, tasks: r.tasks })
@@ -311,6 +340,50 @@ export class TreeWriter {
       .set({ processed: done + 1, createdCount: this.summary.tasksCreated, updatedAt: new Date() })
       .where(eq(clickupImportJobs.id, this.target.jobId))
       .catch(() => undefined)
+    return { spaceId: where }
+  }
+
+  /**
+   * The Workspace's Goals, each with its targets: its owner and theirs the members
+   * they are here (or nobody), its progress as the tool has it. Goals are the
+   * workspace's, as ClickUp's are the Workspace's, not a Space's.
+   */
+  async writeGoals(all: ImGoal[]) {
+    for (const g of all) {
+      const percent = Math.max(0, Math.min(100, Math.round(g.percent * 100) / 100))
+      const [row] = await this.db
+        .insert(goals)
+        .values({
+          workspaceId: this.target.workspaceId,
+          ownerId: this.whom(g.owner),
+          title: g.name.trim().slice(0, 500) || 'Goal',
+          description: g.description?.trim() ? storable(g.description.trim()) : null,
+          kind: 'percentage',
+          targetValue: 100,
+          currentValue: percent,
+          status: g.done ? 'completed' : 'on_track',
+          startDate: g.start,
+          dueDate: g.due,
+          completedAt: g.done ? new Date() : null,
+        })
+        .returning({ id: goals.id })
+      this.madeGoals.push(row.id)
+      this.summary.goalsImported = (this.summary.goalsImported ?? 0) + 1
+      for (const [n, k] of g.keyResults.entries()) {
+        await this.db.insert(goalKeyResults).values({
+          goalId: row.id,
+          workspaceId: this.target.workspaceId,
+          ownerId: this.whom(k.owner),
+          title: k.name.trim().slice(0, 500) || 'Target',
+          unit: k.unit?.trim().slice(0, 40) || null,
+          targetValue: k.target,
+          currentValue: k.current,
+          status: k.done ? 'completed' : 'on_track',
+          position: n,
+        })
+        this.summary.keyResultsImported = (this.summary.keyResultsImported ?? 0) + 1
+      }
+    }
   }
 
   /** The links between tasks, once every task they name is here; and the job, done. */
@@ -341,6 +414,7 @@ export class TreeWriter {
   /** What the run made, taken away; and the job, failed in the tool's words. */
   async fail(e: unknown) {
     try {
+      if (this.madeGoals.length) await this.db.delete(goals).where(inArray(goals.id, this.madeGoals))
       if (this.madeLists.length) await this.db.delete(lists).where(inArray(lists.id, this.madeLists))
       if (this.madeProjects.length) await this.db.delete(projects).where(inArray(projects.id, this.madeProjects))
       if (this.madeSpaces.length) await this.db.delete(spaces).where(inArray(spaces.id, this.madeSpaces))
@@ -483,6 +557,7 @@ export class TreeWriter {
         for (const c of comments) await this.comment(taskId, c)
         for (const f of files) await this.file(taskId, title, f)
       }
+      if (t.time?.length) await this.time(taskId, t.time)
     } catch (e: any) {
       // The grant refused mid-run is the run's end; anything else is this task's, said, and the run goes on.
       if (e instanceof AppError && e.status === 401) throw e
@@ -495,6 +570,34 @@ export class TreeWriter {
       made += await this.task(listId, containerId, rows, s, n, depth >= 1 ? parentId! : taskId, depth + 1)
     }
     return made
+  }
+
+  /**
+   * Time tracked on a task, under whoever tracked it: a member here; else held for
+   * somebody the run invited until they join (`import_pending_time_entries`); else
+   * counted, as an assignee of nobody here is.
+   */
+  private async time(taskId: string, entries: ImTime[]) {
+    for (const e of entries) {
+      const userId = this.whom(e.person)
+      const invitedAs = !userId && e.person ? this.invited.get(e.person.key) : undefined
+      const row = {
+        startedAt: e.start,
+        endedAt: e.end,
+        durationSec: Math.max(0, Math.round(e.seconds)),
+        description: e.description?.trim() ? e.description.trim().slice(0, 2000) : null,
+        isBillable: e.billable,
+      }
+      if (userId) {
+        await this.db.insert(timeEntries).values({ taskId, userId, ...row, importId: this.target.jobId })
+        this.summary.timeEntriesImported = (this.summary.timeEntriesImported ?? 0) + 1
+      } else if (invitedAs) {
+        await this.db.insert(importPendingTimeEntries).values({ workspaceId: this.target.workspaceId, email: invitedAs, taskId, jobId: this.target.jobId, ...row })
+        this.summary.timeEntriesPending = (this.summary.timeEntriesPending ?? 0) + 1
+      } else {
+        this.summary.timeEntriesUnmatched = (this.summary.timeEntriesUnmatched ?? 0) + 1
+      }
+    }
   }
 
   /** Whom a person of the tool is here: the one the importer mapped them to, else the member with their email. */

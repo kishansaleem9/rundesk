@@ -2,7 +2,7 @@ import { ASSIGNABLE_WORKSPACE_ROLES } from '../../common/permissions/workspace-r
 import { Injectable, Inject, NotFoundException, ConflictException, ForbiddenException, GoneException, BadRequestException } from '@nestjs/common'
 import { eq, and, inArray } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
-import { organizations, invitations, organizationMembers, workspaceMembers, users, workspaces, importPendingAssignees, taskAssignees } from '@rundesk/db'
+import { organizations, invitations, organizationMembers, workspaceMembers, users, workspaces, importPendingAssignees, importPendingTimeEntries, taskAssignees, timeEntries } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { passwords } from '../../common/security/password-hash'
@@ -424,7 +424,10 @@ export class InvitationsService {
 
     // The tasks an import held for them, theirs now that they are a member — after the commit, as the
     // assignee rule reads the membership just made.
-    for (const ws of grants) await this.takePendingAssignees(ws.workspaceId, invite.email, result.userId!)
+    for (const ws of grants) {
+      await this.takePendingAssignees(ws.workspaceId, invite.email, result.userId!)
+      await this.takePendingTime(ws.workspaceId, invite.email, result.userId!)
+    }
 
     // Fire member.joined per workspace the invite granted (best effort). The
     // joining user is the actor. Runs after the tx commits so the membership
@@ -463,5 +466,38 @@ export class InvitationsService {
       .delete(importPendingAssignees)
       .where(and(eq(importPendingAssignees.workspaceId, workspaceId), eq(importPendingAssignees.email, email.toLowerCase())))
     return { held: held.length, assigned }
+  }
+
+  /**
+   * THE TIME AN IMPORT HELD FOR SOMEBODY IT INVITED (`found-14-oct/clickup-docs-time-goals-unimported`),
+   * theirs as they join: each entry on a task they may work on now — where the assignee route would put
+   * them, as their held tasks are given — and none held any longer either way.
+   */
+  async takePendingTime(workspaceId: string, email: string, userId: string) {
+    const held = await this.db
+      .select()
+      .from(importPendingTimeEntries)
+      .where(and(eq(importPendingTimeEntries.workspaceId, workspaceId), eq(importPendingTimeEntries.email, email.toLowerCase())))
+    let made = 0
+    const mayWork = new Map<string, boolean>()
+    for (const h of held) {
+      if (!mayWork.has(h.taskId)) mayWork.set(h.taskId, await IMPORT_ACCESS.mayBeAssigned(this.db, { workspaceId, taskId: h.taskId, userId }))
+      if (!mayWork.get(h.taskId)) continue
+      await this.db.insert(timeEntries).values({
+        taskId: h.taskId,
+        userId,
+        startedAt: h.startedAt,
+        endedAt: h.endedAt,
+        durationSec: h.durationSec,
+        description: h.description,
+        isBillable: h.isBillable,
+        importId: h.jobId,
+      })
+      made++
+    }
+    await this.db
+      .delete(importPendingTimeEntries)
+      .where(and(eq(importPendingTimeEntries.workspaceId, workspaceId), eq(importPendingTimeEntries.email, email.toLowerCase())))
+    return { held: held.length, made }
   }
 }

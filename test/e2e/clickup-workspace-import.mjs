@@ -36,7 +36,7 @@ const argOf = (name, fallback) => {
   return i === -1 ? fallback : process.argv[i + 1]
 }
 
-const EXPECTED_CHECKS = 14
+const EXPECTED_CHECKS = 20
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -175,6 +175,42 @@ try {
           ],
         }],
       }],
+      // The rest of the Workspace (`found-14-oct/clickup-docs-time-goals-unimported`): a Doc in the Space with a page under its
+      // first and one beside it, a Doc in its Inbox List, and one of the Workspace's own.
+      docs: [
+        {
+          id: 'd1',
+          name: `Product brief ${TAG}`,
+          parent: { id: 's1', type: 4 },
+          pages: [
+            { id: 'p1', name: 'Overview', content: `# Why\n\nWe ship ${TAG}`, pages: [{ id: 'p2', name: `Risks ${TAG}`, content: 'Late **assets**' }] },
+            { id: 'p3', name: `Timeline ${TAG}`, content: 'October' },
+          ],
+        },
+        { id: 'd2', name: `Inbox notes ${TAG}`, parent: { id: 'l2', type: 6 }, pages: [{ id: 'p4', name: 'Notes', content: 'Triage daily' }] },
+        { id: 'd3', name: `Handbook ${TAG}`, parent: { id: 't1', type: 12 }, pages: [{ id: 'p5', name: 'Welcome', content: 'Hello team' }] },
+      ],
+      // Ana's two hours on the plan, billable; Nina's half hour on Fix login (she is invited); ten minutes of somebody
+      // ClickUp no longer has; and Ana's timer still running on the blog draft.
+      time_entries: [
+        { id: 'te1', task: { id: 'cu1' }, user: lite(anaCu), billable: true, start: MS('2026-10-06T09:00:00Z'), end: MS('2026-10-06T11:00:00Z'), duration: '7200000', description: 'Planning' },
+        { id: 'te2', task: { id: 'cu7' }, user: lite(nina), billable: false, start: MS('2026-10-07T09:00:00Z'), end: MS('2026-10-07T09:30:00Z'), duration: '1800000', description: '' },
+        { id: 'te3', task: { id: 'cu1' }, user: { id: 950, username: 'Gone Person', email: `${TAG}-gone@clickup.invalid` }, billable: false, start: MS('2026-10-08T09:00:00Z'), end: MS('2026-10-08T09:10:00Z'), duration: '600000' },
+        { id: 'te4', task: { id: 'cu4' }, user: lite(anaCu), billable: false, start: MS('2026-10-14T08:00:00Z'), end: null, duration: `-${MS('2026-10-14T08:00:00Z')}` },
+      ],
+      goals: [{
+        id: 'g1',
+        name: `Q4 revenue ${TAG}`,
+        description: 'Grow the pipeline',
+        start_date: MS('2026-10-01T00:00:00Z'),
+        due_date: MS('2026-12-31T00:00:00Z'),
+        owners: [lite(anaCu)],
+        percent_completed: 70,
+        key_results: [
+          { id: 'k1', name: 'Close deals', type: 'number', unit: 'deals', steps_start: 0, steps_end: 10, steps_current: 4, completed: false, owners: [lite(anaCu)] },
+          { id: 'k2', name: 'Launch the site', type: 'boolean', completed: true, owners: [] },
+        ],
+      }],
     }],
   }
   await seedApp(STUB, { app: 'clickup', token: CU, name: 'Admin ClickUp', email: ADMIN.email, data }).catch((e) => console.log(`  (the stub did not take the ClickUp account: ${e.message})`))
@@ -280,6 +316,22 @@ try {
     '“Invite everyone who is not here” sets the four to their invitations; the run reports the Space, its Folder, two Lists, seven tasks (two subtasks), 27 comments, four people invited and five tasks held for them',
     JSON.stringify({ chosen, report }),
   )
+  const offered = {
+    docs: await panel.getByTestId('import-app-option-docs-spaces').count().catch(() => 0),
+    time: await panel.getByTestId('import-app-option-time-yes').count().catch(() => 0),
+    goals: await panel.getByTestId('import-app-option-goals-yes').count().catch(() => 0),
+  }
+  const more = {
+    pages: await figure('import-app-r-pages'),
+    time: await figure('import-app-r-time'),
+    timeWaiting: await figure('import-app-r-time-waiting'),
+    goals: await figure('import-app-r-goals'),
+  }
+  chk(
+    more.pages === 4 && more.time === 1 && more.timeWaiting === 1 && more.goals === 1,
+    'the run brings the rest of the Workspace and says so: four pages of Docs, one time entry made and one held for somebody invited, one Goal',
+    JSON.stringify({ offered, more }),
+  )
 
   // ══ 4. THE HIERARCHY ══════════════════════════════════════════════════════
   console.log('\n▶ The Space, its Folder and Lists, each List’s statuses')
@@ -324,8 +376,9 @@ try {
     : {}
   chk(
     fields.Budget?.v === 1200 && fields.Stage?.type === 'dropdown' && fields.Stage?.v === 'Build' && fields.Spec?.v === 'https://example.com/spec' &&
-      fields['Signed off']?.v === true && String(fields.Kickoff?.v ?? '').startsWith('2026-10-02') && fields.Areas?.v === 'Web, Mobile' && !fields.Owner && !fields.Empty,
-    'its Custom Fields come in: a currency as a number, a dropdown by its option (ClickUp names it by its place), a link, a checkbox, a date, Labels as their names; a People field, which has nothing to hold it here, and an empty one do not',
+      fields['Signed off']?.v === true && String(fields.Kickoff?.v ?? '').startsWith('2026-10-02') && fields.Areas?.v === 'Web, Mobile' &&
+      fields.Owner?.type === 'text' && fields.Owner?.v === ANA_NAME && !fields.Empty,
+    'its Custom Fields come in: a currency as a number, a dropdown by its option (ClickUp names it by its place), a link, a checkbox, a date, Labels as their names, a People field as its people’s names; an empty one does not',
     JSON.stringify(fields),
   )
 
@@ -371,6 +424,43 @@ try {
     JSON.stringify({ roles: { nina: roleIn(inv.nina), gil: roleIn(inv.gil), ola: roleIn(inv.ola), pat: roleIn(inv.pat) }, ninaMails: ninaMails.length, tokenMailed: `${ninaMails[0]?.text ?? ''}${ninaMails[0]?.html ?? ''}`.includes(inv.nina[0]?.token ?? 'no-token'), held, planAssignees: plan ? (await assigneesOf(plan.id)).length : null }),
   )
 
+  // ══ 9b. ITS DOCS, ITS TIME, ITS GOALS ═════════════════════════════════════
+  console.log('\n▶ The Space’s Docs, the time tracked on its tasks, the Workspace’s Goals')
+  const docRows = space ? await sql`select id, title, parent_doc_id, plaintext from docs where workspace_id = ${WS} and space_id = ${space.id} order by created_at, position` : []
+  const brief = docRows.find((d) => d.title === `Product brief ${TAG}`)
+  const under = brief ? docRows.filter((d) => d.parent_doc_id === brief.id).map((d) => d.title).sort() : []
+  const risks = docRows.find((d) => d.title === `Risks ${TAG}`)
+  const notes = docRows.find((d) => d.title === `Inbox notes ${TAG}`)
+  const handbook = (await sql`select id from docs where workspace_id = ${WS} and title = ${`Handbook ${TAG}`}`).length
+  chk(
+    !!brief && /We ship/.test(brief.plaintext ?? '') && under.join('|') === [`Risks ${TAG}`, `Timeline ${TAG}`].sort().join('|') && !!risks && /Late assets/.test(risks.plaintext ?? '') &&
+      !!notes && /Triage daily/.test(notes.plaintext ?? '') && handbook === 0,
+    'the Space’s Docs come in it — one in the Space, one in its List — the first page a Doc’s own body and the others under it, as ClickUp nests them; the Workspace’s own Doc stays behind unless asked for',
+    JSON.stringify({ docs: docRows.map((d) => [d.title, !!d.parent_doc_id]), under, briefText: brief?.plaintext?.slice(0, 40), handbook }),
+  )
+
+  const planTime = plan ? await sql`select user_id, duration_sec, is_billable, description, import_id from time_entries where task_id = ${plan.id}` : []
+  const fixTask = await taskNamed(`Fix login ${TAG}`)
+  const draft = await taskNamed(`Draft blog ${TAG}`)
+  const heldTime = await sql`select task_id, duration_sec from import_pending_time_entries where workspace_id = ${WS} and email = ${nina.email}`
+  const draftTime = draft ? (await sql`select 1 from time_entries where task_id = ${draft.id}`).length : -1
+  chk(
+    planTime.length === 1 && planTime[0].user_id === ana.id && planTime[0].duration_sec === 7200 && planTime[0].is_billable === true && planTime[0].description === 'Planning' && !!planTime[0].import_id &&
+      heldTime.length === 1 && heldTime[0].task_id === fixTask?.id && heldTime[0].duration_sec === 1800 && draftTime === 0,
+    'the time tracked comes in under whoever tracked it: Ana’s two billable hours are hers; Nina’s half hour waits for her; somebody ClickUp no longer has, and a timer still running, bring nothing',
+    JSON.stringify({ planTime, held: heldTime, draftTime }),
+  )
+
+  const [goal] = await sql`select id, owner_id, current_value, target_value, status, start_date, due_date, description from goals where workspace_id = ${WS} and title = ${`Q4 revenue ${TAG}`}`
+  const krs = goal ? await sql`select title, unit, target_value, current_value, status, owner_id from goal_key_results where goal_id = ${goal.id} order by position` : []
+  chk(
+    !!goal && goal.owner_id === ana.id && Number(goal.current_value) === 70 && Number(goal.target_value) === 100 && goal.status === 'on_track' && goal.description === 'Grow the pipeline' &&
+      goal.due_date?.toISOString() === '2026-12-31T00:00:00.000Z' &&
+      krs.map((k) => `${k.title}|${k.unit ?? '-'}|${Number(k.current_value)}/${Number(k.target_value)}|${k.status}`).join(' ; ') === 'Close deals|deals|4/10|on_track ; Launch the site|-|1/1|completed' && krs[0].owner_id === ana.id,
+    'the Workspace’s Goal comes in with its Targets: Ana owns it, 70% along as its Targets are, due when it was; four deals of ten, and the site launched',
+    JSON.stringify({ goal, krs }),
+  )
+
   // ══ 10. JOINING TAKES THEIR TASKS ═════════════════════════════════════════
   console.log('\n▶ Accepting the invitation: their tasks are theirs')
   const claim = async (who, token) => {
@@ -390,6 +480,13 @@ try {
       olaClaim.ok && olaRole === 'workspace_admin' && olaOn && (await heldFor(ola.email)).length === 0,
     'Nina accepts and is on her two tasks; Ola joins as an admin, as ClickUp had her, and is on hers; nothing is held for either any longer',
     JSON.stringify({ nina: ninaClaim.status, ninaOn, held: (await heldFor(nina.email)).length, ola: olaClaim.status, olaRole, olaOn }),
+  )
+  const ninaTime = fix && ninaUser ? await sql`select duration_sec from time_entries where task_id = ${fix.id} and user_id = ${ninaUser.id}` : []
+  const ninaTimeHeld = (await sql`select 1 from import_pending_time_entries where workspace_id = ${WS} and email = ${nina.email}`).length
+  chk(
+    ninaTime.length === 1 && ninaTime[0].duration_sec === 1800 && ninaTimeHeld === 0,
+    'and the half hour Nina tracked on Fix login is hers now that she has joined, held no longer',
+    JSON.stringify({ ninaTime, ninaTimeHeld }),
   )
 
   // ══ 11. A GUEST TAKES ONLY WHAT IS SHARED WITH THEM ═══════════════════════
@@ -435,6 +532,23 @@ try {
     catalogue.status === 200 && catalogue.data?.length === 6 && !catalogue.data.some((a) => a.key === 'clickup'),
     'ClickUp is on its own tab: the Apps tab’s tools are still its six',
     JSON.stringify({ status: catalogue.status, apps: catalogue.data?.map((a) => a.key) }),
+  )
+
+  // ══ 15. THE WORKSPACE'S OWN DOCS, WHEN ASKED; WHAT IS TURNED OFF, NOT READ ══
+  console.log('\n▶ Asked for the Workspace’s own Docs, with time and Goals turned off')
+  const goalsBefore = (await sql`select count(*)::int as n from goals where workspace_id = ${WS}`)[0]?.n
+  const askedBefore = ((await appAsked(STUB, 'clickup', CU)) ?? []).length
+  const wide = await A(`/workspaces/${WS}/import/apps/clickup`, { method: 'POST', body: { source: 't1', projectIds: ['s1'], spaceId: SPACE_ID ?? null, people: {}, options: { docs: 'workspace', time: 'no', goals: 'no' } } })
+  const wideJob = wide.data?.jobId ? await job(wide.data.jobId) : null
+  const [book] = await sql`select space_id, plaintext from docs where workspace_id = ${WS} and title = ${`Handbook ${TAG}`}`
+  const wideTime = wide.data?.jobId ? (await sql`select count(*)::int as n from time_entries where import_id = ${wide.data.jobId}`)[0]?.n : -1
+  const goalsAfter = (await sql`select count(*)::int as n from goals where workspace_id = ${WS}`)[0]?.n
+  const askedNow = ((await appAsked(STUB, 'clickup', CU)) ?? []).slice(askedBefore)
+  chk(
+    wide.status === 201 && wideJob?.status === 'completed' && !!book && book.space_id === null && /Hello team/.test(book.plaintext ?? '') && wideTime === 0 && goalsAfter === goalsBefore &&
+      !askedNow.some((a) => a.includes('/time_entries') || a.includes('/goal')),
+    'asked for them, the Workspace’s own Docs come in beside the workspace’s other Docs; time and Goals turned off are neither read nor made',
+    JSON.stringify({ start: said(wide), job: wideJob?.status, error: wideJob?.error, book: book ? { space: book.space_id, text: book.plaintext?.slice(0, 20) } : null, wideTime, goals: [goalsBefore, goalsAfter], asked: askedNow.filter((a) => /time_entries|goal/.test(a)) }),
   )
 } catch (e) {
   failed += 1

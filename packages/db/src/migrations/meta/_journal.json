@@ -1373,6 +1373,13 @@
       "when": 1900000140052,
       "tag": "0195_clickup_workspace_import",
       "breakpoints": true
+    },
+    {
+      "idx": 196,
+      "version": "7",
+      "when": 1900000141052,
+      "tag": "0196_clickup_docs_time_goals",
+      "breakpoints": true
     }
   ]
 }

@@ -290,6 +290,12 @@ export type AppSummary = {
   errors: string[]
   docs?: Array<{ id: string; title: string }>
   pagesImported?: number
+  /** Time tracked on the tasks: made here, held for the people invited, and of nobody here. */
+  timeEntriesImported?: number
+  timeEntriesPending?: number
+  timeEntriesUnmatched?: number
+  goalsImported?: number
+  keyResultsImported?: number
 }
 
 const apps = (workspaceId: string) => `/workspaces/${workspaceId}/import/apps`

@@ -4,15 +4,21 @@ import {
   imTask,
   type ImChecklist,
   type ImComment,
+  type ImDoc,
+  type ImDocPage,
+  type ImExtras,
   type ImFieldValue,
   type ImFileRef,
   type ImFolder,
+  type ImGoal,
+  type ImKeyResult,
   type ImList,
   type ImNode,
   type ImPerson,
   type ImPriority,
   type ImStatus,
   type ImTask,
+  type ImTime,
 } from './import-tree'
 
 /**
@@ -48,9 +54,41 @@ import {
  * and its dependencies and links as related tasks. Its people are the
  * Workspace's members, matched by email — or invited here, with their ClickUp
  * role, and given their tasks when they join (`TreeWriter`, `import_pending_assignees`).
+ *
+ * AND THE REST OF IT (`found-14-oct/clickup-docs-time-goals-unimported`), as the
+ * import page's choices say — each on unless turned off:
+ *
+ *   `GET /team/{id}/time_entries`     the time tracked in the Space (`space_id`), from
+ *                                     ClickUp's first day to now, everyone's (`assignee`,
+ *                                     which only a Workspace owner's or admin's token may
+ *                                     ask; anyone else's brings their own); a running
+ *                                     timer's negative duration is not time yet
+ *   v3 `GET /workspaces/{id}/docs`    the Workspace's Docs, a page of them at a time by
+ *                                     `cursor`, each with its `parent` (a Space 4, a Folder
+ *                                     5, a List 6; the Workspace's own otherwise)
+ *   v3 `GET …/docs/{id}/pages`        a Doc's pages, nested, as Markdown
+ *                                     (`content_format=text/md`, `max_page_depth=-1`)
+ *   `GET /team/{id}/goal`             the Workspace's Goals, those in Goal Folders too
+ *   `GET /goal/{id}`                  a Goal with its Targets (`key_results`: number,
+ *                                     currency, true/false, percentage, or tasks done)
+ *
+ * The time comes in under whoever tracked it — a member here, or held for
+ * somebody the run invited until they join (`import_pending_time_entries`).
+ * A Doc in the Space, its Folders or its Lists comes in in the Space, its first
+ * page the Doc's own and the rest nested under it as ClickUp nests them; the
+ * Workspace's own Docs only when asked. Goals are the Workspace's, so they come
+ * in once a run, the workspace's here.
  */
 
 const apiUrl = () => setting('CLICKUP_API_URL', 'https://api.clickup.com/api/v2')
+/** ClickUp's v3 API — Docs live there — beside its v2. */
+const apiV3Url = () => setting('CLICKUP_API_V3_URL', apiUrl().replace(/\/v2$/, '/v3'))
+/** ClickUp's own first day: tracked time is asked for from here, as the API asks for a range. */
+const CLICKUP_EPOCH = Date.UTC(2017, 0, 1)
+/** How many people one ask for their tracked time names, so the address stays short. */
+const TIME_ASSIGNEES = 50
+/** The most pages of Docs one run brings: a Workspace's worth, and a bound on what one run holds. */
+const MAX_DOC_PAGES = 5_000
 
 /** ClickUp's 100 tasks a page; a page short of it, or `last_page`, is the last. */
 const TASK_PAGE = 100
@@ -90,6 +128,41 @@ type CuList = { id: string; name?: string; content?: string | null; override_sta
 type CuFolder = { id: string; name?: string; hidden?: boolean; override_statuses?: boolean; statuses?: CuStatus[]; lists?: CuList[] }
 type CuSpace = { id: string; name?: string; private?: boolean; statuses?: CuStatus[] }
 type CuComment = { id?: string; comment_text?: string; comment?: Array<{ text?: string }>; user?: CuUser | null; date?: string | null }
+type CuTimeEntry = {
+  id?: string
+  task?: { id?: string } | null
+  user?: CuUser | null
+  billable?: boolean
+  start?: string | number | null
+  end?: string | number | null
+  duration?: string | number | null
+  description?: string | null
+}
+type CuDoc = { id: string; name?: string; parent?: { id?: string | number; type?: string | number } | null; deleted?: boolean; archived?: boolean }
+type CuPage = { id: string; name?: string; content?: string | null; pages?: CuPage[]; deleted?: boolean; archived?: boolean }
+type CuKeyResult = {
+  name?: string
+  type?: string
+  unit?: string | null
+  steps_start?: string | number | null
+  steps_end?: string | number | null
+  steps_current?: string | number | null
+  completed?: boolean
+  owners?: CuUser[]
+  last_action?: { steps_current?: string | number | null } | null
+}
+type CuGoal = {
+  id: string
+  name?: string
+  description?: string | null
+  start_date?: string | null
+  due_date?: string | null
+  owner?: CuUser | null
+  owners?: CuUser[]
+  percent_completed?: string | number | null
+  archived?: boolean
+  key_results?: CuKeyResult[]
+}
 
 const ROLE: Record<number, ImPerson['role']> = { 1: 'admin', 2: 'admin', 3: 'member', 4: 'guest' }
 const PRIORITY: Record<string, ImPriority> = { '1': 'urgent', '2': 'high', '3': 'normal', '4': 'low', urgent: 'urgent', high: 'high', normal: 'normal', low: 'low' }
@@ -136,8 +209,10 @@ const optionName = (o: CuOption | undefined) => (o ? (o.name ?? o.label ?? '').t
 /**
  * A Custom Field's value as a field here: text, number, date, checkbox, link or
  * dropdown. A dropdown names its option by its place (`orderindex`) or its id;
- * Labels name several, which come in as text. People, task, relationship,
- * formula, file and other fields have nothing to hold them here, and are left out.
+ * Labels name several, which come in as text. A People field comes in as its
+ * people's names, a Task or Relationship field as its tasks' names, a Formula as
+ * its number (or its text), as ClickUp's own imports bring a field they have no
+ * like of; a Files field and the rest are left out.
  */
 export function cuField(f: CuField): ImFieldValue | null {
   const name = (f.name ?? '').trim()
@@ -181,6 +256,24 @@ export function cuField(f: CuField): ImFieldValue | null {
       const names = ids.map((id) => optionName(options.find((o) => String(o.id) === id))).filter(Boolean)
       return names.length ? { name, type: 'text', value: names.join(', ') } : null
     }
+    case 'users': {
+      const names = (Array.isArray(v) ? v : [v])
+        .map((u) => (u && typeof u === 'object' ? ((u as CuUser).username ?? (u as CuUser).email ?? '').trim() : ''))
+        .filter(Boolean)
+      return names.length ? { name, type: 'text', value: names.join(', ') } : null
+    }
+    case 'tasks':
+    case 'list_relationship': {
+      const names = (Array.isArray(v) ? v : [v])
+        .map((t) => (t && typeof t === 'object' ? String((t as { name?: string }).name ?? '').trim() : ''))
+        .filter(Boolean)
+      return names.length ? { name, type: 'text', value: names.join(', ') } : null
+    }
+    case 'formula': {
+      const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN
+      if (Number.isFinite(n)) return { name, type: 'number', value: n }
+      return typeof v === 'string' && v.trim() ? { name, type: 'text', value: v.trim() } : null
+    }
     default:
       return null
   }
@@ -192,12 +285,12 @@ export const CLICKUP: AppDef = {
   icon: '🚀',
   auth: 'token',
   env: [],
-  options: [],
-  notImported: [
-    'Docs, Whiteboards, Chat, Goals, Dashboards and views',
-    'Tracked time and reminders',
-    'People, task and relationship fields, formulas and files in fields',
+  options: [
+    { key: 'docs', choices: ['spaces', 'workspace', 'none'], default: 'spaces' },
+    { key: 'time', choices: ['yes', 'no'], default: 'yes' },
+    { key: 'goals', choices: ['yes', 'no'], default: 'yes' },
   ],
+  notImported: ['Whiteboards, Chat, Dashboards and views', 'Reminders, and Goal Folders (their Goals come in)', 'Files in Custom Fields'],
   identify: async (token: GrantToken) => {
     const me = await new ClickUpApi(token.accessToken).get<{ user?: CuUser }>('/user')
     const name = me.user?.username || me.user?.email || 'ClickUp'
@@ -211,11 +304,18 @@ export class ClickUpApi {
   private readonly http: AppHttp
 
   constructor(token: string, fetchImpl?: typeof fetch) {
-    this.http = new AppHttp('ClickUp', [apiUrl()], { Authorization: token }, fetchImpl)
+    this.http = new AppHttp('ClickUp', [apiUrl(), apiV3Url()], { Authorization: token }, fetchImpl)
   }
 
   get<T>(path: string, query: Record<string, string | number | boolean> = {}): Promise<T> {
     const url = new URL(apiUrl() + path)
+    for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v))
+    return this.http.json<T>(url.toString())
+  }
+
+  /** The same, of ClickUp's v3 API. */
+  get3<T>(path: string, query: Record<string, string | number | boolean> = {}): Promise<T> {
+    const url = new URL(apiV3Url() + path)
     for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v))
     return this.http.json<T>(url.toString())
   }
@@ -227,6 +327,8 @@ export class ClickUpApi {
 
 export class ClickUpReader implements AppReader {
   private teams: Promise<Array<{ id: string; name?: string; members?: Array<{ user?: CuUser }> }>> | null = null
+  private docsOf: Promise<CuDoc[]> | null = null
+  private docPagesRead = 0
 
   constructor(private readonly api: ClickUpApi) {}
 
@@ -265,26 +367,153 @@ export class ClickUpReader implements AppReader {
     return out
   }
 
-  async read(source: string, project: AppProject): Promise<ImNode> {
-    const members = new Map((await this.people(source)).map((p) => [p.key, p]))
+  async read(source: string, project: AppProject, options: Record<string, string> = {}): Promise<ImNode> {
+    const people = await this.people(source)
+    const members = new Map(people.map((p) => [p.key, p]))
+    const errors: string[] = []
     const space = await this.api.get<CuSpace>(`/space/${encodeURIComponent(project.id)}`)
     const spaceStatuses = space.statuses ?? []
     const folders = (await this.api.get<{ folders?: CuFolder[] }>(`/space/${encodeURIComponent(project.id)}/folder`, { archived: false })).folders ?? []
     const loose = (await this.api.get<{ lists?: CuList[] }>(`/space/${encodeURIComponent(project.id)}/list`, { archived: false })).lists ?? []
+    // The Space's tracked time, read once and handed to each of its tasks.
+    const time = options.time === 'no' ? new Map<string, ImTime[]>() : await this.timeOf(source, project.id, people, members, errors)
     const outFolders: ImFolder[] = []
     for (const f of folders) {
       if (f.hidden) continue
       const lists: ImList[] = []
-      for (const l of f.lists ?? []) lists.push(await this.list(l, f.override_statuses && f.statuses?.length ? f.statuses : spaceStatuses, members))
+      for (const l of f.lists ?? []) lists.push(await this.list(l, f.override_statuses && f.statuses?.length ? f.statuses : spaceStatuses, members, time))
       outFolders.push({ name: f.name || 'Folder', lists })
     }
     const outLists: ImList[] = []
-    for (const l of loose) outLists.push(await this.list(l, spaceStatuses, members))
-    return { kind: 'space', name: space.name || project.name, folders: outFolders, lists: outLists }
+    for (const l of loose) outLists.push(await this.list(l, spaceStatuses, members, time))
+    // Its Docs: those in it, its Folders and its Lists, hidden Folders' too.
+    let docs: ImDoc[] = []
+    if (options.docs !== 'none') {
+      const places = { space: String(project.id), folders: new Set(folders.map((f) => String(f.id))), lists: new Set([...folders.flatMap((f) => (f.lists ?? []).map((l) => String(l.id))), ...loose.map((l) => String(l.id))]) }
+      docs = await this.docsWhere(source, (d) => docIn(d, places), errors)
+    }
+    return { kind: 'space', name: space.name || project.name, folders: outFolders, lists: outLists, docs, errors }
+  }
+
+  /** The Workspace's own Docs, when asked for, and its Goals, once a run. */
+  async extras(source: string, options: Record<string, string> = {}): Promise<ImExtras> {
+    const errors: string[] = []
+    const members = new Map((await this.people(source)).map((p) => [p.key, p]))
+    const docs = options.docs === 'workspace' ? await this.docsWhere(source, (d) => docParentKind(d) === 'workspace', errors) : []
+    let goals: ImGoal[] = []
+    if (options.goals !== 'no') {
+      try {
+        goals = await this.goals(source, members)
+      } catch (e) {
+        if (!(e instanceof AppError)) throw e
+        errors.push(`Goals could not be read from ClickUp: ${e.message}`)
+      }
+    }
+    return { docs, goals, errors }
+  }
+
+  /**
+   * The time tracked in a Space, by task: everyone's, asked for a few dozen people at a time — which
+   * only a Workspace owner's or admin's token may ask; anyone else's brings only their own, and the run
+   * says so. A running timer is not time yet.
+   */
+  private async timeOf(team: string, space: string, people: ImPerson[], members: Map<string, ImPerson>, errors: string[]): Promise<Map<string, ImTime[]>> {
+    const range = { start_date: CLICKUP_EPOCH, end_date: Date.now(), space_id: space }
+    const path = `/team/${encodeURIComponent(team)}/time_entries`
+    const ids = people.map((p) => p.key.replace(/^clickup:/, '')).filter(Boolean)
+    const rows: CuTimeEntry[] = []
+    try {
+      for (let i = 0; i < Math.max(ids.length, 1); i += TIME_ASSIGNEES) {
+        const some = ids.slice(i, i + TIME_ASSIGNEES)
+        rows.push(...((await this.api.get<{ data?: CuTimeEntry[] }>(path, { ...range, ...(some.length ? { assignee: some.join(',') } : {}) })).data ?? []))
+      }
+    } catch (e) {
+      if (!(e instanceof AppError)) throw e
+      rows.length = 0
+      try {
+        rows.push(...((await this.api.get<{ data?: CuTimeEntry[] }>(path, range)).data ?? []))
+        errors.push('Only a ClickUp Workspace owner’s or admin’s token reads everyone’s tracked time: the time you tracked came in')
+      } catch (e2) {
+        if (!(e2 instanceof AppError)) throw e2
+        errors.push(`Tracked time could not be read from ClickUp: ${e2.message}`)
+      }
+    }
+    const byTask = new Map<string, ImTime[]>()
+    const seen = new Set<string>()
+    for (const r of rows) {
+      const entry = cuTime(r, (u) => members.get(`clickup:${String(u.id)}`) ?? cuPerson(u))
+      const taskId = r.task?.id ? String(r.task.id) : null
+      if (!entry || !taskId || (r.id && seen.has(String(r.id)))) continue
+      if (r.id) seen.add(String(r.id))
+      byTask.set(taskId, [...(byTask.get(taskId) ?? []), entry])
+    }
+    return byTask
+  }
+
+  /** Every Doc of the Workspace the token may open, read once a run, a page of them at a time. */
+  private allDocs(team: string): Promise<CuDoc[]> {
+    this.docsOf ??= (async () => {
+      const out: CuDoc[] = []
+      let cursor: string | null = null
+      for (let n = 0; n < 1_000; n++) {
+        const body: { docs?: CuDoc[]; next_cursor?: string | null } = await this.api.get3(`/workspaces/${encodeURIComponent(team)}/docs`, { limit: 100, deleted: false, archived: false, ...(cursor ? { cursor } : {}) })
+        const rows = body.docs ?? []
+        out.push(...rows)
+        if (!rows.length || !body.next_cursor || body.next_cursor === cursor) break
+        cursor = body.next_cursor
+      }
+      return out.filter((d) => d.id && !d.deleted && !d.archived)
+    })()
+    return this.docsOf
+  }
+
+  /** The Docs that pass, each with its pages; what cannot be read is said, and the run goes on. */
+  private async docsWhere(team: string, wanted: (d: CuDoc) => boolean, errors: string[]): Promise<ImDoc[]> {
+    let all: CuDoc[]
+    try {
+      all = await this.allDocs(team)
+    } catch (e) {
+      if (!(e instanceof AppError)) throw e
+      errors.push(`Docs could not be read from ClickUp: ${e.message}`)
+      return []
+    }
+    const out: ImDoc[] = []
+    for (const d of all.filter(wanted)) {
+      if (this.docPagesRead >= MAX_DOC_PAGES) {
+        errors.push(`Only the first ${MAX_DOC_PAGES} pages of Docs come in one run: "${d.name ?? 'a Doc'}" and the Docs after it did not`)
+        break
+      }
+      try {
+        const body = await this.api.get3<CuPage[] | { pages?: CuPage[] }>(`/workspaces/${encodeURIComponent(team)}/docs/${encodeURIComponent(d.id)}/pages`, { max_page_depth: -1, content_format: 'text/md' })
+        const doc = cuDoc(d, Array.isArray(body) ? body : body.pages ?? [])
+        this.docPagesRead += doc.pages.length
+        out.push(doc)
+      } catch (e) {
+        if (!(e instanceof AppError)) throw e
+        errors.push(`The Doc "${d.name ?? d.id}" could not be read from ClickUp: ${e.message}`)
+      }
+    }
+    return out
+  }
+
+  /** The Workspace's Goals, those in Goal Folders too, each read whole for its Targets. */
+  private async goals(team: string, members: Map<string, ImPerson>): Promise<ImGoal[]> {
+    const body = await this.api.get<{ goals?: CuGoal[]; folders?: Array<{ goals?: CuGoal[] }> }>(`/team/${encodeURIComponent(team)}/goal`, { include_completed: true })
+    const all = [...(body.goals ?? []), ...(body.folders ?? []).flatMap((f) => f.goals ?? [])]
+    const seen = new Set<string>()
+    const out: ImGoal[] = []
+    const who = (u: CuUser | null | undefined) => (u ? (members.get(`clickup:${String(u.id)}`) ?? cuPerson(u)) : null)
+    for (const g of all) {
+      if (!g?.id || seen.has(String(g.id)) || g.archived) continue
+      seen.add(String(g.id))
+      const whole = (await this.api.get<{ goal?: CuGoal }>(`/goal/${encodeURIComponent(String(g.id))}`)).goal ?? g
+      out.push(cuGoal({ ...g, ...whole }, who))
+    }
+    return out
   }
 
   /** A List: its statuses (its own when it overrides its Folder's or Space's) and every page of its tasks. */
-  private async list(l: CuList, inherited: CuStatus[], members: Map<string, ImPerson>): Promise<ImList> {
+  private async list(l: CuList, inherited: CuStatus[], members: Map<string, ImPerson>, time: Map<string, ImTime[]> = new Map()): Promise<ImList> {
     let own = l.statuses
     if (l.override_statuses && !own?.length) own = (await this.api.get<CuList>(`/list/${encodeURIComponent(l.id)}`)).statuses
     const statuses = cuStatuses(l.override_statuses && own?.length ? own : inherited)
@@ -306,7 +535,7 @@ export class ClickUpReader implements AppReader {
     const children = new Map<string, CuTask[]>()
     for (const t of all) if (t.parent && byId.has(t.parent)) children.set(t.parent, [...(children.get(t.parent) ?? []), t])
     const closedNames = new Set(statuses.filter((s) => s.category === 'closed').map((s) => s.name.toLowerCase()))
-    const build = (t: CuTask): ImTask => this.task(t, (children.get(t.id) ?? []).map(build), closedNames, members)
+    const build = (t: CuTask): ImTask => ({ ...this.task(t, (children.get(t.id) ?? []).map(build), closedNames, members), time: time.get(t.id) ?? [] })
     return {
       name: l.name || 'List',
       description: typeof l.content === 'string' && l.content.trim() ? l.content : null,
@@ -382,5 +611,117 @@ export class ClickUpReader implements AppReader {
         size: Number.isFinite(Number(a.size)) ? Number(a.size) : null,
         fetch: () => this.api.file((a.url_w_query ?? a.url)!),
       }))
+  }
+}
+
+/** Where a Doc lives, by its `parent`'s type: a Space (4), a Folder (5), a List (6), or the Workspace itself (Everything, 7; the Workspace, 12). */
+export function docParentKind(d: CuDoc): 'space' | 'folder' | 'list' | 'workspace' {
+  const type = String(d.parent?.type ?? '').toUpperCase()
+  if (type === '4' || type === 'SPACE') return 'space'
+  if (type === '5' || type === 'FOLDER') return 'folder'
+  if (type === '6' || type === 'LIST') return 'list'
+  return 'workspace'
+}
+
+/** Whether a Doc is in this Space: in it, or in one of its Folders or Lists. */
+export function docIn(d: CuDoc, places: { space: string; folders: Set<string>; lists: Set<string> }): boolean {
+  const id = String(d.parent?.id ?? '')
+  switch (docParentKind(d)) {
+    case 'space':
+      return id === places.space
+    case 'folder':
+      return places.folders.has(id)
+    case 'list':
+      return places.lists.has(id)
+    default:
+      return false
+  }
+}
+
+/**
+ * A Doc as Docs here: its first page is the Doc's own body, under the Doc's name;
+ * that page's own pages, and the Doc's other pages, are pages under it, each with
+ * theirs under them as ClickUp nests them. Archived and deleted pages stay behind.
+ */
+export function cuDoc(d: CuDoc, pages: CuPage[]): ImDoc {
+  const live = (all: CuPage[] | undefined) => (all ?? []).filter((p) => p && p.id && !p.deleted && !p.archived)
+  const top = live(pages)
+  const root = `doc:${d.id}`
+  const first = top[0]
+  const title = (d.name ?? '').trim() || (first?.name ?? '').trim() || 'Untitled'
+  const out: ImDocPage[] = [{ key: root, parent: null, title, markdown: first?.content ?? '' }]
+  const walk = (all: CuPage[], parent: string) => {
+    for (const p of live(all)) {
+      const key = `page:${p.id}`
+      out.push({ key, parent, title: (p.name ?? '').trim() || 'Untitled', markdown: p.content ?? '' })
+      walk(p.pages ?? [], key)
+    }
+  }
+  if (first) walk(first.pages ?? [], root)
+  walk(top.slice(1), root)
+  return { title, pages: out }
+}
+
+/** An entry of tracked time, or none: a running timer (a negative duration) or one with no start is not time yet. */
+export function cuTime(r: CuTimeEntry, who: (u: CuUser) => ImPerson | null): ImTime | null {
+  const ms = Number(r.duration)
+  const start = msDate(r.start)
+  if (!start || !Number.isFinite(ms) || ms <= 0) return null
+  return {
+    person: r.user ? who(r.user) : null,
+    start,
+    end: msDate(r.end) ?? new Date(start.getTime() + ms),
+    seconds: Math.round(ms / 1000),
+    billable: r.billable === true,
+    description: typeof r.description === 'string' && r.description.trim() ? r.description.trim() : null,
+  }
+}
+
+const numberOf = (v: unknown): number | null => {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN
+  return Number.isFinite(n) ? n : null
+}
+
+/**
+ * A Target as a key result here, which counts from nothing to its target: a
+ * number, currency or percentage target from its start to its end (one that
+ * counts down, too), a true/false one as one to do, a tasks one as its tasks done
+ * of its tasks. Its owner is its first.
+ */
+export function cuKeyResult(k: CuKeyResult, who: (u: CuUser | null | undefined) => ImPerson | null): ImKeyResult {
+  const name = (k.name ?? '').trim() || 'Target'
+  const owner = who(k.owners?.[0])
+  const done = k.completed === true
+  if (k.type === 'boolean') return { name, unit: null, target: 1, current: done ? 1 : 0, done, owner }
+  const start = numberOf(k.steps_start) ?? 0
+  const end = numberOf(k.steps_end) ?? (k.type === 'percentage' ? 100 : start)
+  const now = numberOf(k.steps_current) ?? numberOf(k.last_action?.steps_current) ?? start
+  const target = Math.abs(end - start)
+  const current = Math.max(0, Math.min(target, end >= start ? now - start : start - now))
+  const unit = k.type === 'percentage' ? '%' : k.type === 'automatic' ? 'tasks' : (k.unit ?? '').trim() || null
+  return { name, unit, target, current, done: done || (target > 0 && current >= target), owner }
+}
+
+/** A Goal: its progress from its Targets when it has any (as ClickUp's is), else as it says; done at its end. */
+export function cuGoal(g: CuGoal, who: (u: CuUser | null | undefined) => ImPerson | null): ImGoal {
+  const keyResults = (g.key_results ?? []).map((k) => cuKeyResult(k, who))
+  let percent: number
+  if (keyResults.length) {
+    percent = (keyResults.reduce((sum, k) => sum + (k.done ? 1 : k.target > 0 ? Math.min(1, k.current / k.target) : 0), 0) / keyResults.length) * 100
+  } else {
+    const said = numberOf(g.percent_completed) ?? 0
+    // ClickUp says it as a share of one in some answers and of a hundred in others.
+    percent = said > 0 && said < 1 ? said * 100 : said
+  }
+  percent = Math.max(0, Math.min(100, percent))
+  return {
+    name: (g.name ?? '').trim() || 'Goal',
+    description: typeof g.description === 'string' && g.description.trim() ? g.description.trim() : null,
+    start: msDate(g.start_date),
+    due: msDate(g.due_date),
+    owner: who(g.owners?.[0] ?? g.owner),
+    percent,
+    done: percent >= 100,
+    keyResults,
   }
 }

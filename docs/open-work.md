@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 574 items: 4 open · 0 partly fixed · 560 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 14 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 575 items: 5 open · 0 partly fixed · 560 closed, and 10 features, decisions, deploy settings and items the owner settled, not counted as defects; counted from this file's headings on 14 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 110, each reproduced
+## Found by the triage, 5 October, and since — 111, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10720,6 +10720,18 @@ Measured:
 - the four actions, a watcher only somebody who may open the task, the comment under the rule's maker;
 - a test that says what a rule would do to a task and does nothing;
 - the builder's conditions, the actions' pickers, the test on a rule's card, a skipped run in its history.
+
+### `found-14-oct/clickup-docs-time-goals-unimported` — **open** (feature, large; found closing `found-14-oct/clickup-workspace-import-and-people-unbuilt`, at the owner's word "we need to import their full data too") · reproduced 14 October
+
+**A ClickUp Workspace comes over without its Docs, the time its people tracked, or its Goals**
+
+*Evidence, 14 October:* the token import of `found-14-oct/clickup-workspace-import-and-people-unbuilt` brings a Space's Folders, Lists, statuses, tasks, subtasks, checklists, fields, comments, files and links, and its run says what stays behind: "Docs, Whiteboards, Chat, Goals, Dashboards and views", "Tracked time and reminders", and "People, task and relationship fields, formulas and files in fields" (`CLICKUP.notImported`). A team's written knowledge, its billable hours and its targets are left in ClickUp.
+
+*To close:* as ClickUp's API holds them (developer docs through search excerpts, 14 October: v3 `GET /workspaces/{id}/docs`, a Doc's `parent` 4 Space, 5 Folder, 6 List, the Workspace's own otherwise, and `…/docs/{id}/pages` nested, as Markdown with `content_format=text/md`; v2 `GET /team/{id}/time_entries`, everyone's by `assignee` only for a Workspace owner's or admin's token, a running timer's duration negative; `GET /team/{id}/goal` and `GET /goal/{id}` with its Targets — number, currency, true/false, percentage, tasks):
+- a Space's Docs into the Space, the first page a Doc's own body and the rest nested under it; the Workspace's own only when asked;
+- tracked time under whoever tracked it, held for somebody invited until they join; a timer still running is not time; a token that may not read others' time brings its own and says so;
+- the Workspace's Goals with their Targets, its owner and theirs mapped; each of the three a choice on the import page, on unless turned off;
+- a People field as its people's names, a Task or Relationship field as its tasks', a Formula as its value.
 
 ## Closed from the uncounted list, as ClickUp works them (8 to 13 October) — 46
 

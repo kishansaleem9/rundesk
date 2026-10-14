@@ -39,6 +39,9 @@
  *                  lists: [list]}], lists: [list]}]}]}   (`found-14-oct/clickup-workspace-import-and-people-unbuilt`)
  *           list: {id, name, content?, override_statuses?, statuses?, tasks: [task]}; a task in ClickUp's own shape,
  *                  with `comments: [{id, comment_text, user, date}]` and `attachments: [{id, title, content}]`
+ *           a team's docs: [{id, name, parent: {id, type}, pages: [{id, name, content, pages}]}] (v3), its
+ *                  time_entries: [{id, task: {id}, user, billable, start, end, duration, description}] and its
+ *                  goals: [{id, name, …, key_results}]   (`found-14-oct/clickup-docs-time-goals-unimported`)
  *   monday  data: {me: {id, name, email, account: {name}}, users: [user], boards: [{id, name, type?, workspace?,
  *                  columns, groups, items}]}
  *
@@ -516,12 +519,35 @@ async function clickup(req, res, url, ctx) {
         }
     return send(res, 404, { err: 'Attachment not found', ECODE: 'ATTCH_001' })
   }
-  const path = url.pathname.slice('/clickup/api/v2'.length)
+  const v3 = url.pathname.startsWith('/clickup/api/v3/')
+  const path = url.pathname.slice((v3 ? '/clickup/api/v3' : '/clickup/api/v2').length)
   // A personal token is sent as it is, with no `Bearer`.
   const g = authorize('clickup', req, res, url, req.headers.authorization ?? '')
   if (!g) return
   const data = g.data
   let m
+  const teamOf = (id) => (data.teams ?? []).find((t) => t.id === id)
+  if (v3) {
+    // Docs live on ClickUp's v3 API: a page of a Workspace's Docs at a time, then a Doc's pages, nested.
+    if ((m = /^\/workspaces\/([^/]+)\/docs$/.exec(path))) {
+      const team = teamOf(m[1])
+      if (!team) return send(res, 401, { err: 'Team not authorized', ECODE: 'OAUTH_027' })
+      const all = (team.docs ?? []).filter((d) => !d.deleted && !d.archived)
+      const limit = Math.max(1, Number(url.searchParams.get('limit') ?? 50))
+      const from = Number(url.searchParams.get('cursor') ?? 0) || 0
+      const slice = all.slice(from, from + limit)
+      return send(res, 200, { docs: slice.map(({ pages: _p, ...d }) => ({ ...d, workspace_id: team.id })), next_cursor: from + limit < all.length ? String(from + limit) : null })
+    }
+    if ((m = /^\/workspaces\/([^/]+)\/docs\/([^/]+)\/pages$/.exec(path))) {
+      const doc = (teamOf(m[1])?.docs ?? []).find((d) => d.id === m[2])
+      if (!doc) return send(res, 404, { err: 'Doc not found', ECODE: 'DOC_004' })
+      // Markdown only when asked for it; anything else, the page's words alone.
+      const md = url.searchParams.get('content_format') === 'text/md'
+      const shape = (p) => ({ id: p.id, doc_id: doc.id, name: p.name, content: md ? p.content ?? '' : String(p.content ?? '').replace(/[#*_`>]/g, ''), pages: (p.pages ?? []).map(shape) })
+      return send(res, 200, (doc.pages ?? []).map(shape))
+    }
+    return send(res, 404, { err: 'Route not found', ECODE: 'APP_001' })
+  }
   if (path === '/user') return send(res, 200, { user: data.user })
   if (path === '/team') return send(res, 200, { teams: (data.teams ?? []).map((t) => ({ id: t.id, name: t.name, color: '#7b68ee', members: t.members ?? [] })) })
   if ((m = /^\/team\/([^/]+)\/space$/.exec(path))) {
@@ -544,6 +570,29 @@ async function clickup(req, res, url, ctx) {
   if ((m = /^\/space\/([^/]+)\/list$/.exec(path))) {
     const s = spaceOf(m[1])
     return s ? send(res, 200, { lists: (s.lists ?? []).map(cuListRow) }) : send(res, 404, { err: 'Space not found' })
+  }
+  if ((m = /^\/team\/([^/]+)\/time_entries$/.exec(path))) {
+    // Without `assignee`, the token's own time; with it, theirs — in the range, of tasks in `space_id`.
+    const team = teamOf(m[1])
+    if (!team) return send(res, 401, { err: 'Team not authorized', ECODE: 'OAUTH_027' })
+    const who = url.searchParams.get('assignee')
+    const ids = who ? who.split(',') : [String(data.user?.id ?? '')]
+    const space = url.searchParams.get('space_id')
+    const from = Number(url.searchParams.get('start_date') ?? 0)
+    const to = Number(url.searchParams.get('end_date') ?? Date.now())
+    const inSpace = (taskId) => !space || clickupLists(data).some((x) => x.space.id === space && (x.list.tasks ?? []).some((t) => t.id === taskId))
+    const rows = (team.time_entries ?? []).filter((e) => ids.includes(String(e.user?.id)) && inSpace(e.task?.id) && Number(e.start) >= from && Number(e.start) <= to)
+    return send(res, 200, { data: rows })
+  }
+  if ((m = /^\/team\/([^/]+)\/goal$/.exec(path))) {
+    const team = teamOf(m[1])
+    if (!team) return send(res, 401, { err: 'Team not authorized', ECODE: 'OAUTH_027' })
+    // The listing names each Goal; its Targets are on its own page.
+    return send(res, 200, { goals: (team.goals ?? []).map(({ key_results: _k, ...g }) => g), folders: [] })
+  }
+  if ((m = /^\/goal\/([^/]+)$/.exec(path))) {
+    const goal = (data.teams ?? []).flatMap((t) => t.goals ?? []).find((x) => x.id === m[1])
+    return goal ? send(res, 200, { goal }) : send(res, 404, { err: 'Goal not found', ECODE: 'GOAL_002' })
   }
   const found = (id) => clickupLists(data).find((x) => x.list.id === id)
   if ((m = /^\/list\/([^/]+)$/.exec(path))) {

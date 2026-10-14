@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ClickUpApi, ClickUpReader, cuField, cuStatuses, msDate } from './clickup'
+import { ClickUpApi, ClickUpReader, cuDoc, cuField, cuGoal, cuKeyResult, cuStatuses, cuTime, docIn, msDate } from './clickup'
 import { inviteAs } from './app-import.service'
 import { roleRank } from '../../../common/permissions/workspace-roles'
 
@@ -23,7 +23,7 @@ function clickup(routes: (path: string, q: URLSearchParams) => unknown) {
   return { reader: new ClickUpReader(new ClickUpApi('pk_test', fetchImpl)), asked }
 }
 
-test('a Custom Field comes in by its type: a dropdown by its place or its id, Labels by their names, a People field not at all', () => {
+test('a Custom Field comes in by its type: a dropdown by its place or its id, Labels by their names, a People field with no names not at all', () => {
   const options = [{ id: 'o1', name: 'Idea', orderindex: 0 }, { id: 'o2', name: 'Build', orderindex: 1 }]
   assert.deepEqual(cuField({ name: 'Stage', type: 'drop_down', type_config: { options }, value: 1 }), { name: 'Stage', type: 'dropdown', value: 'Build', options: ['Idea', 'Build'] })
   assert.deepEqual(cuField({ name: 'Stage', type: 'drop_down', type_config: { options }, value: 'o1' }), { name: 'Stage', type: 'dropdown', value: 'Idea', options: ['Idea', 'Build'] })
@@ -142,4 +142,143 @@ test('every comment is read, oldest first: ClickUp’s pages of 25, newest first
 test('a Workspace the token does not open is said, not read', async () => {
   const { reader } = clickup((path) => (path === '/team' ? { teams: [{ id: 'w1', name: 'Acme', members: [] }] } : undefined))
   await assert.rejects(() => reader.projects('w2'), /not one this token opens/)
+})
+
+/* THE REST OF A WORKSPACE (`found-14-oct/clickup-docs-time-goals-unimported`): its Docs, its tracked time, its Goals. */
+
+test('a People field comes in as its people’s names, a Task or Relationship field as its tasks’, a Formula as its number or its text', () => {
+  assert.deepEqual(cuField({ name: 'Owner', type: 'users', value: [{ id: 1, username: 'Ana' }, { id: 2, email: 'ben@x.test' }] }), { name: 'Owner', type: 'text', value: 'Ana, ben@x.test' })
+  assert.deepEqual(cuField({ name: 'Blocks', type: 'tasks', value: [{ id: 't1', name: 'Ship it' }] }), { name: 'Blocks', type: 'text', value: 'Ship it' })
+  assert.deepEqual(cuField({ name: 'Client', type: 'list_relationship', value: [{ id: 'c1', name: 'Acme' }, { id: 'c2', name: 'Initech' }] }), { name: 'Client', type: 'text', value: 'Acme, Initech' })
+  assert.deepEqual(cuField({ name: 'Margin', type: 'formula', value: '12.5' }), { name: 'Margin', type: 'number', value: 12.5 })
+  assert.deepEqual(cuField({ name: 'Label', type: 'formula', value: 'late' }), { name: 'Label', type: 'text', value: 'late' })
+  assert.equal(cuField({ name: 'Files', type: 'attachment', value: [{ id: 'f' }] }), null)
+})
+
+test('a Doc’s first page is the Doc’s own body; its pages, and the Doc’s other pages, nest under it as ClickUp nests them; archived and deleted pages stay behind', () => {
+  const doc = cuDoc({ id: 'd1', name: 'Brief' }, [
+    { id: 'p1', name: 'Overview', content: '# Why', pages: [{ id: 'p2', name: 'Risks', content: 'Late', pages: [{ id: 'p5', name: 'Deep', content: 'x' }] }, { id: 'p6', name: 'Gone', deleted: true }] },
+    { id: 'p3', name: 'Timeline', content: 'October' },
+    { id: 'p4', name: 'Old', archived: true },
+  ])
+  assert.equal(doc.title, 'Brief')
+  assert.deepEqual(doc.pages.map((p) => `${p.key}<${p.parent ?? '-'}:${p.title}=${p.markdown}`), [
+    'doc:d1<-:Brief=# Why',
+    'page:p2<doc:d1:Risks=Late',
+    'page:p5<page:p2:Deep=x',
+    'page:p3<doc:d1:Timeline=October',
+  ])
+  assert.deepEqual(cuDoc({ id: 'd2', name: '' }, []).pages, [{ key: 'doc:d2', parent: null, title: 'Untitled', markdown: '' }])
+})
+
+test('a Doc is in a Space when it is in it, a Folder of it or a List of it; the Workspace’s own is in none', () => {
+  const places = { space: 's1', folders: new Set(['f1']), lists: new Set(['l1']) }
+  assert.equal(docIn({ id: 'a', parent: { id: 's1', type: 4 } }, places), true)
+  assert.equal(docIn({ id: 'b', parent: { id: 'f1', type: '5' } }, places), true)
+  assert.equal(docIn({ id: 'c', parent: { id: 'l1', type: 'LIST' } }, places), true)
+  assert.equal(docIn({ id: 'd', parent: { id: 's2', type: 4 } }, places), false)
+  assert.equal(docIn({ id: 'e', parent: { id: 't1', type: 12 } }, places), false)
+})
+
+test('tracked time is its duration in seconds, billable as it was; a running timer is not time yet', () => {
+  const ana = { key: 'clickup:1', name: 'Ana', email: 'ana@x.test' }
+  const who = () => ana
+  assert.deepEqual(cuTime({ id: 'e1', task: { id: 't' }, user: { id: 1 }, start: '1791280800000', end: '1791288000000', duration: '7200000', billable: true, description: ' Planning ' }, who), {
+    person: ana,
+    start: new Date(1791280800000),
+    end: new Date(1791288000000),
+    seconds: 7200,
+    billable: true,
+    description: 'Planning',
+  })
+  assert.equal(cuTime({ id: 'e2', user: { id: 1 }, start: '1791280800000', duration: '-1791280800000' }, who), null)
+  assert.equal(cuTime({ id: 'e3', user: { id: 1 }, start: '1791280800000', end: null, duration: '600000' }, who)?.end?.getTime(), 1791280800000 + 600000)
+})
+
+test('a Target counts from nothing to its target: from its start to its end, down as well as up; true/false as one to do; a Goal’s progress is its Targets’', () => {
+  const nobody = () => null
+  assert.deepEqual(cuKeyResult({ name: 'Deals', type: 'number', unit: 'deals', steps_start: 0, steps_end: 10, steps_current: 4 }, nobody), { name: 'Deals', unit: 'deals', target: 10, current: 4, done: false, owner: null })
+  assert.deepEqual(cuKeyResult({ name: 'Users', type: 'number', steps_start: 50, steps_end: 100, steps_current: 75 }, nobody), { name: 'Users', unit: null, target: 50, current: 25, done: false, owner: null })
+  assert.deepEqual(cuKeyResult({ name: 'Churn', type: 'percentage', steps_start: 10, steps_end: 4, steps_current: 7 }, nobody), { name: 'Churn', unit: '%', target: 6, current: 3, done: false, owner: null })
+  assert.deepEqual(cuKeyResult({ name: 'Launch', type: 'boolean', completed: true }, nobody), { name: 'Launch', unit: null, target: 1, current: 1, done: true, owner: null })
+  assert.equal(cuKeyResult({ name: 'Tasks', type: 'automatic', steps_end: 8, last_action: { steps_current: 8 } }, nobody).done, true)
+  const goal = cuGoal({ id: 'g', name: 'Q4', key_results: [{ name: 'a', type: 'number', steps_start: 0, steps_end: 10, steps_current: 4 }, { name: 'b', type: 'boolean', completed: true }] }, nobody)
+  assert.equal(goal.percent, 70)
+  assert.equal(goal.done, false)
+  assert.equal(cuGoal({ id: 'h', name: 'Old', percent_completed: 0.5 }, nobody).percent, 50)
+  assert.equal(cuGoal({ id: 'i', name: 'Done', percent_completed: 100 }, nobody).done, true)
+})
+
+/** One small Workspace: a Space with a List of two tasks, time on one, three Docs and a Goal. */
+function workspace(opts: { refuseOthersTime?: boolean } = {}) {
+  return clickup((path, q) => {
+    if (path === '/team') return { teams: [{ id: 't1', name: 'Acme', members: [{ user: { id: 1, username: 'Ana', email: 'ana@x.test', role: 1 } }, { user: { id: 2, username: 'Ben', email: 'ben@x.test', role: 3 } }] }] }
+    if (path === '/space/s1') return { id: 's1', name: 'Product', statuses: [{ status: 'to do', type: 'open', orderindex: 0 }, { status: 'done', type: 'closed', orderindex: 1 }] }
+    if (path === '/space/s1/folder') return { folders: [{ id: 'f1', name: 'Roadmap', lists: [] }] }
+    if (path === '/space/s1/list') return { lists: [{ id: 'l1', name: 'Inbox' }] }
+    if (path === '/list/l1/task') return { tasks: [{ id: 'k1', name: 'One', status: { status: 'to do', type: 'open' } }, { id: 'k2', name: 'Two', status: { status: 'to do', type: 'open' } }], last_page: true }
+    if (path === '/team/t1/time_entries') {
+      if (q.get('assignee') && opts.refuseOthersTime) return undefined
+      const own = !q.get('assignee')
+      return {
+        data: [
+          { id: 'e1', task: { id: 'k1' }, user: { id: 1 }, start: '1791280800000', end: '1791288000000', duration: '7200000', billable: true },
+          ...(own ? [] : [{ id: 'e2', task: { id: 'k1' }, user: { id: 2 }, start: '1791280800000', duration: '1800000' }]),
+          { id: 'e3', task: { id: 'k2' }, user: { id: 1 }, start: '1791280800000', duration: '-1' },
+        ],
+      }
+    }
+    if (path === '/api/v3/workspaces/t1/docs')
+      return {
+        docs: [
+          { id: 'd1', name: 'In the Space', parent: { id: 's1', type: 4 } },
+          { id: 'd2', name: 'In a Folder', parent: { id: 'f1', type: 5 } },
+          { id: 'd3', name: 'The Workspace’s', parent: { id: 't1', type: 12 } },
+          { id: 'd4', name: 'Elsewhere', parent: { id: 's9', type: 4 } },
+        ],
+        next_cursor: null,
+      }
+    const pages = /^\/api\/v3\/workspaces\/t1\/docs\/(d\d)\/pages$/.exec(path)
+    if (pages) return [{ id: `${pages[1]}p`, name: 'Page', content: `body of ${pages[1]}` }]
+    if (path === '/team/t1/goal') return { goals: [{ id: 'g1', name: 'Q4' }], folders: [{ goals: [{ id: 'g1', name: 'Q4' }, { id: 'g2', name: 'Old', archived: true }] }] }
+    if (path === '/goal/g1') return { goal: { id: 'g1', name: 'Q4', owners: [{ id: 1 }], key_results: [{ name: 'Deals', type: 'number', steps_start: 0, steps_end: 10, steps_current: 5, owners: [{ id: 2 }] }] } }
+    return undefined
+  })
+}
+
+test('a Space’s tracked time comes with its tasks, everyone’s, under whoever tracked it; its Docs are those in it, its Folders and Lists', async () => {
+  const { reader, asked } = workspace()
+  const node = await reader.read('t1', { id: 's1', name: 'Product' }, { docs: 'spaces', time: 'yes', goals: 'yes' })
+  assert.equal(node.kind, 'space')
+  if (node.kind !== 'space') return
+  const [one, two] = node.lists[0].tasks
+  assert.deepEqual(one.time?.map((e) => `${e.person?.email}:${e.seconds}:${e.billable}`), ['ana@x.test:7200:true', 'ben@x.test:1800:false'])
+  assert.deepEqual(two.time, [])
+  const timeAsk = asked.find((a) => a.startsWith('/team/t1/time_entries?'))!
+  assert.ok(timeAsk.includes('assignee=1%2C2') && timeAsk.includes('space_id=s1'), timeAsk)
+  assert.deepEqual(node.docs?.map((d) => d.title), ['In the Space', 'In a Folder'])
+  assert.ok(asked.some((a) => a.startsWith('/api/v3/workspaces/t1/docs/d1/pages?') && a.includes('content_format=text%2Fmd') && a.includes('max_page_depth=-1')))
+  assert.deepEqual(node.errors, [])
+})
+
+test('a token that may not read others’ time brings its own, and the run says so; turned off, time and Docs are not asked', async () => {
+  const refused = workspace({ refuseOthersTime: true })
+  const node = await refused.reader.read('t1', { id: 's1', name: 'Product' }, { docs: 'spaces', time: 'yes' })
+  if (node.kind !== 'space') return assert.fail('a Space')
+  assert.deepEqual(node.lists[0].tasks[0].time?.map((e) => e.person?.email), ['ana@x.test'])
+  assert.match(node.errors?.join() ?? '', /Only a ClickUp Workspace owner’s or admin’s token reads everyone’s tracked time/)
+  const off = workspace()
+  const quiet = await off.reader.read('t1', { id: 's1', name: 'Product' }, { docs: 'none', time: 'no' })
+  if (quiet.kind !== 'space') return assert.fail('a Space')
+  assert.equal(off.asked.some((a) => a.includes('time_entries') || a.includes('/docs')), false)
+  assert.deepEqual(quiet.docs, [])
+})
+
+test('the Workspace’s Goals come once, each read whole for its Targets, an archived one left behind; its own Docs only when asked', async () => {
+  const { reader } = workspace()
+  const x = await reader.extras('t1', { docs: 'workspace', goals: 'yes' })
+  assert.deepEqual(x.goals?.map((g) => `${g.name}:${g.percent}:${g.owner?.email}:${g.keyResults.map((k) => `${k.name}=${k.current}/${k.target}@${k.owner?.email}`).join()}`), ['Q4:50:ana@x.test:Deals=5/10@ben@x.test'])
+  assert.deepEqual(x.docs?.map((d) => d.title), ['The Workspace’s'])
+  const none = await workspace().reader.extras('t1', { docs: 'spaces', goals: 'no' })
+  assert.deepEqual([none.docs, none.goals], [[], []])
 })

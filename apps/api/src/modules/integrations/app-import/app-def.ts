@@ -1,5 +1,5 @@
 import { AppError, APP_REFUSALS, formBody, FORM, JSON_BODY, originOf } from './app-http'
-import type { ImNode, ImPerson } from './import-tree'
+import type { ImExtras, ImNode, ImPerson } from './import-tree'
 
 /**
  * ONE TOOL, AS ITS IMPORTER SIGNS IN TO IT AND READS IT
@@ -26,6 +26,8 @@ export interface AppReader {
   people(source: string, projectIds: string[]): Promise<ImPerson[]>
   /** One chosen project, read into the shape Rundesk writes. */
   read(source: string, project: AppProject, options: Record<string, string>): Promise<ImNode>
+  /** What the tool keeps for the whole account, not in a project — ClickUp's Workspace Docs and Goals — read once a run, after its projects. */
+  extras?(source: string, options: Record<string, string>): Promise<ImExtras>
 }
 
 export type AppDef = {
