@@ -105,6 +105,7 @@ export * from './email-accounts'
 export * from './import-grants'
 export * from './import-pending-assignees'
 export * from './import-pending-time-entries'
+export * from './import-pending-channel-members'
 // `ledger-rows/row-852` — Super Agents: their profiles, who a private one is shared with, what they remember, every run.
 export * from './super-agents'
 export * from './ai-artifacts'

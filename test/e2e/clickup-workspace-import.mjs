@@ -36,7 +36,7 @@ const argOf = (name, fallback) => {
   return i === -1 ? fallback : process.argv[i + 1]
 }
 
-const EXPECTED_CHECKS = 22
+const EXPECTED_CHECKS = 29
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -87,6 +87,9 @@ try {
   const addedAna = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email: anaEmail, role: 'member' } })
   if (!addedAna.ok) throw new Error(`could not add Ana: ${said(addedAna)}`)
   const [ana] = await sql`select id from users where email = ${anaEmail}`
+  // The admin and Ana talk here already: the history of their ClickUp direct message joins this one.
+  const anaDm = await A(`/workspaces/${WS}/chat/dms`, { method: 'POST', body: { peerUserId: ana.id } })
+  if (!anaDm.ok || !anaDm.data?.id) throw new Error(`could not open the admin's direct message with Ana: ${said(anaDm)}`)
   const OUT = (who) => `${TAG}-${who}@clickup.invalid`
   const nina = { id: 902, username: `Nina New ${stamp}`, email: OUT('nina'), role: 3 }
   const gil = { id: 903, username: `Gil Guest ${stamp}`, email: OUT('gil'), role: 4 }
@@ -134,6 +137,8 @@ try {
       { id: 'f6', name: 'Areas', type: 'labels', type_config: { options: [{ id: 'a1', label: 'Web' }, { id: 'a2', label: 'Mobile' }] }, value: ['a1', 'a2'] },
       { id: 'f7', name: 'Owner', type: 'users', value: [lite(anaCu)] },
       { id: 'f8', name: 'Empty', type: 'text' },
+      // A Files field (`found-14-oct/clickup-import-rest-unimported`): its file is the task's too.
+      { id: 'f9', name: 'Contract', type: 'attachment', value: [{ id: 'fa1', title: 'contract.txt', content: 'signed contract' }] },
     ],
     linked_tasks: [{ task_id: 'cu1', link_id: 'cu3' }],
     comments,
@@ -163,7 +168,22 @@ try {
         id: 's1',
         name: `Product ${TAG}`,
         statuses: SPACE_STATUSES,
-        folders: [{ id: 'fo1', name: `Roadmap ${TAG}`, lists: [{ id: 'l1', name: `Q4 ${TAG}`, content: 'This quarter', tasks: tasksQ4 }] }],
+        folders: [{
+          id: 'fo1',
+          name: `Roadmap ${TAG}`,
+          lists: [{
+            id: 'l1',
+            name: `Q4 ${TAG}`,
+            content: 'This quarter',
+            tasks: tasksQ4,
+            // Its views: a pinned board grouped by priority, newest due first; Ana's own list; and a Form, which no List here has.
+            views: [
+              { id: 'v1', name: `Sprint board ${TAG}`, type: 'board', orderindex: 0, pinned: true, visibility: 'public', creator: 900, grouping: { field: 'priority' }, sorting: { fields: [{ field: 'dueDate', dir: -1 }] } },
+              { id: 'v2', name: `Mine ${TAG}`, type: 'list', orderindex: 1, visibility: 'private', creator: 901 },
+              { id: 'v3', name: `Intake ${TAG}`, type: 'form', orderindex: 2, visibility: 'public', creator: 900 },
+            ],
+          }],
+        }],
         lists: [{
           id: 'l2',
           name: `Inbox ${TAG}`,
@@ -208,17 +228,31 @@ try {
           type: 'CHANNEL',
           visibility: 'PUBLIC',
           messages: [
-            { id: 'k1', content: `Kickoff at ten ${TAG}`, user_id: 901, date: MS('2026-10-08T09:00:00Z'), replies: [
+            // A thumbs up from Ana, and one from somebody ClickUp no longer has (`found-14-oct/clickup-import-rest-unimported`).
+            { id: 'k1', content: `Kickoff at ten ${TAG}`, user_id: 901, date: MS('2026-10-08T09:00:00Z'), reactions: [{ reaction: 'thumbsup', user_id: 901 }, { reaction: 'thumbsup', user_id: 999 }], replies: [
               { id: 'k1r1', content: `On it ${TAG}`, user_id: 901, date: MS('2026-10-08T09:05:00Z') },
               { id: 'k1r2', content: `Booked the room ${TAG}`, user_id: 900, date: MS('2026-10-08T09:06:00Z') },
             ] },
             { id: 'k2', content: `Thanks [@${ANA_NAME}](#user_mention#901), see [@leads](#user_group_mention#g-1)`, user_id: 902, date: MS('2026-10-08T09:10:00Z') },
             { id: 'k3', content: 'Daily reminder', user_id: -1, date: MS('2026-10-08T09:20:00Z') },
-            ...[4, 5, 6, 7].map((n) => ({ id: `k${n}`, content: `Note ${n} ${TAG}`, user_id: 901, date: MS(`2026-10-08T10:0${n}:00Z`) })),
+            // Note 4 with a file, Note 6 nothing but an image, as ClickUp's Markdown links them to its file store.
+            ...[4, 5, 6, 7].map((n) => ({
+              id: `k${n}`,
+              content: n === 6 ? '' : `Note ${n} ${TAG}`,
+              user_id: 901,
+              date: MS(`2026-10-08T10:0${n}:00Z`),
+              ...(n === 4 ? { files: [{ id: 'cf1', name: 'notes.txt', content: 'chat file body' }] } : {}),
+              ...(n === 6 ? { files: [{ id: 'cf2', name: 'shot.png', mimetype: 'image/png', content: 'PNG-BYTES' }] } : {}),
+            })),
           ],
         },
-        { id: 'ch2', name: `Leads ${TAG}`, type: 'CHANNEL', visibility: 'PRIVATE', members: [901, 900], messages: [{ id: 'l1', content: `Lead from Acme ${TAG}`, user_id: 901, date: MS('2026-10-09T09:00:00Z') }] },
-        { id: 'dm1', name: 'Ana, Nina', type: 'DM', visibility: 'PRIVATE', messages: [{ id: 'd1', content: `Just us ${TAG}`, user_id: 902, date: MS('2026-10-09T10:00:00Z') }] },
+        // Nina is in Leads too: her place waits for her.
+        { id: 'ch2', name: `Leads ${TAG}`, type: 'CHANNEL', visibility: 'PRIVATE', members: [901, 900, 902], messages: [{ id: 'l1', content: `Lead from Acme ${TAG}`, user_id: 901, date: MS('2026-10-09T09:00:00Z') }] },
+        // A channel of the Space, by the id ClickUp gives one: it goes into the Space it came into.
+        { id: '4-s1-8', name: `Product talk ${TAG}`, type: 'CHANNEL', visibility: 'PUBLIC', messages: [{ id: 'pt1', content: `Space talk ${TAG}`, user_id: 901, date: MS('2026-10-09T11:00:00Z') }] },
+        // The admin's direct messages: with Nina, invited, and with Ana, who has one with the admin here already.
+        { id: 'dm1', name: 'Admin, Nina', type: 'DM', visibility: 'PRIVATE', members: [900, 902], messages: [{ id: 'd1', content: `Just us ${TAG}`, user_id: 902, date: MS('2026-10-09T10:00:00Z') }] },
+        { id: 'dm2', name: 'Admin, Ana', type: 'DM', visibility: 'PRIVATE', members: [900, 901], messages: [{ id: 'd2', content: `Lunch at one ${TAG}`, user_id: 901, date: MS('2026-10-09T12:00:00Z') }] },
       ],
       goals: [{
         id: 'g1',
@@ -233,6 +267,8 @@ try {
           { id: 'k2', name: 'Launch the site', type: 'boolean', completed: true, owners: [] },
         ],
       }],
+      // A Goal in a Goal Folder.
+      goal_folders: [{ id: 'gf1', name: `Growth ${TAG}`, goals: [{ id: 'g2', name: `Grow signups ${TAG}`, percent_completed: 25, owners: [lite(anaCu)], key_results: [] }] }],
     }],
   }
   await seedApp(STUB, { app: 'clickup', token: CU, name: 'Admin ClickUp', email: ADMIN.email, data }).catch((e) => console.log(`  (the stub did not take the ClickUp account: ${e.message})`))
@@ -350,8 +386,8 @@ try {
     goals: await figure('import-app-r-goals'),
   }
   chk(
-    more.pages === 4 && more.time === 1 && more.timeWaiting === 1 && more.goals === 1,
-    'the run brings the rest of the Workspace and says so: four pages of Docs, one time entry made and one held for somebody invited, one Goal',
+    more.pages === 4 && more.time === 1 && more.timeWaiting === 1 && more.goals === 2,
+    'the run brings the rest of the Workspace and says so: four pages of Docs, one time entry made and one held for somebody invited, two Goals',
     JSON.stringify({ offered, more }),
   )
 
@@ -407,14 +443,23 @@ try {
   // ══ 7. ITS COMMENTS, FILES AND LINKS ══════════════════════════════════════
   console.log('\n▶ Its comments, every page; its file; its links')
   const planComments = plan ? await sql`select author_id, body from task_comments where task_id = ${plan.id} order by created_at` : []
-  const planFiles = plan ? await sql`select file_name, size_bytes from task_attachments where task_id = ${plan.id}` : []
+  const planFiles = plan ? await sql`select id, file_name, size_bytes from task_attachments where task_id = ${plan.id} order by file_name` : []
+  const planTxt = planFiles.filter((f) => f.file_name === 'plan.txt')
   const related = plan && kit ? (await sql`select 1 from task_dependencies where (task_id = ${plan.id} and related_task_id = ${kit.id}) or (task_id = ${kit.id} and related_task_id = ${plan.id})`).length : 0
   chk(
     planComments.length === 27 && planComments[0].author_id === ana.id && planComments[0].body === `Note 1 ${TAG}` &&
       planComments[1].author_id === me.id && planComments[1].body.startsWith(`**Nina New ${stamp}** _(ClickUp comment`) && planComments[26].body === `Note 27 ${TAG}` &&
-      planFiles.length === 1 && planFiles[0].file_name === 'plan.txt' && Number(planFiles[0].size_bytes) === 'the plan, in a file'.length && related >= 1,
+      planTxt.length === 1 && Number(planTxt[0].size_bytes) === 'the plan, in a file'.length && related >= 1,
     'all 27 comments come in, oldest first — Ana’s under Ana, Nina’s (not a member yet) under the importer with her name at the head; its file with its bytes; its link and its dependency as related tasks',
     JSON.stringify({ comments: planComments.length, first: planComments[0]?.author_id === ana.id, second: planComments[1]?.body?.slice(0, 50), last: planComments[26]?.body, files: planFiles, related }),
+  )
+  // A Files field (`found-14-oct/clickup-import-rest-unimported`): a Files field here, holding its file, which is the task's file too.
+  const contract = planFiles.find((f) => f.file_name === 'contract.txt')
+  const filesField = fields.Contract
+  chk(
+    filesField?.type === 'files' && !!contract && Number(contract.size_bytes) === 'signed contract'.length && JSON.stringify(filesField?.v) === JSON.stringify([contract?.id]),
+    'a Files field comes in as a Files field, holding its file — which is the task’s own file too, with its bytes',
+    JSON.stringify({ field: filesField ?? null, files: planFiles.map((f) => [f.file_name, Number(f.size_bytes)]) }),
   )
 
   // ══ 8. EVERY PAGE, AS CLICKUP PAGES ═══════════════════════════════════════
@@ -502,9 +547,66 @@ try {
       thanks?.author_id === me.id && thanks?.imported_author === `Nina New ${stamp}` && thanks?.body === `Thanks <@${ana.id}>, see @leads` &&
       JSON.stringify(thanks?.mentions) === JSON.stringify([{ userId: ana.id }]) && reminder?.imported_author === 'ClickUp' &&
       !!leads && leads.is_private === true && leadsMembers.includes(ana.id) && leadsMembers.includes(me.id) &&
-      !chatChannelsHere.some((c) => /nina/.test(c.name)) && chatFigure === 10,
-    'its Chat comes over: a public channel public and a private one private with its people, every page of messages each at its moment, a thread’s replies in its thread, Nina’s message (not a member yet) drawn under her name and its mention of Ana a mention of her, ClickUp’s own post under ClickUp; a direct message stays behind, and the report says ten messages',
+      chatFigure === 13,
+    'its Chat comes over: a public channel public and a private one private with its people, every page of messages each at its moment, a thread’s replies in its thread, Nina’s message (not a member yet) drawn under her name and its mention of Ana a mention of her, ClickUp’s own post under ClickUp; the report says 13 messages',
     JSON.stringify({ channels: chatChannelsHere.map((c) => [c.name, c.is_private]), messages: generalMessages.length, kickoff: kickoff && { author: kickoff.author_id === ana.id, at: kickoff.created_at }, replies, thanks: thanks && { author: thanks.author_id === me.id, as: thanks.imported_author, body: thanks.body, mentions: thanks.mentions }, reminder: reminder?.imported_author, leadsMembers: leadsMembers.length, chatFigure }),
+  )
+
+  // ══ 9d. THE REST THE API GIVES (`found-14-oct/clickup-import-rest-unimported`) ══
+  console.log('\n▶ Reactions, files, a Space’s channel, direct messages; a List’s views; Goal Folders')
+  const k1Reactions = kickoff ? await sql`select user_id, emoji from chat_message_reactions where message_id = ${kickoff.id}` : []
+  const note4 = byText(/^Note 4/)
+  const note4Files = note4 ? await sql`select file_name, size_bytes, content_type from chat_message_attachments where message_id = ${note4.id}` : []
+  const shot = generalMessages.find((m) => m.created_at?.toISOString() === '2026-10-08T10:06:00.000Z')
+  const shotFiles = shot ? await sql`select file_name, size_bytes, content_type from chat_message_attachments where message_id = ${shot.id}` : []
+  const figures = { reactions: await figure('import-app-r-reactions'), files: await figure('import-app-r-chat-files'), dms: await figure('import-app-r-dms'), waiting: await figure('import-app-r-chat-waiting'), views: await figure('import-app-r-views'), folders: await figure('import-app-r-goal-folders') }
+  chk(
+    k1Reactions.length === 1 && k1Reactions[0].user_id === ana.id && k1Reactions[0].emoji === '👍' &&
+      note4Files.length === 1 && note4Files[0].file_name === 'notes.txt' && Number(note4Files[0].size_bytes) === 'chat file body'.length && note4?.body === `Note 4 ${TAG}` &&
+      shotFiles.length === 1 && shotFiles[0].file_name === 'shot.png' && shotFiles[0].content_type === 'image/png' && shot?.body === '' &&
+      figures.reactions === 1 && figures.files === 2,
+    'a message’s reactions come in as the members’ reactions here (a 👍 from Ana; one from somebody ClickUp no longer has, not); a file posted in Chat is the message’s file here, with its bytes, its link gone from the words, and a message that was only an image is that image',
+    JSON.stringify({ k1Reactions, note4: note4 && { body: note4.body, files: note4Files }, shot: shot && { body: shot.body, files: shotFiles }, figures }),
+  )
+  const talk = (await sql`select id, space_id from chat_channels where workspace_id = ${WS} and name = ${`product-talk-${TAG}`}`)[0] ?? null
+  chk(
+    !!talk && !!space && talk.space_id === space.id,
+    'a channel of a ClickUp Space comes into the Space the import brought it to',
+    JSON.stringify({ talk, space: space?.id ?? null }),
+  )
+  const dmsHere = await sql`select c.id, array_agg(m.user_id::text order by m.user_id) as members from chat_channels c left join chat_channel_members m on m.channel_id = c.id where c.workspace_id = ${WS} and c.is_dm group by c.id`
+  const withAna = dmsHere.filter((d) => d.members.includes(ana.id) && d.members.includes(me.id) && d.members.length === 2)
+  const lunch = (await sql`select channel_id, author_id from chat_messages where body = ${`Lunch at one ${TAG}`}`)[0] ?? null
+  const justUs = (await sql`select m.channel_id, m.imported_author, c.is_dm from chat_messages m join chat_channels c on c.id = m.channel_id where m.body = ${`Just us ${TAG}`}`)[0] ?? null
+  const ninaDmMembers = justUs ? (await sql`select user_id from chat_channel_members where channel_id = ${justUs.channel_id}`).map((r) => r.user_id) : []
+  const ninaHeld = (await sql`select channel_id from import_pending_channel_members where workspace_id = ${WS} and email = ${nina.email}`).map((r) => r.channel_id)
+  const leadsId = leads?.id ?? null
+  chk(
+    withAna.length === 1 && withAna[0].id === anaDm.data.id && lunch?.channel_id === anaDm.data.id && lunch?.author_id === ana.id &&
+      justUs?.is_dm === true && ninaDmMembers.join() === me.id && ninaHeld.includes(justUs?.channel_id) && ninaHeld.includes(leadsId) && figures.dms === 2,
+    'the admin’s direct messages come over between the same people: with Ana, its history joins the one they have here; with Nina, invited, it is the admin’s for now, and Nina’s place in it — and in Leads — waits for her',
+    JSON.stringify({ withAna: withAna.length, sameDm: withAna[0]?.id === anaDm.data.id, lunch: lunch && { here: lunch.channel_id === anaDm.data.id, ana: lunch.author_id === ana.id }, justUs: justUs && { dm: justUs.is_dm, members: ninaDmMembers.length }, ninaHeld: ninaHeld.length, dmsFigure: figures.dms }),
+  )
+  const q4Views = q4 ? await sql`select name, type, is_default, is_pinned, visibility, config, created_by_id from task_views where list_id = ${q4.id} order by position` : []
+  chk(
+    q4Views.length === 2 && q4Views[0].name === `Sprint board ${TAG}` && q4Views[0].type === 'board' && q4Views[0].is_default === true && q4Views[0].is_pinned === true &&
+      q4Views[0].config?.groupBy === 'priority' && q4Views[0].config?.sort?.field === 'due' && q4Views[0].config?.sort?.dir === 'desc' &&
+      q4Views[1].name === `Mine ${TAG}` && q4Views[1].type === 'list' && q4Views[1].visibility === 'private' && q4Views[1].created_by_id === ana.id && figures.views === 2,
+    'a List’s views come in as its views here: the pinned board grouped by priority, newest due first, its default; Ana’s private list hers alone; a Form view, which no List here has, not made',
+    JSON.stringify({ views: q4Views.map((v) => ({ name: v.name, type: v.type, def: v.is_default, pinned: v.is_pinned, vis: v.visibility, config: v.config, ana: v.created_by_id === ana.id })), figure: figures.views }),
+  )
+  const growth = (await sql`select id from goal_folders where workspace_id = ${WS} and name = ${`Growth ${TAG}`}`)[0] ?? null
+  const signups = (await sql`select folder_id, owner_id, current_value from goals where workspace_id = ${WS} and title = ${`Grow signups ${TAG}`}`)[0] ?? null
+  const revenueFolder = (await sql`select folder_id from goals where workspace_id = ${WS} and title = ${`Q4 revenue ${TAG}`}`)[0]?.folder_id
+  await page.goto(`${B}/app/${WS}/goals`, { waitUntil: 'domcontentloaded' })
+  const folderBox = page.locator(`[data-testid="goal-folder"][data-folder-id="${growth?.id ?? 'none'}"]`)
+  const drawn = await waitUntil(async () => /Grow signups/.test((await folderBox.innerText().catch(() => '')) ?? ''), { timeoutMs: 15_000 })
+  const looseText = await page.getByTestId('goal-folder-loose').innerText().catch(() => '')
+  chk(
+    !!growth && signups?.folder_id === growth.id && signups?.owner_id === ana.id && Number(signups?.current_value) === 25 && revenueFolder === null &&
+      figures.folders === 1 && drawn && /Q4 revenue/.test(looseText) && !/Grow signups/.test(looseText),
+    'a Goal in a Goal Folder comes in in a Goal Folder of its name, and the Goals page draws the folder with its goal in it; a Goal in no folder is in none',
+    JSON.stringify({ folder: !!growth, signups: signups && { inFolder: signups.folder_id === growth?.id, ana: signups.owner_id === ana.id, at: Number(signups.current_value) }, revenueFolder, figure: figures.folders, drawn, loose: looseText.slice(0, 80) }),
   )
 
   // ══ 10. JOINING TAKES THEIR TASKS ═════════════════════════════════════════
@@ -533,6 +635,13 @@ try {
     ninaTime.length === 1 && ninaTime[0].duration_sec === 1800 && ninaTimeHeld === 0,
     'and the half hour Nina tracked on Fix login is hers now that she has joined, held no longer',
     JSON.stringify({ ninaTime, ninaTimeHeld }),
+  )
+  const ninaIn = ninaUser ? (await sql`select channel_id from chat_channel_members where user_id = ${ninaUser.id}`).map((r) => r.channel_id) : []
+  const ninaStillHeld = (await sql`select 1 from import_pending_channel_members where workspace_id = ${WS} and email = ${nina.email}`).length
+  chk(
+    !!justUs && ninaIn.includes(justUs.channel_id) && !!leadsId && ninaIn.includes(leadsId) && ninaStillHeld === 0,
+    'and she is in her direct message with the admin and in Leads, as she was in ClickUp, her places held no longer',
+    JSON.stringify({ dm: !!justUs && ninaIn.includes(justUs.channel_id), leads: !!leadsId && ninaIn.includes(leadsId), held: ninaStillHeld }),
   )
 
   // ══ 11. A GUEST TAKES ONLY WHAT IS SHARED WITH THEM ═══════════════════════

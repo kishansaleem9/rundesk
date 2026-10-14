@@ -301,6 +301,15 @@ export type AppSummary = {
   chatMessagesImported?: number
   chatRepliesImported?: number
   channels?: Array<{ id: string; name: string }>
+  /** Direct messages, reactions, files in Chat, places in channels held for invited people; views; Goal Folders. */
+  chatDmsImported?: number
+  chatReactionsImported?: number
+  chatReactionsSkipped?: number
+  chatFilesImported?: number
+  chatMembersPending?: number
+  viewsImported?: number
+  viewsSkipped?: number
+  goalFoldersImported?: number
 }
 
 const apps = (workspaceId: string) => `/workspaces/${workspaceId}/import/apps`

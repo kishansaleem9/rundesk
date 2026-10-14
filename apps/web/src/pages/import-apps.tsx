@@ -128,6 +128,12 @@ function Report({ result, label }: { result: AppSummary; label: string }) {
         {(result.timeEntriesPending ?? 0) > 0 && <Figure testid="import-app-r-time-waiting" label={t('import.appTimeWaiting')} value={result.timeEntriesPending ?? 0} />}
         {result.goalsImported !== undefined && <Figure testid="import-app-r-goals" label={t('import.appGoals')} value={result.goalsImported} />}
         {result.chatMessagesImported !== undefined && <Figure testid="import-app-r-chat" label={t('import.appChat')} value={result.chatMessagesImported} />}
+        {(result.chatDmsImported ?? 0) > 0 && <Figure testid="import-app-r-dms" label={t('import.appDms')} value={result.chatDmsImported ?? 0} />}
+        {(result.chatReactionsImported ?? 0) > 0 && <Figure testid="import-app-r-reactions" label={t('import.appReactions')} value={result.chatReactionsImported ?? 0} />}
+        {(result.chatFilesImported ?? 0) > 0 && <Figure testid="import-app-r-chat-files" label={t('import.appChatFiles')} value={result.chatFilesImported ?? 0} />}
+        {(result.chatMembersPending ?? 0) > 0 && <Figure testid="import-app-r-chat-waiting" label={t('import.appChatWaiting')} value={result.chatMembersPending ?? 0} />}
+        {(result.viewsImported ?? 0) > 0 && <Figure testid="import-app-r-views" label={t('import.appViews')} value={result.viewsImported ?? 0} />}
+        {(result.goalFoldersImported ?? 0) > 0 && <Figure testid="import-app-r-goal-folders" label={t('import.appGoalFolders')} value={result.goalFoldersImported ?? 0} />}
       </div>
       {result.made.lists.length > 0 && (
         <ul className="text-sm space-y-1" data-testid="import-app-r-made">

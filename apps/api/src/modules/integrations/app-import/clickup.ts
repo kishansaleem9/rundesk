@@ -1,4 +1,4 @@
-import { AppError, AppHttp } from './app-http'
+import { AppError, AppHttp, type AppFile } from './app-http'
 import { person, setting, type AppDef, type AppProject, type AppReader, type AppSource, type GrantToken } from './app-def'
 import {
   imTask,
@@ -22,7 +22,9 @@ import {
   type ImStatus,
   type ImTask,
   type ImTime,
+  type ImView,
 } from './import-tree'
+import { slackEmoji } from '../../chat/slack-export'
 
 /**
  * A CLICKUP WORKSPACE, IMPORTED WHOLE, ITS PEOPLE WITH IT (`found-14-oct/clickup-workspace-import-and-people-unbuilt`).
@@ -99,6 +101,24 @@ import {
  * in as a Chat channel here, private when it was, with its messages at their
  * moments, a thread's replies in its thread, and its people mapped as a task's
  * are; somebody who is not a member here is drawn under the name they wrote as.
+ *
+ * AND WHAT THE API GIVES OF THE REST (`found-14-oct/clickup-import-rest-unimported`):
+ *
+ *   `GET /list/{id}/view`                       a List's saved views: type, name, grouping,
+ *                                               sorting, pinned, private, protected
+ *   v3 `GET …/chat/messages/{id}/reactions`     a message's reactions, by emoji name — one
+ *                                               ask a message, as the API has no count of them
+ *                                               on the message (ClickUp's own feedback board)
+ *
+ * A direct message is read as a channel is (`type` DM or GROUP_DM, a token reading
+ * only its own), and comes in between the same people here. A file posted in Chat
+ * is a link in the message's Markdown to ClickUp's file store
+ * (`…clickup-attachments.com/…`), and comes in as the message's file. A channel of
+ * a Space, Folder or List — its id `4-<id>-…`, `5-…`, `6-…`, as a Doc's parent is
+ * typed — goes into the Space it came into. A Goal in a Goal Folder comes in in a
+ * Goal Folder of that name, and a Files field's files as the task's own.
+ * Whiteboards, Dashboards and reminders have no endpoint in ClickUp's public API
+ * (its feedback board asks for them), so no importer can read them, and the run says so.
  */
 
 const apiUrl = () => setting('CLICKUP_API_URL', 'https://api.clickup.com/api/v2')
@@ -112,6 +132,11 @@ const TIME_ASSIGNEES = 50
 const MAX_DOC_PAGES = 5_000
 /** The newest messages of a channel one run brings, as the Slack import brings a channel's. */
 const MAX_CHAT_MESSAGES = 10_000
+/**
+ * The most messages one run asks for their reactions: one ask each, ClickUp's 100 a minute on most
+ * plans, so a quarter of an hour of a run's asking at most. Past it the run says how far it went.
+ */
+const MAX_REACTION_READS = 1_500
 
 /** ClickUp's 100 tasks a page; a page short of it, or `last_page`, is the last. */
 const TASK_PAGE = 100
@@ -120,6 +145,19 @@ type CuUser = { id?: number | string; username?: string | null; email?: string |
 type CuStatus = { status?: string; type?: string; orderindex?: number | string }
 type CuOption = { id?: string; name?: string; label?: string; orderindex?: number | string }
 type CuField = { id?: string; name?: string; type?: string; type_config?: { options?: CuOption[] } | null; value?: unknown }
+type CuView = {
+  id?: string
+  name?: string | null
+  type?: string | null
+  visibility?: string | null
+  protected?: boolean | null
+  pinned?: boolean | null
+  creator?: number | string | null
+  orderindex?: number | string | null
+  grouping?: { field?: string | null } | null
+  sorting?: { fields?: Array<{ field?: string | null; dir?: number | string | null }> } | null
+}
+type CuReaction = { reaction?: string | null; emoji?: string | null; name?: string | null; user_id?: string | number | null; user?: { id?: string | number | null } | null }
 type CuAttachment = { id?: string; title?: string; url?: string; url_w_query?: string; size?: number | string | null }
 type CuTask = {
   id: string
@@ -174,11 +212,22 @@ type CuKeyResult = {
   owners?: CuUser[]
   last_action?: { steps_current?: string | number | null } | null
 }
-type CuChannel = { id: string; name?: string | null; description?: string | null; topic?: string | null; type?: string | null; visibility?: string | null; archived?: boolean | null; is_archived?: boolean | null }
+type CuChannel = {
+  id: string
+  name?: string | null
+  description?: string | null
+  topic?: string | null
+  type?: string | null
+  visibility?: string | null
+  archived?: boolean | null
+  is_archived?: boolean | null
+  parent?: { id?: string | number | null; type?: string | number | null } | null
+  location?: { id?: string | number | null; type?: string | number | null } | null
+}
 type CuChatMessage = { id: string; content?: string | null; text?: string | null; user_id?: string | number | null; date?: string | number | null; has_replies?: boolean | null; replies_count?: number | string | null }
 type CuChatMember = { id?: string | number | null; user_id?: string | number | null; user?: { id?: string | number | null } | null }
 /** A page of a Chat listing: the API gives its rows as `data`; the owner's connector names them. */
-type CuChatPage<T> = { data?: T[]; channels?: T[]; messages?: T[]; replies?: T[]; members?: T[]; next_cursor?: string | null }
+type CuChatPage<T> = { data?: T[]; channels?: T[]; messages?: T[]; replies?: T[]; members?: T[]; reactions?: T[]; next_cursor?: string | null }
 type CuGoal = {
   id: string
   name?: string
@@ -240,9 +289,11 @@ const optionName = (o: CuOption | undefined) => (o ? (o.name ?? o.label ?? '').t
  * Labels name several, which come in as text. A People field comes in as its
  * people's names, a Task or Relationship field as its tasks' names, a Formula as
  * its number (or its text), as ClickUp's own imports bring a field they have no
- * like of; a Files field and the rest are left out.
+ * like of; a Files field its files, the task's own files too, as a Files field
+ * here holds them (`found-14-oct/clickup-import-rest-unimported`). The rest are
+ * left out.
  */
-export function cuField(f: CuField): ImFieldValue | null {
+export function cuField(f: CuField, fetchFile?: (url: string) => Promise<AppFile | null>): ImFieldValue | null {
   const name = (f.name ?? '').trim()
   const v = f.value
   if (!name || v === undefined || v === null || v === '') return null
@@ -302,6 +353,23 @@ export function cuField(f: CuField): ImFieldValue | null {
       if (Number.isFinite(n)) return { name, type: 'number', value: n }
       return typeof v === 'string' && v.trim() ? { name, type: 'text', value: v.trim() } : null
     }
+    case 'attachment': {
+      // A Files field: its files, each the task's own file too, as a Files field here keeps them.
+      const files = (Array.isArray(v) ? v : [v])
+        .map((a) => (a && typeof a === 'object' ? (a as CuAttachment) : null))
+        .filter((a): a is CuAttachment => !!a && typeof (a.url_w_query ?? a.url) === 'string')
+      if (!files.length || !fetchFile) return null
+      return {
+        name,
+        type: 'files',
+        value: files.map((a) => (a.title ?? '').trim() || 'attachment').join(', '),
+        files: files.map((a) => ({
+          name: (a.title ?? '').trim() || 'attachment',
+          size: Number.isFinite(Number(a.size)) ? Number(a.size) : null,
+          fetch: () => fetchFile((a.url_w_query ?? a.url)!),
+        })),
+      }
+    }
     default:
       return null
   }
@@ -318,12 +386,11 @@ export const CLICKUP: AppDef = {
     { key: 'time', choices: ['yes', 'no'], default: 'yes' },
     { key: 'goals', choices: ['yes', 'no'], default: 'yes' },
     { key: 'chat', choices: ['yes', 'no'], default: 'yes' },
+    { key: 'dms', choices: ['yes', 'no'], default: 'yes' },
   ],
   notImported: [
-    'Whiteboards, Dashboards and views',
-    'Reminders, and Goal Folders (their Goals come in)',
-    'Direct messages, and files and reactions in Chat',
-    'Files in Custom Fields',
+    'Whiteboards, Dashboards and reminders: ClickUp’s API has no way to read them',
+    'Views of a Space, a Folder or Everything (a List’s views come in), and a List’s Doc, Form, Chat and Embed views',
   ],
   identify: async (token: GrantToken) => {
     const me = await new ClickUpApi(token.accessToken).get<{ user?: CuUser }>('/user')
@@ -415,18 +482,18 @@ export class ClickUpReader implements AppReader {
     for (const f of folders) {
       if (f.hidden) continue
       const lists: ImList[] = []
-      for (const l of f.lists ?? []) lists.push(await this.list(l, f.override_statuses && f.statuses?.length ? f.statuses : spaceStatuses, members, time))
-      outFolders.push({ name: f.name || 'Folder', lists })
+      for (const l of f.lists ?? []) lists.push(await this.list(l, f.override_statuses && f.statuses?.length ? f.statuses : spaceStatuses, members, time, errors))
+      outFolders.push({ name: f.name || 'Folder', lists, ref: `folder:${f.id}` })
     }
     const outLists: ImList[] = []
-    for (const l of loose) outLists.push(await this.list(l, spaceStatuses, members, time))
+    for (const l of loose) outLists.push(await this.list(l, spaceStatuses, members, time, errors))
     // Its Docs: those in it, its Folders and its Lists, hidden Folders' too.
     let docs: ImDoc[] = []
     if (options.docs !== 'none') {
       const places = { space: String(project.id), folders: new Set(folders.map((f) => String(f.id))), lists: new Set([...folders.flatMap((f) => (f.lists ?? []).map((l) => String(l.id))), ...loose.map((l) => String(l.id))]) }
       docs = await this.docsWhere(source, (d) => docIn(d, places), errors)
     }
-    return { kind: 'space', name: space.name || project.name, folders: outFolders, lists: outLists, docs, errors }
+    return { kind: 'space', name: space.name || project.name, folders: outFolders, lists: outLists, docs, errors, ref: `space:${project.id}` }
   }
 
   /** The Workspace's own Docs, when asked for, and its Goals and its Chat, once a run. */
@@ -443,12 +510,12 @@ export class ClickUpReader implements AppReader {
         errors.push(`Goals could not be read from ClickUp: ${e.message}`)
       }
     }
-    const chat = options.chat === 'no' ? [] : await this.chat(source, members, errors)
+    const chat = options.chat === 'no' ? [] : await this.chat(source, members, errors, options.dms !== 'no')
     return { docs, goals, chat, errors }
   }
 
-  /** The Workspace's Chat channels, not its direct messages, each with its members and its messages, oldest first. */
-  private async chat(team: string, members: Map<string, ImPerson>, errors: string[]): Promise<ImChannel[]> {
+  /** The Workspace's Chat channels, and its direct messages when asked, each with its members and its messages, oldest first. */
+  private async chat(team: string, members: Map<string, ImPerson>, errors: string[], dms = true): Promise<ImChannel[]> {
     const who = (id: string) => members.get(`clickup:${id}`) ?? null
     const base = `/workspaces/${encodeURIComponent(team)}/chat`
     let channels: CuChannel[]
@@ -460,18 +527,23 @@ export class ClickUpReader implements AppReader {
       return []
     }
     const out: ImChannel[] = []
+    const reading = { reactions: 0, said: false }
     for (const c of channels) {
-      if (!c?.id || String(c.type ?? 'CHANNEL').toUpperCase() !== 'CHANNEL') continue
+      const type = String(c?.type ?? 'CHANNEL').toUpperCase()
+      const dm = type === 'DM' || type === 'GROUP_DM'
+      if (!c?.id || (type !== 'CHANNEL' && !dm) || (dm && !dms)) continue
       try {
-        const messages = await this.chatMessages(base, String(c.id), who)
+        const messages = await this.chatMessages(base, String(c.id), who, reading, errors)
         out.push({
-          name: (c.name ?? '').trim() || 'channel',
+          name: (c.name ?? '').trim() || (dm ? 'direct message' : 'channel'),
           description: typeof c.description === 'string' && c.description.trim() ? c.description.trim() : null,
           topic: typeof c.topic === 'string' && c.topic.trim() ? c.topic.trim() : null,
-          private: String(c.visibility ?? '').toUpperCase() === 'PRIVATE',
+          private: dm || String(c.visibility ?? '').toUpperCase() === 'PRIVATE',
           archived: c.archived === true || c.is_archived === true,
           members: await this.chatMembers(base, String(c.id), who),
           messages,
+          dm,
+          place: channelPlace(c),
         })
       } catch (e) {
         if (!(e instanceof AppError)) throw e
@@ -482,7 +554,7 @@ export class ClickUpReader implements AppReader {
   }
 
   /** Every page of a Chat listing, up to a bound: ClickUp's 100 a page, the next asked by its cursor. */
-  private async chatPages<T>(path: string, query: Record<string, string | number>, key: 'channels' | 'messages' | 'replies' | 'members', pages: number, most = Infinity): Promise<T[]> {
+  private async chatPages<T>(path: string, query: Record<string, string | number>, key: 'channels' | 'messages' | 'replies' | 'members' | 'reactions', pages: number, most = Infinity): Promise<T[]> {
     const out: T[] = []
     let cursor: string | null = null
     for (let n = 0; n < pages && out.length < most; n++) {
@@ -496,18 +568,55 @@ export class ClickUpReader implements AppReader {
     return out
   }
 
-  /** A channel's newest messages, as Markdown, each thread's replies after its first message; oldest first. */
-  private async chatMessages(base: string, channelId: string, who: (id: string) => ImPerson | null): Promise<ImChatMessage[]> {
+  /**
+   * A channel's newest messages, as Markdown, each thread's replies after its first message, oldest
+   * first; each with the files posted in it and, while the run's bound lasts, its reactions.
+   */
+  private async chatMessages(
+    base: string,
+    channelId: string,
+    who: (id: string) => ImPerson | null,
+    reading: { reactions: number; said: boolean },
+    errors: string[],
+  ): Promise<ImChatMessage[]> {
     const top = (await this.chatPages<CuChatMessage>(`${base}/channels/${encodeURIComponent(channelId)}/messages`, { content_format: 'text/md' }, 'messages', 200, MAX_CHAT_MESSAGES)).slice(0, MAX_CHAT_MESSAGES)
-    const out: ImChatMessage[] = []
+    const raw: Array<{ m: CuChatMessage; parent: string | null }> = []
     for (const m of top) {
       if (!m?.id) continue
-      out.push(cuChatMessage(m, null, who))
+      raw.push({ m, parent: null })
       if (m.has_replies !== true && !(Number(m.replies_count) > 0)) continue
       const replies = await this.chatPages<CuChatMessage>(`${base}/messages/${encodeURIComponent(String(m.id))}/replies`, { content_format: 'text/md' }, 'replies', 100)
-      for (const r of replies) if (r?.id) out.push(cuChatMessage(r, String(m.id), who))
+      for (const r of replies) if (r?.id) raw.push({ m: r, parent: String(m.id) })
+    }
+    const out: ImChatMessage[] = []
+    // The newest first, so a bound on reactions keeps the newest messages' reactions.
+    for (const { m, parent } of raw.sort((a, b) => (msDate(b.m.date)?.getTime() ?? 0) - (msDate(a.m.date)?.getTime() ?? 0))) {
+      const message = cuChatMessage(m, parent, who, (url) => this.api.file(url))
+      if (reading.reactions < MAX_REACTION_READS) {
+        reading.reactions++
+        message.reactions = await this.reactions(base, String(m.id), who).catch((e) => {
+          if (!(e instanceof AppError)) throw e
+          return []
+        })
+      } else if (!reading.said) {
+        reading.said = true
+        errors.push(`Reactions came in on the newest ${MAX_REACTION_READS} messages of Chat: ClickUp's API is asked once a message for them`)
+      }
+      out.push(message)
     }
     return out.sort((a, b) => a.at.getTime() - b.at.getTime())
+  }
+
+  /** A message's reactions, each by whom and with which emoji, every page of them. */
+  private async reactions(base: string, messageId: string, who: (id: string) => ImPerson | null): Promise<NonNullable<ImChatMessage['reactions']>> {
+    const rows = await this.chatPages<CuReaction>(`${base}/messages/${encodeURIComponent(messageId)}/reactions`, {}, 'reactions', 20)
+    return rows
+      .map((r) => {
+        const name = String(r?.reaction ?? r?.emoji ?? r?.name ?? '').trim()
+        const id = String(r?.user_id ?? r?.user?.id ?? '').trim()
+        return name && id ? { person: who(id), emoji: cuEmoji(name) } : null
+      })
+      .filter((r): r is { person: ImPerson | null; emoji: string } => !!r)
   }
 
   /** A channel's members where ClickUp says them; where it does not, the channel keeps those it heard from. */
@@ -607,7 +716,10 @@ export class ClickUpReader implements AppReader {
 
   /** The Workspace's Goals, those in Goal Folders too, each read whole for its Targets. */
   private async goals(team: string, members: Map<string, ImPerson>): Promise<ImGoal[]> {
-    const body = await this.api.get<{ goals?: CuGoal[]; folders?: Array<{ goals?: CuGoal[] }> }>(`/team/${encodeURIComponent(team)}/goal`, { include_completed: true })
+    const body = await this.api.get<{ goals?: CuGoal[]; folders?: Array<{ name?: string | null; goals?: CuGoal[] }> }>(`/team/${encodeURIComponent(team)}/goal`, { include_completed: true })
+    // A Goal in a Goal Folder keeps its Folder's name, for the Goal Folder it comes into.
+    const folderOf = new Map<string, string>()
+    for (const f of body.folders ?? []) for (const g of f.goals ?? []) if (g?.id && f.name?.trim()) folderOf.set(String(g.id), f.name.trim())
     const all = [...(body.goals ?? []), ...(body.folders ?? []).flatMap((f) => f.goals ?? [])]
     const seen = new Set<string>()
     const out: ImGoal[] = []
@@ -616,13 +728,13 @@ export class ClickUpReader implements AppReader {
       if (!g?.id || seen.has(String(g.id)) || g.archived) continue
       seen.add(String(g.id))
       const whole = (await this.api.get<{ goal?: CuGoal }>(`/goal/${encodeURIComponent(String(g.id))}`)).goal ?? g
-      out.push(cuGoal({ ...g, ...whole }, who))
+      out.push({ ...cuGoal({ ...g, ...whole }, who), folder: folderOf.get(String(g.id)) ?? null })
     }
     return out
   }
 
   /** A List: its statuses (its own when it overrides its Folder's or Space's) and every page of its tasks. */
-  private async list(l: CuList, inherited: CuStatus[], members: Map<string, ImPerson>, time: Map<string, ImTime[]> = new Map()): Promise<ImList> {
+  private async list(l: CuList, inherited: CuStatus[], members: Map<string, ImPerson>, time: Map<string, ImTime[]> = new Map(), errors: string[] = []): Promise<ImList> {
     let own = l.statuses
     if (l.override_statuses && !own?.length) own = (await this.api.get<CuList>(`/list/${encodeURIComponent(l.id)}`)).statuses
     const statuses = cuStatuses(l.override_statuses && own?.length ? own : inherited)
@@ -650,7 +762,27 @@ export class ClickUpReader implements AppReader {
       description: typeof l.content === 'string' && l.content.trim() ? l.content : null,
       statuses,
       tasks: all.filter((t) => !t.archived && !(t.parent && byId.has(t.parent))).map(build),
+      ref: `list:${l.id}`,
+      views: await this.views(l, members, errors),
     }
+  }
+
+  /** A List's saved views, those of a kind a List here has, in ClickUp's order; what cannot be read is said. */
+  private async views(l: CuList, members: Map<string, ImPerson>, errors: string[]): Promise<ImView[]> {
+    let rows: CuView[]
+    try {
+      const body = await this.api.get<{ views?: CuView[] }>(`/list/${encodeURIComponent(l.id)}/view`)
+      rows = body.views ?? []
+    } catch (e) {
+      if (!(e instanceof AppError) || e.status === 401) throw e
+      errors.push(`The views of the List "${l.name ?? l.id}" could not be read from ClickUp: ${e.message}`)
+      return []
+    }
+    const who = (id: string) => members.get(`clickup:${id}`) ?? null
+    return rows
+      .sort((a, b) => Number(a.orderindex ?? 0) - Number(b.orderindex ?? 0))
+      .map((v) => cuView(v, who))
+      .filter((v): v is ImView => !!v)
   }
 
   private task(t: CuTask, subtasks: ImTask[], closedNames: Set<string>, members: Map<string, ImPerson>): ImTask {
@@ -676,7 +808,7 @@ export class ClickUpReader implements AppReader {
       assignees: (t.assignees ?? []).map(who).filter((p): p is ImPerson => !!p),
       tags: (t.tags ?? []).map((x) => (x.name ?? '').trim()).filter(Boolean),
       checklists: (t.checklists ?? []).map((c): ImChecklist => ({ name: (c.name ?? '').trim() || 'Checklist', items: flatItems(c.items) })),
-      fields: (t.custom_fields ?? []).map(cuField).filter((f): f is ImFieldValue => !!f),
+      fields: (t.custom_fields ?? []).map((f) => cuField(f, (url) => this.api.file(url))).filter((f): f is ImFieldValue => !!f),
       subtasks,
       links: [...new Set(links)],
       details: async () => ({ comments: await this.comments(t.id, who), files: await this.files(t) }),
@@ -852,11 +984,137 @@ export function cuChatText(content: string, who: (id: string) => ImPerson | null
   return { text, mentions }
 }
 
-/** A Chat message: its author when they are a person of the Workspace, else the name it is drawn under — ClickUp itself for its own posts. */
-export function cuChatMessage(m: CuChatMessage, parent: string | null, who: (id: string) => ImPerson | null): ImChatMessage {
+/**
+ * A Chat message: its author when they are a person of the Workspace, else the name it is drawn under —
+ * ClickUp itself for its own posts; and the files posted in it, which its Markdown names by their place
+ * in ClickUp's file store, taken out of its words.
+ */
+export function cuChatMessage(m: CuChatMessage, parent: string | null, who: (id: string) => ImPerson | null, fetchFile?: (url: string) => Promise<AppFile | null>): ImChatMessage {
   const userId = m.user_id === undefined || m.user_id === null ? '' : String(m.user_id)
   const author = userId && userId !== '-1' ? who(userId) : null
   const authorName = author?.name ?? author?.email ?? (!userId || userId === '-1' ? 'ClickUp' : `ClickUp user ${userId}`)
-  const { text, mentions } = cuChatText(String(m.content ?? m.text ?? ''), who)
-  return { ref: String(m.id), parent, author, authorName, text, mentions, at: msDate(m.date) ?? new Date() }
+  const { text: words, files } = chatFiles(String(m.content ?? m.text ?? ''))
+  const { text, mentions } = cuChatText(words, who)
+  const message: ImChatMessage = { ref: String(m.id), parent, author, authorName, text, mentions, at: msDate(m.date) ?? new Date() }
+  if (files.length && fetchFile) message.files = files.map((f) => ({ name: f.name, size: null, fetch: () => fetchFile(f.url) }))
+  return message
+}
+
+/** An address on ClickUp's file store, where a file posted in Chat is kept; or, on a lane, the stub's own. */
+export function isClickUpFile(url: string): boolean {
+  try {
+    const u = new URL(url)
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return false
+    if (u.hostname === 'clickup-attachments.com' || u.hostname.endsWith('.clickup-attachments.com')) return true
+    return u.origin === new URL(apiUrl()).origin && u.pathname.includes('/attachments/')
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The files a Chat message's Markdown names — an image (`![name](url)`) or a link (`[name](url)`) to
+ * ClickUp's file store — each with its name (the link's words, else the address's `filename` or its
+ * last part), and the words without them.
+ */
+export function chatFiles(markdown: string): { text: string; files: Array<{ name: string; url: string }> } {
+  const files: Array<{ name: string; url: string }> = []
+  const seen = new Set<string>()
+  const text = markdown.replace(/!?\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, (whole, label: string, url: string) => {
+    if (!isClickUpFile(url)) return whole
+    if (!seen.has(url)) {
+      seen.add(url)
+      files.push({ name: fileNameOf(label, url), url })
+    }
+    return ''
+  })
+  return { text: text.replace(/\n{3,}/g, '\n\n').trim(), files }
+}
+
+function fileNameOf(label: string, url: string): string {
+  const said = label.trim()
+  if (said && !/^https?:\/\//i.test(said)) return said.slice(0, 255)
+  try {
+    const u = new URL(url)
+    const named = u.searchParams.get('filename')
+    if (named?.trim()) return named.trim().slice(0, 255)
+    const last = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() ?? '')
+    return last.trim().slice(0, 255) || 'file'
+  } catch {
+    return 'file'
+  }
+}
+
+/** A reaction's emoji, from the name ClickUp keeps it by (`thumbsup`, `white_check_mark`), as the Slack import reads Slack's. */
+export function cuEmoji(name: string): string {
+  const bare = name.trim().replace(/^:|:$/g, '')
+  // A reaction already kept as its character is that character.
+  if (/[^\x00-\x7f]/.test(bare)) return bare
+  return slackEmoji(bare.toLowerCase())
+}
+
+/**
+ * The Space, Folder or List a channel belongs to, as the ref its node has: by its `parent` or
+ * `location` when the API says, else by its id — `4-<id>-…` a Space's, `5-…` a Folder's, `6-…` a
+ * List's, as a Doc's parent is typed. None for a channel of the Workspace.
+ */
+export function channelPlace(c: CuChannel): string | null {
+  const said = c.parent ?? c.location
+  const kind = (type: unknown) => {
+    const t = String(type ?? '').toUpperCase()
+    return t === '4' || t === 'SPACE' ? 'space' : t === '5' || t === 'FOLDER' ? 'folder' : t === '6' || t === 'LIST' ? 'list' : null
+  }
+  if (said?.id !== undefined && said?.id !== null) {
+    const k = kind(said.type)
+    return k ? `${k}:${String(said.id)}` : null
+  }
+  const m = /^([456])-([^-]+)-\d+$/.exec(String(c.id))
+  if (!m) return null
+  return `${kind(m[1])}:${m[2]}`
+}
+
+/** ClickUp's view types, as the kinds of view a List has here; a Doc, Form, Chat, Embed or Whiteboard view has none. */
+const VIEW_TYPES: Record<string, ImView['type']> = {
+  list: 'list',
+  board: 'board',
+  calendar: 'calendar',
+  gantt: 'gantt',
+  table: 'table',
+  timeline: 'timeline',
+  workload: 'workload',
+  activity: 'activity',
+  map: 'map',
+  mind_map: 'mindmap',
+  mindmap: 'mindmap',
+  box: 'team',
+  team: 'team',
+}
+const VIEW_GROUPS: Record<string, ImView['groupBy']> = { status: 'status', priority: 'priority', assignee: 'assignee' }
+const VIEW_SORTS: Record<string, NonNullable<ImView['sort']>['field']> = {
+  name: 'title',
+  status: 'status',
+  priority: 'priority',
+  dueDate: 'due',
+  due_date: 'due',
+  assignee: 'assignee',
+  dateCreated: 'created',
+  date_created: 'created',
+}
+
+/** A List's view as a view here: its kind, name, grouping, first sort, pinned, private to its maker or protected. */
+export function cuView(v: CuView, who: (id: string) => ImPerson | null): ImView | null {
+  const type = VIEW_TYPES[String(v.type ?? '').toLowerCase()]
+  if (!type) return null
+  const sort = v.sorting?.fields?.[0]
+  const sortField = sort?.field ? VIEW_SORTS[sort.field] : undefined
+  return {
+    name: (v.name ?? '').trim() || type,
+    type,
+    pinned: v.pinned === true,
+    private: String(v.visibility ?? '').toLowerCase() === 'private',
+    protected: v.protected === true,
+    owner: v.creator !== undefined && v.creator !== null ? who(String(v.creator)) : null,
+    groupBy: VIEW_GROUPS[String(v.grouping?.field ?? '')] ?? null,
+    sort: sortField ? { field: sortField, dir: Number(sort?.dir) < 0 ? 'desc' : 'asc' } : null,
+  }
 }

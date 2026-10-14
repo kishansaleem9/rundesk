@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ClickUpApi, ClickUpReader, cuChatMessage, cuChatText, cuDoc, cuField, cuGoal, cuKeyResult, cuStatuses, cuTime, docIn, msDate } from './clickup'
+import { ClickUpApi, ClickUpReader, channelPlace, chatFiles, cuChatMessage, cuChatText, cuDoc, cuEmoji, cuField, cuGoal, cuKeyResult, cuStatuses, cuTime, cuView, docIn, msDate } from './clickup'
 import { mentionToken } from './import-tree'
 import { inviteAs } from './app-import.service'
 import { roleRank } from '../../../common/permissions/workspace-roles'
@@ -218,6 +218,7 @@ function workspace(opts: { refuseOthersTime?: boolean } = {}) {
     if (path === '/space/s1/folder') return { folders: [{ id: 'f1', name: 'Roadmap', lists: [] }] }
     if (path === '/space/s1/list') return { lists: [{ id: 'l1', name: 'Inbox' }] }
     if (path === '/list/l1/task') return { tasks: [{ id: 'k1', name: 'One', status: { status: 'to do', type: 'open' } }, { id: 'k2', name: 'Two', status: { status: 'to do', type: 'open' } }], last_page: true }
+    if (path === '/list/l1/view') return { views: [] }
     if (path === '/team/t1/time_entries') {
       if (q.get('assignee') && opts.refuseOthersTime) return undefined
       const own = !q.get('assignee')
@@ -303,7 +304,7 @@ test('a Chat message is under its author when they are of the Workspace, under C
   assert.deepEqual([cuChatMessage({ id: 'm3', content: 'x', user_id: '77', date: 1 }, 'm1', who).authorName], ['ClickUp user 77'])
 })
 
-test('Chat is read whole: every page of channels and of messages, each thread’s replies after its first message, oldest first; a direct message is not read', async () => {
+test('Chat is read whole: every page of channels and of messages, each thread’s replies after its first message, oldest first; direct messages turned off are not read', async () => {
   const msgs = (ids: number[]) => ids.map((n) => ({ id: `m${n}`, content: `note ${n}`, user_id: '1', date: 1790000000000 + n * 1000, has_replies: n === 1 }))
   const { reader, asked } = clickup((path, q) => {
     if (path === '/team') return { teams: [{ id: 't1', name: 'Acme', members: [{ user: { id: 1, username: 'Ana', email: 'ana@x.test', role: 1 } }] }] }
@@ -319,7 +320,7 @@ test('Chat is read whole: every page of channels and of messages, each thread’
     if (path === '/api/v3/workspaces/t1/chat/channels/ch2/members') return { data: [{ id: 1 }], next_cursor: null }
     return undefined
   })
-  const x = await reader.extras('t1', { goals: 'no' })
+  const x = await reader.extras('t1', { goals: 'no', dms: 'no' })
   assert.deepEqual(x.chat?.map((c) => `${c.name}:${c.private}:${c.members.map((p) => p.email).join()}`), ['General talk:false:', 'Leads:true:ana@x.test'])
   assert.deepEqual(x.chat?.[0].messages.map((m) => `${m.ref}<${m.parent ?? '-'}`), ['m1<-', 'r1<m1', 'm2<-', 'm3<-'])
   assert.ok(asked.some((a) => a.startsWith('/api/v3/workspaces/t1/chat/channels/ch1/messages?') && a.includes('content_format=text%2Fmd')))
@@ -328,4 +329,70 @@ test('Chat is read whole: every page of channels and of messages, each thread’
   const off = clickup((path) => (path === '/team' ? { teams: [{ id: 't1', members: [] }] } : undefined))
   assert.deepEqual((await off.reader.extras('t1', { goals: 'no', chat: 'no' })).chat, [])
   assert.equal(off.asked.some((a) => a.includes('/chat/')), false)
+})
+
+test('the rest of Chat (`found-14-oct/clickup-import-rest-unimported`): a direct message between its people, a message’s reactions and files, a Space’s channel by its id', async () => {
+  const shot = 'https://t1.p.clickup-attachments.com/t1/u1/shot.png'
+  const pdf = 'https://t1.p.clickup-attachments.com/t1/u2/a.pdf?view=open&filename=a.pdf'
+  const { reader, asked } = clickup((path) => {
+    if (path === '/team') return { teams: [{ id: 't1', name: 'Acme', members: [{ user: { id: 1, username: 'Ana', email: 'ana@x.test', role: 1 } }, { user: { id: 2, username: 'Ben', email: 'ben@x.test', role: 3 } }] }] }
+    if (path === '/api/v3/workspaces/t1/chat/channels') return { data: [{ id: '4-s9-8', name: 'Space talk', type: 'CHANNEL', visibility: 'PUBLIC' }, { id: 'dm1', type: 'DM', visibility: 'PRIVATE' }], next_cursor: null }
+    if (path === '/api/v3/workspaces/t1/chat/channels/4-s9-8/messages') return { data: [{ id: 'm1', content: `look ![shot.png](${shot})\n[${pdf}](${pdf})`, user_id: '1', date: 1790000000000 }], next_cursor: null }
+    if (path === '/api/v3/workspaces/t1/chat/channels/dm1/messages') return { data: [{ id: 'm2', content: 'just us', user_id: '2', date: 1790000001000 }], next_cursor: null }
+    if (path === '/api/v3/workspaces/t1/chat/channels/dm1/members') return { data: [{ id: 1 }, { id: 2 }], next_cursor: null }
+    if (path === '/api/v3/workspaces/t1/chat/messages/m1/reactions') return { data: [{ reaction: 'thumbsup', user_id: '2' }], next_cursor: null }
+    if (path === '/api/v3/workspaces/t1/chat/messages/m2/reactions') return { data: [], next_cursor: null }
+    return undefined
+  })
+  const x = await reader.extras('t1', { goals: 'no' })
+  const [talk, dm] = x.chat ?? []
+  assert.equal(talk.place, 'space:s9')
+  assert.equal(talk.dm, false)
+  assert.equal(talk.messages[0].text, 'look')
+  assert.deepEqual(talk.messages[0].files?.map((f) => f.name), ['shot.png', 'a.pdf'])
+  assert.deepEqual(talk.messages[0].reactions?.map((r) => `${r.person?.email}:${r.emoji}`), ['ben@x.test:👍'])
+  assert.equal(dm.dm, true)
+  assert.equal(dm.private, true)
+  assert.deepEqual(dm.members.map((p) => p.email), ['ana@x.test', 'ben@x.test'])
+  assert.ok(asked.includes('/api/v3/workspaces/t1/chat/messages/m1/reactions?limit=100'))
+})
+
+test('a file’s link in Chat is a ClickUp file only on its file store; a channel’s place is its parent, else its id; a reaction’s name is its emoji', () => {
+  assert.deepEqual(chatFiles('see [the brief](https://elsewhere.test/brief.pdf)'), { text: 'see [the brief](https://elsewhere.test/brief.pdf)', files: [] })
+  assert.deepEqual(chatFiles('![x](https://t9.p.clickup-attachments.com/t9/u/x%20y.png)'), { text: '', files: [{ name: 'x', url: 'https://t9.p.clickup-attachments.com/t9/u/x%20y.png' }] })
+  assert.deepEqual(chatFiles('[https://t9.p.clickup-attachments.com/t9/u/f.webm?filename=clip.webm](https://t9.p.clickup-attachments.com/t9/u/f.webm?filename=clip.webm)').files[0].name, 'clip.webm')
+  assert.equal(channelPlace({ id: '6-123-8' }), 'list:123')
+  assert.equal(channelPlace({ id: '5-77-8' }), 'folder:77')
+  assert.equal(channelPlace({ id: '8ct13c1-62898' }), null)
+  assert.equal(channelPlace({ id: 'x', parent: { id: 9, type: 'SPACE' } }), 'space:9')
+  assert.equal(cuEmoji('thumbsup'), '👍')
+  assert.equal(cuEmoji('🎉'), '🎉')
+  assert.equal(cuEmoji('no_such_name'), ':no_such_name:')
+})
+
+test('a List’s view comes in as a view of its kind, grouped and sorted as it was; a Form view has no kind here; a Files field holds its files', () => {
+  const ana = { key: 'clickup:1', name: 'Ana', email: 'ana@x.test' }
+  assert.deepEqual(cuView({ name: 'Board', type: 'board', pinned: true, visibility: 'public', grouping: { field: 'assignee' }, sorting: { fields: [{ field: 'dateCreated', dir: -1 }] }, creator: 1 }, (id) => (id === '1' ? ana : null)), {
+    name: 'Board',
+    type: 'board',
+    pinned: true,
+    private: false,
+    protected: false,
+    owner: ana,
+    groupBy: 'assignee',
+    sort: { field: 'created', dir: 'desc' },
+  })
+  assert.equal(cuView({ name: 'Mine', type: 'list', visibility: 'private' }, () => null)?.private, true)
+  assert.equal(cuView({ name: 'Mind', type: 'mind_map' }, () => null)?.type, 'mindmap')
+  assert.equal(cuView({ name: 'Intake', type: 'form' }, () => null), null)
+  const asked: string[] = []
+  const field = cuField({ name: 'Contract', type: 'attachment', value: [{ title: 'c.txt', url: 'https://x.test/c.txt', size: 3 }] }, async (url) => {
+    asked.push(url)
+    return null
+  })
+  assert.equal(field?.type, 'files')
+  assert.deepEqual(field?.files?.map((f) => f.name), ['c.txt'])
+  void field?.files?.[0].fetch()
+  assert.deepEqual(asked, ['https://x.test/c.txt'])
+  assert.equal(cuField({ name: 'Contract', type: 'attachment', value: [] }, async () => null), null)
 })

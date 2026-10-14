@@ -1380,6 +1380,13 @@
       "when": 1900000141052,
       "tag": "0196_clickup_docs_time_goals",
       "breakpoints": true
+    },
+    {
+      "idx": 197,
+      "version": "7",
+      "when": 1900000142052,
+      "tag": "0197_clickup_import_rest",
+      "breakpoints": true
     }
   ]
 }

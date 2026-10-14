@@ -55,6 +55,7 @@ export class GoalsController {
       startDate?: string
       dueDate?: string
       ownerId?: string
+      folderId?: string | null
     },
   ) {
     return this.goals.create(
@@ -63,6 +64,7 @@ export class GoalsController {
         title: body.title,
         description: body.description,
         spaceId: body.spaceId,
+        folderId: body.folderId,
         parentGoalId: body.parentGoalId,
         kind: body.kind,
         targetValue: body.targetValue,
@@ -73,6 +75,37 @@ export class GoalsController {
       },
       reader(user),
     )
+  }
+
+  // ─── Goal Folders ──────────────────────────────────────────────────────────
+
+  @Get('workspaces/:workspaceId/goal-folders')
+  @UseGuards(WorkspaceMemberGuard)
+  listFolders(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.goals.listFolders(workspaceId, reader(user))
+  }
+
+  @Post('workspaces/:workspaceId/goal-folders')
+  @UseGuards(WorkspaceMemberGuard)
+  createFolder(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload, @Body() body: { name?: string }) {
+    return this.goals.createFolder(workspaceId, body?.name, reader(user))
+  }
+
+  @Patch('workspaces/:workspaceId/goal-folders/:folderId')
+  @UseGuards(WorkspaceMemberGuard)
+  updateFolder(
+    @Param('workspaceId') workspaceId: string,
+    @Param('folderId') folderId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { name?: string; position?: number },
+  ) {
+    return this.goals.updateFolder(workspaceId, folderId, { name: body?.name, position: body?.position }, reader(user))
+  }
+
+  @Delete('workspaces/:workspaceId/goal-folders/:folderId')
+  @UseGuards(WorkspaceMemberGuard)
+  deleteFolder(@Param('workspaceId') workspaceId: string, @Param('folderId') folderId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.goals.deleteFolder(workspaceId, folderId, reader(user))
   }
 
   @Patch('goals/:goalId')
@@ -86,6 +119,7 @@ export class GoalsController {
       targetValue?: number
       status?: GoalStatus
       ownerId?: string | null
+      folderId?: string | null
       startDate?: string | null
       dueDate?: string | null
     },

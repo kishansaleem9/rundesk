@@ -44,6 +44,12 @@
  *                  goals: [{id, name, …, key_results}]   (`found-14-oct/clickup-docs-time-goals-unimported`)
  *           and its chat: [{id, name, type CHANNEL|DM, visibility, members?: [userId], messages: [{id, content,
  *                  user_id, date, replies?: [message]}]}] (v3, `found-14-oct/clickup-chat-unimported`)
+ *           and the rest (`found-14-oct/clickup-import-rest-unimported`): a list's views: [{id, name, type,
+ *                  visibility, protected, pinned, creator, grouping, sorting}]; a message's reactions:
+ *                  [{reaction, user_id}] and files: [{id, name, content, mimetype?}], drawn in its Markdown as
+ *                  ClickUp draws them, links to the file store (here `/clickup/attachments/…`); a channel of a
+ *                  Space has the id ClickUp gives one (`4-<space id>-8`); a team's goal_folders: [{id, name,
+ *                  goals: [goal]}]; a task's Files field: {type: 'attachment', value: [{id, title, content}]}
  *   monday  data: {me: {id, name, email, account: {name}}, users: [user], boards: [{id, name, type?, workspace?,
  *                  columns, groups, items}]}
  *
@@ -505,10 +511,27 @@ function clickupLists(data) {
 /** A List as ClickUp lists it: its statuses only on its own page (`GET /list/{id}`), as a Folder's listing may leave them out. */
 const cuListRow = (l) => ({ id: l.id, name: l.name, content: l.content ?? '', override_statuses: l.override_statuses === true, task_count: (l.tasks ?? []).length })
 
-/** A task as a page of tasks gives it: no comments, and no attachments (its own page has those). */
-function cuTaskRow(t, list) {
+/** A task as a page of tasks gives it: no comments, and no attachments (its own page has those); a Files field's files by their address. */
+function cuTaskRow(t, list, base) {
   const { comments: _c, attachments: _a, ...row } = t
+  if (row.custom_fields) {
+    row.custom_fields = row.custom_fields.map((f) =>
+      f.type === 'attachment' ? { ...f, value: (f.value ?? []).map((a) => ({ id: a.id, title: a.title, size: Buffer.byteLength(a.content ?? ''), url: `${base}/clickup/files/${t.id}/${a.id}` })) } : f,
+    )
+  }
   return { archived: false, list: { id: list.id }, ...row }
+}
+
+/** A task's files: those attached to it, and those in its Files fields. */
+const cuFilesOf = (t) => [...(t.attachments ?? []), ...(t.custom_fields ?? []).filter((f) => f.type === 'attachment').flatMap((f) => f.value ?? [])]
+
+/** A Chat message's files, drawn in its Markdown as ClickUp draws them: an image as an image, anything else as a link. */
+function chatContent(msg, base, teamId) {
+  const links = (msg.files ?? []).map((f) => {
+    const at = `${base}/clickup/attachments/t${teamId}/${f.id}/${encodeURIComponent(f.name)}`
+    return /^image\//.test(f.mimetype ?? '') ? `![${f.name}](${at})` : `[${at}?view=open&filename=${encodeURIComponent(f.name)}](${at}?view=open&filename=${encodeURIComponent(f.name)})`
+  })
+  return [msg.content ?? '', ...links].filter(Boolean).join('\n')
 }
 
 async function clickup(req, res, url, ctx) {
@@ -518,9 +541,21 @@ async function clickup(req, res, url, ctx) {
     for (const g of grantsOf('clickup').values())
       for (const { list } of clickupLists(g.data))
         for (const t of list.tasks ?? []) {
-          const a = t.id === taskId ? (t.attachments ?? []).find((x) => x.id === attId) : null
+          const a = t.id === taskId ? cuFilesOf(t).find((x) => x.id === attId) : null
           if (a) return send(res, 200, Buffer.from(a.content ?? ''), { 'content-type': a.mimetype ?? 'text/plain' })
         }
+    return send(res, 404, { err: 'Attachment not found', ECODE: 'ATTCH_001' })
+  }
+  if (url.pathname.startsWith('/clickup/attachments/')) {
+    // A file posted in Chat, on ClickUp's file store: asked for without the token, as a link is opened.
+    const [, , , , fileId] = url.pathname.split('/')
+    for (const g of grantsOf('clickup').values())
+      for (const team of g.data.teams ?? [])
+        for (const c of team.chat ?? [])
+          for (const msg of (c.messages ?? []).flatMap((x) => [x, ...(x.replies ?? [])])) {
+            const f = (msg.files ?? []).find((x) => x.id === fileId)
+            if (f) return send(res, 200, Buffer.from(f.content ?? ''), { 'content-type': f.mimetype ?? 'text/plain' })
+          }
     return send(res, 404, { err: 'Attachment not found', ECODE: 'ATTCH_001' })
   }
   const v3 = url.pathname.startsWith('/clickup/api/v3/')
@@ -558,7 +593,7 @@ async function clickup(req, res, url, ctx) {
       return { data: rows.slice(from, from + size), next_cursor: from + size < rows.length ? String(from + size) : null }
     }
     const chatOf = (team) => team?.chat ?? []
-    const messageRow = (msg) => ({ id: msg.id, type: 'message', content: msg.content ?? '', user_id: String(msg.user_id), date: Number(msg.date), has_replies: (msg.replies ?? []).length > 0 })
+    const messageRow = (teamId) => (msg) => ({ id: msg.id, type: 'message', content: chatContent(msg, ctx.base, teamId), user_id: String(msg.user_id), date: Number(msg.date), has_replies: (msg.replies ?? []).length > 0 })
     const newestFirst = (rows) => [...rows].sort((a, b) => Number(b.date) - Number(a.date))
     if ((m = /^\/workspaces\/([^/]+)\/chat\/channels$/.exec(path))) {
       const team = teamOf(m[1])
@@ -568,12 +603,17 @@ async function clickup(req, res, url, ctx) {
     if ((m = /^\/workspaces\/([^/]+)\/chat\/channels\/([^/]+)\/messages$/.exec(path))) {
       const channel = chatOf(teamOf(m[1])).find((c) => c.id === m[2])
       if (!channel) return send(res, 404, { err: 'Channel not found', ECODE: 'CHAT_404' })
-      return send(res, 200, chatPage(newestFirst(channel.messages ?? []).map(messageRow)))
+      return send(res, 200, chatPage(newestFirst(channel.messages ?? []).map(messageRow(m[1]))))
     }
     if ((m = /^\/workspaces\/([^/]+)\/chat\/messages\/([^/]+)\/replies$/.exec(path))) {
       const msg = chatOf(teamOf(m[1])).flatMap((c) => c.messages ?? []).find((x) => x.id === m[2])
       if (!msg) return send(res, 404, { err: 'Message not found', ECODE: 'CHAT_404' })
-      return send(res, 200, chatPage(newestFirst(msg.replies ?? []).map(messageRow)))
+      return send(res, 200, chatPage(newestFirst(msg.replies ?? []).map(messageRow(m[1]))))
+    }
+    if ((m = /^\/workspaces\/([^/]+)\/chat\/messages\/([^/]+)\/reactions$/.exec(path))) {
+      const msg = chatOf(teamOf(m[1])).flatMap((c) => (c.messages ?? []).flatMap((x) => [x, ...(x.replies ?? [])])).find((x) => x.id === m[2])
+      if (!msg) return send(res, 404, { err: 'Message not found', ECODE: 'CHAT_404' })
+      return send(res, 200, chatPage((msg.reactions ?? []).map((r) => ({ reaction: r.reaction, user_id: String(r.user_id), date: Number(msg.date) }))))
     }
     if ((m = /^\/workspaces\/([^/]+)\/chat\/channels\/([^/]+)\/members$/.exec(path))) {
       const channel = chatOf(teamOf(m[1])).find((c) => c.id === m[2])
@@ -621,17 +661,26 @@ async function clickup(req, res, url, ctx) {
   if ((m = /^\/team\/([^/]+)\/goal$/.exec(path))) {
     const team = teamOf(m[1])
     if (!team) return send(res, 401, { err: 'Team not authorized', ECODE: 'OAUTH_027' })
-    // The listing names each Goal; its Targets are on its own page.
-    return send(res, 200, { goals: (team.goals ?? []).map(({ key_results: _k, ...g }) => g), folders: [] })
+    // The listing names each Goal; its Targets are on its own page. A Goal in a Goal Folder is under its Folder.
+    const row = ({ key_results: _k, ...g }) => g
+    return send(res, 200, {
+      goals: (team.goals ?? []).map(row),
+      folders: (team.goal_folders ?? []).map((f) => ({ id: f.id, name: f.name, goal_count: (f.goals ?? []).length, goals: (f.goals ?? []).map(row) })),
+    })
   }
   if ((m = /^\/goal\/([^/]+)$/.exec(path))) {
-    const goal = (data.teams ?? []).flatMap((t) => t.goals ?? []).find((x) => x.id === m[1])
+    const goal = (data.teams ?? []).flatMap((t) => [...(t.goals ?? []), ...(t.goal_folders ?? []).flatMap((f) => f.goals ?? [])]).find((x) => x.id === m[1])
     return goal ? send(res, 200, { goal }) : send(res, 404, { err: 'Goal not found', ECODE: 'GOAL_002' })
   }
   const found = (id) => clickupLists(data).find((x) => x.list.id === id)
   if ((m = /^\/list\/([^/]+)$/.exec(path))) {
     const x = found(m[1])
     return x ? send(res, 200, { ...cuListRow(x.list), statuses: cuStatusOf(x.space, x.folder, x.list) }) : send(res, 404, { err: 'List not found' })
+  }
+  if ((m = /^\/list\/([^/]+)\/view$/.exec(path))) {
+    const x = found(m[1])
+    if (!x) return send(res, 404, { err: 'List not found' })
+    return send(res, 200, { views: x.list.views ?? [] })
   }
   if ((m = /^\/list\/([^/]+)\/task$/.exec(path))) {
     const x = found(m[1])
@@ -642,7 +691,7 @@ async function clickup(req, res, url, ctx) {
     const rows = (x.list.tasks ?? []).filter((t) => (closed || !['closed', 'done'].includes(t.status?.type)) && (subtasks || !t.parent))
     const page = Number(url.searchParams.get('page') ?? 0)
     const slice = rows.slice(page * PAGE, page * PAGE + PAGE)
-    return send(res, 200, { tasks: slice.map((t) => cuTaskRow(t, x.list)), last_page: page * PAGE + PAGE >= rows.length })
+    return send(res, 200, { tasks: slice.map((t) => cuTaskRow(t, x.list, ctx.base)), last_page: page * PAGE + PAGE >= rows.length })
   }
   const taskOf = (id) => {
     for (const x of clickupLists(data)) {

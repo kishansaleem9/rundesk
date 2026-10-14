@@ -2,7 +2,7 @@ import { ASSIGNABLE_WORKSPACE_ROLES } from '../../common/permissions/workspace-r
 import { Injectable, Inject, NotFoundException, ConflictException, ForbiddenException, GoneException, BadRequestException } from '@nestjs/common'
 import { eq, and, inArray } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
-import { organizations, invitations, organizationMembers, workspaceMembers, users, workspaces, importPendingAssignees, importPendingTimeEntries, taskAssignees, timeEntries } from '@rundesk/db'
+import { organizations, invitations, organizationMembers, workspaceMembers, users, workspaces, importPendingAssignees, importPendingTimeEntries, importPendingChannelMembers, chatChannels, chatChannelMembers, taskAssignees, timeEntries } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { passwords } from '../../common/security/password-hash'
@@ -427,6 +427,7 @@ export class InvitationsService {
     for (const ws of grants) {
       await this.takePendingAssignees(ws.workspaceId, invite.email, result.userId!)
       await this.takePendingTime(ws.workspaceId, invite.email, result.userId!)
+      await this.takePendingChannels(ws.workspaceId, invite.email, result.userId!)
     }
 
     // Fire member.joined per workspace the invite granted (best effort). The
@@ -499,5 +500,29 @@ export class InvitationsService {
       .delete(importPendingTimeEntries)
       .where(and(eq(importPendingTimeEntries.workspaceId, workspaceId), eq(importPendingTimeEntries.email, email.toLowerCase())))
     return { held: held.length, made }
+  }
+
+  /**
+   * THE CHANNELS AN IMPORT HELD A PLACE IN FOR SOMEBODY IT INVITED (`found-14-oct/clickup-import-rest-unimported`):
+   * the channels and direct messages they were in, theirs as they join — a member of each that is
+   * still this workspace's — and none held any longer.
+   */
+  async takePendingChannels(workspaceId: string, email: string, userId: string) {
+    const held = await this.db
+      .select({ channelId: importPendingChannelMembers.channelId })
+      .from(importPendingChannelMembers)
+      .innerJoin(chatChannels, eq(chatChannels.id, importPendingChannelMembers.channelId))
+      .where(
+        and(
+          eq(importPendingChannelMembers.workspaceId, workspaceId),
+          eq(importPendingChannelMembers.email, email.toLowerCase()),
+          eq(chatChannels.workspaceId, workspaceId),
+        ),
+      )
+    for (const h of held) await this.db.insert(chatChannelMembers).values({ channelId: h.channelId, userId }).onConflictDoNothing()
+    await this.db
+      .delete(importPendingChannelMembers)
+      .where(and(eq(importPendingChannelMembers.workspaceId, workspaceId), eq(importPendingChannelMembers.email, email.toLowerCase())))
+    return { joined: held.length }
   }
 }

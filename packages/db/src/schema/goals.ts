@@ -7,10 +7,32 @@ import { users } from './users'
 export type GoalStatus = 'on_track' | 'at_risk' | 'off_track' | 'completed'
 export type GoalKind = 'numeric' | 'percentage' | 'boolean'
 
+/**
+ * A GOAL FOLDER, AS CLICKUP FILES GOALS (`found-14-oct/clickup-import-rest-unimported`).
+ *
+ * ClickUp keeps Goals in Goal Folders, and its import brought their Goals with
+ * nowhere to put the Folder. A folder is the workspace's, named, in its order;
+ * a goal is in one folder or none. Deleting a folder leaves its goals, out of
+ * any folder. Who reads a goal is still the goal's own rule (`read-access.ts`):
+ * a folder holds goals, it shares none.
+ */
+export const goalFolders = pgTable('goal_folders', {
+  id:          uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  name:        text('name').notNull(),
+  position:    integer('position').notNull().default(0),
+  createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('idx_goal_folders_workspace').on(t.workspaceId, t.position),
+])
+
 export const goals = pgTable('goals', {
   id:             uuid('id').primaryKey().defaultRandom(),
   workspaceId:    uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   spaceId:        uuid('space_id').references(() => spaces.id, { onDelete: 'set null' }),
+  /** Its Goal Folder, if it is in one. */
+  folderId:       uuid('folder_id').references(() => goalFolders.id, { onDelete: 'set null' }),
   parentGoalId:   uuid('parent_goal_id').references((): AnyPgColumn => goals.id, { onDelete: 'cascade' }),
   ownerId:        uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
   title:          text('title').notNull(),
@@ -25,7 +47,9 @@ export const goals = pgTable('goals', {
   completedAt:    timestamp('completed_at', { withTimezone: true }),
   createdAt:      timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:      timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => [
+  index('idx_goals_folder').on(t.folderId),
+])
 
 export const goalUpdates = pgTable('goal_updates', {
   id:        uuid('id').primaryKey().defaultRandom(),

@@ -3,12 +3,16 @@ import { randomUUID } from 'node:crypto'
 import {
   chatChannelMembers,
   chatChannels,
+  chatMessageAttachments,
+  chatMessageReactions,
   chatMessages,
   clickupImportJobs,
   customFieldDefinitions,
+  goalFolders,
   goalKeyResults,
   goals,
   importPendingAssignees,
+  importPendingChannelMembers,
   importPendingTimeEntries,
   customFieldValues,
   labels,
@@ -23,6 +27,7 @@ import {
   taskComments,
   taskDependencies,
   taskLabelAssignments,
+  taskViews,
   tasks,
   timeEntries,
   users,
@@ -51,8 +56,9 @@ export type ImPerson = { key: string; name: string | null; email: string | null;
 export type ImComment = { author: ImPerson | null; text: string; at: Date | null }
 export type ImFileRef = { name: string; size: number | null; fetch: () => Promise<AppFile | null> }
 export type ImChecklist = { name: string; items: Array<{ name: string; done: boolean }> }
-export type ImFieldType = 'text' | 'number' | 'date' | 'checkbox' | 'url' | 'dropdown'
-export type ImFieldValue = { name: string; type: ImFieldType; value: string | number | boolean; options?: string[] }
+export type ImFieldType = 'text' | 'number' | 'date' | 'checkbox' | 'url' | 'dropdown' | 'files'
+/** A field's value on a task; a Files field's is its files (`files`), its `value` their names. */
+export type ImFieldValue = { name: string; type: ImFieldType; value: string | number | boolean; options?: string[]; files?: ImFileRef[] }
 export type ImStatus = { name: string; category: 'open' | 'in_progress' | 'closed' }
 export type ImPriority = 'urgent' | 'high' | 'normal' | 'low'
 /** Time tracked on a task: by whom, from when to when, how long in seconds, and whether it is billable. */
@@ -63,14 +69,55 @@ export type ImDocPage = { key: string; parent: string | null; title: string; mar
 export type ImDoc = { title: string; pages: ImDocPage[] }
 /** A target of a Goal: how far it is to go, how far it has gone, and whether it is done. */
 export type ImKeyResult = { name: string; unit: string | null; target: number; current: number; done: boolean; owner: ImPerson | null }
-export type ImGoal = { name: string; description: string | null; start: Date | null; due: Date | null; owner: ImPerson | null; percent: number; done: boolean; keyResults: ImKeyResult[] }
+/** A Goal; `folder`, the name of the Goal Folder it is in, if any. */
+export type ImGoal = { name: string; description: string | null; start: Date | null; due: Date | null; owner: ImPerson | null; percent: number; done: boolean; keyResults: ImKeyResult[]; folder?: string | null }
 /**
  * A Chat message: its author (none for the tool's own posts) and the name it was written under, its
  * thread's first message by ref, and its text in Markdown, each person it mentions held as a token
  * (`mentionToken(n)`) that the writer makes a mention of a member here, or their name.
  */
-export type ImChatMessage = { ref: string; parent: string | null; author: ImPerson | null; authorName: string; text: string; mentions: Array<{ person: ImPerson | null; name: string }>; at: Date }
-export type ImChannel = { name: string; description: string | null; topic: string | null; private: boolean; archived: boolean; members: ImPerson[]; messages: ImChatMessage[] }
+export type ImChatMessage = {
+  ref: string
+  parent: string | null
+  author: ImPerson | null
+  authorName: string
+  text: string
+  mentions: Array<{ person: ImPerson | null; name: string }>
+  at: Date
+  /** The files posted with it. */
+  files?: ImFileRef[]
+  /** Who reacted, and with what (an emoji's character, or its `:name:`). */
+  reactions?: Array<{ person: ImPerson | null; emoji: string }>
+}
+/**
+ * A Chat channel, or (`dm`) a direct message between its members. `place`, the tool's own Space,
+ * Folder or List it belongs to, by the ref its node has (`ImNode.ref`), when it is one of those.
+ */
+export type ImChannel = {
+  name: string
+  description: string | null
+  topic: string | null
+  private: boolean
+  archived: boolean
+  members: ImPerson[]
+  messages: ImChatMessage[]
+  dm?: boolean
+  place?: string | null
+}
+/**
+ * A saved view of a List: its type here, its name, and as much of its layout as a view here keeps —
+ * what it is grouped and sorted by, whether it is pinned, private to its maker, or protected.
+ */
+export type ImView = {
+  name: string
+  type: 'list' | 'board' | 'calendar' | 'gantt' | 'table' | 'team' | 'activity' | 'workload' | 'timeline' | 'mindmap' | 'map'
+  pinned: boolean
+  private: boolean
+  protected: boolean
+  owner: ImPerson | null
+  groupBy: 'status' | 'priority' | 'assignee' | null
+  sort: { field: 'title' | 'status' | 'priority' | 'due' | 'assignee' | 'created'; dir: 'asc' | 'desc' } | null
+}
 /** What a tool keeps for the whole account, not in one project: ClickUp's Workspace Docs, its Goals and its Chat; and what could not be read of it, in words. */
 export type ImExtras = { docs?: ImDoc[]; goals?: ImGoal[]; chat?: ImChannel[]; errors?: string[] }
 
@@ -104,13 +151,14 @@ export type ImTask = {
   time?: ImTime[]
   details?: () => Promise<{ comments: ImComment[]; files: ImFileRef[] }>
 }
-export type ImList = { name: string; description?: string | null; statuses: ImStatus[] | null; tasks: ImTask[] }
-export type ImFolder = { name: string; description?: string | null; lists: ImList[] }
+/** `ref`: the tool's own id of a List, Folder or Space, for what names it (a channel's `place`). */
+export type ImList = { name: string; description?: string | null; statuses: ImStatus[] | null; tasks: ImTask[]; ref?: string; views?: ImView[] }
+export type ImFolder = { name: string; description?: string | null; lists: ImList[]; ref?: string }
 /** What one chosen project becomes: a Folder, a List, or (Wrike's spaces, ClickUp's) a whole Space with its Docs; and what of it could not be read. */
 export type ImNode =
   | { kind: 'folder'; folder: ImFolder; errors?: string[] }
   | { kind: 'list'; list: ImList; errors?: string[] }
-  | { kind: 'space'; name: string; folders: ImFolder[]; lists: ImList[]; docs?: ImDoc[]; errors?: string[] }
+  | { kind: 'space'; name: string; folders: ImFolder[]; lists: ImList[]; docs?: ImDoc[]; errors?: string[]; ref?: string }
 
 /** A task with nothing but its title, the rest filled in by the caller. */
 export function imTask(ref: string, title: string, rest: Partial<ImTask> = {}): ImTask {
@@ -182,6 +230,17 @@ export type AppImportSummary = {
   chatRepliesImported?: number
   /** The Chat channels made, to open from the report. */
   channels?: Array<{ id: string; name: string }>
+  /** Direct messages brought, the reactions and files on Chat's messages, and the places in channels held for people the run invited. */
+  chatDmsImported?: number
+  chatReactionsImported?: number
+  chatReactionsSkipped?: number
+  chatFilesImported?: number
+  chatMembersPending?: number
+  /** A List's saved views, made here; and those of a kind no List here has. */
+  viewsImported?: number
+  viewsSkipped?: number
+  /** Goal Folders, made. */
+  goalFoldersImported?: number
 }
 
 export const emptySummary = (source: string, notImported: string[] = []): AppImportSummary => ({
@@ -286,7 +345,12 @@ export function placeStatus(rows: StatusRow[], status: string | null, done: bool
 export class TreeWriter {
   readonly summary: AppImportSummary
   private readonly madeGoals: string[] = []
+  private readonly madeGoalFolders: string[] = []
   private readonly madeChannels: string[] = []
+  /** Messages written into a direct message that was here already: the run's undo takes them, not the conversation. */
+  private readonly madeMessages: string[] = []
+  /** The Space each of the tool's Spaces, Folders and Lists went into, by its ref: where a channel of one of them goes. */
+  private readonly places = new Map<string, string>()
   private readonly madeSpaces: string[] = []
   private readonly madeProjects: string[] = []
   private readonly madeLists: string[] = []
@@ -335,6 +399,7 @@ export class TreeWriter {
     if (n.kind === 'space') {
       const place = this.target.spaceId ? await this.existing() : await this.newSpace(n.name)
       where = place.spaceId
+      if (n.ref) this.places.set(n.ref, place.spaceId)
       for (const f of n.folders) {
         const r = await this.folder(place.spaceId, f)
         lists += r.lists
@@ -370,12 +435,24 @@ export class TreeWriter {
    * workspace's, as ClickUp's are the Workspace's, not a Space's.
    */
   async writeGoals(all: ImGoal[]) {
+    // Each Goal Folder once, in the order its first Goal names it, as ClickUp lists them.
+    const folderIds = new Map<string, string>()
+    for (const name of [...new Set(all.map((g) => g.folder?.trim()).filter((f): f is string => !!f))]) {
+      const [row] = await this.db
+        .insert(goalFolders)
+        .values({ workspaceId: this.target.workspaceId, name: name.slice(0, 200), position: folderIds.size, createdById: this.target.importer.id })
+        .returning({ id: goalFolders.id })
+      folderIds.set(name, row.id)
+      this.madeGoalFolders.push(row.id)
+      this.summary.goalFoldersImported = (this.summary.goalFoldersImported ?? 0) + 1
+    }
     for (const g of all) {
       const percent = Math.max(0, Math.min(100, Math.round(g.percent * 100) / 100))
       const [row] = await this.db
         .insert(goals)
         .values({
           workspaceId: this.target.workspaceId,
+          folderId: g.folder?.trim() ? folderIds.get(g.folder.trim()) ?? null : null,
           ownerId: this.whom(g.owner),
           title: g.name.trim().slice(0, 500) || 'Goal',
           description: g.description?.trim() ? storable(g.description.trim()) : null,
@@ -411,23 +488,31 @@ export class TreeWriter {
    * THE TOOL'S CHAT, AS CHAT HERE (`found-14-oct/clickup-chat-unimported`), as the Slack import
    * writes a channel (`SlackImportService.run`): each a channel of the workspace, under its own
    * name — or with the tool's name after it when the workspace has one so called — private when it
-   * was, archived when it was. Its members are the importer and every member here it had or heard
-   * from. Each message is at its moment, under its author when they are a member here, else under
-   * the importer, drawn with the name it was written under (`imported_author`). A reply is in its
-   * thread, and a mention of a member here is a mention of them, of anyone else their name.
+   * was, archived when it was; in the Space its Space, Folder or List came into, when it belonged to
+   * one this run brought (`found-14-oct/clickup-import-rest-unimported`). Its members are the
+   * importer and every member here it had or heard from; somebody the run invited has their place
+   * held until they join (`import_pending_channel_members`). Each message is at its moment, under its
+   * author when they are a member here, else under the importer, drawn with the name it was written
+   * under (`imported_author`), with its files and the reactions of members here. A reply is in its
+   * thread, and a mention of a member here is a mention of them, of anyone else their name. A direct
+   * message is one here, between the same people (`writeDm`).
    */
   async writeChat(all: ImChannel[]) {
     const taken = new Set(
       (await this.db.select({ name: chatChannels.name }).from(chatChannels).where(eq(chatChannels.workspaceId, this.target.workspaceId))).map((r) => r.name.toLowerCase()),
     )
     for (const c of all) {
+      if (c.dm) {
+        await this.writeDm(c)
+        continue
+      }
       const name = freeChannelName(c.name, taken, this.target.source)
       taken.add(name)
       const [channel] = await this.db
         .insert(chatChannels)
         .values({
           workspaceId: this.target.workspaceId,
-          spaceId: null,
+          spaceId: c.place ? (this.places.get(c.place) ?? null) : null,
           name,
           description: c.description?.trim() ? storable(c.description.trim()) : null,
           topic: c.topic?.trim() ? c.topic.trim().slice(0, 250) : null,
@@ -438,8 +523,9 @@ export class TreeWriter {
         .returning({ id: chatChannels.id })
       this.madeChannels.push(channel.id)
       this.summary.chatChannelsImported = (this.summary.chatChannelsImported ?? 0) + 1
+      const people = [...c.members, ...c.messages.map((m) => m.author)]
       const memberIds = new Set<string>([this.target.importer.id])
-      for (const p of [...c.members, ...c.messages.map((m) => m.author)]) {
+      for (const p of people) {
         const id = this.whom(p)
         if (id) memberIds.add(id)
       }
@@ -447,36 +533,203 @@ export class TreeWriter {
         .insert(chatChannelMembers)
         .values([...memberIds].map((userId) => ({ channelId: channel.id, userId })))
         .onConflictDoNothing()
-      // Each message its id before it is written, so a reply names its thread's first message.
-      const idOf = new Map(c.messages.map((m) => [m.ref, randomUUID()]))
-      const rows = c.messages.map((m) => {
-        const author = this.whom(m.author)
-        const mentioned = new Set<string>()
-        let body = m.text
-        m.mentions.forEach((x, n) => {
-          const member = this.whom(x.person)
-          if (member) mentioned.add(member)
-          body = body.split(mentionToken(n)).join(member ? `<@${member}>` : `@${x.name}`)
-        })
-        const parent = m.parent ? idOf.get(m.parent) ?? null : null
-        return {
-          id: idOf.get(m.ref)!,
-          channelId: channel.id,
-          authorId: author ?? this.target.importer.id,
-          importedAuthor: author ? null : m.authorName.slice(0, 200),
-          parentMessageId: parent,
-          body: storable(body.trim() || '_(a file, left in the tool)_'),
-          mentions: mentioned.size ? [...mentioned].map((userId) => ({ userId })) : null,
-          createdAt: m.at,
-        }
-      })
-      // A thread's first message before its replies, which name it.
-      for (const group of [rows.filter((r) => !r.parentMessageId), rows.filter((r) => r.parentMessageId)]) {
-        for (let k = 0; k < group.length; k += 500) await this.db.insert(chatMessages).values(group.slice(k, k + 500))
-      }
-      this.summary.chatMessagesImported = (this.summary.chatMessagesImported ?? 0) + rows.length
-      this.summary.chatRepliesImported = (this.summary.chatRepliesImported ?? 0) + rows.filter((r) => r.parentMessageId).length
+      await this.holdPlaces(channel.id, people)
+      await this.writeMessages(channel.id, c.messages)
       this.summary.channels = [...(this.summary.channels ?? []), { id: channel.id, name }].slice(0, MAX_REPORTED)
+    }
+  }
+
+  /**
+   * A direct message, between the same people here: those who are members, and those the run invited,
+   * whose place waits for them. Its history joins the conversation they have here already, when all
+   * of them are here and have one; else it is a new one. One between fewer than two of them — the
+   * rest neither here nor invited — is left, and the report says how many were.
+   */
+  private async writeDm(c: ImChannel) {
+    const people = (c.members.length ? c.members : c.messages.map((m) => m.author)).filter((p): p is ImPerson => !!p)
+    const here = new Set<string>()
+    const held = new Set<string>()
+    for (const p of people) {
+      const id = this.whom(p)
+      if (id) here.add(id)
+      else if (this.invited.has(p.key)) held.add(this.invited.get(p.key)!)
+    }
+    if (!here.size || here.size + held.size < 2) {
+      this.summary.errors.push(`A direct message with nobody else here or invited was left (${c.messages.length} messages)`)
+      return
+    }
+    let channelId = held.size ? null : await this.existingDm([...here])
+    const reused = !!channelId
+    if (!channelId) {
+      const ids = [...here]
+      const [row] = await this.db
+        .insert(chatChannels)
+        .values({
+          workspaceId: this.target.workspaceId,
+          name: here.size + held.size > 2 ? `dm-group-${ids[0].slice(0, 8)}-${here.size + held.size}` : `dm-${ids[0].slice(0, 8)}-${(ids[1] ?? 'invited').slice(0, 8)}`,
+          isPrivate: true,
+          isDm: true,
+          createdById: here.has(this.target.importer.id) ? this.target.importer.id : ids[0],
+        })
+        .returning({ id: chatChannels.id })
+      channelId = row.id
+      this.madeChannels.push(row.id)
+      await this.db
+        .insert(chatChannelMembers)
+        .values(ids.map((userId) => ({ channelId: row.id, userId })))
+        .onConflictDoNothing()
+    }
+    await this.holdPlaces(channelId, people)
+    const written = await this.writeMessages(channelId, c.messages)
+    if (reused) this.madeMessages.push(...written)
+    this.summary.chatDmsImported = (this.summary.chatDmsImported ?? 0) + 1
+  }
+
+  /** The direct message these members, and nobody else, have here already. */
+  private async existingDm(userIds: string[]): Promise<string | null> {
+    if (userIds.length < 2) return null
+    const rows = (await this.db.execute(sql`
+      select m.channel_id as id from ${chatChannelMembers} m
+        join ${chatChannels} c on c.id = m.channel_id
+       where c.workspace_id = ${this.target.workspaceId} and c.is_dm and c.archived_at is null
+       group by m.channel_id
+      having count(*) = ${userIds.length}
+         and bool_and(m.user_id in (${sql.join(userIds.map((id) => sql`${id}::uuid`), sql`, `)}))
+       limit 1
+    `)) as unknown as Array<{ id: string }>
+    return rows[0]?.id ?? null
+  }
+
+  /** A place in the channel for each person the run invited, made theirs when they accept. */
+  private async holdPlaces(channelId: string, people: Array<ImPerson | null>) {
+    const emails = new Set<string>()
+    for (const p of people) {
+      if (!p || this.whom(p)) continue
+      const email = this.invited.get(p.key)
+      if (email) emails.add(email)
+    }
+    for (const email of emails) {
+      await this.db
+        .insert(importPendingChannelMembers)
+        .values({ workspaceId: this.target.workspaceId, email, channelId, jobId: this.target.jobId })
+        .onConflictDoNothing()
+      this.summary.chatMembersPending = (this.summary.chatMembersPending ?? 0) + 1
+    }
+  }
+
+  /** A channel's messages, threads after their first message; their files and reactions. The ids written. */
+  private async writeMessages(channelId: string, all: ImChatMessage[]): Promise<string[]> {
+    // Each message its id before it is written, so a reply names its thread's first message.
+    const idOf = new Map(all.map((m) => [m.ref, randomUUID()]))
+    const filed = !!this.r2?.configured
+    const rows = all.map((m) => {
+      const author = this.whom(m.author)
+      const mentioned = new Set<string>()
+      let body = m.text
+      m.mentions.forEach((x, n) => {
+        const member = this.whom(x.person)
+        if (member) mentioned.add(member)
+        body = body.split(mentionToken(n)).join(member ? `<@${member}>` : `@${x.name}`)
+      })
+      const parent = m.parent ? idOf.get(m.parent) ?? null : null
+      // A message that was only a file holds the file here; where nothing can hold one, it says one was left.
+      const blank = filed && m.files?.length ? '' : '_(a file, left in the tool)_'
+      return {
+        id: idOf.get(m.ref)!,
+        channelId,
+        authorId: author ?? this.target.importer.id,
+        importedAuthor: author ? null : m.authorName.slice(0, 200),
+        parentMessageId: parent,
+        body: storable(body.trim() || blank),
+        mentions: mentioned.size ? [...mentioned].map((userId) => ({ userId })) : null,
+        createdAt: m.at,
+      }
+    })
+    // A thread's first message before its replies, which name it.
+    for (const group of [rows.filter((r) => !r.parentMessageId), rows.filter((r) => r.parentMessageId)]) {
+      for (let k = 0; k < group.length; k += 500) await this.db.insert(chatMessages).values(group.slice(k, k + 500))
+    }
+    this.summary.chatMessagesImported = (this.summary.chatMessagesImported ?? 0) + rows.length
+    this.summary.chatRepliesImported = (this.summary.chatRepliesImported ?? 0) + rows.filter((r) => r.parentMessageId).length
+    const authorOf = new Map(rows.map((r) => [r.id, r.authorId]))
+    for (const m of all) {
+      const messageId = idOf.get(m.ref)!
+      for (const f of m.files ?? []) await this.chatFile(channelId, messageId, authorOf.get(messageId)!, f)
+    }
+    // Who reacted, when they are members here; each reaction once.
+    const reactions: Array<{ messageId: string; userId: string; emoji: string }> = []
+    const seen = new Set<string>()
+    for (const m of all) {
+      for (const r of m.reactions ?? []) {
+        const userId = this.whom(r.person)
+        const emoji = r.emoji.trim().slice(0, 64)
+        if (!userId || !emoji) {
+          this.summary.chatReactionsSkipped = (this.summary.chatReactionsSkipped ?? 0) + 1
+          continue
+        }
+        const key = `${m.ref}|${userId}|${emoji}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        reactions.push({ messageId: idOf.get(m.ref)!, userId, emoji })
+      }
+    }
+    for (let k = 0; k < reactions.length; k += 500) await this.db.insert(chatMessageReactions).values(reactions.slice(k, k + 500))
+    this.summary.chatReactionsImported = (this.summary.chatReactionsImported ?? 0) + reactions.length
+    return rows.map((r) => r.id)
+  }
+
+  /** A file posted in Chat, into the store beside the channel's own, when the store is set up. */
+  private async chatFile(channelId: string, messageId: string, uploadedById: string, f: ImFileRef) {
+    if (!this.r2?.configured) {
+      this.summary.attachmentsSkipped++
+      this.noStore()
+      return
+    }
+    const got = await f.fetch().catch(() => null)
+    if (!got) {
+      this.summary.attachmentsSkipped++
+      this.summary.errors.push(`A file posted in Chat, "${f.name}", could not be read from ${this.target.label}, or is larger than an import takes`)
+      return
+    }
+    const fileName = f.name.trim().slice(0, 255) || 'file'
+    const key = `chat/${channelId}/attachments/${Date.now()}-${randomUUID().slice(0, 8)}-${safeFileName(fileName, 'file')}`
+    await this.r2.putObject(key, got.buffer, got.contentType, { source: `${this.target.source}-import` })
+    await this.db.insert(chatMessageAttachments).values({
+      channelId,
+      messageId,
+      fileName,
+      contentType: got.contentType,
+      sizeBytes: got.buffer.length,
+      storageKey: key,
+      uploadedById,
+    })
+    this.summary.chatFilesImported = (this.summary.chatFilesImported ?? 0) + 1
+  }
+
+  /**
+   * A List's saved views, as views of the List here: each of a kind a List here has, under its name,
+   * grouped and sorted as it was, pinned, private to whoever made it or protected as it was; the first
+   * the List's default. A kind no List here has — a Doc, a Form, an Embed — is counted, not made.
+   */
+  private async views(listId: string, all: ImView[]) {
+    let position = 0
+    for (const v of all) {
+      const owner = this.whom(v.owner) ?? this.target.importer.id
+      const config: Record<string, unknown> = {}
+      if (v.groupBy) config.groupBy = v.groupBy
+      if (v.sort) config.sort = v.sort
+      await this.db.insert(taskViews).values({
+        listId,
+        createdById: owner,
+        name: v.name.trim().slice(0, 200) || 'View',
+        type: v.type,
+        isDefault: position === 0,
+        isPinned: v.pinned,
+        visibility: v.private ? 'private' : v.protected ? 'protected' : 'everyone',
+        position: position++,
+        config,
+      })
+      this.summary.viewsImported = (this.summary.viewsImported ?? 0) + 1
     }
   }
 
@@ -509,7 +762,9 @@ export class TreeWriter {
   async fail(e: unknown) {
     try {
       if (this.madeChannels.length) await this.db.delete(chatChannels).where(inArray(chatChannels.id, this.madeChannels))
+      for (let k = 0; k < this.madeMessages.length; k += 500) await this.db.delete(chatMessages).where(inArray(chatMessages.id, this.madeMessages.slice(k, k + 500)))
       if (this.madeGoals.length) await this.db.delete(goals).where(inArray(goals.id, this.madeGoals))
+      if (this.madeGoalFolders.length) await this.db.delete(goalFolders).where(inArray(goalFolders.id, this.madeGoalFolders))
       if (this.madeLists.length) await this.db.delete(lists).where(inArray(lists.id, this.madeLists))
       if (this.madeProjects.length) await this.db.delete(projects).where(inArray(projects.id, this.madeProjects))
       if (this.madeSpaces.length) await this.db.delete(spaces).where(inArray(spaces.id, this.madeSpaces))
@@ -583,6 +838,7 @@ export class TreeWriter {
       .returning({ id: projects.id })
     this.madeProjects.push(row.id)
     this.summary.foldersCreated++
+    if (f.ref) this.places.set(f.ref, spaceId)
     if (this.summary.made.folders.length < MAX_REPORTED) this.summary.made.folders.push({ id: row.id, name: f.name })
     let made = 0
     for (const [i, l] of f.lists.entries()) made += await this.list(spaceId, row.id, l, i)
@@ -603,6 +859,8 @@ export class TreeWriter {
     const rows = statusRows(l.statuses)
     await this.db.insert(listStatuses).values(rows.map((r) => ({ listId: row.id, ...r }))).onConflictDoNothing()
     if (l.statuses?.length) this.summary.statusesCreated += rows.length
+    if (l.ref) this.places.set(l.ref, spaceId)
+    if (l.views?.length) await this.views(row.id, l.views)
     let made = 0
     for (const [n, t] of l.tasks.entries()) {
       made += await this.task(row.id, containerId, rows, t, n, null, 0)
@@ -823,7 +1081,8 @@ export class TreeWriter {
           this.fieldDefs.set(key, def)
           this.summary.fieldsCreated++
         }
-        const v = valueFor(def.type, f.value)
+        // A Files field holds its files, each one of the task's files too, as a Files field here does.
+        const v = def.type === 'files' ? await this.fieldFiles(taskId, title, f.files ?? []) : valueFor(def.type, f.value)
         if (v === null) continue
         await this.db
           .insert(customFieldValues)
@@ -834,6 +1093,16 @@ export class TreeWriter {
         this.summary.errors.push(`Field "${name}" on "${title}": ${e?.message ?? 'unknown error'}`)
       }
     }
+  }
+
+  /** A Files field's files, each brought as the task's file; their ids, or none when none came. */
+  private async fieldFiles(taskId: string, title: string, refs: ImFileRef[]): Promise<string[] | null> {
+    const ids: string[] = []
+    for (const r of refs) {
+      const id = await this.file(taskId, title, r)
+      if (id) ids.push(id)
+    }
+    return ids.length ? ids : null
   }
 
   /**
@@ -857,33 +1126,41 @@ export class TreeWriter {
   }
 
   /** A file into the store, beside the task's own, when the store is set up; said when it is not. */
-  private async file(taskId: string, title: string, f: ImFileRef) {
+  private async file(taskId: string, title: string, f: ImFileRef): Promise<string | null> {
     if (!this.r2?.configured) {
       this.summary.attachmentsSkipped++
-      if (!this.noStoreSaid) {
-        this.noStoreSaid = true
-        this.summary.errors.push(`Files were not imported: file storage is not configured on this server`)
-      }
-      return
+      this.noStore()
+      return null
     }
     const got = await f.fetch().catch(() => null)
     if (!got) {
       this.summary.attachmentsSkipped++
       this.summary.errors.push(`"${title}": the file "${f.name}" could not be read from ${this.target.label}, or is larger than an import takes`)
-      return
+      return null
     }
     const fileName = f.name.trim().slice(0, 255) || 'file'
-    const key = `workspaces/${this.target.workspaceId}/tasks/${taskId}/attachments/${Date.now()}-${safeFileName(fileName, 'file')}`
+    const key = `workspaces/${this.target.workspaceId}/tasks/${taskId}/attachments/${Date.now()}-${randomUUID().slice(0, 8)}-${safeFileName(fileName, 'file')}`
     await this.r2.putObject(key, got.buffer, got.contentType, { source: `${this.target.source}-import` })
-    await this.db.insert(taskAttachments).values({
-      taskId,
-      uploadedById: this.target.importer.id,
-      fileName,
-      contentType: got.contentType,
-      sizeBytes: got.buffer.length,
-      storageKey: key,
-    })
+    const [row] = await this.db
+      .insert(taskAttachments)
+      .values({
+        taskId,
+        uploadedById: this.target.importer.id,
+        fileName,
+        contentType: got.contentType,
+        sizeBytes: got.buffer.length,
+        storageKey: key,
+      })
+      .returning({ id: taskAttachments.id })
     this.summary.attachmentsImported++
+    return row.id
+  }
+
+  /** Said once a run: the server keeps no files, so none came in. */
+  private noStore() {
+    if (this.noStoreSaid) return
+    this.noStoreSaid = true
+    this.summary.errors.push(`Files were not imported: file storage is not configured on this server`)
   }
 }
 

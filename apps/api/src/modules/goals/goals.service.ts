@@ -1,10 +1,11 @@
 import { Injectable, Inject, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common'
 import { eq, and, desc, asc, isNull } from 'drizzle-orm'
-import { goals, goalUpdates, goalKeyResults, spaces, users } from '@rundesk/db'
+import { goalFolders, goals, goalUpdates, goalKeyResults, spaces, users, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import type { GoalKind, GoalStatus } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { isUuid } from '../../common/validation/uuid'
+import { isAdminRole } from '../../common/permissions/workspace-roles'
 import {
   goalReach,
   goalVisibilityFilter,
@@ -48,6 +49,7 @@ export class GoalsService {
         id: goals.id,
         workspaceId: goals.workspaceId,
         spaceId: goals.spaceId,
+        folderId: goals.folderId,
         parentGoalId: goals.parentGoalId,
         ownerId: goals.ownerId,
         ownerName: users.displayName,
@@ -74,6 +76,7 @@ export class GoalsService {
     data: {
       workspaceId: string
       spaceId?: string | null
+      folderId?: string | null
       parentGoalId?: string | null
       ownerId?: string | null
       title: string
@@ -104,12 +107,14 @@ export class GoalsService {
     const at = { workspaceId: data.workspaceId, spaceId, spaceVisibility: await this.spaceVisibilityIn(data.workspaceId, spaceId) }
     if (spaceId && !(await mayReadGoalAt(this.db, at, actor))) throw new NotFoundException('Space not found')
     if (data.ownerId) await this.assertOwnerCanRead(at, data.ownerId)
+    if (data.folderId) await this.folderIn(data.workspaceId, data.folderId)
 
     const [row] = await this.db
       .insert(goals)
       .values({
         workspaceId: data.workspaceId,
         spaceId,
+        folderId: data.folderId ?? null,
         parentGoalId: data.parentGoalId ?? null,
         ownerId: data.ownerId ?? null,
         title: data.title,
@@ -139,6 +144,7 @@ export class GoalsService {
       targetValue?: number
       status?: GoalStatus
       ownerId?: string | null
+      folderId?: string | null
       startDate?: Date | null
       dueDate?: Date | null
     },
@@ -167,6 +173,10 @@ export class GoalsService {
     if (patch.ownerId !== undefined) {
       if (patch.ownerId !== null) await this.assertOwnerCanRead(goal, patch.ownerId)
       set.ownerId = patch.ownerId
+    }
+    if (patch.folderId !== undefined) {
+      if (patch.folderId !== null) await this.folderIn(goal.workspaceId, patch.folderId)
+      set.folderId = patch.folderId
     }
 
     if (typeof patch.currentValue === 'number' && patch.currentValue !== existing.currentValue) {
@@ -224,6 +234,7 @@ export class GoalsService {
         id: goals.id,
         workspaceId: goals.workspaceId,
         spaceId: goals.spaceId,
+        folderId: goals.folderId,
         parentGoalId: goals.parentGoalId,
         ownerId: goals.ownerId,
         owner: { id: users.id, displayName: users.displayName, avatarUrl: users.avatarUrl },
@@ -351,6 +362,88 @@ export class GoalsService {
   }
 
   // ─── Who may ───────────────────────────────────────────────────────────────
+
+  // ─── Goal Folders (`found-14-oct/clickup-import-rest-unimported`) ──────────
+  /*
+   * ClickUp files Goals in Goal Folders. A folder is the workspace's: every member who reads goals
+   * sees its folders, in their order; a guest, who reads no goal, sees none and makes none. Its maker
+   * and the workspace's admins rename and delete it; deleting it leaves its goals, out of
+   * any folder. A folder shares nothing: who reads a goal in it is the goal's own rule.
+   */
+  async listFolders(workspaceId: string, actor: ReadActor) {
+    if ((await goalReach(this.db, workspaceId, actor)) === 'none') return []
+    return this.db
+      .select({ id: goalFolders.id, name: goalFolders.name, position: goalFolders.position, createdById: goalFolders.createdById })
+      .from(goalFolders)
+      .where(eq(goalFolders.workspaceId, workspaceId))
+      .orderBy(asc(goalFolders.position), asc(goalFolders.createdAt))
+  }
+
+  async createFolder(workspaceId: string, name: unknown, actor: ReadActor) {
+    if ((await goalReach(this.db, workspaceId, actor)) === 'none') throw new ForbiddenException('Guests cannot make Goal Folders')
+    const named = this.folderName(name)
+    const existing = await this.db.select({ id: goalFolders.id }).from(goalFolders).where(eq(goalFolders.workspaceId, workspaceId))
+    const [row] = await this.db
+      .insert(goalFolders)
+      .values({ workspaceId, name: named, position: existing.length, createdById: actor.id })
+      .returning({ id: goalFolders.id, name: goalFolders.name, position: goalFolders.position, createdById: goalFolders.createdById })
+    return row
+  }
+
+  async updateFolder(workspaceId: string, folderId: string, patch: { name?: unknown; position?: unknown }, actor: ReadActor) {
+    const folder = await this.folderManagedBy(workspaceId, folderId, actor)
+    const set: Record<string, unknown> = {}
+    if (patch?.name !== undefined) set.name = this.folderName(patch.name)
+    if (patch?.position !== undefined) {
+      if (typeof patch.position !== 'number' || !Number.isInteger(patch.position) || patch.position < 0) throw new BadRequestException('position must be a whole number')
+      set.position = patch.position
+    }
+    if (!Object.keys(set).length) return folder
+    const [row] = await this.db
+      .update(goalFolders)
+      .set(set)
+      .where(eq(goalFolders.id, folder.id))
+      .returning({ id: goalFolders.id, name: goalFolders.name, position: goalFolders.position, createdById: goalFolders.createdById })
+    return row
+  }
+
+  async deleteFolder(workspaceId: string, folderId: string, actor: ReadActor) {
+    const folder = await this.folderManagedBy(workspaceId, folderId, actor)
+    // Its goals stay, out of any folder (the foreign key's `set null`).
+    await this.db.delete(goalFolders).where(eq(goalFolders.id, folder.id))
+    return { ok: true }
+  }
+
+  private folderName(name: unknown): string {
+    if (typeof name !== 'string' || !name.trim()) throw new BadRequestException('A Goal Folder needs a name')
+    return name.trim().slice(0, 200)
+  }
+
+  /** A folder of this workspace, or not-found. */
+  private async folderIn(workspaceId: string, folderId: string) {
+    if (!isUuid(folderId)) throw new NotFoundException('Goal Folder not found')
+    const [folder] = await this.db
+      .select({ id: goalFolders.id, name: goalFolders.name, position: goalFolders.position, createdById: goalFolders.createdById })
+      .from(goalFolders)
+      .where(and(eq(goalFolders.id, folderId), eq(goalFolders.workspaceId, workspaceId)))
+      .limit(1)
+    if (!folder) throw new NotFoundException('Goal Folder not found')
+    return folder
+  }
+
+  /** A folder its caller may rename or delete: its maker's, or any to the workspace's admins. */
+  private async folderManagedBy(workspaceId: string, folderId: string, actor: ReadActor) {
+    if ((await goalReach(this.db, workspaceId, actor)) === 'none') throw new NotFoundException('Goal Folder not found')
+    const folder = await this.folderIn(workspaceId, folderId)
+    if (folder.createdById === actor.id || actor.role === 'super_admin') return folder
+    const [member] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actor.id)))
+      .limit(1)
+    if (isAdminRole(member?.role)) return folder
+    throw new ForbiddenException('Only the folder’s maker and the workspace’s admins change a Goal Folder')
+  }
 
   private async goalOpenTo(goalId: string, actor: ReadActor) {
     const goal = await readableGoal(this.db, goalId, actor)
