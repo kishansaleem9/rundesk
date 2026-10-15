@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, Loader2 } from 'lucide-react'
+import { ListSkeleton } from './loading-skeletons'
 import { Button, Input, cn, toast } from '@rundesk/ui'
 import { api } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
@@ -93,7 +94,8 @@ export function NotetakerPanel({ workspaceId }: { workspaceId: string }) {
         <h2 className="text-sm font-medium">{t('notetaker.title')}</h2>
       </div>
       {state === 'loading' ? (
-        <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Loader2 className="h-3.5 w-3.5 animate-spin" />{t('common.loading')}</p>
+        // A waiting state drawn as the shapes it will fill, as every surface here draws one (`loading-states`).
+        <ListSkeleton rows={2} />
       ) : state === 'failed' ? (
         <p className="text-xs text-destructive" data-testid="notetaker-failed">{t('notetaker.loadFailed')}</p>
       ) : state === 'unset' ? (

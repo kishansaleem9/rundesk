@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { Folder, List as ListIcon, Loader2 } from 'lucide-react'
+import { Folder, List as ListIcon } from 'lucide-react'
+import { ListSkeleton } from '../loading-skeletons'
 import { api } from '../../lib/api'
 import { useTranslation } from '../../lib/i18n'
 
@@ -71,8 +72,9 @@ export function SpaceChannelViews({ workspaceId, spaceId }: { workspaceId: strin
 
   if (tree.isLoading) {
     return (
-      <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground" data-testid="chat-space-views-loading">
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t('common.loading')}
+      // A waiting state drawn as the shapes it will fill, as every surface here draws one (`loading-states`).
+      <div className="flex-1 px-5 py-4" data-testid="chat-space-views-loading">
+        <ListSkeleton rows={3} />
       </div>
     )
   }
