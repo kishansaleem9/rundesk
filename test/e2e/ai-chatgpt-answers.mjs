@@ -202,7 +202,7 @@ try {
   const gemini = await turn(auth.accessToken, { workspaceId: WS, tier: 'gemini', messages: [{ role: 'user', content: `Gemini please ${TAG}` }] })
   const asksAfter = (await asked()).length
   chk(
-    asksAfter === asksBefore && (claudeSetUp ? gemini.status < 300 && gemini.done : gemini.status === 503),
+    asksAfter === asksBefore && (claudeSetUp ? gemini.status >= 200 && gemini.status < 300 && gemini.done : gemini.status === 503),
     'a turn asking for Gemini, which has no key here, never reaches OpenAI’s address: Claude answers it, or nobody where Claude has no key either',
     JSON.stringify({ status: gemini.status, claudeSetUp, toOpenAi: asksAfter - asksBefore }),
   )
