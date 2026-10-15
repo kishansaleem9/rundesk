@@ -197,11 +197,11 @@ function followReasonKey(notif: Notification): TranslationKey | null {
       return 'inbox.why.docThread'
     case 'approval_needed':
       return 'inbox.why.approver'
-    // Addressed to you personally rather than through a subscription.
+    // Addressed to you personally rather than through a subscription: the AI
+    // Notetaker's notes of a meeting it joined for you among them (`commit-log/log-39863ff-1`).
     case 'ai_briefing':
     case 'workload_alert':
     case 'test_notification':
-    // The AI Notetaker's notes of a meeting it joined for you (`commit-log/log-39863ff-1`).
     case 'meeting_notes_ready':
       return 'inbox.why.directToYou'
     case 'billing_past_due':

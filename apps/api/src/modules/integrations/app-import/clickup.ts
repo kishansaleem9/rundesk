@@ -1049,7 +1049,7 @@ function fileNameOf(label: string, url: string): string {
 export function cuEmoji(name: string): string {
   const bare = name.trim().replace(/^:|:$/g, '')
   // A reaction already kept as its character is that character.
-  if (/[^\x00-\x7f]/.test(bare)) return bare
+  if (/[\u0080-\uffff]/.test(bare)) return bare
   return slackEmoji(bare.toLowerCase())
 }
 
