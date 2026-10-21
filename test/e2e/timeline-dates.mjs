@@ -445,6 +445,13 @@ try {
       `binning answered ${said(binned)}; the PATCH answered ${refused.status ?? 'nothing'} saying ${JSON.stringify(refused.words)}; the toasts read ${JSON.stringify(await toasts(page))}; the task ${JSON.stringify(binnedBefore)} → ${JSON.stringify(binnedAfter)}`,
     )
 
+    /*
+     * The refusal reads the rows again, which takes the binned bar away and moves each row under it up
+     * one. The next press waits for that: read between the bar's box and the press, the press landed
+     * where the shared bar had been and panned the chart (rehearsal 22, late in the full job).
+     */
+    await waitUntil(async () => (await bar(page, binnedTask).count()) === 0, { timeoutMs: 10_000 })
+
     // The member's own share: a task given them at Edit, in the list they may only view.
     const sharedOffer = await offer(sharedTask)
     const sharedBefore = await rowOf(sharedTask)
