@@ -2381,7 +2381,9 @@ export class TasksService {
           visFilter,
         ),
       )
-      .orderBy(asc(tasks.startDate), asc(tasks.dueDate))
+      // Same-dated tasks in the order they were made: by their dates alone a read again
+      // could swap two rows under the pointer (`found-21-oct/timeline-same-dated-rows-swap`).
+      .orderBy(asc(tasks.startDate), asc(tasks.dueDate), asc(tasks.createdAt), asc(tasks.id))
 
     const mayEdit = opts.actor ? await this.timelineEditable(workspaceId, rows, opts.actor.id) : null
     /*

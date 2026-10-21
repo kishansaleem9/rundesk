@@ -446,9 +446,10 @@ try {
     )
 
     /*
-     * The refusal reads the rows again, which takes the binned bar away and moves each row under it up
-     * one. The next press waits for that: read between the bar's box and the press, the press landed
-     * where the shared bar had been and panned the chart (rehearsal 22, late in the full job).
+     * The refusal reads the rows again, and that read takes the binned bar away. The next bar is
+     * measured once it has, so it is measured where it is drawn: in rehearsal 22 the read was drawn
+     * between the shared bar's box and the press, and the rows of the same dates came back in the other
+     * order, so the press fell on the view-only bar (`found-21-oct/timeline-same-dated-rows-swap`).
      */
     await waitUntil(async () => (await bar(page, binnedTask).count()) === 0, { timeoutMs: 10_000 })
 
