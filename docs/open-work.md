@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 580 items: 0 open · 0 partly fixed · 573 closed, and 7 items the owner settled, not counted as defects; counted from this file's headings on 14 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 581 items: 0 open · 0 partly fixed · 574 closed, and 7 items the owner settled, not counted as defects; counted from this file's headings on 21 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 116, each reproduced
+## Found by the triage, 5 October, and since — 117, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10885,6 +10885,23 @@ Measured:
 Measured:
 - `ccdv-8` to `ccdv-11` each redden what they name.
 - `a39-dm-tabs` 19 of 19 on lane 4; `a39-2`, re-aimed to the reset's new shape, reddens it.
+
+### `found-21-oct/timeline-same-dated-rows-swap` — **closed** (product, small; found by rehearsal 22) · reproduced 21 October
+
+**The workspace timeline drew tasks of the same dates in no fixed order, so a read again could swap two rows under the pointer**
+
+*Evidence, 21 October:* rehearsal 22 at `1b3c4a4`, the only failure of its 400 steps (verify 81, browser 6, postgres 313): "Timeline drags move whole days and keep the time", 16 of 17, "the member's shared task {"mayEdit":"true","handles":2}, dragged true: {"start":"2026-10-07T09:00:00.000Z",…} → {"start":"2026-10-07T09:00:00.000Z",…}". The API sent no "was updated" mail for that task, as it does when the member's change is saved, so no change reached it. The suite passed 6 of 6 alone and 6 of 6 after the job's first 94 steps, so it was traced there instead (every mousedown, PATCH and timeline read):
+- `getTimelineForWorkspace` ordered by start and due date alone. The member's view-only task and the task shared with them have the same dates.
+- They were drawn in one order on one run and the other on the next, and swapped between the first read and the read again that the refused drag of the binned task makes.
+- A bar measured before that read is drawn and pressed after it is pressed where the other row now is: the view-only bar, which moves nothing.
+
+*Closed, 21 October:*
+- `1ea455e`: the read orders by when each task was made, then its id, so a read again draws each row where it was.
+- `0a98704` and `1ea455e`: the suite measures the shared bar once the refusal's read has taken the binned bar away, so it is measured where it is drawn.
+- Measured on the rehearsal's checkout, with the refusal's read held and the two rows swapped in it:
+  - drawn between the shared bar's box and the press, with no wait (A): rehearsal 22's failure, word for word, the press on the view-only bar (`data-may-edit` false), no PATCH sent;
+  - drawn a second later, with the wait (B, B2): 17 of 17.
+- No patch is aimed at the order: putting the old order back fails the check only when Postgres's sort swaps the two rows, which no run can make it do.
 
 ## Closed from the uncounted list, as ClickUp works them (8 to 14 October) — 49
 
