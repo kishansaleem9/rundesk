@@ -30,11 +30,17 @@ chmod +x "$WORK/bin/docker" "$WORK/bin/sleep"
 pass=0
 fail=0
 # case <name> <log> <must match, or ''> <must not match, or ''>
+#
+# Run as deploy.sh runs it, under its `set -euo pipefail`, and the rebuild must go
+# on after it: run without them, a log with nothing to say passed here, while on
+# production (21 October, its first deploy) the grep that found nothing ended the
+# rebuild there, silently, before "✓ Rebuild complete.".
 check() {
   printf '%s\n' "$2" > "$WORK/log"
   local out
-  out=$(PATH="$WORK/bin:$PATH" FAKE_LOG="$WORK/log" bash -c "source '$WORK/fn.sh'; warn_if_public_domain_on_private_bucket" 2>&1)
-  if { [ -n "$3" ] && ! grep -qE "$3" <<<"$out"; } || { [ -n "$4" ] && grep -qE "$4" <<<"$out"; }; then
+  out=$(PATH="$WORK/bin:$PATH" FAKE_LOG="$WORK/log" bash -c "set -euo pipefail; source '$WORK/fn.sh'; warn_if_public_domain_on_private_bucket; echo 'and the rebuild goes on'" 2>&1)
+  if ! grep -q 'and the rebuild goes on' <<<"$out" \
+    || { [ -n "$3" ] && ! grep -qE "$3" <<<"$out"; } || { [ -n "$4" ] && grep -qE "$4" <<<"$out"; }; then
     echo "  FAIL $1 — it said: ${out:-nothing}"
     fail=$((fail + 1))
   else

@@ -178,7 +178,9 @@ warn_if_vhost_caches_index() {
 warn_if_public_domain_on_private_bucket() {
   local line=""
   for i in $(seq 1 30); do
-    line=$(docker logs rundesk-api 2>&1 | grep -E "to anybody, unsigned|Could not check whether R2_PUBLIC_URL" | tail -1)
+    # `|| true`: a log with nothing to say is the usual case, and under this script's pipefail
+    # the grep that finds nothing ended the rebuild here, before "✓ Rebuild complete.".
+    line=$(docker logs rundesk-api 2>&1 | grep -E "to anybody, unsigned|Could not check whether R2_PUBLIC_URL" | tail -1 || true)
     [ -n "$line" ] && break
     docker logs rundesk-api 2>&1 | grep -q "Nest application successfully started" && break
     sleep 2

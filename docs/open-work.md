@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 581 items: 0 open · 0 partly fixed · 574 closed, and 7 items the owner settled, not counted as defects; counted from this file's headings on 21 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 582 items: 0 open · 0 partly fixed · 575 closed, and 7 items the owner settled, not counted as defects; counted from this file's headings on 22 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 117, each reproduced
+## Found by the triage, 5 October, and since — 118, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10902,6 +10902,17 @@ Measured:
   - drawn between the shared bar's box and the press, with no wait (A): rehearsal 22's failure, word for word, the press on the view-only bar (`data-may-edit` false), no PATCH sent;
   - drawn a second later, with the wait (B, B2): 17 of 17.
 - No patch is aimed at the order: putting the old order back fails the check only when Postgres's sort swaps the two rows, which no run can make it do.
+
+### `found-22-oct/deploy-stops-at-the-r2-check` — **closed** (deploy, small; found by the first production deploy of `196bf45`) · reproduced 22 October
+
+**`deploy.sh rebuild` ended silently at its R2 check whenever there was nothing to warn about**
+
+*Evidence, 22 October:* the owner's deploy of `196bf45` built and published the web app, rebuilt and restarted the API, applied every migration and reloaded nginx, and then stopped without "✓ Rebuild complete.". The owner's deploy script (`docs/resume-2026-10-13.md` §3) read the exit status and printed its rollback steps. `warn_if_public_domain_on_private_bucket` (batch 51, `09bd80d`) reads the API's log with `line=$(docker logs … | grep -E "…" | tail -1)`. Under the script's `set -euo pipefail` the grep that finds nothing, the usual case, fails the assignment, and the script exits 1 there, saying nothing. Its test ran the function without those options, so it passed.
+
+*Closed, 22 October:*
+- `deploy.sh`: the pipeline ends `|| true`.
+- `test/deploy/public-domain-warning.test.sh` runs the function under `set -euo pipefail` and requires the rebuild to go on after it: 3 of 5 against the old line (the two cases with nothing to say), 5 of 5 after.
+- No other `$(… | grep …)` in `deploy.sh` or `deploy/lib` is without `|| true`.
 
 ## Closed from the uncounted list, as ClickUp works them (8 to 14 October) — 49
 
