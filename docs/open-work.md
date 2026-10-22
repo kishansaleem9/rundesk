@@ -10913,6 +10913,7 @@ Measured:
 - `deploy.sh`: the pipeline ends `|| true`.
 - `test/deploy/public-domain-warning.test.sh` runs the function under `set -euo pipefail` and requires the rebuild to go on after it: 3 of 5 against the old line (the two cases with nothing to say), 5 of 5 after.
 - No other `$(… | grep …)` in `deploy.sh` or `deploy/lib` is without `|| true`.
+- The wait in the same check, for the API to say it has started, ran its whole minute on every deploy: `docker logs | grep -q` stopped reading at the first match, and under pipefail the broken pipe failed the line. Measured on a 4.6 MB log, 30 rounds of 2 s. The log is now read once a round and searched as a string; the test's new case, a long log that says the API started, waits 30 rounds against the old lines and none now (6 of 6). Seen in the owner's verified deploy of `2051a24b`, which paused a minute there.
 
 ## Closed from the uncounted list, as ClickUp works them (8 to 14 October) — 49
 

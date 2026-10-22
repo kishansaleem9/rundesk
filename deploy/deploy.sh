@@ -176,13 +176,16 @@ warn_if_vhost_caches_index() {
 # do is disconnect the domain. So the deploy reads that log and says it where the deployer is looking,
 # with the four steps, rather than leaving it in a log nobody opens. Nothing set, nothing said.
 warn_if_public_domain_on_private_bucket() {
-  local line=""
+  local line="" log
   for i in $(seq 1 30); do
-    # `|| true`: a log with nothing to say is the usual case, and under this script's pipefail
-    # the grep that finds nothing ended the rebuild here, before "✓ Rebuild complete.".
-    line=$(docker logs rundesk-api 2>&1 | grep -E "to anybody, unsigned|Could not check whether R2_PUBLIC_URL" | tail -1 || true)
+    # The log is read once a round and searched as a string. Under this script's pipefail a
+    # grep that finds nothing, the usual case, ended the rebuild here before "✓ Rebuild
+    # complete." (hence `|| true`), and `docker logs | grep -q` stopped reading at the first
+    # match, so the pipe failed and the wait ran its whole minute after the API had started.
+    log=$(docker logs rundesk-api 2>&1 || true)
+    line=$(grep -E "to anybody, unsigned|Could not check whether R2_PUBLIC_URL" <<<"$log" | tail -1 || true)
     [ -n "$line" ] && break
-    docker logs rundesk-api 2>&1 | grep -q "Nest application successfully started" && break
+    grep -q "Nest application successfully started" <<<"$log" && break
     sleep 2
   done
   case "$line" in

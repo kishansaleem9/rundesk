@@ -24,7 +24,7 @@ if ! grep -q '^    warn_if_public_domain_on_private_bucket$' "$ROOT/deploy/deplo
 fi
 mkdir -p "$WORK/bin"
 printf '#!/usr/bin/env bash\ncat "$FAKE_LOG"\n' > "$WORK/bin/docker"
-printf '#!/usr/bin/env bash\nexit 0\n' > "$WORK/bin/sleep"
+printf '#!/usr/bin/env bash\n[ -n "${SLEEPS:-}" ] && echo slept >> "$SLEEPS"\nexit 0\n' > "$WORK/bin/sleep"
 chmod +x "$WORK/bin/docker" "$WORK/bin/sleep"
 
 pass=0
@@ -69,6 +69,21 @@ $STARTED" \
 check 'and an API that never says either says nothing, without waiting for ever' \
   '' \
   '' '⚠'
+
+# A real API log runs to megabytes, and the wait ends as soon as it says the API has started:
+# `docker logs | grep -q` stopped reading at the first match, the pipe failed under pipefail,
+# and every deploy waited its whole minute (measured on a 4.6 MB log, 30 rounds).
+{ echo "$STARTED"; for _ in $(seq 1 40000); do echo '[Nest] 1  - 10/14/2026, 9:00:02 AM   DEBUG [RealtimeGateway] connected abcdefghijklmnopqrstuvwx -> user:00000000-0000-0000-0000-000000000000'; done; } > "$WORK/log"
+: > "$WORK/sleeps"
+out=$(PATH="$WORK/bin:$PATH" FAKE_LOG="$WORK/log" SLEEPS="$WORK/sleeps" bash -c "set -euo pipefail; source '$WORK/fn.sh'; warn_if_public_domain_on_private_bucket; echo 'and the rebuild goes on'" 2>&1)
+slept=$(wc -l < "$WORK/sleeps")
+if grep -q 'and the rebuild goes on' <<<"$out" && [ "$slept" -eq 0 ]; then
+  echo "  PASS a long log that says the API started ends the wait at once"
+  pass=$((pass + 1))
+else
+  echo "  FAIL a long log that says the API started ends the wait at once — it waited $slept rounds"
+  fail=$((fail + 1))
+fi
 
 echo
 echo "$pass passed, $fail failed"
