@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 582 items: 0 open · 0 partly fixed · 575 closed, and 7 items the owner settled, not counted as defects; counted from this file's headings on 22 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 583 items: 0 open · 0 partly fixed · 576 closed, and 7 items the owner settled, not counted as defects; counted from this file's headings on 28 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 118, each reproduced
+## Found by the triage, 5 October, and since — 119, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10914,6 +10914,22 @@ Measured:
 - `test/deploy/public-domain-warning.test.sh` runs the function under `set -euo pipefail` and requires the rebuild to go on after it: 3 of 5 against the old line (the two cases with nothing to say), 5 of 5 after.
 - No other `$(… | grep …)` in `deploy.sh` or `deploy/lib` is without `|| true`.
 - The wait in the same check, for the API to say it has started, ran its whole minute on every deploy: `docker logs | grep -q` stopped reading at the first match, and under pipefail the broken pipe failed the line. Measured on a 4.6 MB log, 30 rounds of 2 s. The log is now read once a round and searched as a string; the test's new case, a long log that says the API started, waits 30 rounds against the old lines and none now (6 of 6). Seen in the owner's verified deploy of `2051a24b`, which paused a minute there.
+
+### `found-28-oct/spreadsheet-import-stops-at-10000-rows` — **closed** (feature, small; at the owner's word, 28 October) · reproduced 28 October
+
+**A spreadsheet import stopped at 10,000 rows, and a real workspace's ClickUp export runs past that**
+
+*Evidence, 28 October:* the owner's ClickUp export, imported through Settings › Imports / Exports: "There is a 10,000-row limit for imported spreadsheets. Split your file into batches." Files of 500 to 1,000 rows came in. The number is ClickUp's own (§2.4), held twice: the file reader's `MAX_SHEET_ROWS` and the API's per-plan `maxRows`, the API's refusal with "10,000" written into it. The owner asked for 50,000 ("test it first properly end to end, then make sure that CI is verified"). A ClickUp Workspace read through ClickUp's API with a personal token has no such cap (tasks a hundred a page); the owner uses that for the whole move, and wants the spreadsheet's limit raised too.
+
+*Closed, 28 October* (`d279268`):
+- `MAX_SHEET_ROWS` is 50,000, and the API's `maxRows` reads that constant, so the page and the API refuse at the same row. Both refusals are written from the number (`tooManyRows`). The grid's accepted-files hint says 50,000 in English, Spanish, Arabic and Urdu.
+- Tests: the reader's boundary (50,000 read, 50,001 refused in those words) and the plan limits (50,000 on every plan) pin the number; `@rundesk/imports` 33 of 33, `import-plan` 17 of 17.
+- Measured on a 2-CPU checkout at `d279268`, through the real wizard (Playwright, the page as the owner uses it) and read back by SQL, twice:
+  - a 50,001-row file is refused by the page in the new words, before anything is sent;
+  - a 50,000-row ClickUp export (its 32 columns, a tenth of the rows subtasks, 12.3 MB) is read in 2.7 to 3.9 s and drawn in 0.3 to 0.5 s ("50,000 Records"; the page's heap about 300 MB), uploaded in 3.9 s in 44 chunks, and written by the runner in 92 to 98 s: 45,000 tasks and 5,000 subtasks, 18 Lists, 10 statuses, 7 tags, no errors; the API's memory peaked at 730 to 785 MB;
+  - the Space exported: 50,000 rows, 22.2 MB, in 5 s (the API at 875 MB);
+  - the import undone as a unit: answered in 2.7 s, 50,000 tasks in Trash, none left.
+- Exports had no row limit to raise.
 
 ## Closed from the uncounted list, as ClickUp works them (8 to 14 October) — 49
 
