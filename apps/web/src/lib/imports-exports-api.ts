@@ -95,7 +95,7 @@ export const exportsApi = {
 }
 
 /**
- * The reviewed rows in chunks of about half a megabyte, so a 10,000-row sheet
+ * The reviewed rows in chunks of about half a megabyte, so a 50,000-row sheet
  * stays under the API's request limit whatever its cells hold.
  */
 export function chunkRows(rows: GridRow[], maxBytes = 512 * 1024): GridRow[][] {

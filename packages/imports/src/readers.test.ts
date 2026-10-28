@@ -27,9 +27,13 @@ test('headers must be unique and present', () => {
   assert.throws(() => readDelimited(',,\n1,2,3'), (e: SheetReadError) => e.code === 'no_header')
 })
 
-test('more than 10,000 rows is refused in the spec’s words', () => {
+test('more than 50,000 rows is refused, the limit in its words', () => {
   const text = ['Name', ...Array.from({ length: MAX_SHEET_ROWS + 1 }, (_, i) => `t${i}`)].join('\n')
-  assert.throws(() => readDelimited(text), /10,000-row limit for imported spreadsheets\. Split your file into batches\./)
+  assert.throws(() => readDelimited(text), {
+    name: 'SheetReadError',
+    code: 'too_many_rows',
+    message: 'There is a 50,000-row limit for imported spreadsheets. Split your file into batches.',
+  })
   assert.equal(readDelimited(text.split('\n').slice(0, MAX_SHEET_ROWS + 1).join('\n')).rows.length, MAX_SHEET_ROWS)
 })
 

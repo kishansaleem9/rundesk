@@ -107,11 +107,11 @@ describe('assignees (§2.3)', () => {
 })
 
 describe('limits and odds and ends', () => {
-  it('60 imports a day except enterprise, which plan gating never restricts; 10,000 rows everywhere', () => {
+  it('60 imports a day except enterprise, which plan gating never restricts; 50,000 rows everywhere, the file reader’s limit', () => {
     assert.equal(importLimitsFor('free').importsPerDay, 60)
     assert.equal(importLimitsFor('enterprise').importsPerDay, null)
     assert.equal(importLimitsFor('not-a-plan').importsPerDay, null)
-    for (const p of ['free', 'pro', 'business', 'enterprise']) assert.equal(importLimitsFor(p).maxRows, 10_000)
+    for (const p of ['free', 'pro', 'business', 'enterprise']) assert.equal(importLimitsFor(p).maxRows, 50_000)
   })
   it('batches keep order', () => {
     assert.deepEqual(batches([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]])

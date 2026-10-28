@@ -1,3 +1,4 @@
+import { MAX_SHEET_ROWS } from '@rundesk/imports'
 import type { PlanId } from '../plans/plans.constants'
 
 /**
@@ -24,7 +25,8 @@ export type ImportLimits = {
 
 const BASE: ImportLimits = {
   importsPerDay: 60,
-  maxRows: 10_000,
+  // The file reader's limit, so the page and the API refuse at the same row.
+  maxRows: MAX_SHEET_ROWS,
   deletableDays: 10,
   sourceRetentionDays: 30,
   exportLinkSeconds: 3_600,

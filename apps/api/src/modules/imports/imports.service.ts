@@ -2,7 +2,7 @@
  * Settings › Imports / Exports — the import jobs' lifecycle (§7, §9.7).
  *
  *   POST   /imports              a DRAFT job: source, destination, date format, delimiter
- *   POST   /imports/:id/upload   the reviewed rows, in chunks (a 10,000-row sheet is
+ *   POST   /imports/:id/upload   the reviewed rows, in chunks (a 50,000-row sheet is
  *                                larger than one request may be)
  *   GET    /imports/:id/preview  what the mapping screens need of the destination
  *   PUT    /imports/:id/mapping  the grid's columns and the value maps
@@ -39,6 +39,7 @@ import {
   isCsvSource,
   mappingProblem,
   normaliseHeader,
+  tooManyRows,
   type ColumnMapping,
   type GridColumn,
   type ValueMaps,
@@ -170,7 +171,7 @@ export class ImportsService {
       .from(importStagedRows)
       .where(and(eq(importStagedRows.jobId, jobId), ne(importStagedRows.chunkIndex, chunkIndex)))
     if ((held?.n ?? 0) + rows.length > limits.maxRows) {
-      throw new BadRequestException('There is a 10,000-row limit for imported spreadsheets. Split your file into batches.')
+      throw new BadRequestException(tooManyRows(limits.maxRows))
     }
     await this.db
       .insert(importStagedRows)
