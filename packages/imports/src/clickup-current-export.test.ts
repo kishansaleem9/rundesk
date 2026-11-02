@@ -112,7 +112,7 @@ test('its cells are read as the importer reads a cell: no null, no \\n pairs, no
 })
 
 test('the .xlsx writes its numbers as Java writes a double, and they are read as whole numbers', () => {
-  const xlsx = { ...EMPTY_ROW, 'Date Created': '1.750967227037E12', 'Due Date': '1.7513E12', 'Priority': '2.0', 'Time Estimated': '3600000.0', 'Time Spent': '9.0E5', 'Rolled Up Time': 'NaN' }
+  const xlsx: Record<string, string> = { ...EMPTY_ROW, 'Date Created': '1.750967227037E12', 'Due Date': '1.7513E12', 'Priority': '2.0', 'Time Estimated': '3600000.0', 'Time Spent': '9.0E5', 'Rolled Up Time': 'NaN' }
   const [row] = normaliseClickUpCurrentExport({ headers: HEADERS, rows: [{ line: 2, cells: HEADERS.map((h) => xlsx[h] ?? '') }] }).rows
   const at = (header: string) => row.cells[HEADERS.indexOf(header)]
   assert.deepEqual(

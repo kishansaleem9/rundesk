@@ -29,7 +29,7 @@ import type { SheetTable } from './table'
 const key = (header: string) => header.trim().toLowerCase().replace(/\s+/g, ' ')
 
 /** Its header row names Task Content and Home Location, which no other export here writes together. */
-export function isClickUpCurrentExport(headers: string[]): boolean {
+export function isClickUpCurrentExport(headers: readonly string[]): boolean {
   const names = new Set(headers.map(key))
   return names.has('task content') && names.has('home location')
 }
