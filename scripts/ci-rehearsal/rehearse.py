@@ -3,6 +3,7 @@
 
   python3 rehearse.py JOB LOGDIR [--repo DIR] [--steps 1-15,140-271]
                       [--only REGEX] [--skip REGEX] [--step-timeout SEC]
+                      [--changes JSON]
 
 Run by launch.sh inside a namespace that looks like a fresh runner; see the
 README beside this file. Each `run:` step runs the way the runner runs it:
@@ -15,6 +16,11 @@ checkout.sh; `playwright install` uses this machine's browsers.
 EVERY STEP RUNS, EVEN AFTER A FAILURE. The workflow stops at its first one,
 to save billed minutes; here the minutes are free, and the point is to find
 every failure before a push. A step the runner would have skipped is marked so.
+
+A STEP'S `if:` OVER THE `changes` JOB'S OUTPUTS IS EVALUATED AS CI WOULD
+(2 November: CI runs what a push can affect). `--changes` is
+`scripts/ci-affected.mjs --json`'s answer; without it everything runs, nothing
+is trusted, and the made-sweep's mutation run is not wanted — a full run.
 
 Writes LOGDIR/NNN-<step>.log per step, LOGDIR/steps.jsonl as it goes, and
 LOGDIR/summary.json at the end.
@@ -37,7 +43,30 @@ ap.add_argument('--steps', default=None, help='step numbers to run, e.g. 1-15,14
 ap.add_argument('--only', default=None)
 ap.add_argument('--skip', default=None)
 ap.add_argument('--step-timeout', type=int, default=1800)
+ap.add_argument('--changes', default=None, help="the changes job's outputs: scripts/ci-affected.mjs --json")
 a = ap.parse_args()
+
+# What CI's `changes` job would answer, as the strings its outputs are.
+changes = {'code': 'true', 'full': 'true', 'suites': '||', 'web': 'true', 'harness': 'true', 'sweep_mutate': 'false', 'trusted': 'false'}
+if a.changes:
+    c = json.loads(a.changes)
+    flag = lambda v: 'true' if v else 'false'
+    changes = {'code': flag(c['code']), 'full': flag(c['full']), 'suites': '|' + '|'.join(c['suites']) + '|',
+               'web': flag(c['web']), 'harness': flag(c['harness']), 'sweep_mutate': flag(c['sweepMutate']),
+               'trusted': flag(c['trusted'])}
+
+
+def wanted_by_changes(cond):
+    """A step's `if:` read as GitHub reads it, when it asks the changes job; None when it asks anything else."""
+    if 'needs.changes.outputs.' not in cond:
+        return None
+    expr = re.sub(r'needs\.changes\.outputs\.(\w+)', lambda m: repr(changes.get(m.group(1), '')), cond)
+    expr = re.sub(r"contains\(\s*('[^']*')\s*,\s*('[^']*')\s*\)", r'(\2 in \1)', expr)
+    expr = expr.replace('&&', ' and ').replace('||', ' or ')
+    expr = re.sub(r'!(?!=)', ' not ', expr)
+    if re.search(r'[A-Za-z_]+\(', expr.replace(' in ', ' ')):
+        raise SystemExit(f'unsupported condition: {cond}')
+    return bool(eval(expr, {'__builtins__': {}}, {}))
 
 wanted = None
 if a.steps:
@@ -107,7 +136,9 @@ for i, st in enumerate(job['steps'], 1):
     if a.skip and re.search(a.skip, name + '\n' + run):
         continue
     rec = {'i': i, 'name': name}
-    if 'uses' in st:
+    if wanted_by_changes(str(st.get('if', ''))) is False:
+        rec.update(status='not-affected', secs=0)
+    elif 'uses' in st:
         rec.update(status='set-up-beforehand', secs=0)
     elif 'playwright install' in run:
         rec.update(status='machine-browser', secs=0)

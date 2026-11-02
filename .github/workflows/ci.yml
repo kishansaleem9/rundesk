@@ -63,6 +63,12 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.decide.outputs.code }}
+      full: ${{ steps.decide.outputs.full }}
+      suites: ${{ steps.decide.outputs.suites }}
+      web: ${{ steps.decide.outputs.web }}
+      harness: ${{ steps.decide.outputs.harness }}
+      sweep_mutate: ${{ steps.decide.outputs.sweep_mutate }}
+      trusted: ${{ steps.decide.outputs.trusted }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -72,6 +78,23 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
+      # WHAT THIS PUSH RUNS, at the owner's word (2 November): "test only what
+      # changed", and "rehearse everything locally, so CI is green without
+      # rehearsing it all again". `scripts/ci-affected.mjs` answers both, the
+      # same answer `scripts/ci-rehearsal/affected.sh` rehearses by:
+      #   · prose alone runs no heavy job, as before (`code`);
+      #   · the suites a push can affect are read from the code — the API
+      #     routes, pages and elements its changed files reach through every
+      #     importer — and only they run (`suites`); the schema, CI itself, the
+      #     test helpers, the app's shell, the API's shared code and any path
+      #     no rule knows run everything (`full`);
+      #   · the made-sweep's 75-minute mutation run only when its own code
+      #     changed (`sweep_mutate`); its cases run once every time;
+      #   · a passing local rehearsal of this very code, recorded in
+      #     `docs/rehearsals/latest.json`, is trusted (`trusted`): Verify's quick
+      #     half runs here, and nothing heavy.
+      # Every answer it cannot give is "everything, trust nothing", and so is a
+      # selection that fails.
       - id: decide
         env:
           EVENT: ${{ github.event_name }}
@@ -80,25 +103,17 @@ jobs:
           AFTER: ${{ github.event.after }}
         run: |
           set -u
-          code=true
-          if [ "$EVENT" = "pull_request" ] && [ "$ACTION" = "synchronize" ] \
-             && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null \
-             && git cat-file -e "${AFTER}^{commit}" 2>/dev/null; then
-            changed=$(git diff --name-only "$BEFORE" "$AFTER")
-            echo "files in this push:"
-            echo "$changed" | sed 's/^/  /'
-            # Skip only when there IS a diff and NOTHING in it lies outside
-            # docs. An empty diff means something unexpected, so it runs.
-            if [ -n "$changed" ] && ! printf '%s\n' "$changed" | grep -qvE '^(docs/|[^/]*\.md$)'; then
-              code=false
-            fi
+          if ! node scripts/ci-affected.mjs --event "$EVENT" --action "$ACTION" \
+               --base "$BEFORE" --head "$AFTER" --github-output "$GITHUB_OUTPUT"; then
+            printf '%s\n' code=true full=true 'suites=||' web=true harness=true sweep_mutate=false trusted=false >> "$GITHUB_OUTPUT"
           fi
-          echo "run expensive jobs: $code"
-          echo "code=$code" >> "$GITHUB_OUTPUT"
 
   verify:
     name: Verify Monorepo
     runs-on: ubuntu-latest
+    # For `trusted` only: lint, types and the unit tests always run here; the
+    # gates and their cases are the local rehearsal's when it is trusted.
+    needs: [changes]
     # Measured, not guessed. On 1 October one runner took 12 minutes to step 57
     # and another took 25 to step 72, where this limit, then 25, cancelled the
     # run with every step so far green: the same steps, on a runner about 1.6
@@ -142,6 +157,7 @@ jobs:
         run: node scripts/unit-tests-pass.mjs -- pnpm --filter @rundesk/web test
 
       - name: And a unit run fails on a suite that never ran
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/unit-tests-pass.mjs --mutate
 
       # The import parsers, the review grid's rules and the export format,
@@ -150,6 +166,7 @@ jobs:
         run: pnpm --filter @rundesk/imports test
 
       - name: Migration sequence guardrail
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-migration-order.mjs
 
       # Production runs `drizzle-kit migrate`; the lanes, this workflow and a
@@ -158,9 +175,11 @@ jobs:
       # the indexes unique, so every test ran on a database that accepted what
       # production refuses (`found-30-sep/comment-file-index-only-in-a-migration`).
       - name: What a migration makes, the schema declares
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-schema-declares-migrations.mjs
 
       - name: And the schema gate can fail
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-schema-declares-migrations-cases.mjs --mutate
 
       # The unit claims apply break patches and must leave the tree as they found
@@ -168,6 +187,7 @@ jobs:
       # same status with a patch left on it
       # (`found-30-sep/unit-claims-refuse-an-uncommitted-batch`).
       - name: The unit claims leave the tree they found
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-tree-state-cases.mjs --mutate
 
       # Step 6 of the re-audit applies deliberately-broken edits to the tree to
@@ -176,6 +196,7 @@ jobs:
       # behind a testid renamed `-DISABLED`. Nothing failed; the diff read as a
       # decision somebody had taken. Vigilance is not a control, so this is.
       - name: No break patches in the tree
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-no-break-patches.mjs
 
       # And that the guard above is looking at anything, because it was the
@@ -190,6 +211,7 @@ jobs:
       # "clean" says how many files it read. 14 cases planting into a throwaway
       # tree — never into this one — and seven mutations, all of which bite.
       - name: And that guard actually looks at the tree
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-patch-guard.mjs --mutate
 
       # The re-audit ledger's headline count read `88 built · 21 partial · 64
@@ -199,6 +221,7 @@ jobs:
       # survived several passes. A count is the one thing in that file that
       # gets quoted without being checked, so it is checked here instead.
       - name: The re-audit ledger agrees with its own derivation
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-video2-counts.mjs
 
       # 573 break patches anchor on exact lines of source. A refactor that moves
@@ -212,6 +235,7 @@ jobs:
       # them is APPLIED in the tree. Both are needed — one says the patches can
       # still break the code, the other that they have not.
       - name: Every break patch still finds its line
+        if: needs.changes.outputs.trusted != 'true'
         run: python3 scripts/check-break-patches.py
 
       # And still names a check that exists. A patch whose anchor is fine but
@@ -221,6 +245,7 @@ jobs:
       # the 121 claimless patches and the 36 rotted claims it was created to
       # grandfather are all closed, so it fails on the first one that arrives.
       - name: Break patches still name a check that exists
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-break-claims.mjs
 
       # And the denominator, which this audit had never printed. A suite with no
@@ -231,6 +256,7 @@ jobs:
       # each suite's own EXPECTED_CHECKS now. Ratcheted, so a new suite arrives
       # with a patch.
       - name: No new suite arrives without a break patch
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-break-coverage.mjs
 
       # A conditional check makes the run LENGTH conditional, and every suite
@@ -254,6 +280,7 @@ jobs:
       # All 242 have it; a suite arriving without it, or reaching for `<`
       # because it expects a skip, fails the build that brings it.
       - name: No suite's branches report different numbers of checks
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-suite-check-branches.mjs
 
       # And that THAT rule can fail at all. It gates, its steady-state answer is
@@ -262,6 +289,7 @@ jobs:
       # the one three mutation harnesses turned out to be in even after they had
       # one. 39 cases over fixture suites, 23 of 23 mutations redden one.
       - name: The conditional-check rule can fail, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-branches-cases.mjs --mutate
 
       # And the module those suites were rewritten onto. It is load-bearing in
@@ -271,6 +299,7 @@ jobs:
       # undefined` and counted towards the total. Found by calling `step` three
       # times on a chain of two; invisible by reading.
       - name: The chain helper holds its contract
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-chain-helper.mjs --mutate
 
       # And the wait helper 151 suites call. It awaited its question before it
@@ -278,6 +307,7 @@ jobs:
       # 20 s wait for fourteen minutes, until the break runner's kill
       # (`found-30-sep/a-hung-page-outlasts-every-wait`).
       - name: A wait gives up at its deadline
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-wait-helper.mjs --mutate
 
       # Every gate that re-runs itself against a mutant goes through one runner.
@@ -286,12 +316,14 @@ jobs:
       # `git add -A` staged eleven probes. The runner ends the mutant's process
       # group, and removes what it named after its pid, however it ended.
       - name: A mutant run ends with everything it started
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-run-mutant.mjs --mutate
 
       # Every break patch writes /home/user/rundesk/…; a runner in another
       # checkout aims it at its own. check-unit-claims.mjs ran them as written
       # from an agent's worktree and patched 29 files of the main checkout.
       - name: A break patch runs aimed at its own tree
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-patch-root.mjs --mutate
 
       # And the matcher that decides whether a claim counts as verified, for 798
@@ -301,6 +333,7 @@ jobs:
       # pinned in both directions, because a test of the floor's existence left
       # lowering it from five words to four completely green.
       - name: The claim matcher holds its contract
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-claim-match.mjs --mutate
 
       # And the module that decides WHICH SUITE a patch is about. There were
@@ -309,6 +342,7 @@ jobs:
       # attributed in one report and "(no suite named)" in another — and a patch
       # that cannot be attributed cannot be scheduled to run.
       - name: The patch-to-suite attribution holds its contract
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-suite-of-patch.mjs --mutate
 
       # And the module that decides WHICH TREE a recorded number is about. The
@@ -324,6 +358,7 @@ jobs:
       # Replacing the comparison with `if (true)` left all 36 cases green. The
       # names are reversed now, and 8 of 8 mutations redden a case.
       - name: The break-log provenance reader holds its contract, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-log-tree.mjs --mutate
 
       # And a press on a control the check above it is allowed to find absent.
@@ -344,22 +379,26 @@ jobs:
       # cannot see, so the rule classifies the variable's first USE instead;
       # each of those six spellings is now a case.
       - name: Nothing ends a section on a throw where a check belongs
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-suite-section-enders.mjs
 
       # A check that says text is shown reads what is drawn, not textContent,
       # which reads hidden text too (found-23-sep/checks-read-textContent-not-what-is-shown).
       - name: A check of shown text reads what is drawn, and that rule bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-suite-text-reads.mjs --mutate
 
       # An API client never throws on a status, so a .catch(() => {}) on its
       # call hides every refusal (suite-hygiene/inert-catches, resume-3).
       - name: No silent catch on an API client, and that gate bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-suite-api-catches.mjs --mutate
 
       # One API client, lib/fixture.mjs's apiAs(base)(token): 172 suites had a
       # copy of their own in 21 variants, and 13 more one by another name
       # (suite-hygiene/apiAs-duplicated-62). A new one is refused by name or shape.
       - name: No suite hand-rolls an API client, and that gate bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-suite-api-clients.mjs --mutate
 
       # That client answers status 0 when nothing answers, unless a suite binds
@@ -367,14 +406,17 @@ jobs:
       # passed with the API gone (found-30-sep/status-zero-passes-status-only-checks).
       # A status that can be 0 is never compared with an upper bound alone.
       - name: A status of 0 never reads as success, and that gate bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-suite-status-floor.mjs --mutate
 
       # process.exit() loses the end of a suite's output on a pipe; the count
       # may only fall (log-30183c3-1).
       - name: No new process.exit in a suite
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-suite-process-exit.mjs --mutate
 
       - name: A suite that stands on the assistant's refusal declares it
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-suite-lane-need.mjs --mutate
 
       # Rule six of that checker, which is a gate over a tree with zero sites
@@ -385,6 +427,7 @@ jobs:
       # written so that deleting the line it covers changes the answer; all six
       # mutations redden, each on the case that names the defect.
       - name: Rule six's reader holds its contract
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-suite-reads.mjs --mutate
 
       # And the five rules ABOVE it, which had no case file at all — five loops
@@ -401,6 +444,7 @@ jobs:
       # A mutant now has to walk a fixture and print a summary before its
       # verdict is read.
       - name: Every ender rule holds its cases, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-suite-enders.mjs --mutate
 
       # The ledger recorded the cover picker's Upload tab as UNMEASURABLE
@@ -422,6 +466,7 @@ jobs:
       # sibling route. 59 write routes name a :workspaceId; the 14 protected in
       # their SERVICE instead are listed by name, each read before it went in.
       - name: Every workspace write proves the caller belongs there
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-workspace-guards.mjs
 
       # Who manages a workspace was an array literal in nine places, who
@@ -430,9 +475,11 @@ jobs:
       # common/permissions/workspace-roles.ts, and a list anywhere else in the
       # API fails here (role-lists-copied-per-module).
       - name: A workspace role list is stated once
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-role-lists.mjs
 
       - name: And that gate can fail, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-role-lists-cases.mjs --mutate
 
       # Bash reads a script as it runs, by offset; an in-place edit to a lane
@@ -440,9 +487,11 @@ jobs:
       # its body in one brace group ending in `exit`, parsed whole before it
       # runs (lane-scripts-read-as-they-run). The cases show the premise too.
       - name: Each lane script is read whole before it runs
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-lane-scripts-whole.mjs
 
       - name: And an edit mid-run is harmless, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-lane-scripts-whole-cases.mjs --mutate
 
       # The role editor offers every key of the permission catalog; seventeen
@@ -450,9 +499,11 @@ jobs:
       # key is asked by a route or service, or named with the open item that
       # owns it (role-editor-offers-unenforced-permissions).
       - name: Every permission the role editor offers is asked
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-permission-keys-asked.mjs
 
       - name: And that gate can fail, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-permission-keys-asked-cases.mjs --mutate
 
       # Comments, suites and scripts cite the ledger by id so a reader can find
@@ -461,9 +512,11 @@ jobs:
       # deploy, packages and .github is a heading of docs/open-work.md; a
       # citation wrapped at a hyphen is joined first.
       - name: Every ledger id cited in the code is an item of the ledger
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-ledger-ids.mjs
 
       - name: And that gate can fail, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-ledger-ids-cases.mjs --mutate
 
       # The translator fills `{{name}}` and nothing else, and three strings wrote
@@ -472,9 +525,11 @@ jobs:
       # writes a single-braced word but a formula's own syntax, and each key
       # fills the same placeholders in every locale as in English.
       - name: Every placeholder in the catalogues is one the translator fills
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-i18n-placeholders.mjs
 
       - name: And that gate can fail, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-i18n-placeholders-cases.mjs --mutate
 
       # The sweep fixture picked a workspace by walking every space and then
@@ -482,6 +537,7 @@ jobs:
       # interrupted run ended nine suites before their first check
       # (fixture-builds-in-a-space-it-did-not-check). One walk now, for both.
       - name: The sweep fixture builds where it picked, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-sweep-fixture-cases.mjs --mutate
 
       # Playwright's route never sees a request the service worker answers,
@@ -490,30 +546,36 @@ jobs:
       # Every context of a suite that routes says serviceWorkers: 'block', or
       # 'allow' where the worker is what is tested.
       - name: A suite that routes requests says what its service worker does
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-suite-routes.mjs
 
       - name: And that gate can fail, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-suite-routes-cases.mjs --mutate
 
       # The e2e proxy forwarded the API's 72 s keep-alive while it closes an
       # idle socket after 5 s, so a suite's fetch after a pause died with
       # "fetch failed" (e2e-proxy-advertises-the-apis-keep-alive).
       - name: The e2e proxy keeps what it advertises, and that check bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-local-stack-keepalive.mjs --mutate
 
       # A schema push that stopped on a question exits 0 having applied
       # nothing; the lane scripts read its log (lane-push-errors-read-as-synced).
       - name: A push that stops is not read as synced
+        if: needs.changes.outputs.trusted != 'true'
         run: bash scripts/e2e-lanes/push-log-selfcheck.sh --mutate
 
       # One writer or any number of readers per lane web bundle: a run holds it
       # shared, a build exclusive (log-d92d58f-1).
       - name: One writer or many readers per lane bundle
+        if: needs.changes.outputs.trusted != 'true'
         run: bash scripts/e2e-lanes/bundle-lock-selfcheck.sh --mutate
 
       # A suite that stands on the assistant's refusal declares it, and the
       # lanes refuse a model it cannot pass on (model-lane-routing-unbuilt).
       - name: A suite runs where its model need is met
+        if: needs.changes.outputs.trusted != 'true'
         run: bash scripts/e2e-lanes/lane-need-selfcheck.sh --mutate
 
       # What verify.sh asks of a lane: a start read to the hundredth, a KILL
@@ -521,29 +583,34 @@ jobs:
       # (verify-refuses-a-lane-restarted-in-its-builds-second,
       # verify-timeout-ends-no-hung-suite, verify-takes-a-bundle-of-other-sources-as-fresh).
       - name: What verify asks of a lane is read exactly, and each check bites
+        if: needs.changes.outputs.trusted != 'true'
         run: bash scripts/e2e-lanes/verify-guards-selfcheck.sh --mutate
 
       # A stale stub is stopped by its port before its replacement starts; the
       # model stub's command line ends at its port, and the old pattern never
       # matched it (stale-model-stub-never-replaced).
       - name: A stale stub is stopped before its replacement starts
+        if: needs.changes.outputs.trusted != 'true'
         run: bash scripts/e2e-lanes/stub-down-selfcheck.sh --mutate
 
       # A worktree linked by link-worktree.sh builds its own workspace packages,
       # not the main checkout's (`found-30-sep/agent-worktrees-build-main-packages`).
       - name: A worktree builds its own packages, and that check bites
+        if: needs.changes.outputs.trusted != 'true'
         run: bash scripts/e2e-lanes/link-worktree-selfcheck.sh --mutate
 
       # The unit claims found their test files by walking the repository, and
       # took an agent worktree's unpatched copy under .claude/ for this tree's
       # (unit-claims-read-a-nested-checkout).
       - name: A nested checkout is not read as this tree, and that check bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-find-in-tree.mjs --mutate
 
       # Two sweeps at once shared one status, results and queue file; the
       # second truncated the first's record and could hand its suites to the
       # first's workers (two-sweeps-share-one-record). Stand-in suites, no lanes.
       - name: Two sweeps at once keep two records
+        if: needs.changes.outputs.trusted != 'true'
         run: bash scripts/e2e-lanes/sweep-selfcheck.sh
 
       # A suite that is not registered is verified once on a lane and never
@@ -552,10 +619,19 @@ jobs:
       # file. Reads `run:` lines only — a suite named in a comment, a step name
       # or behind a shell `#` is run by nothing — and fails on an empty read.
       - name: Every e2e suite has a CI step
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-suites-registered.mjs
 
       - name: And that gate can fail, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-suites-registered-cases.mjs --mutate
+
+      # Which suites a push can affect is read from the code
+      # (`scripts/lib/ci-affected.mjs`); its cases plant trees and changes, and
+      # each rule of it is broken in turn.
+      - name: A push runs what it can affect, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
+        run: node scripts/ci-affected-cases.mjs --mutate
 
       # A run's people are removed when it ends, and a killed run's by the next
       # (test/e2e/lib/made.mjs), but only the people it registered: lane 6 held
@@ -565,58 +641,70 @@ jobs:
       # an invitation claimed, a user inserted by SQL — registers them in the
       # block that makes them, before the request.
       - name: A suite that makes a person hands them to the cleanup
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-suite-made-registered.mjs
 
       - name: And that gate can fail, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-suite-made-registered-cases.mjs --mutate
 
       - name: The S3 stub is faithful to the SDK, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-s3-stub.mjs --mutate
 
       # A lane's old API really stops before a new one starts. Two lane scripts
       # did not wait for it and one never stopped it at all, so a lane could be
       # reported UP on the build it was meant to replace.
       - name: A lane's old API stops before its port is reused
+        if: needs.changes.outputs.trusted != 'true'
         run: bash scripts/check-lane-api-down.sh --mutate
 
       # A break planner that crashed wrote an empty plan, and both chain
       # scripts read the empty plan as "nothing left" and exited 0.
       - name: A failed break planner is never read as nothing left
+        if: needs.changes.outputs.trusted != 'true'
         run: bash scripts/check-build-plan.sh --mutate
 
       # One round loop for both chain scripts. The second copy had lost the
       # guard for "somebody else has the lanes" and stopped on no progress.
       - name: The break round loop ends the way it says
+        if: needs.changes.outputs.trusted != 'true'
         run: bash scripts/check-rounds.sh --mutate
 
       # Lane locks carry their holder's PID. A holder reaped by SIGKILL left a
       # bare directory, and every waiter then waited for ever in silence.
       - name: A dead holder's lane lock is taken, a live one kept
+        if: needs.changes.outputs.trusted != 'true'
         run: bash scripts/check-locks.sh --mutate
 
       # A suite's break results are one file per suite. Two of its sets on two
       # lanes truncated each other's; the dispatcher now passes a busy suite by.
       - name: One suite's break sets never run at once
+        if: needs.changes.outputs.trusted != 'true'
         run: bash scripts/check-run-plan.sh --mutate
 
       # A patch that only a model can redden ran on lanes with none, and read
       # as a patch that reddened nothing. Its set now runs with a model.
       - name: A break set that needs a model runs with one
+        if: needs.changes.outputs.trusted != 'true'
         run: bash scripts/check-model-lanes.sh --mutate
 
       # `fleet-up.sh` read a bare number as a count and drops every lane it is
       # given: healing lane 3 alone would have dropped lanes 1 and 2.
       - name: A lane number is one lane, never a count
+        if: needs.changes.outputs.trusted != 'true'
         run: bash scripts/check-lane-lists.sh --mutate
 
       # A migration that creates a table proves a lane current as well as one
       # that adds a column; the restart looked for columns only.
       - name: A new table proves a lane current too
+        if: needs.changes.outputs.trusted != 'true'
         run: bash scripts/check-schema-witness.sh --mutate
 
       # Every checker stops through bail(). It returned whenever output was
       # still queued — i.e. whenever piped, as here — and the checker ran on.
       - name: bail stops the checker and loses no output
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-bail.mjs --mutate
 
       # The same recorded reason, one subsystem over. A row of AI surfaces is
@@ -629,6 +717,7 @@ jobs:
       # that stopped honouring the variable would otherwise send these suites
       # at the live API. 10 cases, 6 of 6 mutations redden one.
       - name: The model seam is really a seam, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-model-stub.mjs --mutate
 
       # And for search (commit-log/log-68c0345-1). `SearchService` builds
@@ -639,18 +728,21 @@ jobs:
       # client, against the stub the lanes start (RUNDESK_LANE_SEARCH): 28
       # cases, 32 of 32 mutations redden one.
       - name: The search seam is really a seam, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-meili-stub.mjs --mutate
 
       # And for a person's calendars (found-25-sep/connected-calendars-read-by-nothing):
       # the product's own readers and writers against the stub every lane and
       # the suites' job start, and each rule of the stub broken in turn.
       - name: The calendar seam is really a seam, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-calendar-stub.mjs --mutate
 
       # And for a cover's photo library (`commit-log/log-601eacc-1`): the
       # product's own client against the stub every lane and the suites' job
       # start, and each rule of the stub broken in turn.
       - name: The photo library seam is really a seam, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-media-stub.mjs --mutate
 
       # And for the mail server (`resume-defects/s4-composer-email`): the
@@ -658,6 +750,7 @@ jobs:
       # start, a bare SMTP session beside it, and each rule of the stub broken
       # in turn.
       - name: The mail seam is really a seam, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-mail-stub.mjs --mutate
 
       # And for a person's own mailbox over IMAP (`found-12-oct/task-email-imap-unbuilt`):
@@ -666,6 +759,7 @@ jobs:
       # offered, a sender held to its own address, a search by its key — broken
       # in turn.
       - name: The mailbox seam is really a seam, and each case bites
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-mailbox-stub.mjs --mutate
 
       # And the other direction from the ledger's own reconciliations: does a
@@ -673,17 +767,20 @@ jobs:
       # timestamped frame observations, and asking found `03:15` — a cover
       # picker tab checked for existing with nothing inside it ever touched.
       - name: Every frame observation is answered somewhere
+        if: needs.changes.outputs.trusted != 'true'
         run: node scripts/check-frame-traceability.mjs
 
       # Two generations of hashed chunks must survive a publish, or a tab open
       # across a deploy 404s on every lazy import.
       - name: Web publish keeps the previous release's chunks
+        if: needs.changes.outputs.trusted != 'true'
         run: bash test/deploy/publish-web-dist.test.sh
 
       # A timed-out locator in one section of the deployed-UI check used to end
       # the whole run while the summary still read like a near-complete pass.
       # Needs no browser: it drives verify-ui.mjs against a stub.
       - name: Deployed-UI check survives a section that throws
+        if: needs.changes.outputs.trusted != 'true'
         run: bash test/deploy/verify-ui-isolation.test.sh
 
       # `found-30-sep/domain-left-on-the-private-bucket` — a rebuild reads the
@@ -692,6 +789,7 @@ jobs:
       # nothing when the domain is on a bucket of its own. Four of four
       # mutations of the function redden a case (measured 14 October).
       - name: The deploy says when R2_PUBLIC_URL serves the private bucket
+        if: needs.changes.outputs.trusted != 'true'
         run: bash test/deploy/public-domain-warning.test.sh
 
   # The checks that need a real database.
@@ -724,7 +822,15 @@ jobs:
     # waits for Verify and Browser suites, so a lint error or a broken page is
     # never followed by an hour of suites.
     needs: [changes, verify, browser-suites]
-    if: needs.changes.outputs.code == 'true'
+    # Run when something in it is selected. A needed job that was SKIPPED
+    # skips this one too unless the condition says otherwise, so the results
+    # are read by hand: Verify passed, and the browser suites passed or were
+    # not wanted (an API-only push).
+    if: >-
+      !cancelled() && needs.verify.result == 'success'
+      && (needs.browser-suites.result == 'success' || needs.browser-suites.result == 'skipped')
+      && needs.changes.outputs.code == 'true' && needs.changes.outputs.trusted != 'true'
+      && needs.changes.outputs.harness == 'true'
     # THIS NUMBER GOES STALE EVERY TIME A SUITE IS ADDED, AND IT HAS TWICE.
     #
     # First it said "it now runs twenty-one" at 32 minutes, measured off the run
@@ -872,7 +978,16 @@ jobs:
       # rehearsal of a936b69 took 4,018 s here, about 51 minutes on a slow
       # runner, where it had taken 1,328 s the day before. 40 minutes would
       # have cut it off.
+      #
+      # SO THE MUTATIONS RUN ONLY WHEN THE SWEEP'S OWN CODE CHANGES (the owner,
+      # 2 November: they were 75 of a full run's ~215 minutes). Its cases run
+      # once on every run, against this commit's schema.
       - name: A run's people go when it ends, a killed run's with the next
+        timeout-minutes: 15
+        run: node scripts/check-made-sweep.mjs
+
+      - name: And each rule of the cleanup is broken in turn, and a case notices
+        if: needs.changes.outputs.sweep_mutate == 'true'
         timeout-minutes: 90
         run: node scripts/check-made-sweep.mjs --mutate
 
@@ -1134,6 +1249,7 @@ jobs:
           TRUST_PROXY: '1'
 
       - name: A real SyncUp, in two browsers
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|syncup-live|')
         timeout-minutes: 15
         run: node test/e2e/syncup-live.mjs --api 3011 --dist apps/web/dist
 
@@ -1143,22 +1259,27 @@ jobs:
       # these gaps was a case where the parts existed and nothing joined them
       # up, which is exactly what a stub cannot see.
       - name: Chat message actions
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|chat-message-actions|')
         timeout-minutes: 15
         run: node test/e2e/chat-message-actions.mjs --api 3011 --dist apps/web/dist
 
       - name: Task creation depth
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-depth|')
         timeout-minutes: 15
         run: node test/e2e/task-depth.mjs --api 3011 --dist apps/web/dist
 
       - name: The second-level panel collapses
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|panel-collapse|')
         timeout-minutes: 15
         run: node test/e2e/panel-collapse.mjs --api 3011 --dist apps/web/dist
 
       - name: Status, timed mute, contrast, booking a call
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|settings-depth|')
         timeout-minutes: 15
         run: node test/e2e/settings-depth.mjs --api 3011 --dist apps/web/dist
 
       - name: The person profile panel
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|person-panel|')
         timeout-minutes: 15
         run: node test/e2e/person-panel.mjs --api 3011 --dist apps/web/dist
 
@@ -1168,6 +1289,7 @@ jobs:
       # no MEILISEARCH_URL, so search here takes SearchService's Postgres
       # fallback and the Meilisearch path is not measured.
       - name: Addressability, end to end
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|addressability-live|')
         timeout-minutes: 15
         run: node test/e2e/addressability-live.mjs --api 3011 --dist apps/web/dist
 
@@ -1190,10 +1312,12 @@ jobs:
       # user, which no seeded database has. admin + org-admin are both seeded,
       # and the pair matters: some checks need somebody else to act on you.
       - name: UI sweep — every surface, in a browser
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|ui-sweep|')
         timeout-minutes: 15
         run: node test/e2e/ui-sweep.mjs --api 3011 --dist apps/web/dist
 
       - name: The video1 regression sweep
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|video-regression|')
         timeout-minutes: 15
         run: node test/e2e/video-regression.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1205,6 +1329,7 @@ jobs:
       # manager can see private items by design: run as one of those and the
       # 403 under test never happens.
       - name: Requesting access to a private object
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|request-access|')
         timeout-minutes: 15
         run: node test/e2e/request-access.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1216,6 +1341,7 @@ jobs:
       # from an earlier run, so the creation path — the thing under test —
       # never runs, and a broken container passes cleanly.
       - name: A List under a Space
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|list-under-space|')
         timeout-minutes: 15
         run: node test/e2e/list-under-space.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1226,6 +1352,7 @@ jobs:
       # channel. Needs two accounts: a notification only reaches somebody who
       # did not write the message.
       - name: Replies answers a thread in place
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|replies-inline-thread|')
         timeout-minutes: 15
         run: node test/e2e/replies-inline-thread.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1238,6 +1365,7 @@ jobs:
       # rows arriving in somebody else's inbox, not pixels, and driving a
       # browser to observe them would test the inbox rather than the fan-out.
       - name: Notifications that were never sent
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|notification-gaps|')
         timeout-minutes: 15
         run: node test/e2e/notification-gaps.mjs --api 3011
         env:
@@ -1251,6 +1379,7 @@ jobs:
       # down the app and cannot carry a MediaStream, so it would fail forever
       # and say nothing about the defect.
       - name: A SyncUp survives leaving the page
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|call-survives-navigation|')
         timeout-minutes: 15
         run: node test/e2e/call-survives-navigation.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1261,6 +1390,7 @@ jobs:
       # owner-scoping protects against is a colleague who knows an id, not an
       # anonymous caller, and only a second signed-in user can show that.
       - name: Bookmarks, internal and external
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|bookmarks|')
         timeout-minutes: 15
         run: node test/e2e/bookmarks.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1272,6 +1402,7 @@ jobs:
       # §G03-6 — Trending In Workspace / Trending For You. Two accounts again:
       # the two modes are only distinguishable when somebody else opens things.
       - name: Trending sorts
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|trending-sort|')
         timeout-minutes: 15
         run: node test/e2e/trending-sort.mjs --api 3011
         env:
@@ -1285,6 +1416,7 @@ jobs:
       # the only symptom was `invalid input syntax for type uuid` in this job's
       # own service-container log, which nothing was reading.
       - name: Malformed ids
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|malformed-ids|')
         timeout-minutes: 15
         run: node test/e2e/malformed-ids.mjs --api 3011
         env:
@@ -1306,6 +1438,7 @@ jobs:
       # per project, so a field on the seeded project would change the shape of
       # every other suite's task rows.
       - name: Progress (Auto) custom field
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|custom-field-progress|')
         timeout-minutes: 15
         run: node test/e2e/custom-field-progress.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1322,6 +1455,7 @@ jobs:
       # the screen. A suite asserting "a toast appeared" would pass against a
       # button wired to nothing.
       - name: Undo a delete
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|undo-delete|')
         timeout-minutes: 15
         run: node test/e2e/undo-delete.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1329,6 +1463,7 @@ jobs:
           E2E_PASSWORD: Admin@123!
 
       - name: Task provenance
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-provenance|')
         timeout-minutes: 15
         run: node test/e2e/task-provenance.mjs --api 3011
         env:
@@ -1340,6 +1475,7 @@ jobs:
       # `storage_key` and read it back through R2, and this is the shape that
       # does not repeat it.
       - name: Task cover
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-cover|')
         timeout-minutes: 15
         run: node test/e2e/task-cover.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1351,6 +1487,7 @@ jobs:
       # a page at a time, each credited, and one chosen is the cover. What is
       # said when nothing matches and when the library does not answer.
       - name: A cover's Search tab finds free photos, and one chosen is the cover
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|cover-photo-search|')
         timeout-minutes: 15
         run: node test/e2e/cover-photo-search.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1365,6 +1502,7 @@ jobs:
       # normally share them and every join table is unique on (task, thing) —
       # a bulk UPDATE throws on the first collision.
       - name: Merging one task into another
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-merge|')
         timeout-minutes: 15
         run: node test/e2e/task-merge.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1382,6 +1520,7 @@ jobs:
       # The frame's four destinations are there, Analytics the fourth: opened by
       # the member while its ClickApp is off, it says so and offers no switch.
       - name: The Teams destination
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|teams-destination|')
         timeout-minutes: 15
         run: node test/e2e/teams-destination.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1394,6 +1533,7 @@ jobs:
       # team, over a period; a ClickApp off until turned on, open to everyone
       # but guests or to owners and admins. Read back by SQL.
       - name: The Teams hub's Analytics
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|teams-analytics|')
         timeout-minutes: 15
         run: node test/e2e/teams-analytics.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1410,6 +1550,7 @@ jobs:
       # a settings form that saves, reads back and changes nothing on the page
       # it belongs to is this codebase's most common defect.
       - name: AI value and activity
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|ai-value|')
         timeout-minutes: 15
         run: node test/e2e/ai-value.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1430,6 +1571,7 @@ jobs:
       # that was built for the printer and asserts the description, the title
       # and the id are on it.
       - name: Task menu — description history and print
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-menu|')
         timeout-minutes: 15
         run: node test/e2e/task-menu.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1446,6 +1588,7 @@ jobs:
       # against what the GUARD does when that person really opens the task, so a
       # warning that disagrees with reality is a failure rather than a feature.
       - name: Comment recording and mention access
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|comment-recording|')
         timeout-minutes: 15
         run: node test/e2e/comment-recording.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1456,6 +1599,7 @@ jobs:
       # queried. The load-bearing check is the visibility one: a doc listing its
       # tasks must not become a way to read the titles of private ones.
       - name: Doc and task links
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|doc-task-links|')
         timeout-minutes: 15
         run: node test/e2e/doc-task-links.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1466,6 +1610,7 @@ jobs:
       # is the injection one: a task titled `=cmd|...` must not reach a
       # spreadsheet as a formula.
       - name: List export
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|list-export|')
         timeout-minutes: 15
         run: node test/e2e/list-export.mjs --api 3011
         env:
@@ -1477,6 +1622,7 @@ jobs:
       # member must not see somebody's private view, and must not be able to
       # change a protected one. Before this, ANY member could delete ANY view.
       - name: View visibility
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|view-visibility|')
         timeout-minutes: 15
         run: node test/e2e/view-visibility.mjs --api 3011
         env:
@@ -1489,6 +1635,7 @@ jobs:
       # scoping, save-by-name replacing, and refusing a nest the panel could
       # not have built.
       - name: List filters
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|list-filters|')
         timeout-minutes: 15
         run: node test/e2e/list-filters.mjs --api 3011
         env:
@@ -1500,6 +1647,7 @@ jobs:
       # preset SEEDS THE SPACE'S FIRST LISTS (`[07:46]`), without which the
       # wizard collects a purpose and throws it away.
       - name: Space presets
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|space-presets|')
         timeout-minutes: 15
         run: node test/e2e/space-presets.mjs --api 3011
         env:
@@ -1512,6 +1660,7 @@ jobs:
       # delete one; and its label is RESOLVED from the task, so renaming the
       # task renames every block pointing at it.
       - name: Planner blocks
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|planner-blocks|')
         timeout-minutes: 15
         run: node test/e2e/planner-blocks.mjs --api 3011
         env:
@@ -1524,6 +1673,7 @@ jobs:
       # by a colleague; and a block written to the default calendar, moved and
       # deleted there, saved whatever the calendar answers.
       - name: Connected calendars are read, and a block is written to one
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|connected-calendars|')
         timeout-minutes: 15
         run: node test/e2e/connected-calendars.mjs --api 3011 --dist apps/web/dist
 
@@ -1532,6 +1682,7 @@ jobs:
       # The load-bearing checks are the last four: what the wizard POSTs is
       # what was chosen, not just the name.
       - name: Space wizard
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|space-wizard|')
         timeout-minutes: 15
         run: node test/e2e/space-wizard.mjs --dist apps/web/dist
 
@@ -1553,6 +1704,7 @@ jobs:
       # renders identically — the fixture gives two people different loads, one
       # task with two assignees and one with none, so the numbers separate them.
       - name: Team view
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|team-view|')
         timeout-minutes: 15
         run: node test/e2e/team-view.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1568,6 +1720,7 @@ jobs:
       # check is phrased by DESTINATION — "an item was added" passes on the
       # broken build too, because the item existed, just in the wrong list.
       - name: Checklists
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|checklists|')
         timeout-minutes: 15
         run: node test/e2e/checklists.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1582,6 +1735,7 @@ jobs:
       # exemption the frame does not show and the product needs — an empty
       # REQUIRED field is the one blank somebody has to see.
       - name: Collapse empty fields
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|collapse-empty-fields|')
         timeout-minutes: 15
         run: node test/e2e/collapse-empty-fields.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1597,6 +1751,7 @@ jobs:
       # matched the CLIENT's spelling, so neither could ever see it. The first
       # check here watches the request the page really makes and fails on a 404.
       - name: Planner rail
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|planner-rail|')
         timeout-minutes: 15
         run: node test/e2e/planner-rail.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1608,6 +1763,7 @@ jobs:
       # (ledger-rows/row-835-reorder). A newcomer's own rail, in a workspace
       # the suite makes; the admin's order is not touched.
       - name: The planner rail keeps the order its Sidebar page sets
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|rail-reorder|')
         timeout-minutes: 15
         run: node test/e2e/rail-reorder.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1620,6 +1776,7 @@ jobs:
       # placed among the five, and deleted without touching its tasks. A
       # section is its maker's, and holds only what they may open.
       - name: A planner rail section of one's own holds the tasks put in it, where its maker places it
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|planner-rail-sections|')
         timeout-minutes: 15
         run: node test/e2e/planner-rail-sections.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1635,6 +1792,7 @@ jobs:
       # an action that can be. The confirmation text is asserted, and so is the
       # round trip through restore.
       - name: Task menu favorite and archive
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-menu-favorite-archive|')
         timeout-minutes: 15
         run: node test/e2e/task-menu-favorite-archive.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1649,6 +1807,7 @@ jobs:
       # row that survived the round trip, which is the difference between a
       # control and a readout.
       - name: Planner priorities
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|planner-priorities|')
         timeout-minutes: 15
         run: node test/e2e/planner-priorities.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1663,6 +1822,7 @@ jobs:
       # a boundary — the prompt is followed to the server, the toast's link is
       # followed to the Planner, and the rail is read for THAT task.
       - name: Assign to priorities
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|assign-to-priorities|')
         timeout-minutes: 15
         run: node test/e2e/assign-to-priorities.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1678,6 +1838,7 @@ jobs:
       # for one person leaves exactly one row. The first version of the
       # load-bearing check was VACUOUS and a break-test caught it.
       - name: Assignee picker
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|assignee-picker|')
         timeout-minutes: 15
         run: node test/e2e/assignee-picker.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1695,6 +1856,7 @@ jobs:
       # the reaction check reads `task_comment_reactions` rather than watching
       # a button light up.
       - name: Comment thread panel
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|comment-thread|')
         timeout-minutes: 15
         run: node test/e2e/comment-thread.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1711,6 +1873,7 @@ jobs:
       # check follows the row to the comment AI panel it opens
       # (`ledger-rows/row-751`).
       - name: Comment plus menu
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|comment-plus-menu|')
         timeout-minutes: 15
         run: node test/e2e/comment-plus-menu.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1724,6 +1887,7 @@ jobs:
       # grid moves and the FETCH still asks for a week, so most of a month looks
       # empty. There is a check for each, and the last one was a real bug.
       - name: Planner views
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|planner-views|')
         timeout-minutes: 15
         run: node test/e2e/planner-views.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1739,6 +1903,7 @@ jobs:
       # prove the index is what holds. Both list-creation paths in the dialog are
       # driven, because only one of them had an `onError`.
       - name: List name taken
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|list-name-taken|')
         timeout-minutes: 15
         run: node test/e2e/list-name-taken.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1753,6 +1918,7 @@ jobs:
       # `file_name_here` and `and/or` — must still read byte for byte. That
       # check caught the first version eating the underscores as emphasis.
       - name: Comment slash commands
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|comment-slash-commands|')
         timeout-minutes: 15
         run: node test/e2e/comment-slash-commands.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1769,6 +1935,7 @@ jobs:
       # the one thing it must not be — shared: two accounts save two different
       # comments and neither may see the other's.
       - name: Save a comment
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|save-comment|')
         timeout-minutes: 15
         run: node test/e2e/save-comment.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1786,6 +1953,7 @@ jobs:
       # created in August and requiring THAT date — a chip reading "today"
       # passes any presence check while being wrong about every older task.
       - name: Activity rail and created chip
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|activity-rail|')
         timeout-minutes: 15
         run: node test/e2e/activity-rail.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1802,6 +1970,7 @@ jobs:
       # screen picker is not ours and not automatable — so the check is that the
       # `displaySurface` hint is sent, and that the panel says so.
       - name: Clip setup panel
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|clip-setup|')
         timeout-minutes: 15
         run: node test/e2e/clip-setup.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1818,6 +1987,7 @@ jobs:
       # product does not serve, which is how §V2-S14's planner 404 survived two
       # suites that stubbed the client's spelling of a route that never existed.
       - name: Clip created card
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|clip-created-card|')
         timeout-minutes: 15
         run: node test/e2e/clip-created-card.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1832,6 +2002,7 @@ jobs:
       # which refuses a URL past its window, and the API step's
       # CLIP_PLAYBACK_URL_SECONDS, so the suite can wait one window out.
       - name: A clip's link outlives every signature, and opens for whoever may watch
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|clip-links|')
         timeout-minutes: 15
         run: node test/e2e/clip-links.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1845,6 +2016,7 @@ jobs:
       # so a members-only clip says so to anyone outside, and a deleted one
       # says it is gone. Against the store above.
       - name: A clip's link pasted in chat, a comment or a description is drawn as the clip
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|clip-link-embeds|')
         timeout-minutes: 15
         run: node test/e2e/clip-link-embeds.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1859,6 +2031,7 @@ jobs:
       # teaching one of them what `90m` means would have made them disagree
       # about the same input — worse than neither understanding it.
       - name: Time estimate
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|time-estimate|')
         timeout-minutes: 15
         run: node test/e2e/time-estimate.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1866,6 +2039,7 @@ jobs:
           E2E_PASSWORD: Admin@123!
 
       - name: Space features
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|space-features|')
         timeout-minutes: 15
         run: node test/e2e/space-features.mjs --dist apps/web/dist
 
@@ -1875,6 +2049,7 @@ jobs:
       # the now-line is on today's column and nowhere else, and that the
       # Backlog holds what is NOT scheduled.
       - name: Planner grid
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|planner-grid|')
         timeout-minutes: 15
         run: node test/e2e/planner-grid.mjs --dist apps/web/dist
 
@@ -1883,6 +2058,7 @@ jobs:
       # changes nothing. Every check here is a before/after on the CALENDAR;
       # none of them assert that a switch moved.
       - name: Planner settings
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|planner-settings|')
         timeout-minutes: 15
         run: node test/e2e/planner-settings.mjs --dist apps/web/dist
 
@@ -1904,6 +2080,7 @@ jobs:
       # asked, that a busy window can carry no title, that windows merge, and
       # that an unreadable calendar costs its own time and not the panel.
       - name: Calendar accounts and busy time
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|calendar-accounts|')
         timeout-minutes: 15
         run: node test/e2e/calendar-accounts.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1916,6 +2093,7 @@ jobs:
       # caught a real bug — the dirty flag was held in a ref, so the chip
       # stayed up after a successful save.
       - name: List save-view chip
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|list-save-view|')
         timeout-minutes: 15
         run: node test/e2e/list-save-view.mjs --dist apps/web/dist
 
@@ -1926,6 +2104,7 @@ jobs:
       # archived task must NOT appear in the Trash, which was impossible to
       # satisfy while the Trash selected tasks on `isArchived`.
       - name: Task delete versus archive
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-delete|')
         timeout-minutes: 15
         run: node test/e2e/task-delete.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1939,6 +2118,7 @@ jobs:
       # the tuple to the end of the heap, so renaming a workspace reordered the
       # list — and with it, the policy.
       - name: Login workspace binding
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|login-workspace-binding|')
         timeout-minutes: 15
         run: node test/e2e/login-workspace-binding.mjs --api 3011
         env:
@@ -1951,6 +2131,7 @@ jobs:
       # actually leaves the browser. The parameter was read by the controller
       # and honoured by the service, and no web code had ever sent it.
       - name: List view controls
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|list-view-controls|')
         timeout-minutes: 15
         run: node test/e2e/list-view-controls.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1964,6 +2145,7 @@ jobs:
       # strings: "an empty state renders" passes on the bug, because there was
       # always an empty state — it just said the wrong thing.
       - name: List empty states
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|list-empty-states|')
         timeout-minutes: 15
         run: node test/e2e/list-empty-states.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1976,6 +2158,7 @@ jobs:
       # visible on exactly the surface that set it. This reads the LIST
       # endpoint, not the single-task one, and measures the three card sizes.
       - name: List card cover and card size
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|list-card-cover|')
         timeout-minutes: 15
         run: node test/e2e/list-card-cover.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1987,6 +2170,7 @@ jobs:
       # `category: 'open'` for ANY key on a list with none — so `done` stored
       # `status='done'` and `statusCategory='open'`, permanently.
       - name: List statuses are seeded
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|list-statuses-seeded|')
         timeout-minutes: 15
         run: node test/e2e/list-statuses-seeded.mjs --api 3011 --dist apps/web/dist
         env:
@@ -1997,6 +2181,7 @@ jobs:
       # its OWN word: the Team row used to fall back to `list.viewList` and
       # render as "List", and any check for "a label is present" passes on that.
       - name: Space wizard required views
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|space-wizard-views|')
         timeout-minutes: 15
         run: node test/e2e/space-wizard-views.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2005,6 +2190,7 @@ jobs:
 
       # §P frame `08:00` — the "+" on a space opens the 8-item Create menu.
       - name: Space create menu
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|space-create-menu|')
         timeout-minutes: 15
         run: node test/e2e/space-create-menu.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2015,6 +2201,7 @@ jobs:
       # point, not the count, so the checks assert the SERVER refuses a gated
       # ClickApp for a free-plan actor, not merely that the UI hides it.
       - name: ClickApps plan gating
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|clickapps-plan-gating|')
         timeout-minutes: 15
         run: node test/e2e/clickapps-plan-gating.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2024,6 +2211,7 @@ jobs:
       # §M frame `14:10` — the five Appearance settings that were stored and read
       # by nothing. Each check asserts the GRID changed, not that a switch moved.
       - name: Planner appearance toggles
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|planner-appearance-toggles|')
         timeout-minutes: 15
         run: node test/e2e/planner-appearance-toggles.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2032,6 +2220,7 @@ jobs:
 
       # §M — the Upcoming meeting page: time left, quick-join, desktop notice.
       - name: Planner upcoming meeting
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|planner-upcoming-meeting|')
         timeout-minutes: 15
         run: node test/e2e/planner-upcoming-meeting.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2041,6 +2230,7 @@ jobs:
       # §M frame `09:44` — Auto fit, week numbers, collapsible panels, export.
       # The export check reads the downloaded bytes; a constant file fails it.
       - name: Gantt controls
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|gantt-controls|')
         timeout-minutes: 15
         run: node test/e2e/gantt-controls.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2057,6 +2247,7 @@ jobs:
       # drop keeping the time (found-5-oct/timeline-press-moves-dates,
       # found-30-sep/timeline-drags-refused-silently). Read back by SQL.
       - name: Timeline drags move whole days and keep the time
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|timeline-dates|')
         timeout-minutes: 15
         run: node test/e2e/timeline-dates.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2069,6 +2260,7 @@ jobs:
       # and double-clicked away, the critical path and slack time, and Export as
       # PDF or PNG on Business. Dates and dependencies read back by SQL.
       - name: One Gantt on the list and the timeline
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|gantt-one-chart|')
         timeout-minutes: 15
         run: node test/e2e/gantt-one-chart.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2078,6 +2270,7 @@ jobs:
       # §M frame `20:57` — the Teams empty state. Asserted in BOTH conditions:
       # a check run only when empty cannot tell an empty state from a broken page.
       - name: Teams empty state
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|teams-empty-state|')
         timeout-minutes: 15
         run: node test/e2e/teams-empty-state.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2087,6 +2280,7 @@ jobs:
       # §M frame `21:00` — per-person work cards. Two people are seeded with
       # DIFFERENT work, so a card rendering the same person twice fails.
       - name: Teams person cards
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|teams-person-cards|')
         timeout-minutes: 15
         run: node test/e2e/teams-person-cards.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2097,6 +2291,7 @@ jobs:
       # members the tab lists, and draws no number while the list is on its
       # way (ledger-rows/row-2398-remainder).
       - name: All People carries the workspace's head count
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|teams-people-count|')
         timeout-minutes: 15
         run: node test/e2e/teams-people-count.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2107,6 +2302,7 @@ jobs:
       # resulting tasks are read from Postgres, including a row that must be
       # REJECTED and is, with the line and column named.
       - name: Spreadsheet and source imports
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|imports|')
         timeout-minutes: 15
         run: node test/e2e/imports.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2120,6 +2316,7 @@ jobs:
       # checklist, dates to the millisecond, the Free plan's fallback, and the
       # undo of what it made (`found-02-nov/clickup-current-export-unread`).
       - name: ClickUp's current export, imported as it is written
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|clickup-current-export|')
         timeout-minutes: 10
         run: node test/e2e/clickup-current-export.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2132,6 +2329,7 @@ jobs:
       # every "a doc exists" check. The one suite that was never registered;
       # `check-suites-registered.mjs` now fails the build if another one isn't.
       - name: Document import
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|doc-import|')
         timeout-minutes: 15
         run: node test/e2e/doc-import.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2146,6 +2344,7 @@ jobs:
       # plays Launchpad and the API), its projects into Spaces or Folders. Each is read
       # back by SQL.
       - name: The importers ClickUp has, for every row of the Imports menu
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|importers|')
         timeout-minutes: 15
         run: node test/e2e/importers.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2159,6 +2358,7 @@ jobs:
       # what the server refuses left as it was) and Map (a Location placed by the media
       # stub's geocoder, its tiles asked). The space's view settings decide the tabs.
       - name: The list views ClickUp has, all eleven
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|list-views|')
         timeout-minutes: 15
         run: node test/e2e/list-views.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2172,6 +2372,7 @@ jobs:
       # reads the run written down as refused and nothing answered; a lane with
       # the model stub reads the answers.
       - name: Super Agents, as ClickUp has them
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|super-agents|')
         timeout-minutes: 15
         run: node test/e2e/super-agents.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2186,6 +2387,7 @@ jobs:
       # composer says why, a question is refused, and the deck the viewer opens
       # is written by SQL as Brain would keep it.
       - name: Brain in a comment's thread, the composer's "+", and its decks
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|brain-comments-and-decks|')
         timeout-minutes: 15
         run: node test/e2e/brain-comments-and-decks.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2195,6 +2397,7 @@ jobs:
       # §P frame `18:39` — the integration error card carries the PROVIDER'S own
       # message. A card rendering a constant string is the facade defect.
       - name: Integration error card
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|integration-error-card|')
         timeout-minutes: 15
         run: node test/e2e/integration-error-card.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2204,6 +2407,7 @@ jobs:
       # §M — a countdown in the tab title, which must MOVE and must be RESTORED.
       # Set-once and never-cleared are both easy to miss and both covered.
       - name: Tab title countdown
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|tab-title-countdown|')
         timeout-minutes: 15
         run: node test/e2e/tab-title-countdown.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2215,6 +2419,7 @@ jobs:
       # gives the API, is a tier; Gemini, with none, is listed and must stay
       # unselectable: storing it is refused, not coerced.
       - name: AI model picker
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|ai-model-picker|')
         timeout-minutes: 15
         run: node test/e2e/ai-model-picker.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2227,6 +2432,7 @@ jobs:
       # what they ask, its refusal is said, it can be the preferred model, and a
       # turn asking for Gemini, which has no key, never reaches OpenAI.
       - name: ChatGPT answers in Brain's picker
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|ai-chatgpt-answers|')
         timeout-minutes: 15
         run: node test/e2e/ai-chatgpt-answers.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2240,6 +2446,7 @@ jobs:
       # with the transcript, the attendees and an Inbox notice; called back, it
       # is not sent again, and a colleague sees none of it.
       - name: The AI Notetaker joins meetings and writes their notes
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|ai-notetaker|')
         timeout-minutes: 15
         run: node test/e2e/ai-notetaker.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2249,6 +2456,7 @@ jobs:
       # §P frames `18:53`-`18:59` — 24 raw feature values grouped into 8
       # categories, server-side. A failed run must move no tile.
       - name: AI action categories
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|ai-action-categories|')
         timeout-minutes: 15
         run: node test/e2e/ai-action-categories.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2261,6 +2469,7 @@ jobs:
       # files, added to the dock's task or downloaded, each ask is a run on the
       # Images generated tile, and the service's refusals are said.
       - name: The AI makes images from a comment, a message and the Ask AI dock
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|ai-image-generation|')
         timeout-minutes: 15
         run: node test/e2e/ai-image-generation.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2274,6 +2483,7 @@ jobs:
       # email stays in the task with its envelope, and the answers of the
       # people it went to land under it.
       - name: The comment box sends email, and the answers land in the task
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|comment-email|')
         timeout-minutes: 15
         run: node test/e2e/comment-email.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2287,6 +2497,7 @@ jobs:
       # and its answers read back into the task; signatures and templates on
       # Business; sent later, cancelled or sent now; a Free plan's 100 emails.
       - name: A task's email goes from the writer's own Gmail or Outlook
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-email-accounts|')
         timeout-minutes: 15
         run: node test/e2e/task-email-accounts.mjs --api 3011 --dist apps/web/dist
 
@@ -2298,6 +2509,7 @@ jobs:
       # changed at the provider marks it to link again; the AI's draft in its
       # Drafts; the composer's form and the Email settings.
       - name: A task's email goes from a mailbox linked over IMAP
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-email-imap|')
         timeout-minutes: 15
         run: node test/e2e/task-email-imap.mjs --api 3011 --dist apps/web/dist
 
@@ -2307,6 +2519,7 @@ jobs:
       # secret that still verifies, a webhook's signing secret shown once; a
       # grant kept in the clear before is still read; nothing is given back.
       - name: The secrets Rundesk keeps are kept sealed
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|secrets-at-rest|')
         timeout-minutes: 15
         run: node test/e2e/secrets-at-rest.mjs --api 3011
 
@@ -2317,6 +2530,7 @@ jobs:
       # mapped, comments, files, checklists and fields; and Notion from its
       # workspace export. Each tool is the calendar stub's (`import-apps-stub.mjs`).
       - name: Other tools are imported as ClickUp signs in to them
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|importers-by-sign-in|')
         timeout-minutes: 20
         run: node test/e2e/importers-by-sign-in.mjs --api 3011 --dist apps/web/dist
 
@@ -2327,12 +2541,14 @@ jobs:
       # tasks held for them and theirs when they accept. ClickUp is the calendar
       # stub's (`import-apps-stub.mjs`); the invitations go to the mail stub.
       - name: A ClickUp Workspace and its people come over
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|clickup-workspace-import|')
         timeout-minutes: 15
         run: node test/e2e/clickup-workspace-import.mjs --api 3011 --dist apps/web/dist
 
       # `found-14-oct/chat-channel-cannot-be-deleted` and `found-14-oct/space-channel-views-unbuilt` —
       # a channel deleted for good by whoever may archive it, and a Space's channel's Views tab.
       - name: A channel is deleted for good, and a Space's channel has its views
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|chat-channel-delete-and-views|')
         timeout-minutes: 10
         run: node test/e2e/chat-channel-delete-and-views.mjs --api 3011 --dist apps/web/dist
 
@@ -2344,6 +2560,7 @@ jobs:
       # writes (through the execute route, which asks no model); a lane's stub
       # reads the whole path.
       - name: The AI acts in the asker's own calendar, mailbox and Drive
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|ai-connected-apps|')
         timeout-minutes: 15
         run: node test/e2e/ai-connected-apps.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2353,6 +2570,7 @@ jobs:
       # §P frame `19:05` — Status and My-runs filters. Both are asserted to reach
       # the SERVER: `userId` was accepted by the endpoint and sent by nothing.
       - name: AI activity filters
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|ai-activity-filters|')
         timeout-minutes: 15
         run: node test/e2e/ai-activity-filters.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2363,6 +2581,7 @@ jobs:
       # other (found-30-sep/ai-page-fields-checked-only-by-a-unit). No model
       # answers here, so this run reads the refusal; a lane's stub reads the boxes.
       - name: AI Generate offers the chosen list's fields
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|ai-generate-fields|')
         timeout-minutes: 15
         run: node test/e2e/ai-generate-fields.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2372,6 +2591,7 @@ jobs:
       # §P frame `12:14` — the Template Center's facets. The counts come from SQL
       # over the corpus, so ticking a facet must NOT move the type counts.
       - name: Template centre facets
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|template-center|')
         timeout-minutes: 15
         run: node test/e2e/template-center.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2381,6 +2601,7 @@ jobs:
       # §P frames `09:26` and `10:42` — the two paywall sites she names. Run as
       # BOTH an entitled and a blocked actor, and list export must stay free.
       - name: Paywall sites
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|paywall-sites|')
         timeout-minutes: 15
         run: node test/e2e/paywall-sites.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2393,6 +2614,7 @@ jobs:
       # check asserts the SERVER refuses and the row is unchanged afterwards;
       # a UI that merely hides the control would pass none of them.
       - name: Space default permission is enforced
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|space-default-permission|')
         timeout-minutes: 15
         run: node test/e2e/space-default-permission.mjs --api 3011
         env:
@@ -2413,6 +2635,7 @@ jobs:
       # pair "the foreign cover is not signed" with "this task's own cover is"
       # so that neither can pass where nothing can be signed.
       - name: Task references stay inside their workspace
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-boundaries|')
         timeout-minutes: 15
         run: node test/e2e/task-boundaries.mjs --api 3011
         env:
@@ -2426,6 +2649,7 @@ jobs:
       # showed. Parents across workspaces, and a doc nested inside its own
       # child, are refused too.
       - name: Doc references stay inside their workspace
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|doc-boundaries|')
         timeout-minutes: 15
         run: node test/e2e/doc-boundaries.mjs --api 3011
         env:
@@ -2439,6 +2663,7 @@ jobs:
       # the API; this opens the page: the doc as written, read-only, and a link
       # turned off, never made, or to an archived doc saying "Doc not found".
       - name: A doc's public link draws the doc, read-only
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|public-doc-page|')
         timeout-minutes: 15
         run: node test/e2e/public-doc-page.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2451,6 +2676,7 @@ jobs:
       # drawn keeps what it drew when a later refresh is refused. The refusals
       # are answered in the browser; a real 429 would spend the job's budget.
       - name: Public pages read a refusal for too many requests as one
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|public-pages-busy|')
         timeout-minutes: 15
         run: node test/e2e/public-pages-busy.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2463,6 +2689,7 @@ jobs:
       # of; a meeting signed whatever its column named and passed `javascript:`
       # through as a link. NEEDS THE OBJECT STORE: the twins PUT real bytes.
       - name: Object keys are the caller's own
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|object-key-boundaries|')
         timeout-minutes: 15
         run: node test/e2e/object-key-boundaries.mjs --api 3011
         env:
@@ -2481,6 +2708,7 @@ jobs:
       # minutes on a lane, nearly all of it waiting on the clock.
       # NEEDS THE OBJECT STORE: a clip and a logo are uploaded and served.
       - name: The routes anybody may call are limited per address, and the machines' are not
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|public-route-limits|')
         timeout-minutes: 15
         run: node test/e2e/public-route-limits.mjs --api 3011
         env:
@@ -2504,6 +2732,7 @@ jobs:
       # suite ends once it has passed: about two minutes, nearly all of it
       # waiting on the clock.
       - name: Signing up, invitations, SSO and Google are limited per address, read through a proxy as nginx's
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|auth-route-limits|')
         timeout-minutes: 15
         run: node test/e2e/auth-route-limits.mjs --api 3011
         env:
@@ -2520,6 +2749,7 @@ jobs:
       # (127.0.9.x) and the accounts are made from 127.0.0.8, so no budget the
       # other steps share is spent: about twenty seconds.
       - name: A refused sign-in takes one hash's time, and hashing holds up no other request
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|password-hash-time|')
         timeout-minutes: 15
         run: node test/e2e/password-hash-time.mjs --api 3011
 
@@ -2547,6 +2777,7 @@ jobs:
       # accepts one. Every sign-in leaves from a loopback address of its own
       # (127.0.21.x) and the accounts are made from 127.0.0.11–13: under a minute.
       - name: Every wrong password counts, an email is the same in any case, a password change is limited and signs out the rest, and an ended session is refused at once
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|sign-in-and-password|')
         timeout-minutes: 15
         run: node test/e2e/sign-in-and-password.mjs --api 3011
 
@@ -2560,6 +2791,7 @@ jobs:
       # which rejoins the list it shows — and when they sign in again from
       # another tab under a policy of one session at a time. About two minutes.
       - name: A session in the browser is kept after accepting an invitation and ended at once elsewhere, and a mistyped password counts once
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|session-in-the-browser|')
         timeout-minutes: 15
         run: node test/e2e/session-in-the-browser.mjs --api 3011 --dist apps/web/dist
 
@@ -2570,6 +2802,7 @@ jobs:
       # room while something is said to it, and showing it without a reload. The
       # rehearsal of 518f96a lost syncup-live's call card to this. About a minute.
       - name: A page shows what was said while its room was asked for
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|room-catch-up|')
         timeout-minutes: 10
         run: node test/e2e/room-catch-up.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2580,6 +2813,7 @@ jobs:
       # every member's open tasks with no viewer, so private spaces, projects,
       # lists and tasks showed on a teammate's card to anybody in the workspace.
       - name: Reads show the reader what they may see
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|read-visibility|')
         timeout-minutes: 15
         run: node test/e2e/read-visibility.mjs --api 3011
         env:
@@ -2591,6 +2825,7 @@ jobs:
       # made through the modal and must appear without a reload; another
       # member's, and one that already went off, must not appear at all.
       - name: Home lists the reminders that are waiting
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|home-reminders|')
         timeout-minutes: 15
         run: node test/e2e/home-reminders.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2601,6 +2836,7 @@ jobs:
       # caller could see, so an admin's Mine carried the team's hours and
       # "Total this week" summed everything fetched.
       - name: The Mine timesheet is the viewer's own week
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|timesheet-mine|')
         timeout-minutes: 15
         run: node test/e2e/timesheet-mine.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2614,6 +2850,7 @@ jobs:
       # (DATABASE_URL, the job's own): rows a few microseconds apart, and rows
       # at one instant.
       - name: The Inbox is the workspace's, every page of it
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|inbox-scope|')
         timeout-minutes: 15
         run: node test/e2e/inbox-scope.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2625,6 +2862,7 @@ jobs:
       # thread read its FIRST 100 replies. Two page boundaries staged in
       # Postgres (DATABASE_URL, the job's own).
       - name: Chat history pages back, threads show their newest
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|chat-history|')
         timeout-minutes: 15
         run: node test/e2e/chat-history.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2636,6 +2874,7 @@ jobs:
       # with its secret, and an admin-or-manager guard in front of the
       # permission made a custom role granting it useless.
       - name: Webhooks and their secrets belong to webhook.manage
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|webhook-access|')
         timeout-minutes: 15
         run: node test/e2e/webhook-access.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2647,6 +2886,7 @@ jobs:
       # `sso.manage` and `integrations.manage`, and SCIM tokens had no
       # permission at all, so every manager held them.
       - name: SSO, SCIM and integrations answer to their permissions
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|permission-guards|')
         timeout-minutes: 15
         run: node test/e2e/permission-guards.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2660,6 +2900,7 @@ jobs:
       # workspace; the domain's verification secret went to every member.
       # Invitations are checked against their rows in Postgres (DATABASE_URL).
       - name: Credentials and invitations stay inside their owners
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|credential-reads|')
         timeout-minutes: 15
         run: node test/e2e/credential-reads.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2672,6 +2913,7 @@ jobs:
       # the whole credential for adding tasks as its creator — and the switch
       # stopped docs and not portals. Rows checked in Postgres (DATABASE_URL).
       - name: Hook addresses and client portals stay with their owners
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|hook-portal-access|')
         timeout-minutes: 15
         run: node test/e2e/hook-portal-access.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2684,6 +2926,7 @@ jobs:
       # guest) read tasks in a private space they were refused. Rows staged in
       # Postgres (DATABASE_URL).
       - name: Workspace-wide reads, as the caller may see them
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|workspace-read-access|')
         timeout-minutes: 15
         run: node test/e2e/workspace-read-access.mjs --api 3011
         env:
@@ -2694,6 +2937,7 @@ jobs:
       # searcher's access: a member refused a private space found every kind of
       # item planted in it. A file and a custom field are staged in Postgres.
       - name: Search finds only what the searcher may open
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|search-read-access|')
         timeout-minutes: 15
         run: node test/e2e/search-read-access.mjs --api 3011
         env:
@@ -2706,6 +2950,7 @@ jobs:
       # here; a lane that RUNDESK_LANE_SEARCH names reads the index itself
       # (commit-log/log-68c0345-1). One task is archived by SQL.
       - name: What the search indexers write, and what search finds
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|search-index|')
         timeout-minutes: 15
         run: node test/e2e/search-index.mjs --api 3011
         env:
@@ -2717,6 +2962,7 @@ jobs:
       # each named a refused space's items, and blocks and sprints another
       # workspace's tasks. Rows made before the checks are staged in Postgres.
       - name: An id names only what the asker may open
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|lookup-read-access|')
         timeout-minutes: 15
         run: node test/e2e/lookup-read-access.mjs --api 3011
         env:
@@ -2727,6 +2973,7 @@ jobs:
       # refused a private space read, overwrote, defined, renamed and deleted
       # its fields. What each refused write left behind is read in Postgres.
       - name: A project's custom fields, for who may open it
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|custom-field-access|')
         timeout-minutes: 15
         run: node test/e2e/custom-field-access.mjs --api 3011
         env:
@@ -2737,6 +2984,7 @@ jobs:
       # graph, the refusal to close a blocked task and the blocked notice each
       # named the hidden task. Dependencies and a private task staged in SQL.
       - name: A dependency names only tasks its reader may open
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|dependency-read-access|')
         timeout-minutes: 15
         run: node test/e2e/dependency-read-access.mjs --api 3011
         env:
@@ -2747,6 +2995,7 @@ jobs:
       # so a member's counts included spaces they are refused and several named
       # them; and any member could edit, send or delete anybody's saved report.
       - name: A report counts and names only what its reader may open
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|report-read-access|')
         timeout-minutes: 15
         run: node test/e2e/report-read-access.mjs --api 3011
         env:
@@ -2758,6 +3007,7 @@ jobs:
       # edited any workspace's key results through a goal of their own.
       # Goals are planted, and every refusal read back, in Postgres.
       - name: A goal is read and written only by those who may see it
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|goal-access|')
         timeout-minutes: 15
         run: node test/e2e/goal-access.mjs --api 3011
         env:
@@ -2769,6 +3019,7 @@ jobs:
       # checked before any model is asked, so every refusal is measured here,
       # with no model; the twins reach "AI features are not configured".
       - name: A meeting's action items become tasks only where their maker may make them
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|meeting-access|')
         timeout-minutes: 15
         run: node test/e2e/meeting-access.mjs --api 3011
         env:
@@ -2779,6 +3030,7 @@ jobs:
       # refused a DM or a private channel heard every message in it as it was
       # written. Three sockets listen; each "hears nothing" has a twin who does.
       - name: A chat event reaches only those who may read its channel
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|chat-realtime-access|')
         timeout-minutes: 15
         run: node test/e2e/chat-realtime-access.mjs --api 3011
         env:
@@ -2796,6 +3048,7 @@ jobs:
       # "hears nothing" has a twin who keeps access and does. The super_admin
       # is the run's own account, made one in Postgres. About a minute.
       - name: An open socket stops hearing what its person may no longer read, and nobody is notified about what they may not read
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|realtime-access-ends|')
         timeout-minutes: 15
         run: node test/e2e/realtime-access-ends.mjs --api 3011
 
@@ -2804,6 +3057,7 @@ jobs:
       # it; and the reports' reach rule skipped private lists. Every answer
       # here is the deterministic one a server with no model gives.
       - name: The AI's suggestions and counts are made from what their asker may open
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|ai-read-access|')
         timeout-minutes: 15
         run: node test/e2e/ai-read-access.mjs --api 3011
         env:
@@ -2815,6 +3069,7 @@ jobs:
       # user of another organisation in this workspace's, and anybody in a
       # view-only space. createTask asks one rule now; lists read back by SQL.
       - name: A task is made only in a list its maker may make one in
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-creation-access|')
         timeout-minutes: 15
         run: node test/e2e/task-creation-access.mjs --api 3011
         env:
@@ -2825,6 +3080,7 @@ jobs:
       # its "comment" let an assignee rename their task. ClickUp's levels, side
       # by side, each refusal read back from the row.
       - name: A space's permission reaches its tasks
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-space-levels|')
         timeout-minutes: 15
         run: node test/e2e/task-space-levels.mjs --api 3011
         env:
@@ -2834,6 +3090,7 @@ jobs:
       # A guest made, renamed and deleted the workspace's tags; ClickUp's
       # guests use tags and make none. Tags planted and read back by SQL.
       - name: A guest uses the workspace's tags and makes none
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|label-access|')
         timeout-minutes: 15
         run: node test/e2e/label-access.mjs --api 3011
         env:
@@ -2844,6 +3101,7 @@ jobs:
       # published a doc, a guest renamed one, and a view-only space took new
       # docs. Docs and shares planted by SQL; each level beside the next.
       - name: A doc is written at the level its writer holds on it
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|doc-write-levels|')
         timeout-minutes: 15
         run: node test/e2e/doc-write-levels.mjs --api 3011
         env:
@@ -2853,6 +3111,7 @@ jobs:
       # Who was on a call in a DM was told to every member: call events went
       # to the workspace room. Sockets listen as an outsider and a participant.
       - name: A call's events reach only those who may read its channel
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|call-realtime-access|')
         timeout-minutes: 15
         run: node test/e2e/call-realtime-access.mjs --api 3011
         env:
@@ -2863,6 +3122,7 @@ jobs:
       # a cursor into any canvas's room under the name its body gave, from anyone
       # with a socket. Sockets send as a removed member and an outsider.
       - name: What a socket sends goes only where its person may read
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|realtime-sends-access|')
         timeout-minutes: 15
         run: node test/e2e/realtime-sends-access.mjs --api 3011
         env:
@@ -2872,6 +3132,7 @@ jobs:
       # A task handed its reader every related task's whole row, a private
       # space's title and description included. Dependencies planted by SQL.
       - name: A task shows only the related tasks its reader may open
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|related-task-access|')
         timeout-minutes: 15
         run: node test/e2e/related-task-access.mjs --api 3011
         env:
@@ -2882,6 +3143,7 @@ jobs:
       # stopped at spaces and projects: a private list's task and a private
       # task's comment were cited. Reindexed with the local embedder, no model.
       - name: The AI's knowledge answer cites only what its asker may open
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|knowledge-read-access|')
         timeout-minutes: 15
         run: node test/e2e/knowledge-read-access.mjs --api 3011
         env:
@@ -2892,6 +3154,7 @@ jobs:
       # 500 and PDFs came back as JSON describing the file. Each is downloaded,
       # and each export button clicked, and the saved file read.
       - name: A file export downloads the file
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|file-exports|')
         timeout-minutes: 15
         run: node test/e2e/file-exports.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2902,6 +3165,7 @@ jobs:
       # PDF and workload moves, the dashboard's default) and sent support
       # tickets to the user's first workspace.
       - name: A manager's controls follow their role in the workspace on screen
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|workspace-role-controls|')
         timeout-minutes: 15
         run: node test/e2e/workspace-role-controls.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2911,6 +3175,7 @@ jobs:
       # Every goal card read 0% (it drew a field the API never sends), and a
       # guest was offered a "New goal" the API refuses, which failed silently.
       - name: The goals page draws each goal's progress, and offers a guest no create
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|goals-page|')
         timeout-minutes: 15
         run: node test/e2e/goals-page.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2920,6 +3185,7 @@ jobs:
       # The console's audit log read the admin's first workspace only, dropped
       # a failed export, and called a failed read "no events".
       - name: The audit log reads the workspace picked, and says when it fails
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|admin-audit-page|')
         timeout-minutes: 15
         run: node test/e2e/admin-audit-page.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2930,6 +3196,7 @@ jobs:
       # the task was refused and told "No linked docs."; a failed or loading
       # list said the same, and a refused link said nothing.
       - name: A task's linked docs are listed to whoever may open it
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|linked-docs-access|')
         timeout-minutes: 15
         run: node test/e2e/linked-docs-access.mjs --api 3011 --dist apps/web/dist
         env:
@@ -2939,6 +3206,7 @@ jobs:
       # A private space's sprint was listed, named and opened to every member,
       # and any member or guest could make, rename, move and delete sprints.
       - name: A sprint is read and changed where its space lets its reader
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|sprint-access|')
         timeout-minutes: 15
         run: node test/e2e/sprint-access.mjs --api 3011
         env:
@@ -2950,6 +3218,7 @@ jobs:
       # to members it refuses; the workspace list hid a private task from its
       # assignee. Every task read asks the list too now.
       - name: A private list's tasks reach nobody it refuses, whichever read asks
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|private-list-reach|')
         timeout-minutes: 15
         run: node test/e2e/private-list-reach.mjs --api 3011
         env:
@@ -2962,6 +3231,7 @@ jobs:
       # member of this workspace"), and an id naming nothing is 404. And a move
       # into another's private list, which was taken, is refused.
       - name: What a reader may not open is refused with its reason
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|refused-as-forbidden|')
         timeout-minutes: 15
         run: node test/e2e/refused-as-forbidden.mjs --api 3011
         env:
@@ -2973,6 +3243,7 @@ jobs:
       # account's role. The space's level is still asked of them, and a plain
       # member is still refused a private space's task.
       - name: A super_admin member changes the tasks they may open
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|super-admin-task-writes|')
         timeout-minutes: 15
         run: node test/e2e/super-admin-task-writes.mjs --api 3011
         env:
@@ -2982,6 +3253,7 @@ jobs:
       # A private folder left the folder listing and nothing else: its project,
       # lists and tasks were read by members it refused, by id and in every list.
       - name: What is in a private folder reaches nobody it refuses
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|private-folder-reach|')
         timeout-minutes: 15
         run: node test/e2e/private-folder-reach.mjs --api 3011
         env:
@@ -2992,6 +3264,7 @@ jobs:
       # plan, its limits, a domain's verification); a picture was saved at any
       # address; the settings page offered a logo address box.
       - name: A settings save writes what it may, and a picture is one we store
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|settings-writes|')
         timeout-minutes: 15
         run: node test/e2e/settings-writes.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3001,6 +3274,7 @@ jobs:
       # The contribution report's Sprint period could not choose a sprint, and
       # resolved a sprint id with no read rule.
       - name: The contribution report's Sprint period reports on the sprint chosen
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|contribution-sprint|')
         timeout-minutes: 15
         run: node test/e2e/contribution-sprint.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3009,6 +3283,7 @@ jobs:
 
       # A space's projects had no ORDER BY outside the sidebar.
       - name: A space's projects come back in the order they were put in
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|project-order|')
         timeout-minutes: 15
         run: node test/e2e/project-order.mjs --api 3011
         env:
@@ -3018,6 +3293,7 @@ jobs:
       # Create with AI printed a refused step's code, not its sentence, and
       # never drew its plan's warnings.
       - name: Create with AI says why it made nothing, and what its plan warned
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|create-ai-results|')
         timeout-minutes: 15
         run: node test/e2e/create-ai-results.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3027,6 +3303,7 @@ jobs:
       # The planner asked for hidden calendars before its settings arrived, and
       # offered to connect calendars the server could not connect.
       - name: The planner asks for what its settings show, and offers only what it can connect
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|planner-gates|')
         timeout-minutes: 15
         run: node test/e2e/planner-gates.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3037,6 +3314,7 @@ jobs:
       # workload CSV's columns, the AI page's meeting card and three exports'
       # file names, each wrong east of Greenwich.
       - name: A day and a time are the reader's own, east of Greenwich too
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|local-dates|')
         timeout-minutes: 15
         run: node test/e2e/local-dates.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3046,6 +3324,7 @@ jobs:
       # The meetings page filtered tags in the browser over its newest 200, with
       # exact case, so older meetings and other spellings were unreachable.
       - name: A meeting tag finds every meeting carrying it, whatever its case, however old
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|meeting-tags|')
         timeout-minutes: 15
         run: node test/e2e/meeting-tags.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3055,12 +3334,14 @@ jobs:
       # The planner's block prefix, once set, could not be cleared back to
       # "Work on": an empty box sent nothing.
       - name: A cleared block prefix goes back to "Work on"
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|planner-prefix|')
         timeout-minutes: 15
         run: node test/e2e/planner-prefix.mjs --api 3011 --dist apps/web/dist
 
       # The clip library and search read one listing page of 200, which is a
       # workspace's OLDEST 200 clips. Against the store above, in pages.
       - name: The clip library shows the newest clips, and search finds them, however many there are
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|clip-library|')
         timeout-minutes: 15
         run: node test/e2e/clip-library.mjs --api 3011
         env:
@@ -3072,6 +3353,7 @@ jobs:
       # page offered Delete on every card. A guest reads what they recorded; a
       # clip is deleted by its recorder or somebody who manages the workspace.
       - name: A guest reads the clips they recorded, and a clip is deleted by its recorder or a manager
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|clip-library-access|')
         timeout-minutes: 15
         run: node test/e2e/clip-library-access.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3081,6 +3363,7 @@ jobs:
       # Two headers declared sticky inside boxes with no height, which never
       # scroll, so both went with the page.
       - name: A sticky header stays at the top of what scrolls under it
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|sticky-headers|')
         timeout-minutes: 15
         run: node test/e2e/sticky-headers.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3090,6 +3373,7 @@ jobs:
       # One priority change refetched the open sheet's task and attachments six
       # times: two handlers, each refetching for every event of the burst.
       - name: One change to a task refreshes its open sheet once
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-sheet-fetches|')
         timeout-minutes: 15
         run: node test/e2e/task-sheet-fetches.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3099,6 +3383,7 @@ jobs:
       # A reply to a comment notification matched nothing: the notification's
       # Message-ID was never kept, and it carried no Reply-To.
       - name: A reply to a comment notification lands on its task
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|email-reply-routing|')
         timeout-minutes: 15
         run: node test/e2e/email-reply-routing.mjs --api 3011
         env:
@@ -3108,6 +3393,7 @@ jobs:
       # The planner's Default list for new tasks was saved and read by nothing:
       # /task, a message and the AI each chose a list of their own.
       - name: The planner's default list decides where new tasks land
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|planner-default-list|')
         timeout-minutes: 15
         run: node test/e2e/planner-default-list.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3117,6 +3403,7 @@ jobs:
       # A task with no place had nowhere of its own to go: Home's Personal List
       # was a to-do card, and /task filed into the oldest list of the hierarchy.
       - name: Everybody has a Personal List, theirs alone, where a task with no place goes
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|personal-list|')
         timeout-minutes: 15
         run: node test/e2e/personal-list.mjs --api 3011 --dist apps/web/dist
 
@@ -3124,6 +3411,7 @@ jobs:
       # others from its menu, the same task in each, read by each list's people,
       # changed by its home list's, and taken out when the ClickApp is turned off.
       - name: A task is in more lists than its home, as ClickUp's Tasks in Multiple Lists
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|tasks-in-multiple-lists|')
         timeout-minutes: 15
         run: node test/e2e/tasks-in-multiple-lists.mjs --api 3011 --dist apps/web/dist
 
@@ -3131,6 +3419,7 @@ jobs:
       # nothing, and never read what custom roles grant: a member was offered
       # Project (a 403), a guest Space, anyone "Save as template".
       - name: The web offers what a person's permissions allow
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|role-permissions-web|')
         timeout-minutes: 15
         run: node test/e2e/role-permissions-web.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3141,6 +3430,7 @@ jobs:
       # too, so a guest with nothing shared made lists in any open space and
       # commented on its tasks. Grants planted and refusals read back by SQL.
       - name: A guest changes only what is shared with them
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|guest-space-level|')
         timeout-minutes: 15
         run: node test/e2e/guest-space-level.mjs --api 3011
         env:
@@ -3151,6 +3441,7 @@ jobs:
       # tasks, lists and docs, by id, in every listing, in search and in its
       # realtime rooms. Everything planted by SQL.
       - name: A guest reads what is shared with them, and the way to it
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|guest-read-scope|')
         timeout-minutes: 15
         run: node test/e2e/guest-read-scope.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3161,6 +3452,7 @@ jobs:
       # read, searched and heard in the workspace's room, and any channel joined
       # or made. Channels, messages and grants planted by SQL.
       - name: A guest reads the channels shared with them, and hears nothing else
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|guest-chat-scope|')
         timeout-minutes: 15
         run: node test/e2e/guest-chat-scope.mjs --api 3011
         env:
@@ -3170,6 +3462,7 @@ jobs:
       # Whiteboards and mind maps were every member's, a guest's included: none
       # can be shared, so a guest has none, and the pages say so.
       - name: A guest has no whiteboard or mind map
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|guest-canvas-scope|')
         timeout-minutes: 15
         run: node test/e2e/guest-canvas-scope.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3180,6 +3473,7 @@ jobs:
       # submissions included; and a form filed tasks into lists its maker was
       # refused. Two organisations; every refusal read back by SQL.
       - name: A form is its workspace's, and files only where its maker could
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|form-access|')
         timeout-minutes: 15
         run: node test/e2e/form-access.mjs --api 3011
         env:
@@ -3191,6 +3485,7 @@ jobs:
       # anywhere — each a 403. A guest is offered a reminder, and a list only
       # in a space shared with them to edit; the API is asked the same.
       - name: A guest is offered what a guest may make
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|guest-create-menu|')
         timeout-minutes: 15
         run: node test/e2e/guest-create-menu.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3202,6 +3497,7 @@ jobs:
       # to every member and bounced them; the App Center's switch looked live to
       # anyone and the connect route refused them.
       - name: A role's grant is reachable where it is used
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|settings-role-grants|')
         timeout-minutes: 15
         run: node test/e2e/settings-role-grants.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3213,6 +3509,7 @@ jobs:
       # They are shaped by who may add to the space, never a guest; every
       # refusal read back by SQL.
       - name: Statuses are shaped by who may add to the space
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|status-write-access|')
         timeout-minutes: 15
         run: node test/e2e/status-write-access.mjs --api 3011
         env:
@@ -3223,6 +3520,7 @@ jobs:
       # list's Rename and Delete, and the members' changes to anybody who could
       # open it; it asks the API what this person may do there now.
       - name: A project's page offers each control to who may use it
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|project-page-controls|')
         timeout-minutes: 15
         run: node test/e2e/project-page-controls.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3232,6 +3530,7 @@ jobs:
       # A person's dock emptied itself on their first page: the recents write
       # made the row holding an empty choice. Never arranged is null now.
       - name: A dock nobody arranged keeps its default tools
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|dock-defaults|')
         timeout-minutes: 15
         run: node test/e2e/dock-defaults.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3242,6 +3541,7 @@ jobs:
       # members a task, a list, a folder and a form, each a 403. They ask which
       # spaces this person may add to now.
       - name: A view-only space's menus offer a member nothing it refuses
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|view-only-space-menus|')
         timeout-minutes: 15
         run: node test/e2e/view-only-space-menus.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3253,6 +3553,7 @@ jobs:
       # opens the planner's Accounts page by its address now, and only for
       # whoever has no calendar connected.
       - name: Connect Calendar leads to where a calendar is connected
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|meetings-connect-calendar|')
         timeout-minutes: 15
         run: node test/e2e/meetings-connect-calendar.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3264,6 +3565,7 @@ jobs:
       # their account and nothing of the workspace's. Read without Google: the
       # consent address's state, and a code the provider refuses.
       - name: A person connects their own calendar
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|personal-calendar-connect|')
         timeout-minutes: 15
         run: node test/e2e/personal-calendar-connect.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3275,6 +3577,7 @@ jobs:
       # view nothing — and a task the person cannot open is not theirs to
       # change. Every change read back by SQL.
       - name: Task edits follow the space's level
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-edit-levels|')
         timeout-minutes: 15
         run: node test/e2e/task-edit-levels.mjs --api 3011
         env:
@@ -3285,6 +3588,7 @@ jobs:
       # the space's default, both ways: View narrows, Edit widens. A project's
       # maker is seeded as its admin, and that is no grant.
       - name: A project's member roles decide a member's level there
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|project-member-levels|')
         timeout-minutes: 15
         run: node test/e2e/project-member-levels.mjs --api 3011
         env:
@@ -3296,6 +3600,7 @@ jobs:
       # space, comments in a comment-only one (and the status on their own task
       # there), everything where they may edit.
       - name: The task sheet offers what this person may do
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-sheet-capabilities|')
         timeout-minutes: 15
         run: node test/e2e/task-sheet-capabilities.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3308,6 +3613,7 @@ jobs:
       # types, reminders and calendar pushes asked the task's read or write
       # rule. Every refusal read back by SQL beside the same act allowed.
       - name: A task's routes act on its own rows, as its rules allow
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-rows-by-id|')
         timeout-minutes: 15
         run: node test/e2e/task-rows-by-id.mjs --api 3011
         env:
@@ -3319,6 +3625,7 @@ jobs:
       # their project and never by a guest, and a vote — the voter's own —
       # needs only the task to be readable. Read back by SQL.
       - name: Custom fields are set and defined as their level allows
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|field-writes-by-level|')
         timeout-minutes: 15
         run: node test/e2e/field-writes-by-level.mjs --api 3011
         env:
@@ -3330,6 +3637,7 @@ jobs:
       # share, a space or project role; tasks, lists and docs; the wizard, the
       # sheet's Delete, and the spaces the "+" and the Move picker offer.
       - name: Full edit makes and deletes, and is a space's default
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|full-edit-levels|')
         timeout-minutes: 15
         run: node test/e2e/full-edit-levels.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3340,6 +3648,7 @@ jobs:
       # Edit changes it, Comment and assigned moves its status, View nothing —
       # and a task shared with nobody is not theirs; the sheet draws the same.
       - name: A guest changes what is shared with them, at its level
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|guest-task-edits|')
         timeout-minutes: 15
         run: node test/e2e/guest-task-edits.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3351,6 +3660,7 @@ jobs:
       # members and guests with nothing shared land nothing, and nobody is put
       # down as the author of somebody else's mail. Read back by SQL.
       - name: A comment by mail asks what the app asks
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|mail-comments-by-level|')
         timeout-minutes: 15
         run: node test/e2e/mail-comments-by-level.mjs --api 3011
         env:
@@ -3361,6 +3671,7 @@ jobs:
       # pickers), and an invitation's token reaches only those who may copy its
       # link: no list carries it, and a member is refused the link.
       - name: A guest sees nobody's invitation, and a token only its admins
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|guest-invitations|')
         timeout-minutes: 15
         run: node test/e2e/guest-invitations.mjs --api 3011
         env:
@@ -3372,6 +3683,7 @@ jobs:
       # Edit and Full edit lists, in the List, Table, Board, Calendar and Gantt
       # views, and an empty list; what is changed is read back by SQL.
       - name: The list page offers only what its reader may do
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|list-page-levels|')
         timeout-minutes: 15
         run: node test/e2e/list-page-levels.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3382,6 +3694,7 @@ jobs:
       # change it, read back by SQL, and a reader's screen changes nothing
       # (found-6-oct/autosave-switch-saves-nothing).
       - name: Autosave for me saves a changed layout to the view
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|view-autosave|')
         timeout-minutes: 10
         run: node test/e2e/view-autosave.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3396,6 +3709,7 @@ jobs:
       # many ask at once, and the view menu and Customize panel offer only what
       # the reader may do. Read back by SQL.
       - name: A list's shared views are changed by those who may edit it
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|view-writes-by-level|')
         timeout-minutes: 15
         run: node test/e2e/view-writes-by-level.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3409,6 +3723,7 @@ jobs:
       # View; the sheet and the list page offer what the switches allow. Read
       # back by SQL.
       - name: View-only permissions are set person by person
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|view-only-permissions|')
         timeout-minutes: 15
         run: node test/e2e/view-only-permissions.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3420,6 +3735,7 @@ jobs:
       # stored; made and delivered at Full edit; and the Email panel offers it
       # by the list's answer. Read back by SQL.
       - name: A hook is made by somebody who may add what it adds
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|inbound-hook-makers|')
         timeout-minutes: 15
         run: node test/e2e/inbound-hook-makers.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3431,6 +3747,7 @@ jobs:
       # a guest, and withheld by the Email panel; and a task's address carries
       # a tag of it, not the address itself. Mail read back by SQL.
       - name: A list's address is read only by those who may add to it
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|list-address-readers|')
         timeout-minutes: 15
         run: node test/e2e/list-address-readers.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3442,6 +3759,7 @@ jobs:
       # changes or removes a share above them; the space's default counts; a
       # guest shares nothing; the panel offers the levels allowed. By SQL.
       - name: Sharing goes by level, up to the sharer's own
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|share-levels|')
         timeout-minutes: 15
         run: node test/e2e/share-levels.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3452,6 +3770,7 @@ jobs:
       # each does what it says — archived, or in the Trash, read back by SQL —
       # with Delete at Full edit only.
       - name: A subtask's row archives or deletes, as it says
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|subtask-row-actions|')
         timeout-minutes: 15
         run: node test/e2e/subtask-row-actions.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3462,6 +3781,7 @@ jobs:
       # nothing else on the checklist; at View nothing; the sheet offers that
       # tick alone. Items read back by SQL.
       - name: A commenter ticks their own checklist items
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|checklist-assignee-ticks|')
         timeout-minutes: 15
         run: node test/e2e/checklist-assignee-ticks.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3472,6 +3792,7 @@ jobs:
       # list, or a whole space — and not at Edit or where nothing is shared;
       # the list page offers them its add rows by the same answer. By SQL.
       - name: A guest adds a task where they hold Full edit
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|guest-task-making|')
         timeout-minutes: 15
         run: node test/e2e/guest-task-making.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3482,6 +3803,7 @@ jobs:
       # only read is not blocked from one's own (it may still wait on it), and
       # a subtask goes only under a parent at Full edit. By SQL.
       - name: Blocking or parenting another task asks its rule
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|other-task-rules|')
         timeout-minutes: 15
         run: node test/e2e/other-task-rules.mjs --api 3011
         env:
@@ -3493,6 +3815,7 @@ jobs:
       # role decides nothing in a workspace; the knowledge base answers and
       # reindexes by the role there. Entries and the index read back by SQL.
       - name: Time is tracked by whoever may read the task
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|time-tracking-readers|')
         timeout-minutes: 15
         run: node test/e2e/time-tracking-readers.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3504,6 +3827,7 @@ jobs:
       # may open it, and says so before it says no model is configured. Where
       # a model answers, the prompts it is sent are read back.
       - name: AI reads a task only for someone who may open it
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|ai-task-reads|')
         timeout-minutes: 15
         run: node test/e2e/ai-task-reads.mjs --api 3011
         env:
@@ -3514,6 +3838,7 @@ jobs:
       # integrations — a custom role's grant counts — and refused to a member
       # and a guest before it is used; the dialog offers Sync now to the same.
       - name: The workspace calendar is pulled by those who manage integrations
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|calendar-pull-access|')
         timeout-minutes: 15
         run: node test/e2e/calendar-pull-access.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3527,6 +3852,7 @@ jobs:
       # such a person's account, the task sheet saying why. Staged without a
       # token, so nothing leaves the runner.
       - name: A task is pushed only into calendars whose owner may read it
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|calendar-push-reach|')
         timeout-minutes: 15
         run: node test/e2e/calendar-push-reach.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3539,6 +3865,7 @@ jobs:
       # and removed on the planner's Automations page, its events written to the
       # calendars started above and kept as the tasks change.
       - name: A person's syncs decide which tasks go to their calendar
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|calendar-sync-rules|')
         timeout-minutes: 15
         run: node test/e2e/calendar-sync-rules.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3550,6 +3877,7 @@ jobs:
       # event deleted there written again, one changed there put back — and
       # the calendars' events read again, against the calendars started above.
       - name: The planner's Sync now writes the presser's syncs through again
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|planner-sync-now|')
         timeout-minutes: 15
         run: node test/e2e/planner-sync-now.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3560,6 +3888,7 @@ jobs:
       # server holds keys for, and refuses the rest, saying what is missing —
       # judged by what providers/status says of each provider.
       - name: A grant starts only where the server holds the provider's keys
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|oauth-start-readiness|')
         timeout-minutes: 15
         run: node test/e2e/oauth-start-readiness.mjs --api 3011
         env:
@@ -3570,6 +3899,7 @@ jobs:
       # a manager changes no role, makes no custom role, removes nobody — and
       # nobody gives a permission or a rank above their own. By SQL.
       - name: Roles are given only by those who may give them
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|member-role-grants|')
         timeout-minutes: 15
         run: node test/e2e/member-role-grants.mjs --api 3011
         env:
@@ -3580,6 +3910,7 @@ jobs:
       # keys, and its automations ask the catalog key for each: a manager is
       # refused, a member granted it is not; the automations page offers by it.
       - name: Workspace settings, audit, security and automations ask their keys
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|admin-only-keys|')
         timeout-minutes: 15
         run: node test/e2e/admin-only-keys.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3592,6 +3923,7 @@ jobs:
       # follow the same key, an approver is shown only the hours of an entry
       # they cannot open, and the Time page's everyone-views stay the admins'.
       - name: Timesheets are approved by the holders of time.approval.manage
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|time-approval-rule|')
         timeout-minutes: 15
         run: node test/e2e/time-approval-rule.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3602,6 +3934,7 @@ jobs:
       # report.export as well: a guest granted viewing alone downloads no CSV
       # or PDF and is offered no export on the reports page or its builder.
       - name: Report exports ask report.export
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|report-export-key|')
         timeout-minutes: 15
         run: node test/e2e/report-export-key.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3612,6 +3945,7 @@ jobs:
       # no route asked, is gone), a role cannot be made with it, and a role saved
       # while it was offered is still assigned and grants its other keys.
       - name: The role editor offers no key that gates nothing
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|retired-permission-keys|')
         timeout-minutes: 15
         run: node test/e2e/retired-permission-keys.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3622,6 +3956,7 @@ jobs:
       # and no invoice or its Stripe links, and start no checkout and open no
       # portal; a member granted the key does both.
       - name: Billing asks workspace.billing
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|billing-key|')
         timeout-minutes: 15
         run: node test/e2e/billing-key.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3632,6 +3967,7 @@ jobs:
       # granted member on Roles, General or Security — and each control asks its
       # own key; inviting asks members.invite, never above one's own role.
       - name: Settings tabs and invitations follow their keys
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|settings-tabs-by-key|')
         timeout-minutes: 15
         run: node test/e2e/settings-tabs-by-key.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3642,6 +3978,7 @@ jobs:
       # template.manage, and a project is saved as one only as far as its saver
       # may read it; the templates page offers Save as template by the key.
       - name: Project templates ask template.manage
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|project-template-key|')
         timeout-minutes: 15
         run: node test/e2e/project-template-key.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3652,6 +3989,7 @@ jobs:
       # seeded with sample data, with workspace.import — each an admin's by
       # default and grantable; the pages offer each by its key.
       - name: Workspace export and import ask their keys
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|data-transfer-keys|')
         timeout-minutes: 15
         run: node test/e2e/data-transfer-keys.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3662,6 +4000,7 @@ jobs:
       # admin everyone's, a manager their team's, a member their own — and only
       # this workspace's hours.
       - name: The Time page answers whose hours once
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|time-page-reach|')
         timeout-minutes: 15
         run: node test/e2e/time-page-reach.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3672,6 +4011,7 @@ jobs:
       # workspace.clickapps.manage; every member still reads which are on.
       # (admin-guard-admits-managers-where-the-web-says-admin)
       - name: ClickApps are switched by workspace.clickapps.manage
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|clickapp-flags-access|')
         timeout-minutes: 15
         run: node test/e2e/clickapp-flags-access.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3682,6 +4022,7 @@ jobs:
       # rank); the working days and holidays ask workspace.schedule.manage.
       # (admin-guard-admits-managers-where-the-web-says-admin)
       - name: A member's capacity, reporting line, the work week and holidays ask their keys
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|people-calendar-access|')
         timeout-minutes: 15
         run: node test/e2e/people-calendar-access.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3692,6 +4033,7 @@ jobs:
       # restores those they may change; archived workspaces stay an admin's.
       # (admin-guard-admits-managers-where-the-web-says-admin)
       - name: Archived tasks are read by every member, as the read rule allows
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|archived-tasks-access|')
         timeout-minutes: 15
         run: node test/e2e/archived-tasks-access.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3702,6 +4044,7 @@ jobs:
       # is the admins' or a holder of groups.manage; everyone reads them.
       # (admin-guard-admits-managers-where-the-web-says-admin)
       - name: User groups are managed by groups.manage
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|user-group-access|')
         timeout-minutes: 15
         run: node test/e2e/user-group-access.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3712,6 +4055,7 @@ jobs:
       # a guest reads no client list, and a project takes only its own workspace's client.
       # (admin-guard-admits-managers-where-the-web-says-admin)
       - name: Clients are managed by client.manage
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|client-access|')
         timeout-minutes: 15
         run: node test/e2e/client-access.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3722,6 +4066,7 @@ jobs:
       # from Settings -> Announcements; every member still reads the banner.
       # (admin-guard-admits-managers-where-the-web-says-admin)
       - name: Announcements are posted by announcement.manage
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|announcement-access|')
         timeout-minutes: 15
         run: node test/e2e/announcement-access.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3732,6 +4077,7 @@ jobs:
       # and only a dashboard its setter may read can become it.
       # (admin-guard-admits-managers-where-the-web-says-admin)
       - name: The workspace dashboard is set by dashboard.workspace_default.manage
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|default-dashboard-access|')
         timeout-minutes: 15
         run: node test/e2e/default-dashboard-access.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3742,6 +4088,7 @@ jobs:
       # as moving it did: any reader of the space did all three
       # (folders-changed-by-any-reader).
       - name: A folder is changed only as the container rule allows
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|folder-change-rule|')
         timeout-minutes: 15
         run: node test/e2e/folder-change-rule.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3752,6 +4099,7 @@ jobs:
       # project took a folder of another space, or another workspace
       # (project-folder-unchecked-across-workspaces).
       - name: A project's folder is one of its own space's
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|project-folder-home|')
         timeout-minutes: 15
         run: node test/e2e/project-folder-home.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3762,6 +4110,7 @@ jobs:
       # an admin deletes for good or empties it; a manager's Trash is a
       # member's (trash-deletes-for-good-wider-than-clickup).
       - name: Only an admin deletes from the Trash for good
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|trash-rules|')
         timeout-minutes: 15
         run: node test/e2e/trash-rules.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3771,6 +4120,7 @@ jobs:
       # A client with invoices is not deleted: the invoices cascade with it
       # (client-delete-cascades-invoices).
       - name: A client with invoices is not deleted
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|client-delete-keeps-invoices|')
         timeout-minutes: 15
         run: node test/e2e/client-delete-keeps-invoices.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3782,6 +4132,7 @@ jobs:
       # gated nothing leave the role editor
       # (role-editor-offers-unenforced-permissions).
       - name: Deleting what someone else made asks the kind's key
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|container-delete-keys|')
         timeout-minutes: 15
         run: node test/e2e/container-delete-keys.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3793,6 +4144,7 @@ jobs:
       # says when a save fails; a team search is literal
       # (job-title-rule-and-message-disagree).
       - name: A job title follows the member-profiles permission
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|job-title-rule|')
         timeout-minutes: 15
         run: node test/e2e/job-title-rule.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3803,6 +4155,7 @@ jobs:
       # Docs are, and lands in the Trash of whoever did it
       # (doc-archive-and-delete-at-two-levels).
       - name: A doc is archived and deleted at Edit
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|doc-trash-level|')
         timeout-minutes: 15
         run: node test/e2e/doc-trash-level.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3813,6 +4166,7 @@ jobs:
       # the public-link switch by the checks their routes ask
       # (delete-and-public-link-offered-to-everyone).
       - name: A menu offers what its routes would accept
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|menu-offers|')
         timeout-minutes: 15
         run: node test/e2e/menu-offers.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3829,6 +4183,7 @@ jobs:
       # and a second Escape goes on to what is under the menu: the create modal
       # closes (`found-30-sep/leaving-menu-takes-the-next-escape`).
       - name: A menu pressed while it closes opens and stays open, and takes no second row press or Escape
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|menu-reopen|')
         timeout-minutes: 15
         run: node test/e2e/menu-reopen.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3841,6 +4196,7 @@ jobs:
       # (members-have-no-trash-to-open, members-see-no-clickapps-list,
       # settings-blank-on-a-slow-permission-read).
       - name: Every member opens Trash and Features in Settings
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|member-settings-tabs|')
         timeout-minutes: 15
         run: node test/e2e/member-settings-tabs.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3851,6 +4207,7 @@ jobs:
       # rather than an edit that cannot be saved
       # (dashboard-edit-offered-on-others-presets).
       - name: A dashboard somebody else made is copied, not edited
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|dashboard-own-copy|')
         timeout-minutes: 15
         run: node test/e2e/dashboard-own-copy.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3860,6 +4217,7 @@ jobs:
       # A search matches what was typed: % _ and \ are text in every LIKE
       # search (like-patterns-escaped-four-ways).
       - name: A search matches what was typed
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|like-literal|')
         timeout-minutes: 15
         run: node test/e2e/like-literal.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3869,6 +4227,7 @@ jobs:
       # Sign-up sends the ClickApps choice to Settings → Features, not the
       # console (copy-points-admins-to-the-console).
       - name: Sign-up names Settings for ClickApps
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|clickapps-copy|')
         timeout-minutes: 15
         run: node test/e2e/clickapps-copy.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3880,6 +4239,7 @@ jobs:
       # dismissed by nobody; the flag that gated nothing is gone
       # (announcement-views-counted-per-click, announcements-flag-gates-nothing).
       - name: Announcement views are people
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|announcement-views|')
         timeout-minutes: 15
         run: node test/e2e/announcement-views.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3890,6 +4250,7 @@ jobs:
       # Unarchive and Delete at Edit, a refused save said
       # (doc-editor-open-to-readers, docs-offer-no-archive-or-delete).
       - name: The doc page offers what the level allows
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|doc-level-controls|')
         timeout-minutes: 15
         run: node test/e2e/doc-level-controls.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3902,6 +4263,7 @@ jobs:
       # platform-flag-switches-apply-nowhere). It switches Forms for the whole
       # platform and puts it back on however it ends.
       - name: A feature flag resolves one way
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|flag-resolution|')
         timeout-minutes: 15
         run: node test/e2e/flag-resolution.mjs --api 3011
         env:
@@ -3913,6 +4275,7 @@ jobs:
       # list's task is told to nobody it is closed to, an open list's to each
       # member, and not to a guest it is not shared with.
       - name: An automation notifies only those who may open its task
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|automation-notices|')
         timeout-minutes: 15
         run: node test/e2e/automation-notices.mjs --api 3011
         env:
@@ -3925,6 +4288,7 @@ jobs:
       # verdict; four actions (a comment, a watcher, a due date, an AI field);
       # and a rule tested on a task with nothing done.
       - name: An automation acts only when its conditions hold, and is tested on a task
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|automation-conditions|')
         timeout-minutes: 15
         run: node test/e2e/automation-conditions.mjs --api 3011 --dist apps/web/dist
 
@@ -3936,6 +4300,7 @@ jobs:
       # here, so the second end follows the first at once; the calls harness
       # above holds its notes back, as a model's are on a lane.
       - name: What is made once is made once, however many ask at once
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|made-once|')
         timeout-minutes: 15
         run: node test/e2e/made-once.mjs --api 3011
         env:
@@ -3945,6 +4310,7 @@ jobs:
       # A member sets their own weekly capacity from the Workload page;
       # somebody else's asks the profile permission (own-capacity-not-self-service).
       - name: A member sets their own capacity
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|own-capacity|')
         timeout-minutes: 15
         run: node test/e2e/own-capacity.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3955,6 +4321,7 @@ jobs:
       # page's Manage clients, by whoever holds client.manage
       # (clients-cannot-be-edited).
       - name: A client is edited by who manages clients
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|client-edit|')
         timeout-minutes: 15
         run: node test/e2e/client-edit.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3965,6 +4332,7 @@ jobs:
       # restore rule lets; Settings → Archived answers the same, batched
       # (archived-tasks-unarchived-in-place).
       - name: An archived task is unarchived where it is shown
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|unarchive-in-place|')
         timeout-minutes: 15
         run: node test/e2e/unarchive-in-place.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3974,6 +4342,7 @@ jobs:
       # A workspace's audit log in its own Settings, for whoever holds
       # workspace.audit.view (workspace-audit-log-not-in-settings).
       - name: The audit log is read in the workspace's Settings
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|audit-log-settings|')
         timeout-minutes: 15
         run: node test/e2e/audit-log-settings.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3986,6 +4355,7 @@ jobs:
       # `ledger-rows/row-751`). There is no model here, so every answer is
       # asserted as /ai/status says.
       - name: Brain from a task and from a comment
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|brain-entry-points|')
         timeout-minutes: 15
         run: node test/e2e/brain-entry-points.mjs --api 3011 --dist apps/web/dist
         env:
@@ -3995,6 +4365,7 @@ jobs:
       # Three GET routes no page read: a webhook's deliveries, a goal's
       # history, the digest's preview (other-get-routes-without-reader).
       - name: A webhook's deliveries, a goal's history and the digest preview are read
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|routes-with-readers|')
         timeout-minutes: 15
         run: node test/e2e/routes-with-readers.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4004,6 +4375,7 @@ jobs:
       # The assignee picker's footer asks who should take the task, and
       # assigns only on confirm (assign-with-ai-picker-unbuilt).
       - name: The assignee picker's Assign with AI suggests and assigns on confirm
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|assign-with-ai-picker|')
         timeout-minutes: 15
         run: node test/e2e/assign-with-ai-picker.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4013,6 +4385,7 @@ jobs:
       # An archived workspace is deleted for good by its organization's owner,
       # with its name typed (workspace-permanent-delete-unbuilt).
       - name: A workspace is deleted for good by its organization's owner
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|workspace-delete-for-good|')
         timeout-minutes: 15
         run: node test/e2e/workspace-delete-for-good.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4023,6 +4396,7 @@ jobs:
       # one task and leaving the modal and the page as its name says, and the
       # primary button as it was (row-730-create-task-chevron).
       - name: Create Task ▾ makes one task and ends where its name says
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|create-task-chevron|')
         timeout-minutes: 15
         run: node test/e2e/create-task-chevron.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4034,6 +4408,7 @@ jobs:
       # existing template, the second pair only for `template.manage`. Each
       # write is read back from the server (ledger-rows/row-1060).
       - name: The create modal's Templates menu uses, makes, saves and updates templates
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|create-modal-templates|')
         timeout-minutes: 15
         run: node test/e2e/create-modal-templates.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4056,6 +4431,7 @@ jobs:
       # (found-30-sep/sheet-dates-write-as-typed,
       # found-5-oct/years-below-100-read-back-wrong). Each row read back by SQL.
       - name: A task's dates and estimate are taken as sent, and a refused change is said
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-values|')
         timeout-minutes: 15
         run: node test/e2e/task-values.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4066,6 +4442,7 @@ jobs:
       # soonest due first, counted honestly (500+ when cut), and a failed read
       # says so rather than "no tasks". Rows staged in Postgres.
       - name: Home's own open work
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|home-my-work|')
         timeout-minutes: 15
         run: node test/e2e/home-my-work.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4078,6 +4455,7 @@ jobs:
       # left a cookie session alive; the user menu ran off a 900px window.
       # Runs WITH the worker — the one browser suite that must.
       - name: The worker keeps no API answer, and signing out ends the session
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|sw-api-cache|')
         timeout-minutes: 15
         run: node test/e2e/sw-api-cache.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4089,6 +4467,7 @@ jobs:
       # R2 domain is set — the default — so every one broke a quarter of an
       # hour later. Needs the job's S3 store, as the other upload suites do.
       - name: Avatars and logos are saved at an address that lasts
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|stable-images|')
         timeout-minutes: 15
         run: node test/e2e/stable-images.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4107,6 +4486,7 @@ jobs:
       # its database: the domain on the private bucket, on the pictures' alone,
       # and left on the private one after the pictures moved.
       - name: Private objects are signed, and a public domain serves the pictures alone
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|private-object-urls|')
         timeout-minutes: 15
         run: node test/e2e/private-object-urls.mjs --api 3011
 
@@ -4115,6 +4495,7 @@ jobs:
       # answered "no matches". Seeds 236 tasks, so it is one of the longer
       # suites here.
       - name: Task pickers search the whole workspace
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-pickers-search|')
         timeout-minutes: 15
         run: node test/e2e/task-pickers-search.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4125,6 +4506,7 @@ jobs:
       # direct-SQL-insert check proves the INDEX refuses, so the rule cannot be
       # bypassed by anything that writes folders another way.
       - name: Folder create and name collisions
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|folder-create|')
         timeout-minutes: 15
         run: node test/e2e/folder-create.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4136,6 +4518,7 @@ jobs:
       # TREE redraws, not just that the column moved: the bug it was written for
       # lived in the gap between the two.
       - name: Sidebar sections and drag
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|sidebar-sections|')
         timeout-minutes: 15
         run: node test/e2e/sidebar-sections.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4148,6 +4531,7 @@ jobs:
       # words: a tool that reports success and writes nothing is the facade
       # defect with a model in front of it.
       - name: AI creates containers
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|ai-create-containers|')
         timeout-minutes: 15
         run: node test/e2e/ai-create-containers.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4158,6 +4542,7 @@ jobs:
       # live status badge and a ghost reference degrading to inert text rather
       # than to a chip that lies.
       - name: AI answer rendering
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|ai-answer-rendering|')
         timeout-minutes: 15
         run: node test/e2e/ai-answer-rendering.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4170,6 +4555,7 @@ jobs:
       # nothing left to match, and check 15 proves a list with no closed status
       # disables the tick rather than inventing one.
       - name: Task header status controls
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-header-status|')
         timeout-minutes: 15
         run: node test/e2e/task-header-status.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4181,6 +4567,7 @@ jobs:
       # unfiltered read is capped at 100 — so a filter applied in the browser
       # provably cannot find it. The confident zero, made unreachable.
       - name: Task activity search and filter
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-activity-filter|')
         timeout-minutes: 15
         run: node test/e2e/task-activity-filter.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4191,6 +4578,7 @@ jobs:
       # one project, so `scope` can be falsified against a sibling rather than
       # only asserted on the list that set it.
       - name: Create a custom field from a task
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-field-create|')
         timeout-minutes: 15
         run: node test/e2e/task-field-create.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4200,6 +4588,7 @@ jobs:
       # §G02-9 — the source strip, and an unconnected source saying so rather
       # than returning an empty list.
       - name: Search source tabs
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|search-sources|')
         timeout-minutes: 15
         run: node test/e2e/search-sources.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4212,6 +4601,7 @@ jobs:
       # organisation; Gmail is personal; guests get none. The Drive, Gmail and
       # Graph search routes are the calendar stub's (GOOGLE_DRIVE_API_URL above).
       - name: Connected Search answers each person from their own connection
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|connected-search|')
         timeout-minutes: 15
         run: node test/e2e/connected-search.mjs --api 3011 --dist apps/web/dist
 
@@ -4221,6 +4611,7 @@ jobs:
       # reads their refusal and a lane's stub reads what they write — Button,
       # which runs the automation it triggers, and Relationship limited to a list.
       - name: AI fields, Button and Relationship, as ClickUp works them
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|ai-button-relationship-fields|')
         timeout-minutes: 15
         run: node test/e2e/ai-button-relationship-fields.mjs --api 3011 --dist apps/web/dist
 
@@ -4230,6 +4621,7 @@ jobs:
       # and board export metered by free uses (`ledger-rows/row-788`). No model
       # answers here: usage is staged in Postgres and the refusal read either way.
       - name: AI credits, the month's allowance and the free uses of paid features
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|ai-credits|')
         timeout-minutes: 15
         run: node test/e2e/ai-credits.mjs --api 3011 --dist apps/web/dist
 
@@ -4238,6 +4630,7 @@ jobs:
       # saved, their value, its cost and return — every agent to an admin, theirs
       # to a member; with no model here the agent's run is refused and counts nothing.
       - name: My Agent Performance, each Super Agent's month on the Credits tab
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|agent-performance|')
         timeout-minutes: 15
         run: node test/e2e/agent-performance.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4249,6 +4642,7 @@ jobs:
       # this owns "they are all really there, together, in one running product",
       # which is where cross-feature interactions surface.
       - name: Video 1 acceptance walk
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|video1-acceptance|')
         timeout-minutes: 15
         run: node test/e2e/video1-acceptance.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4256,6 +4650,7 @@ jobs:
           E2E_PASSWORD: Admin@123!
 
       - name: The DM tab strip (A3.9)
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|a39-dm-tabs|')
         timeout-minutes: 15
         run: node test/e2e/a39-dm-tabs.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4263,6 +4658,7 @@ jobs:
           E2E_PASSWORD: Admin@123!
 
       - name: The meeting record survives the page (A6.1/A6.2)
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|a61-meeting-record|')
         timeout-minutes: 15
         run: node test/e2e/a61-meeting-record.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4276,6 +4672,7 @@ jobs:
       # configured here and a suite that needs storage cannot pass on a clean
       # machine.
       - name: Attachment thumbnails and their hover actions
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-attachments|')
         timeout-minutes: 15
         run: node test/e2e/task-attachments.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4288,6 +4685,7 @@ jobs:
       # the status alone: a control wired to a route that does not exist would
       # refuse identically from the browser, and no check may pass on a 404.
       - name: The three AI surfaces on a task
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-ai-bar|')
         timeout-minutes: 15
         run: node test/e2e/task-ai-bar.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4301,6 +4699,7 @@ jobs:
       # filtering them out without giving them a home left them reachable only
       # from the page you had to already be on to know you had any.
       - name: Direct Messages have a home in the tree
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|sidebar-dms|')
         timeout-minutes: 15
         run: node test/e2e/sidebar-dms.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4313,6 +4712,7 @@ jobs:
       # FoldersService whitelists {name, color}, so a field typed here would
       # have nowhere to go — the mirror defect, written down instead of built.
       - name: The Create Folder dialog asks what the frame asks
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|folder-dialog|')
         timeout-minutes: 15
         run: node test/e2e/folder-dialog.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4326,6 +4726,7 @@ jobs:
       # A column with no writer and no reader is the mirror defect with the
       # mirror missing too.
       - name: The sidebar tree keeps the order you put it in
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|sidebar-reorder|')
         timeout-minutes: 15
         run: node test/e2e/sidebar-reorder.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4341,6 +4742,7 @@ jobs:
       # overlay in place: deleting it is the cheapest way to green and the
       # worst outcome for the product.
       - name: Team schedules give everyone a column
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|team-schedules|')
         timeout-minutes: 15
         run: node test/e2e/team-schedules.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4351,6 +4753,7 @@ jobs:
       # intercepts every API call, so no server code runs in it: the server's
       # de-duplication was removed and it stayed green (`commit-log/log-1e7f092-1`).
       - name: Team schedules, as the server answers them
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|team-schedules-api|')
         timeout-minutes: 15
         run: node test/e2e/team-schedules-api.mjs --api 3011
         env:
@@ -4365,6 +4768,7 @@ jobs:
       # connected over a token nothing queried. Every tile's button is now
       # either a real connector or an honest "we cannot, ask an admin".
       - name: The App Center offers only what it can do
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|app-catalogue|')
         timeout-minutes: 15
         run: node test/e2e/app-catalogue.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4378,6 +4782,7 @@ jobs:
       # MEASURED against the breadcrumbs, not merely "somewhere on the left" —
       # a break patch that moved it into the tool rail passed the looser check.
       - name: The focus countdown is in the header and is live
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|focus-pill|')
         timeout-minutes: 15
         run: node test/e2e/focus-pill.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4390,6 +4795,7 @@ jobs:
       # three location types: filtering the sidebar's cached tree in the browser
       # finds nothing for a space created this minute, and calls it "no matches".
       - name: The @ picker's sections are real, not labels
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|task-mentions|')
         timeout-minutes: 15
         run: node test/e2e/task-mentions.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4404,6 +4810,7 @@ jobs:
       # and the same metric differing between two models. Two identical bars
       # drawn at full width would satisfy a check that only asked they exist.
       - name: The model picker's cards say something
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|ai-model-cards|')
         timeout-minutes: 15
         run: node test/e2e/ai-model-cards.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4418,6 +4825,7 @@ jobs:
       # meta row is `items-center` and fields of different heights have
       # different tops while plainly sitting on one line.
       - name: The board Customize switches reach the cards
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|list-customize|')
         timeout-minutes: 15
         run: node test/e2e/list-customize.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4430,6 +4838,7 @@ jobs:
       # returns everything fails on the task that should not be there. The
       # Subtasks source returns the PARENT, which is the row you can act on.
       - name: The assignee filter counts the indirect ways work reaches you
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|list-assignee-filter|')
         timeout-minutes: 15
         run: node test/e2e/list-assignee-filter.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4453,6 +4862,7 @@ jobs:
       # renaming a field a formula reads is refused naming the formula, because
       # a rename that goes through orphans it silently.
       - name: The field types the frame lists, and the ten that are decisions
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|custom-field-types|')
         timeout-minutes: 15
         run: node test/e2e/custom-field-types.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4470,6 +4880,7 @@ jobs:
       # never resolve. Check 1 asserts the LABEL is visible instead, so "a
       # picker nobody can open" still fails.
       - name: Files staged before the task exists survive the pick
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|attach-on-create|')
         timeout-minutes: 15
         run: node test/e2e/attach-on-create.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4484,6 +4895,7 @@ jobs:
       # walk and still demands exactly one, so nothing-created, wrong-space and
       # created-twice all redden it.
       - name: The create menu's AI row writes what it reports
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|create-menu-ai|')
         timeout-minutes: 15
         run: node test/e2e/create-menu-ai.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4497,6 +4909,7 @@ jobs:
       # candidate starts at `inList = 0`, so only load moved. It recommends and
       # does not assign, which is asserted by re-reading the task.
       - name: Assign with AI ranks by real load, and does not assign
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|ai-assign|')
         timeout-minutes: 15
         run: node test/e2e/ai-assign.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4513,6 +4926,7 @@ jobs:
       # current hour, so comparing raw bounding boxes was measuring the clock
       # and could only have held between midnight and 01:00.
       - name: The planner onboarding panel and its carousel
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|planner-onboarding|')
         timeout-minutes: 15
         run: node test/e2e/planner-onboarding.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4527,6 +4941,7 @@ jobs:
       # a break patch that mounted one permanently left the earlier version of
       # this check green.
       - name: The planner command bar opens the shared palette
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|planner-command-bar|')
         timeout-minutes: 15
         run: node test/e2e/planner-command-bar.mjs --api 3011 --dist apps/web/dist
         env:
@@ -4537,7 +4952,8 @@ jobs:
     name: Browser suites
     runs-on: ubuntu-latest
     needs: [changes, verify]
-    if: needs.changes.outputs.code == 'true'
+    # Six page-wide checks: wanted when the web app can be affected at all.
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.trusted != 'true' && needs.changes.outputs.web == 'true'
     timeout-minutes: 20
 
     steps:

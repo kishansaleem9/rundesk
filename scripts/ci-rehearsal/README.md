@@ -12,6 +12,34 @@ costs nothing.
 bash scripts/ci-rehearsal/all.sh            # every job; about two hours here
 ```
 
+## What a push runs, and the record CI trusts (2 November)
+
+CI runs what a push can affect, and trusts a passing local rehearsal of the
+same code (the owner: "test only what changed", and "rehearse everything
+locally and only push the code, so CI is green without rehearsing it all
+again"). `scripts/ci-affected.mjs` decides both, for CI's `changes` job and
+for the rehearsal alike:
+
+- the suites a push can affect are read from the code: the API routes, pages
+  and element ids its changed files reach through every importer. The schema,
+  CI itself, the test helpers, the app's shell, the API's shared code and any
+  path no rule knows run everything; prose runs nothing heavy;
+- the made-sweep's 75-minute mutation run only when its own code changes
+  (its cases run once every time);
+- `docs/rehearsals/latest.json`, written by a rehearsal whose every step
+  passed, is trusted when it names a commit in the push's history, nothing
+  but prose changed after it, and it ran at least what the push needs. CI
+  then runs lint, types and the unit tests itself, and nothing heavy.
+
+```bash
+bash scripts/ci-rehearsal/affected.sh          # what the push can affect; minutes for a small change
+git add docs/rehearsals/latest.json && git commit -m "Rehearsed <what>"   # then push
+bash scripts/ci-rehearsal/all.sh               # everything; records a full pass too
+```
+
+`affected.sh` takes the push's base from the branch's upstream (or its first
+argument) and refuses an uncommitted tree: a record names a commit.
+
 One job, or some of its steps:
 
 ```bash
