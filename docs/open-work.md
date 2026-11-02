@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 583 items: 0 open · 0 partly fixed · 576 closed, and 7 items the owner settled, not counted as defects; counted from this file's headings on 28 October (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 584 items: 0 open · 0 partly fixed · 577 closed, and 7 items the owner settled, not counted as defects; counted from this file's headings on 2 November (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -10930,6 +10930,34 @@ Measured:
   - the Space exported: 50,000 rows, 22.2 MB, in 5 s (the API at 875 MB);
   - the import undone as a unit: answered in 2.7 s, 50,000 tasks in Trash, none left.
 - Exports had no row limit to raise.
+
+### `found-02-nov/clickup-current-export-unread` — **closed** (feature, medium; at the owner's word, 2 November) · reproduced 2 November
+
+**ClickUp's current export was read as if it were the classic one: descriptions saying "null", checklists in fragments, the .xlsx's numbers refused, the Folders lost — and 59,318 rows over the limit**
+
+*Evidence, 2 November:* the owner's export of a real ClickUp Workspace, 59,318 rows (a 42.9 MB CSV, and the same as a 9.1 MB .xlsx), "still getting an upload error": past the 50,000 limit. It is also ClickUp's current export (Settings › Imports / Exports › Export), not the classic layout the importer reads. Measured on the owner's file, counts and shapes only:
+- 34 columns, `Task Content` and `Home Location` among them;
+- an empty cell written `null`, `NaN`, `[]`, `{}` or `""`;
+- Task Content's line breaks written as the two characters `\n` (331,717 of them), 35 cells `null`, 2 in Quill's JSON;
+- Checklists a JSON object (2,633 tasks, 9,400 items, no done marks); Folder Name/Path a JSON list;
+- in the .xlsx every number written as a Java double (`1.750967227037E12`, `2.0`, `900000.0`); in the CSV, Time Spent written ` "900000"`;
+- where a task lives is its Home Location, `Space > Folder > List` (59,088) or `Space > List` (230): 2 Spaces, 46 Folders, 185 Lists, 10 List names in more than one place; on 1,195 rows List Name and Space Name name a second List the task was added to;
+- Parent ID on every subtask, while Subtasks IDs names 4,900 of the 29,431 children; nesting to depth 4 (7,108 rows below the first level); one name over 500 characters.
+
+A probe with made-up values in that shape, through the importer as it was: descriptions saying "null" and `\n`, checklists of JSON fragments, priority and time dropped as unreadable, every .xlsx date refused, the 46 Folders gone and same-named Lists merged.
+
+*The owner's choices, 2 November* ("go ahead with default end to end"): due dates kept to the millisecond the export gives; comments and attachment links stay with the ClickUp token import, which brings them (the wizard lists both under "Not imported"); a task in more than one List is imported once, in its home; the one long name shortened, with a note, rather than its row refused.
+
+*Closed, 2 November* (`0012086`):
+- The reader knows the export by its header row and cleans each cell once, as it is read (`clickup-current-export.ts`), so the review grid shows what will be imported. Priority, durations and Unix-ms dates read the `.0` and E-notation forms wherever they are read.
+- The mapping needs no clicks: Home Location to a new `List location` column, List Name and Other Locations left out, Parent ID to the subtasks. A Checklists cell gives every checklist it names.
+- Each ClickUp Folder becomes a project in the destination Space or Folder (Rundesk's Folder → Project → List holds ClickUp's Folder → List one level down), and each List goes in its Folder's project; a project of that name already there is used. Two Folders of one name say their Space; two Lists of one name sharing a project say where they were. Inside a Project or a List, past the plan's projects, against the Space's rule, or with Custom Field columns (a field lives on one project), the Lists go into the destination's own project, and the report says why, once.
+- The row limit is 100,000 on the page and the API alike; the wizard's "What gets imported" names Folders and Lists in English, Spanish, Arabic and Urdu.
+- Tests: `@rundesk/imports` 40 of 40 (7 new; 14 mutations of the fix, each caught), `import-plan` 18 of 18 (5 more mutations caught); `clickup-current-export` 12 of 12, the Postgres harnesses' step 101; `cce-1` to `cce-12` each red on the check it names (run through rehearsal checkouts, the lanes being down after a restart).
+- Measured on 2-CPU rehearsal checkouts, through the real wizard, read back by SQL:
+  - 60,000 made-up rows in the export's shape (17.4 MB, 47 Folders): read in 4.3 s, drawn in 0.6 s, uploaded in 5.3 s, written in 89 s, the API at 823 MB; the suite's 12 checks green at that size;
+  - the owner's own .xlsx: read in 5.9 s, drawn in 3 s ("59,318 Records", the page's heap 149 MB), uploaded in 10.9 s, written in 152 s, the API at 1,002 MB. 29,886 tasks and 29,431 subtasks; 46 projects and 185 Lists (8 straight in their Spaces); 2,068 checklists with 9,400 items; 25,473 time entries; 27,273 descriptions (19,717 of several lines, none "null", no `\n` left); priorities 18,141 urgent, 14,915 high, 26,249 normal, 12 low. One row refused: its Task Name is an empty cell in the file (line 59,291). Notes: 7,108 subtasks folded to one level, 1 name shortened. Undone in 3.4 s, nothing left;
+  - the harness's cleanup after a run of 60,000 rows outlasts its own time limit, as at 50,000; the next run's sweep removes them.
 
 ## Closed from the uncounted list, as ClickUp works them (8 to 14 October) — 49
 
