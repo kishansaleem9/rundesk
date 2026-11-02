@@ -1,0 +1,20 @@
+{
+  "result": "passed",
+  "commit": "29364fa376de42cb4f9e5a7c721905869483fad1",
+  "base": "ff30d8508ee9855d2a91053ca66d9ae620080b63",
+  "at": "2026-11-02T21:39:58.656Z",
+  "verify": "all",
+  "selection": {
+    "full": true,
+    "suites": [],
+    "web": true,
+    "harness": true,
+    "sweepMutate": true
+  },
+  "jobs": {
+    "verify": "82 of 82",
+    "browser": "6 of 6",
+    "postgres": "315 of 315"
+  },
+  "logs": "/home/runner/ci-rh/r26"
+}
