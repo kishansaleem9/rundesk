@@ -539,6 +539,23 @@ try {
       `the older tag ${(await exists('labels', oldLabel.id)) ? 'is there' : 'was DELETED'}, the older project ${(await exists('projects', oldProject.id)) ? 'is there' : 'was DELETED'}; it said ${JSON.stringify(r.out.trim().slice(-300))}`)
     await sql`delete from labels where id = ${oldLabel.id}`
   }
+  {
+    // Made seconds before the run, as the seed is just ahead of the first suite (`found-02-nov/seeded-project-taken-as-a-runs`):
+    // the run files its list in that project and tags its task with that tag, and neither is the run's.
+    const a = await account('seeded-ahead')
+    const sp = await space(shared, 'seeded-ahead-space')
+    const [seeded] = await sql`insert into projects (space_id, name, created_at) values (${sp}, ${slug('seeded-project')}, now() - interval '20 seconds') returning id::text as id`
+    const [own] = await sql`insert into lists (project_id, name, created_at) values (${seeded.id}, ${slug('seeded-list')}, now() - interval '20 seconds') returning id::text as id`
+    const [list] = await sql`insert into lists (project_id, name) values (${seeded.id}, ${slug('run-list')}) returning id::text as id`
+    const [task] = await sql`insert into tasks (list_id, title) values (${list.id}, ${slug('run-task')}) returning id::text as id`
+    const [tag] = await sql`insert into labels (workspace_id, name, color, created_at) values (${shared}, ${slug('seeded-tag')}, '#888888', now() - interval '20 seconds') returning id::text as id`
+    await sql`insert into task_label_assignments (task_id, label_id) values (${task.id}, ${tag.id})`
+    const r = run('probe-seeded-ahead', { register: [{ t: 'users', id: a.id }, { t: 'lists', id: list.id }, { t: 'tasks', id: task.id }], end: 'fall' })
+    chk(r.code === 0 && (await exists('projects', seeded.id)) && (await exists('lists', own.id)) && (await exists('labels', tag.id)) && !(await exists('lists', list.id)),
+      'a project and a tag made seconds before the run — the seed, just ahead of the first suite — stay, though the run filed its list and tagged its task with them',
+      `it exited ${r.code}; the project ${(await exists('projects', seeded.id)) ? 'is there' : 'was DELETED'}, its own list ${(await exists('lists', own.id)) ? 'is there' : 'was DELETED'}, the tag ${(await exists('labels', tag.id)) ? 'is there' : 'was DELETED'}, the run's list ${(await exists('lists', list.id)) ? 'is still there' : 'is gone'}; it said ${JSON.stringify(r.out.trim().slice(-300))}`)
+    await sql`delete from labels where id = ${tag.id}`
+  }
 
   {
     // The mail in and out of a task and a list that go, and what was opened of the task from a search.
@@ -834,7 +851,7 @@ try {
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)
-const MIN_CASES = 48
+const MIN_CASES = 49
 if (pass + fail < MIN_CASES) {
   console.log(`\x1b[31mnot ok\x1b[0m only ${pass + fail} case(s) ran, below the floor of ${MIN_CASES}`)
   fail += 1
@@ -879,12 +896,12 @@ if (process.argv.includes('--mutate') && !process.env.MADE_LIB_UNDER_TEST && !pr
       ['found-all-by-use', '.filter((k) => !byUse.has(k) &&', '.filter((k) => false &&'],
       ['found-none-by-use', "const byUse = new Set([...CHANGED_BY_USE['*'], ...(CHANGED_BY_USE[table] ?? [])])", 'const byUse = new Set()'],
       ['found-gone-passes', "      if (!is) {\n        out.push({ table, id, label, cols: null })\n        continue\n      }", '      if (!is) continue'],
-      ['found-young-read', 'if (at && Date.parse(was[at]) >= started - 60_000) continue', 'void at'],
+      ['found-young-read', 'if (at && Date.parse(was[at]) >= started - 5_000) continue', 'void at'],
       ['found-kept', "      } finally {\n        fs.rmSync(file, { force: true })\n      }", '      } finally {\n        void file\n      }'],
       ['killed-found-kept', "if (!stillRunning(Number(f[2]), `${f[1]}.mjs`) && !names.includes(name.replace(/\\.found\\.json$/, ''))) fs.rmSync(path.join(dir, name), { force: true })", 'void f'],
       ['live-runs-swept', 'if (stillRunning(Number(pid), `${suite}.mjs`)) continue', 'void suite'],
       ['co-owned-organizations-go', "and not exists (select 1 from organization_members m\n                          where m.organization_id = o.id and m.role = 'owner' and not (m.user_id = any(${accountIds}::uuid[])))", ''],
-      ['older-organizations-go', "o.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'", 'true'],
+      ['older-organizations-go', "o.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '5 seconds'", 'true'],
       ['restricting-keys-ignored', "await clearRestricting(sql, 'users', accountIds)", 'void 0'],
       ['caused-notifications-kept', '(await sql`delete from notifications where actor_id = any(${accountIds}::uuid[])`).count)', '0)'],
       ['elder-accounts-deleted', 'const accountIds = accounts.filter((a) => a.ours).map((a) => a.id)', 'const accountIds = accounts.map((a) => a.id)'],
@@ -905,17 +922,19 @@ if (process.argv.includes('--mutate') && !process.env.MADE_LIB_UNDER_TEST && !pr
       ['form-tasks-left', "  if (j.rows.has('forms')) {", "  if (false) {"],
       ['list-projects-left', "  if (j.rows.has('lists')) {", "  if (false) {"],
       ['task-tags-left', "  if (j.rows.has('tasks')) {\n    await filedBy('tags their tasks made'", "  if (false) {\n    await filedBy('tags their tasks made'"],
-      ['shared-projects-taken', "where l.id = any(${[...j.rows.get('lists')]}::uuid[]) and p.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'`)", "where l.id = any(${[...j.rows.get('lists')]}::uuid[])`)"],
-      ['shared-tags-taken', "where a.task_id = any(${[...j.rows.get('tasks')]}::uuid[]) and l.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'`)", "where a.task_id = any(${[...j.rows.get('tasks')]}::uuid[])`)"],
+      ['projects-a-minute-back', "where l.id = any(${[...j.rows.get('lists')]}::uuid[]) and p.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '5 seconds'", "where l.id = any(${[...j.rows.get('lists')]}::uuid[]) and p.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'"],
+      ['tags-a-minute-back', "where a.task_id = any(${[...j.rows.get('tasks')]}::uuid[]) and l.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '5 seconds'", "where a.task_id = any(${[...j.rows.get('tasks')]}::uuid[]) and l.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'"],
+      ['shared-projects-taken', "where l.id = any(${[...j.rows.get('lists')]}::uuid[]) and p.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '5 seconds'`)", "where l.id = any(${[...j.rows.get('lists')]}::uuid[])`)"],
+      ['shared-tags-taken', "where a.task_id = any(${[...j.rows.get('tasks')]}::uuid[]) and l.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '5 seconds'`)", "where a.task_id = any(${[...j.rows.get('tasks')]}::uuid[])`)"],
       ['mail-left', "  if (j.rows.has('tasks') || j.rows.has('lists') || j.rows.has('list_email_aliases')) {", "  if (false) {"],
       ['mail-to-cut-addresses-left', "         or lower(split_part(split_part(recipient, '@', 1), '+', 1)) in (\n           select lower(local_part) from list_email_aliases\n           where list_id = any(${named('lists')}::uuid[]) or id = any(${named('list_email_aliases')}::uuid[]))\n", ''],
       ['mail-naming-their-tasks-left', "\n         or substring(lower(recipient) from '\\\\+task-([0-9a-f-]{36})@') = any(${named('tasks')}::text[])`)", '`)'],
       ['mail-from-their-accounts-left', '  if (j.accountIds.length || j.emails.length) {\n    const theirs', '  if (false) {\n    const theirs'],
-      ['elder-accounts-mail-taken', "      where (id = any(${j.accountIds}::uuid[]) or lower(email) = any(${j.emails}::text[]))\n        and created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'`", "      where (id = any(${j.accountIds}::uuid[]) or lower(email) = any(${j.emails}::text[]))`"],
+      ['elder-accounts-mail-taken', "      where (id = any(${j.accountIds}::uuid[]) or lower(email) = any(${j.emails}::text[]))\n        and created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '5 seconds'`", "      where (id = any(${j.accountIds}::uuid[]) or lower(email) = any(${j.emails}::text[]))`"],
       ['search-opens-left', "(await sql`delete from search_engagement where entity_id in (select unnest(${gone}::text[]))`).count)", '0)'],
       ['made-at-only-created', "and (c.column_name = 'created_at' or (c.column_default like 'now()%' and c.column_name <> 'updated_at' and c.column_name not like 'last\\\\_%'))", "and c.column_name = 'created_at'"],
       ['index-left', "(await sql`delete from knowledge_embeddings where source_id::text in (select unnest(${gone}::text[]))`).count)", '0)'],
-      ['elder-organizations-deleted', "where id = any(${registeredOrgs}::uuid[]) and created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'", 'where id = any(${registeredOrgs}::uuid[])'],
+      ['elder-organizations-deleted', "where id = any(${registeredOrgs}::uuid[]) and created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '5 seconds'", 'where id = any(${registeredOrgs}::uuid[])'],
       ['elder-rows-deleted', 'if (elder.length) kept.push(said(table, elder.length))\n      return ids.filter((id) => !elder.includes(id))', 'return ids'],
       ['leftovers-read-by-hand', "const atExit = argv[0] === '--exit'", 'const atExit = true'],
       ['leftovers-pass', '      if (left.length) {\n        status = 1', '      if (false) {\n        status = 1'],

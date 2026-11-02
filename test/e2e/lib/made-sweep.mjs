@@ -379,6 +379,16 @@ export async function sweepJournal(sql, j) {
     }
   }
   /*
+   * THE RUN'S EDGE IS FIVE SECONDS, NOT A MINUTE (`found-02-nov/seeded-project-taken-as-a-runs`).
+   * A row is the run's when it was made after the run began; `run.started` is
+   * taken as the suite imports this library, before it makes anything, on the
+   * same clock the database keeps. The minute this read before reached back
+   * over whatever ran just ahead: on CI run 1205 the seed finished 54 seconds
+   * before `task-depth` began, so Main's own project, holding the lists that
+   * suite made, read as made by it, went with them, and the next suite found
+   * Main's first space with no project. Five seconds is rounding, not a window.
+   */
+  /*
    * WHAT A REGISTERED ROW FILED ELSEWHERE, which its key does not take with it
    * (`found-30-sep/suite-leftovers-unmeasured`): a call that ends files a
    * meeting, and the server can end it with no answer anybody registered (the
@@ -407,7 +417,7 @@ export async function sweepJournal(sql, j) {
   if (j.rows.has('lists')) {
     await filedBy('projects their lists were filed in', 'projects', () => sql`
       select distinct p.id::text as id from projects p join lists l on l.project_id = p.id
-      where l.id = any(${[...j.rows.get('lists')]}::uuid[]) and p.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'`)
+      where l.id = any(${[...j.rows.get('lists')]}::uuid[]) and p.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '5 seconds'`)
   }
   // The mail in and out of a task or list that goes: its key to them is set null as they go, so it is read first.
   // Mail refused names neither, and is read by its address: a list's (revoked), or a task's (`list-…+task-<id>@`).
@@ -433,7 +443,7 @@ export async function sweepJournal(sql, j) {
     const theirs = () => sql`
       select lower(email) from users
       where (id = any(${j.accountIds}::uuid[]) or lower(email) = any(${j.emails}::text[]))
-        and created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'`
+        and created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '5 seconds'`
     await filedBy('mail in from their accounts', 'inbound_email_messages', () => sql`
       select id::text as id from inbound_email_messages where lower(from_address) in (${theirs()})`)
     await filedBy('mail out to their accounts', 'outbound_email_messages', () => sql`
@@ -442,7 +452,7 @@ export async function sweepJournal(sql, j) {
   if (j.rows.has('tasks')) {
     await filedBy('tags their tasks made', 'labels', () => sql`
       select distinct l.id::text as id from labels l join task_label_assignments a on a.label_id = l.id
-      where a.task_id = any(${[...j.rows.get('tasks')]}::uuid[]) and l.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'`)
+      where a.task_id = any(${[...j.rows.get('tasks')]}::uuid[]) and l.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '5 seconds'`)
   }
   const tables = [...j.rows.keys()].filter((t) => t !== 'organizations')
   // Before anything goes: which accounts are the run's, and which organizations
@@ -451,14 +461,14 @@ export async function sweepJournal(sql, j) {
   // the admin's address by mistake, or the email of an account it did not make,
   // deletes nothing. Every account a run makes is made after it starts.
   const accounts = (await step('read the accounts', () => sql`
-    select id::text as id, created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute' as ours, email from users
+    select id::text as id, created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '5 seconds' as ours, email from users
     where id = any(${j.accountIds}::uuid[]) or lower(email) = any(${j.emails}::text[])`)) ?? []
   const accountIds = accounts.filter((a) => a.ours).map((a) => a.id)
   const elder = accounts.filter((a) => !a.ours).map((a) => a.email)
   const owned = accountIds.length
     ? ((await step('read their organizations', () => sql`
         select o.id::text as id from organizations o
-        where o.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'
+        where o.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '5 seconds'
           and exists (select 1 from organization_members m
                       where m.organization_id = o.id and m.role = 'owner' and m.user_id = any(${accountIds}::uuid[]))
           and not exists (select 1 from organization_members m
@@ -469,7 +479,7 @@ export async function sweepJournal(sql, j) {
   const youngOrgs = registeredOrgs.length
     ? ((await step('read the organizations registered', () => sql`
         select id::text as id from organizations
-        where id = any(${registeredOrgs}::uuid[]) and created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'`)) ?? []).map((o) => o.id)
+        where id = any(${registeredOrgs}::uuid[]) and created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '5 seconds'`)) ?? []).map((o) => o.id)
     : []
   const orgIds = [...new Set([...owned, ...youngOrgs])]
   const kept = []
@@ -492,7 +502,7 @@ export async function sweepJournal(sql, j) {
       if (!dated) return ids
       const elder = (await sql`
         select id::text as id from ${sql(table)}
-        where id = any(${ids}::uuid[]) and created_at < to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'`).map((r) => r.id)
+        where id = any(${ids}::uuid[]) and created_at < to_timestamp(${j.run.started} / 1000.0) - interval '5 seconds'`).map((r) => r.id)
       if (elder.length) kept.push(said(table, elder.length))
       return ids.filter((id) => !elder.includes(id))
     })
@@ -521,7 +531,7 @@ export async function sweepJournal(sql, j) {
     const about = await step('remove the notifications about them', async () => (await sql`
       with gone as (select unnest(${gone}::text[]) as id)
       delete from notifications n
-      where n.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'
+      where n.created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '5 seconds'
         and (n.target->>'entityId' in (select id from gone)
              or exists (select 1 from regexp_matches(coalesce(n.target->>'url', ''), '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', 'g') m
                         where m[1] in (select id from gone)))`).count)
@@ -559,7 +569,7 @@ export async function sweepJournal(sql, j) {
   const still = await step('read back the accounts', () => sql`
     select email from users
     where (id = any(${[...new Set([...j.accountIds, ...accountIds])]}::uuid[]) or lower(email) = any(${j.emails}::text[]))
-      and created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '1 minute'`)
+      and created_at >= to_timestamp(${j.run.started} / 1000.0) - interval '5 seconds'`)
   if (still?.length) left.push(`${said('users', still.length)} (${still.map((r) => r.email).join(', ')})`)
   if (elder.length) removed.push(`and kept ${said('users', elder.length)} older than the run, registered though it did not make them (${elder.join(', ')})`)
   if (kept.length) removed.push(`and kept ${kept.join(', ')} older than the run, registered though it did not make them`)
@@ -752,8 +762,8 @@ export async function leftSince(sql, started) {
  * every table with an id is read, but those using the product makes
  * (`LEFT_BY_USE`); and as it ends, each is read again. One changed outside what
  * using the product writes (`CHANGED_BY_USE`), or gone, fails the run, named
- * with its columns. A row made within the minute before the run began is the
- * run's, as the sweep takes it, and is not read so.
+ * with its columns. A row made within the five seconds before the run began is
+ * the run's, as the sweep takes it, and is not read so.
  */
 export const CHANGED_BY_USE = {
   '*': ['updated_at'],
@@ -788,7 +798,7 @@ export function changedSince(found, now, started) {
     // A table with no time of making says when its row was last written instead (the AI index's passages).
     const at = found.madeAt[table] ?? ('updated_at' in (Object.values(rows)[0] ?? {}) ? 'updated_at' : null)
     for (const [id, was] of Object.entries(rows)) {
-      if (at && Date.parse(was[at]) >= started - 60_000) continue
+      if (at && Date.parse(was[at]) >= started - 5_000) continue
       const label = was.email || was.name || was.title || was.flag_key || id
       const is = now.rows[table]?.[id]
       if (!is) {
