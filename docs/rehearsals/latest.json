@@ -1,20 +1,20 @@
 {
   "result": "passed",
-  "commit": "29364fa376de42cb4f9e5a7c721905869483fad1",
-  "base": "ff30d8508ee9855d2a91053ca66d9ae620080b63",
-  "at": "2026-11-02T21:39:58.656Z",
+  "commit": "0e0fe7e50cdabae2298d34c14de0b1a18e410ab0",
+  "base": "283e8c0f95e2d0c17cd9dffa12c6648438b22a5e",
+  "at": "2026-11-02T23:23:59.166Z",
   "verify": "all",
   "selection": {
     "full": true,
     "suites": [],
     "web": true,
     "harness": true,
-    "sweepMutate": true
+    "sweepMutate": false
   },
   "jobs": {
     "verify": "82 of 82",
     "browser": "6 of 6",
-    "postgres": "315 of 315"
+    "postgres": "314 of 314, in two runs: steps 1 to 221, then 222 to 320 after a container restart stopped the first"
   },
-  "logs": "/home/runner/ci-rh/r26"
+  "logs": "/home/runner/ci-rh/aff-ws2 (verify, browser, postgres 1-221) and /home/runner/ci-rh/aff-ws2b (postgres 222-320)"
 }
