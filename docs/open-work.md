@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 586 items: 0 open · 0 partly fixed · 579 closed, and 7 items the owner settled, not counted as defects; counted from this file's headings on 2 November (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
+> **Current state and where to start: `docs/resume-2026-10-13.md`** (13 October; the 12 October handoff before it) — 594 items: 0 open · 0 partly fixed · 587 closed, and 7 items the owner settled, not counted as defects; counted from this file's headings on 2 November (the triage of 5 October: `docs/triage-2026-10-05.md`). The uncounted ones are in the last section; an item enters the count only once it is reproduced.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -8436,7 +8436,7 @@ longer claims a schedule.
 - In CI (235).
 - Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
-## Found by the triage, 5 October, and since — 119, each reproduced
+## Found by the triage, 5 October, and since — 130, each reproduced
 
 The first seven were reproduced by a skeptic of the triage, trying to prove wrong a verdict that an item was a
 feature or a decision; each is a defect beside that item, and counts. The last five were reproduced by the triage of
@@ -10979,6 +10979,76 @@ A probe with made-up values in that shape, through the importer as it was: descr
 *Evidence, 2 November:* CI run 1205 failed in the Postgres harnesses at `addressability-live`, its first check: "the first space has no project to use". The seed had finished at 18:00:06 and `task-depth` began at 18:01:00, 54 seconds later. `task-depth` files three lists in the first project of the first space — the seed's Onboarding, in Main's General — and the test cleanup takes as a run's "the projects their lists were filed in" made since a minute before the run began. So Onboarding, with the seed's own list, went when `task-depth` ended (its cleanup said "2 projects rows", where on a slower machine it says "1 projects row, 4 lists"), and every suite after it found General empty. Every rule of the cleanup that decides "made since the run began" — accounts, organizations, the tags a run's tasks made, mail, notifications, what a run finds as it begins — read the same minute back. It passed on run 1204 and on the lanes because the runner was slower: seed to `task-depth` was over a minute. Running only what a push can affect puts any suite right after the seed, so the next selective run would have met it sooner.
 
 *Closed, 2 November:* the run's edge is five seconds, not a minute, in every one of those rules (`test/e2e/lib/made-sweep.mjs`). A run's start is taken as the suite imports the library, before it makes anything, on the clock the database keeps; five seconds is rounding, not a window. `check-made-sweep` gained the case: a project and a tag made 20 seconds before the run, which the run files its list in and tags its task with, stay; with the edge widened to a minute the case fails as CI did, the project, its own list and the tag deleted (`edge-a-minute`). The edge is one constant every rule reads: widened in one rule alone, the other rule that guards the same row still holds it, so a mutation of one rule proves nothing. Measured on a rehearsal checkout with the seed 35 seconds ahead of `task-depth`: at the failing commit `addressability-live` fails as on CI, and with the fix it passes.
+
+### `found-02-nov/workspace-has-no-owner` — **closed** (feature, medium; QA WS-016 to WS-018, 2 November) · reproduced 2 November
+
+**A workspace had no owner of its own: nobody could hand one over, any admin could delete it, and an admin could remove or demote whoever made it**
+
+*Evidence, 2 November:* the owner's QA sheet (Hamda, rows WS-015 to WS-019 failing) and her recording of ClickUp's Settings beside Rundesk's ("Missing Workspace Settings"). Ownership lived only on the organization (`organization_members.role = 'owner'`); a workspace knew admins and nothing more, so its maker was one admin among several. Somebody invited into an organization who then made a workspace — her `fsdfsdf` — was not the owner of anything, and could not delete it for good. Settings › General's Danger zone offered "Archive workspace" to anybody holding `workspace.manage`; an admin could demote or remove the workspace's maker; there was no transfer and no leave (`found-02-nov/workspace-transfer-unbuilt`, `found-02-nov/workspace-leave-unbuilt`). Profile › Workspaces called everybody "Workspace Admin". ClickUp (help centre, "Transfer Workspace ownership", "Delete a Workspace", "Leave a Workspace"): one owner; only the owner deletes the Workspace or transfers it, and the owner cannot leave until they have.
+
+*Closed, 2 November* (`828f646`):
+- `workspaces.owner_id` (0201, which makes each workspace's owner its earliest admin, its maker while they stay): set to whoever makes a workspace, by the API or by signing up. While the person it names is a member, they own it; otherwise the earliest admin who is a person answers for it (`effectiveOwners`), so a seed's workspace or one whose owner's account is gone still has one.
+- Only the owner — or an owner of its organization, who owns every workspace in it as deleting one for good always asked, or a platform admin (`actsAsOwner`) — deletes it (`DELETE /workspaces/:id`, which `workspace.manage` no longer carries) or transfers it. No permission key carries either, so no role can be granted them.
+- Nobody removes the owner or makes them anything but an admin; the owner does not leave (`workspace-ownership.ts`, its rules unit-tested, 14 cases).
+- `GET /workspaces/:id` says what the reader is to it (`isOwner`, `actsAsOwner`); the members list and `GET /workspaces` mark the owner, and say how many people each workspace has. Settings › People shows Owner on its row, with no role to change and no Remove; Profile › Workspaces shows Owner beside the name.
+- `workspace-ownership`, the Postgres harnesses' new step, 13 of 13 on a 2-CPU rehearsal checkout through Chromium and SQL; `wso-1` to `wso-17` each red on the check it names. `workspace-delete-for-good` 5 of 5 alongside it.
+- QA WS-004 (one workspace's task reached from another), measured in the same suite and not reproduced: searching another workspace finds nothing of it, its address opens it in its own workspace with the switcher saying which, and somebody in neither is refused it (403) and shown nothing.
+
+### `found-02-nov/workspace-transfer-unbuilt` — **closed** (feature, medium; QA WS-017, 2 November) · reproduced 2 November
+
+**There was no way to hand a workspace to somebody else**
+
+*Evidence, 2 November:* QA WS-017, "Transfer ownership to an Admin; confirm; new Owner gets Owner rights; previous Owner becomes Admin" — failing; no route, no control. ClickUp: only the current owner transfers, picking the new owner from the people in the Workspace; the previous owner becomes an admin.
+
+*Closed, 2 November* (`828f646`): `POST /workspaces/:id/transfer-ownership` with the new owner and the workspace's name typed exactly. Refused to anybody who does not act as its owner (403), and for a guest, an agent, somebody not in it, the owner themself or a name typed otherwise (400) (`transferRefusal`). The new owner is made an admin and the previous one stays one, in one transaction, and the transfer is in the audit log. Settings › General's Danger zone: Transfer ownership offers the members who may own it, its button off until one is picked and the name typed exactly. Measured in `workspace-ownership` §6 and §7; `wso-7` and `wso-8` redden them.
+
+### `found-02-nov/workspace-leave-unbuilt` — **closed** (feature, medium; QA WS-015 and WS-016, 2 November) · reproduced 2 November
+
+**Nobody could leave a workspace; only an admin could remove them**
+
+*Evidence, 2 November:* QA WS-015 ("Settings › Leave Workspace; confirm; removed and switched to another Workspace or create screen") and WS-016 ("As Owner try to leave: blocked with message to transfer ownership first"), both failing. The organization had `POST /organizations/:id/leave`; a workspace had nothing, and Profile › Workspaces was deliberately read-only. ClickUp: My Settings › Workspaces lists each with a gear for those who run it and Leave for anybody but its owner.
+
+*Closed, 2 November* (`828f646`): `POST /workspaces/:id/leave` — anybody in it but its owner, who is told to transfer it first (409), and not the last admin of one with no owner. What they made stays; their place on the roster goes, as an admin's removal takes it, and the leaving is in the audit log. Profile › Workspaces, as ClickUp's My Workspaces: each workspace's avatar, its people, Owner where it is yours, a gear to its settings for its admins, Leave and Open, and New workspace above them; the owner's Leave says to transfer it first and offers its settings. Settings › General's Danger zone has Leave too. Whoever leaves is taken to another workspace of theirs, or to `/app`, which offers to make one (`workspace-exit.ts`). Measured in `workspace-ownership` §5 and §8; `wso-6` and `wso-9` redden them.
+
+### `found-02-nov/archived-workspace-still-opens` — **closed** (defect, medium; QA WS-018, 2 November) · reproduced 2 November
+
+**An archived workspace left everybody's list but still opened for its members, by its address**
+
+*Evidence, 2 November:* QA WS-018 expects "members lose access" when a workspace is deleted, and the archive's own confirmation said "Members will lose access until it is restored". `WorkspaceMemberGuard` and `ResourceMemberGuard` asked membership and nothing else, so a member of an archived workspace still read it, its spaces, lists and tasks, by id or address.
+
+*Closed, 2 November* (`828f646`): both guards answer 404 "Workspace not found" for an archived workspace to its members. The routes that act on one as archived — restoring it, deleting it for good — say so (`@AllowArchivedWorkspace()`), and only they answer. A platform admin reaches it as they reach any workspace. Settings › General's "Delete workspace" archives it, its owner's, with its name typed exactly and the button off until it is; whoever deleted it is taken to another workspace; its owner restores it from Settings › Archived or deletes it for good there, as before. Measured in `workspace-ownership` §9 and §10 (a member's read of it and of its spaces 404, it is not listed, the owner's Archived row offers Delete for good, restoring brings it back); unit tests on both guards; `wso-10` to `wso-13` redden them.
+
+### `found-02-nov/workspace-name-unchecked` — **closed** (defect, small; QA WS-002, 2 November) · reproduced 2 November
+
+**A rename stored any name — blank, spaces, a hundred characters — and the creation counted an emoji as two characters**
+
+*Evidence, 2 November:* QA WS-002 ("empty, only spaces, 100+ characters, emoji: empty and whitespace blocked; long names limited; emoji saved correctly"), "changes required". `PATCH /workspaces/:id` took `name` as it arrived, so a rename to "" or 100 characters was stored; creation asked `MinLength(2)` and `MaxLength(60)` on UTF-16 units, so "   x" was a name, a 31-emoji name was refused, and leading and trailing spaces were kept.
+
+*Closed, 2 November* (`828f646`): one rule for creating and renaming (`cleanWorkspaceName`): whitespace of every kind trimmed from either end and folded inside, never blank or only spaces or zero-width characters, no control characters, 2 to 60 characters as a person counts them (an emoji is one; a joiner inside a word is kept). The web asks the same before it sends (`workspace-name.ts`): Settings › General's name says what is wrong and counts the characters, and the creation flow's Next waits for a name. Measured in `workspace-ownership` §2 and §3; `wso-2` and `wso-3` redden them.
+
+### `found-02-nov/settings-general-buries-name-and-logo` — **closed** (defect, small; QA WS-005 to WS-008, 2 November) · reproduced 2 November
+
+**Settings › General opened on the plan, the billing, the id and the slug; its name and logo were below them, and read as "not available"**
+
+*Evidence, 2 November:* QA WS-005 "name change option not available" and WS-006 "Not available to change the logo", with WS-007 and WS-008 failing; the recording compares ClickUp's Workspace Settings, which open on General: the avatar (a colour or an upload) and the name. Rundesk's had both, under four cards nobody reading for a name gets past.
+
+*Closed, 2 November* (`828f646`): General opens on the workspace's avatar — its colour from twelve or any, or its picture, uploaded with "Upload logo" beside it, a wrong kind or size refused with the picture kept, "Remove logo" leaving its initial on its colour — and its name. Custom branding (the accent colour, the custom domain), the plan, the billing, the id and the slug follow; the Danger zone ends it. The avatar saves as it is chosen; the name from its own button. A member's row in People no longer squeezes their name to nothing. Measured in `workspace-ownership` §3 and §12; `wso-3` and `wso-16` redden them.
+
+### `found-02-nov/invite-one-address-at-a-time` — **closed** (feature, small; QA WS-010, 2 November) · reproduced 2 November
+
+**People's invite box took one address**
+
+*Evidence, 2 November:* QA WS-010, "Paste 3 emails separated by comma, space or new line; all valid emails invited; any invalid email flagged on its own", failing: the box was an `<input type=email>` and sent its whole text as one address.
+
+*Closed, 2 November* (`828f646`): the box takes addresses separated by commas, semicolons, spaces or lines, a mail client's "Name <address>" as its address, the same address once (`email-list.ts`). Each is invited on its own: the good ones go, and each that is not an address, or somebody already in the workspace, is said beside its address and left in the box. Measured in `workspace-ownership` §11; `wso-14` reddens it.
+
+### `found-02-nov/invitation-takes-any-text` — **closed** (defect, small; found closing `found-02-nov/invite-one-address-at-a-time`) · reproduced 2 November
+
+**`POST /invitations` stored and mailed any text as an address, and invited people already in the workspace**
+
+*Evidence, 2 November:* the route lower-cased `email` and stored it: "not-an-email" was an invitation, mailed; somebody already a member was invited again.
+
+*Closed, 2 November* (`828f646`): an address of an address's shape or 400 (`isEmailAddress`, unit-tested), and 409 for somebody already in the workspace, in any case. Measured in `workspace-ownership` §11; `wso-15` reddens it.
 
 ## Closed from the uncounted list, as ClickUp works them (8 to 14 October) — 49
 
