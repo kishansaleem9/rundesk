@@ -17,13 +17,15 @@ export type SheetTable = {
 
 /**
  * §2.4 — "There is a 10,000-row limit for imported spreadsheets." That is
- * ClickUp's number. Rundesk takes 50,000 at the owner's word (28 October): a
- * real workspace's ClickUp export runs past 10,000 rows, and the engine works
- * in chunks and batches throughout. The API's limit is this one too.
+ * ClickUp's number. Rundesk takes 100,000 at the owner's word: 50,000 on 28
+ * October, then 100,000 on 2 November, when the owner's own ClickUp export
+ * held 59,318 rows. The engine works in chunks and batches throughout
+ * (measured at 50,000: the run 98 s, the API's memory 785 MB). The API's
+ * limit is this one too.
  */
-export const MAX_SHEET_ROWS = 50_000
+export const MAX_SHEET_ROWS = 100_000
 
-/** The refusal past a row limit, the number written as the limit is (`50,000`), in whichever place refuses. */
+/** The refusal past a row limit, the number written as the limit is (`100,000`), in whichever place refuses. */
 export function tooManyRows(limit: number): string {
   return `There is a ${String(limit).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}-row limit for imported spreadsheets. Split your file into batches.`
 }

@@ -1,7 +1,8 @@
 /**
  * §2.3 date rules.
  *
- * Accepted regardless of the chosen format: ISO 8601, Unix ms, and the long
+ * Accepted regardless of the chosen format: ISO 8601, Unix ms (`1.750967227037E12`
+ * too, as ClickUp's current .xlsx export writes it), and the long
  * written form ("Wednesday, December 31st 2025[, 3:30:00 pm +00:00]", which is
  * also how ClickUp's export writes its `… Text` columns). The chosen format
  * only decides SHORT dates, where 03/04/2025 means two different days.
@@ -30,6 +31,8 @@ const MONTHS = [
 
 const ISO_FULL = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:?\d{2})?$/i
 const UNIX_MS = /^-?\d{11,14}$/
+/** Unix ms as a spreadsheet may write a whole number: `1750967227037.0`, or Java's `1.750967227037E12`. */
+const UNIX_MS_WRITTEN = /^(\d{11,14}\.0+|\d\.\d{1,13}E1[0-3])$/i
 const TIME = /^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i
 const LONG =
   /^(?:[a-z]+,\s*)?([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})(?:,?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?(?:\s*([+-]\d{2}):?(\d{2}))?)?$/i
@@ -80,6 +83,10 @@ export function parseImportDate(raw: string, format: DateFormatKey): ParsedDate 
     if (!Number.isNaN(ms)) return { ok: true, ms, hasTime: true }
   }
   if (UNIX_MS.test(value)) return { ok: true, ms: Number(value), hasTime: true }
+  if (UNIX_MS_WRITTEN.test(value)) {
+    const ms = Math.round(Number(value))
+    if (ms >= 1e10) return { ok: true, ms, hasTime: true }
+  }
 
   const long = LONG.exec(value)
   if (long) {

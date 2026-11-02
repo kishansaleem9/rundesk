@@ -2,7 +2,7 @@
  * Settings › Imports / Exports — the import jobs' lifecycle (§7, §9.7).
  *
  *   POST   /imports              a DRAFT job: source, destination, date format, delimiter
- *   POST   /imports/:id/upload   the reviewed rows, in chunks (a 50,000-row sheet is
+ *   POST   /imports/:id/upload   the reviewed rows, in chunks (a 100,000-row sheet is
  *                                larger than one request may be)
  *   GET    /imports/:id/preview  what the mapping screens need of the destination
  *   PUT    /imports/:id/mapping  the grid's columns and the value maps

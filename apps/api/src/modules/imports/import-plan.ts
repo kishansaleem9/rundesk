@@ -21,14 +21,25 @@ export type ListPlan = Array<{
   isDestination: boolean
   /** True when this list is "Imported from Spreadsheet" — always a new list, never one already there. */
   alwaysNew: boolean
+  /** The Folder (`BundleFolder.sourceId`) whose project it is made in; absent for the destination's own project. */
+  folderSourceId?: string
 }>
+
+/** Lists that hold at least one row, by source id. */
+const listsInUse = (bundle: RundeskImportBundle) => new Set(bundle.tasks.map((t) => t.listSourceId).filter((id): id is string => Boolean(id)))
 
 /**
  * §2.2: a List destination takes the rows itself; anything else gets a new
  * "Imported from Spreadsheet" List. A `List` column's values each create (or
  * use, when one of that name is already there) a List beside it.
+ *
+ * A `List location` places a List in its Folder: in that Folder's project
+ * when `folderProjects` holds the Folder (see `planFolders`), else in the
+ * destination's own project. Two Lists of one name that land in one project
+ * are told apart by where they were — `Website (Clients / Acme)` — so the
+ * second is never merged into the first.
  */
-export function planLists(bundle: RundeskImportBundle, destinationIsList: boolean): ListPlan {
+export function planLists(bundle: RundeskImportBundle, destinationIsList: boolean, folderProjects: ReadonlySet<string> = new Set()): ListPlan {
   const plan: ListPlan = []
   if (bundle.tasks.some((t) => !t.listSourceId)) {
     plan.push({
@@ -38,11 +49,49 @@ export function planLists(bundle: RundeskImportBundle, destinationIsList: boolea
       alwaysNew: !destinationIsList,
     })
   }
-  for (const l of bundle.lists) {
-    if (!bundle.tasks.some((t) => t.listSourceId === l.sourceId)) continue
-    plan.push({ sourceId: l.sourceId, name: l.name.trim().slice(0, 200), isDestination: false, alwaysNew: false })
+  const used = listsInUse(bundle)
+  const spaceName = new Map(bundle.spaces.map((s) => [s.sourceId, s.name.trim()]))
+  const folderName = new Map(bundle.folders.map((f) => [f.sourceId, f.name.trim()]))
+  const entries = bundle.lists
+    .filter((l) => used.has(l.sourceId))
+    .map((l) => ({
+      sourceId: l.sourceId,
+      name: l.name.trim().slice(0, 200),
+      folderSourceId: l.folderSourceId && folderProjects.has(l.folderSourceId) ? l.folderSourceId : undefined,
+      where: [l.spaceSourceId ? spaceName.get(l.spaceSourceId) : undefined, l.folderSourceId ? folderName.get(l.folderSourceId) : undefined]
+        .filter(Boolean)
+        .join(' / '),
+    }))
+  const sharing = new Map<string, number>()
+  const key = (e: (typeof entries)[number]) => `${e.folderSourceId ?? ''}\n${e.name.toLowerCase()}`
+  for (const e of entries) sharing.set(key(e), (sharing.get(key(e)) ?? 0) + 1)
+  for (const e of entries) {
+    const name = (sharing.get(key(e)) ?? 0) > 1 && e.where ? `${e.name} (${e.where})`.slice(0, 200) : e.name
+    plan.push({ sourceId: e.sourceId, name, isDestination: false, alwaysNew: false, ...(e.folderSourceId ? { folderSourceId: e.folderSourceId } : {}) })
   }
   return plan
+}
+
+export type FolderPlan = Array<{ sourceId: string; name: string }>
+
+/**
+ * The Folders a `List location` names whose Lists hold rows, each to become a
+ * project (RUNDESK's Folder → Project → List holds ClickUp's Folder → List one
+ * level down). Two Folders of one name, from two Spaces, say their Space.
+ */
+export function planFolders(bundle: RundeskImportBundle): FolderPlan {
+  const used = listsInUse(bundle)
+  const inUse = new Set(bundle.lists.filter((l) => l.folderSourceId && used.has(l.sourceId)).map((l) => l.folderSourceId!))
+  const spaceName = new Map(bundle.spaces.map((s) => [s.sourceId, s.name.trim()]))
+  const folders = bundle.folders
+    .filter((f) => inUse.has(f.sourceId))
+    .map((f) => ({ sourceId: f.sourceId, name: f.name.trim().slice(0, 200), space: f.spaceSourceId ? spaceName.get(f.spaceSourceId) : undefined }))
+  const sharing = new Map<string, number>()
+  for (const f of folders) sharing.set(f.name.toLowerCase(), (sharing.get(f.name.toLowerCase()) ?? 0) + 1)
+  return folders.map((f) => ({
+    sourceId: f.sourceId,
+    name: (sharing.get(f.name.toLowerCase()) ?? 0) > 1 && f.space ? `${f.name} (${f.space})`.slice(0, 200) : f.name,
+  }))
 }
 
 /** `Imported from Spreadsheet`, or `… (2)`, `… (3)` while a live list of that name is there. */

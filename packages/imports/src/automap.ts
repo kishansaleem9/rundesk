@@ -11,6 +11,7 @@
  * field will be excluded."
  */
 
+import { isClickUpCurrentExport } from './clickup-current-export'
 import { TASK_COLUMNS, type ColumnMapping, type MappingTarget, type TaskColumnKey } from './columns'
 
 /** Lower-case, `_`/`-` as spaces, no `*` or trailing `:`, single spaces. */
@@ -59,6 +60,23 @@ const CLICKUP_EXPORT: Record<string, AutoMapTarget> = {
   'time spent text': 'skip',
   'rolled up time': 'skip',
   'rolled up time text': 'skip',
+}
+
+/**
+ * ClickUp's current export (`clickup-current-export.ts`), ahead of the classic
+ * names above: where a task lives is its Home Location, so List Name (which
+ * names a List and not where it is) is left out; Subtasks IDs, which leaves
+ * children out, gives way to Parent ID; Other Locations stay where they are.
+ */
+const CLICKUP_CURRENT_EXPORT: Record<string, AutoMapTarget> = {
+  'task content': 'description',
+  'home location': 'location',
+  'list name': 'skip',
+  'subtasks ids': 'skip',
+  'folder name/path': 'skip',
+  'home location id': 'skip',
+  'other location ids': 'skip',
+  'other locations': 'skip',
 }
 
 const SYNONYMS: Record<string, TaskColumnKey | 'parentId'> = {
@@ -124,6 +142,7 @@ export function autoMap(
 ): Record<string, AutoMapTarget> {
   const fieldByName = new Map((opts.customFields ?? []).map((f) => [normaliseHeader(f.name), f.id]))
   const fieldIds = new Set((opts.customFields ?? []).map((f) => f.id))
+  const current = isClickUpCurrentExport(headers) ? CLICKUP_CURRENT_EXPORT : {}
   const taken = new Set<string>()
   const out: Record<string, AutoMapTarget> = {}
   for (const header of headers) {
@@ -133,7 +152,7 @@ export function autoMap(
     if (remembered && (!remembered.startsWith('cf:') || remembered === 'cf:new' || fieldIds.has(remembered.slice(3)))) {
       target = remembered as AutoMapTarget
     }
-    target ??= opts.columns?.[key] ?? BY_LABEL.get(key) ?? CLICKUP_EXPORT[key] ?? SYNONYMS[key]
+    target ??= opts.columns?.[key] ?? BY_LABEL.get(key) ?? current[key] ?? CLICKUP_EXPORT[key] ?? SYNONYMS[key]
     if (!target && fieldByName.has(key)) target = `cf:${fieldByName.get(key)}`
     target ??= 'skip'
     // One incoming field per target: a second "Name" column stays unmapped

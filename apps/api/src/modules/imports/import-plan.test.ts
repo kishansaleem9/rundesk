@@ -11,6 +11,7 @@ import {
   defaultStatus,
   DEFAULT_LIST_SOURCE,
   matchAssignee,
+  planFolders,
   planLists,
   statusKeyFor,
   supportReference,
@@ -48,6 +49,51 @@ describe('which Lists an import writes into (§2.2)', () => {
     ]
     b.tasks = [task({ listSourceId: 'list:q4' })]
     assert.deepEqual(planLists(b, false), [{ sourceId: 'list:q4', name: 'Q4', isDestination: false, alwaysNew: false }])
+  })
+
+  it('a List location: each Folder a project, and two Lists of one name in one project say where they were', () => {
+    const b = emptyBundle()
+    b.spaces = [
+      { sourceId: 'space:a', name: 'Space A' },
+      { sourceId: 'space:b', name: 'Space B' },
+    ]
+    b.folders = [
+      { sourceId: 'folder:a > clients', spaceSourceId: 'space:a', name: 'Clients' },
+      { sourceId: 'folder:b > clients', spaceSourceId: 'space:b', name: 'Clients' },
+      { sourceId: 'folder:b > ops', spaceSourceId: 'space:b', name: 'Ops' },
+      { sourceId: 'folder:b > empty', spaceSourceId: 'space:b', name: 'Empty' },
+    ]
+    b.lists = [
+      { sourceId: 'list:a > clients > weekly', spaceSourceId: 'space:a', folderSourceId: 'folder:a > clients', name: 'Weekly' },
+      { sourceId: 'list:b > clients > weekly', spaceSourceId: 'space:b', folderSourceId: 'folder:b > clients', name: 'Weekly' },
+      { sourceId: 'list:a > inbox', spaceSourceId: 'space:a', name: 'Inbox' },
+      { sourceId: 'list:b > inbox', spaceSourceId: 'space:b', name: 'Inbox' },
+      { sourceId: 'list:b > ops > board', spaceSourceId: 'space:b', folderSourceId: 'folder:b > ops', name: 'Board' },
+      { sourceId: 'list:b > empty > nothing', spaceSourceId: 'space:b', folderSourceId: 'folder:b > empty', name: 'Nothing' },
+    ]
+    b.tasks = ['list:a > clients > weekly', 'list:b > clients > weekly', 'list:a > inbox', 'list:b > inbox', 'list:b > ops > board'].map((l, i) =>
+      task({ sourceId: `r${i + 2}`, listSourceId: l }),
+    )
+    // A Folder whose Lists hold no rows is no project; two Folders of one name say their Space.
+    const folders = planFolders(b)
+    assert.deepEqual(folders, [
+      { sourceId: 'folder:a > clients', name: 'Clients (Space A)' },
+      { sourceId: 'folder:b > clients', name: 'Clients (Space B)' },
+      { sourceId: 'folder:b > ops', name: 'Ops' },
+    ])
+    // Folders made as projects: each Weekly is alone in its project; the two Inboxes share the destination's.
+    assert.deepEqual(planLists(b, false, new Set(folders.map((f) => f.sourceId))), [
+      { sourceId: 'list:a > clients > weekly', name: 'Weekly', isDestination: false, alwaysNew: false, folderSourceId: 'folder:a > clients' },
+      { sourceId: 'list:b > clients > weekly', name: 'Weekly', isDestination: false, alwaysNew: false, folderSourceId: 'folder:b > clients' },
+      { sourceId: 'list:a > inbox', name: 'Inbox (Space A)', isDestination: false, alwaysNew: false },
+      { sourceId: 'list:b > inbox', name: 'Inbox (Space B)', isDestination: false, alwaysNew: false },
+      { sourceId: 'list:b > ops > board', name: 'Board', isDestination: false, alwaysNew: false, folderSourceId: 'folder:b > ops' },
+    ])
+    // No Folder projects (a Project destination, say): everything shares one project, and the Weeklys say where they were.
+    assert.deepEqual(
+      planLists(b, false).map((p) => p.name),
+      ['Weekly (Space A / Clients)', 'Weekly (Space B / Clients)', 'Inbox (Space A)', 'Inbox (Space B)', 'Board'],
+    )
   })
 
   it('a taken name gets a number', () => {
@@ -107,11 +153,11 @@ describe('assignees (§2.3)', () => {
 })
 
 describe('limits and odds and ends', () => {
-  it('60 imports a day except enterprise, which plan gating never restricts; 50,000 rows everywhere, the file reader’s limit', () => {
+  it('60 imports a day except enterprise, which plan gating never restricts; 100,000 rows everywhere, the file reader’s limit', () => {
     assert.equal(importLimitsFor('free').importsPerDay, 60)
     assert.equal(importLimitsFor('enterprise').importsPerDay, null)
     assert.equal(importLimitsFor('not-a-plan').importsPerDay, null)
-    for (const p of ['free', 'pro', 'business', 'enterprise']) assert.equal(importLimitsFor(p).maxRows, 50_000)
+    for (const p of ['free', 'pro', 'business', 'enterprise']) assert.equal(importLimitsFor(p).maxRows, 100_000)
   })
   it('batches keep order', () => {
     assert.deepEqual(batches([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]])

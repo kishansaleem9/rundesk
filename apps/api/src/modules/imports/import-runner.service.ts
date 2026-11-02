@@ -24,7 +24,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
 import { Cron, CronExpression } from '@nestjs/schedule'
 import { HttpException } from '@nestjs/common'
-import { and, asc, eq, inArray, isNotNull, lt, or, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
 import {
   clickupImportJobs,
   customFieldDefinitions,
@@ -82,6 +82,7 @@ import {
   defaultStatus,
   DEFAULT_LIST_SOURCE,
   matchAssignee,
+  planFolders,
   planLists,
   sourceLabel,
   statusKeyFor,
@@ -127,6 +128,11 @@ type RunContext = {
   warnings: Array<{ ref: string; field?: string; message: string }>
   /** Lists by bundle list source id. */
   listIds: Map<string, string>
+  /**
+   * The destination's own project: a Project's or a List's, the Space's list
+   * container, or a Folder's new one. Empty until something goes in it, so a
+   * Folder whose rows all go to their own Folders' projects gets no empty one.
+   */
   projectId: string
   statusByList: Map<string, { byName: Map<string, { key: string; category: Category }>; fallback: { key: string; category: Category } }>
   typeByName: Map<string, { id: string; isMilestone: boolean }>
@@ -318,16 +324,24 @@ export class ImportRunnerService {
 
   private async ensureLists(ctx: RunContext) {
     const { dest } = ctx
-    ctx.projectId = dest.projectId ?? (dest.type === 'space' ? await this.defaultContainer(dest.spaceId, ctx.actor.id) : await this.folderProject(ctx))
-
-    const plan = planLists(ctx.bundle, dest.type === 'list')
-    const live = await this.db
-      .select({ id: lists.id, name: lists.name, position: lists.position })
-      .from(lists)
-      .where(and(eq(lists.projectId, ctx.projectId), eq(lists.isArchived, false)))
-    let position = live.reduce((m, l) => Math.max(m, l.position), -1) + 1
+    const folderProjects = await this.ensureFolderProjects(ctx)
+    const plan = planLists(ctx.bundle, dest.type === 'list', new Set(folderProjects.keys()))
     const scope = await this.newListScope(dest)
     let mayCreateHere: boolean | null = null
+    // Each project's live Lists, read once: a new List goes after them, and one of the same name is used.
+    const held = new Map<string, { live: Array<{ id: string; name: string; position: number }>; next: number }>()
+    const holding = async (projectId: string) => {
+      let h = held.get(projectId)
+      if (!h) {
+        const live = await this.db
+          .select({ id: lists.id, name: lists.name, position: lists.position })
+          .from(lists)
+          .where(and(eq(lists.projectId, projectId), eq(lists.isArchived, false)))
+        h = { live, next: live.reduce((m, l) => Math.max(m, l.position), -1) + 1 }
+        held.set(projectId, h)
+      }
+      return h
+    }
 
     for (const p of plan) {
       if (p.isDestination) {
@@ -339,8 +353,10 @@ export class ImportRunnerService {
         ctx.listIds.set(p.sourceId, known)
         continue
       }
+      const projectId = p.folderSourceId ? folderProjects.get(p.folderSourceId)! : await this.mainProject(ctx)
+      const h = await holding(projectId)
       if (!p.alwaysNew) {
-        const hit = live.find((l) => l.name.trim().toLowerCase() === p.name.toLowerCase())
+        const hit = h.live.find((l) => l.name.trim().toLowerCase() === p.name.toLowerCase())
         if (hit) {
           ctx.listIds.set(p.sourceId, hit.id)
           continue
@@ -362,12 +378,12 @@ export class ImportRunnerService {
           continue
         }
       }
-      const name = p.alwaysNew ? uniqueName(p.name, live.map((l) => l.name)) : p.name
-      const at = position++
+      const name = p.alwaysNew ? uniqueName(p.name, h.live.map((l) => l.name)) : p.name
+      const at = h.next++
       const listId = await this.db.transaction(async (tx) => {
         const [list] = await tx
           .insert(lists)
-          .values({ projectId: ctx.projectId, spaceId: dest.spaceId, name, position: at, createdById: ctx.actor.id, statusScope: scope, importId: ctx.job.id })
+          .values({ projectId, spaceId: dest.spaceId, name, position: at, createdById: ctx.actor.id, statusScope: scope, importId: ctx.job.id })
           .returning({ id: lists.id })
         if (scope === 'list') {
           await tx.insert(listStatuses).values(DEFAULT_LIST_STATUSES.map((s) => ({ listId: list.id, ...s }))).onConflictDoNothing()
@@ -375,10 +391,105 @@ export class ImportRunnerService {
         await tx.insert(importJobItems).values(this.item(ctx, 'list', list.id, p.sourceId, name))
         return list.id
       })
-      live.push({ id: listId, name, position: at })
+      h.live.push({ id: listId, name, position: at })
       ctx.listIds.set(p.sourceId, listId)
       ctx.registry.set('list', p.sourceId, listId)
     }
+  }
+
+  /** The destination's own project (see `RunContext.projectId`), found or made the first time something needs it. */
+  private async mainProject(ctx: RunContext): Promise<string> {
+    if (!ctx.projectId) {
+      const { dest } = ctx
+      ctx.projectId = dest.projectId ?? (dest.type === 'space' ? await this.defaultContainer(dest.spaceId, ctx.actor.id) : await this.folderProject(ctx))
+    }
+    return ctx.projectId
+  }
+
+  /**
+   * A `List location`'s Folders, each a project in the destination Space or
+   * Folder (`planFolders`). A project already there with that name is used, as
+   * a List of that name is. Where projects cannot be made — inside a Project
+   * or a List, past the plan's projects, against the Space's rule, or when the
+   * import has Custom Field columns (a field lives on ONE project) — those
+   * Folders' Lists go into the destination's own project instead, named for
+   * where they were when two share a name, and the report says why, once.
+   */
+  private async ensureFolderProjects(ctx: RunContext): Promise<Map<string, string>> {
+    const made = new Map<string, string>()
+    const wanted = planFolders(ctx.bundle)
+    if (!wanted.length) return made
+    const { dest } = ctx
+    const folders = (n: number) => (n === 1 ? 'one Folder' : `${n.toLocaleString('en-GB')} Folders`)
+    const where =
+      dest.type === 'space'
+        ? 'straight in the Space'
+        : dest.type === 'folder'
+          ? 'in one new project in this Folder'
+          : dest.type === 'project'
+            ? 'in this Project'
+            : 'beside this List'
+    const instead = (why: string) => {
+      const left = wanted.length - made.size
+      ctx.warnings.push({ ref: 'Folders', message: `${why} The Lists of ${folders(left)} were made ${where} instead.` })
+      return made
+    }
+    if (dest.type === 'project' || dest.type === 'list') {
+      return instead(`A ${dest.type === 'project' ? 'Project' : 'List'} cannot hold Folders.`)
+    }
+    if (ctx.bundle.customFields.length) {
+      return instead('This import has Custom Field columns, and a Custom Field belongs to one project, so its Folders were not made as projects.')
+    }
+
+    const siblings = await this.db
+      .select({ id: projects.id, name: projects.name, position: projects.position })
+      .from(projects)
+      .where(
+        and(
+          eq(projects.spaceId, dest.spaceId),
+          dest.folderId ? eq(projects.folderId, dest.folderId) : isNull(projects.folderId),
+          eq(projects.isArchived, false),
+          eq(projects.isDefaultContainer, false),
+        ),
+      )
+    const byName = new Map(siblings.map((s) => [s.name.trim().toLowerCase(), s.id]))
+    const toMake = wanted.filter((f) => !ctx.registry.get('project', f.sourceId) && !byName.has(f.name.toLowerCase()))
+    if (toMake.length) {
+      try {
+        // A Folder destination was asked this when the import was queued; a Space was asked for Lists.
+        if (dest.type === 'space') await assertCanPlaceIn(this.db, { spaceId: dest.spaceId, actorId: ctx.actor.id, kind: 'project' })
+        await this.plans.assertCanCreateProjects(ctx.workspaceId, toMake.length)
+      } catch (e) {
+        if (!(e instanceof HttpException)) throw e
+        // What is already there (or this run already made) is still used.
+        for (const f of wanted) {
+          const id = ctx.registry.get('project', f.sourceId) ?? byName.get(f.name.toLowerCase())
+          if (id) made.set(f.sourceId, id)
+        }
+        return instead(e.message.trim().replace(/([^.!?])$/, '$1.'))
+      }
+    }
+    let next = siblings.reduce((m, s) => Math.max(m, s.position), -1) + 1
+    for (const f of wanted) {
+      const id = ctx.registry.get('project', f.sourceId) ?? byName.get(f.name.toLowerCase())
+      if (id) {
+        made.set(f.sourceId, id)
+        continue
+      }
+      const at = next++
+      const projectId = await this.db.transaction(async (tx) => {
+        const [project] = await tx
+          .insert(projects)
+          .values({ spaceId: dest.spaceId, folderId: dest.folderId, name: f.name, position: at, createdById: ctx.actor.id, importId: ctx.job.id })
+          .returning({ id: projects.id })
+        await tx.insert(importJobItems).values(this.item(ctx, 'project', project.id, f.sourceId, f.name))
+        return project.id
+      })
+      ctx.registry.set('project', f.sourceId, projectId)
+      byName.set(f.name.toLowerCase(), projectId)
+      made.set(f.sourceId, projectId)
+    }
+    return made
   }
 
   /** The space's hidden list container, as `ListsService.defaultContainerForSpace` resolves it. Never tagged: it is the space's, not the import's. */
@@ -610,6 +721,8 @@ export class ImportRunnerService {
    * default in views (§2.5) — "Hidden imported fields" brings it back.
    */
   private async ensureFields(ctx: RunContext) {
+    if (!ctx.bundle.customFields.length) return
+    const projectId = await this.mainProject(ctx)
     for (const f of ctx.bundle.customFields) {
       const options = [...new Set((f.options ?? []).map((o) => o.trim()).filter(Boolean))]
       let id = f.existingFieldId ?? ctx.registry.get('custom_field', f.sourceId)
@@ -619,7 +732,7 @@ export class ImportRunnerService {
           .from(customFieldDefinitions)
           .where(eq(customFieldDefinitions.id, id))
           .limit(1)
-        if (!def || def.projectId !== ctx.projectId) {
+        if (!def || def.projectId !== projectId) {
           ctx.warnings.push({ ref: `Field "${f.name}"`, field: f.name, message: 'That Custom Field is not available in the destination, so the column was not imported.' })
           continue
         }
@@ -632,7 +745,7 @@ export class ImportRunnerService {
       try {
         const def = (await this.customFields.createDefinition(
           ctx.workspaceId,
-          ctx.projectId,
+          projectId,
           { name: f.name.slice(0, 100), type: f.type as never, options: optionList },
           ctx.actor,
         )) as { id: string; options?: unknown; config?: unknown }
@@ -1023,12 +1136,22 @@ export class ImportRunnerService {
       .from(importJobItems)
       .where(and(eq(importJobItems.jobId, ctx.job.id), inArray(importJobItems.entityType, ['task', 'subtask']), eq(importJobItems.action, 'created')))
     for (const chunk of batches(ids.map((r) => r.id).filter((id): id is string => Boolean(id)), 200)) {
+      // Each task's own project: a run can fill several (a List location's Folders).
       const rows = await this.db
-        .select({ id: tasks.id, title: tasks.title, description: tasks.description, listId: tasks.listId, createdAt: tasks.createdAt, updatedAt: tasks.updatedAt })
+        .select({
+          id: tasks.id,
+          title: tasks.title,
+          description: tasks.description,
+          listId: tasks.listId,
+          createdAt: tasks.createdAt,
+          updatedAt: tasks.updatedAt,
+          projectId: lists.projectId,
+        })
         .from(tasks)
+        .innerJoin(lists, eq(lists.id, tasks.listId))
         .where(inArray(tasks.id, chunk))
       await Promise.all(
-        rows.map((r) => this.search.indexTask(r, ctx.workspaceId, ctx.dest.spaceId, ctx.projectId).catch(() => undefined)),
+        rows.map(({ projectId, ...r }) => this.search.indexTask(r, ctx.workspaceId, ctx.dest.spaceId, projectId).catch(() => undefined)),
       )
     }
   }

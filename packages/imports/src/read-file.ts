@@ -1,6 +1,11 @@
+import { isClickUpCurrentExport, normaliseClickUpCurrentExport } from './clickup-current-export'
 import { readDelimited } from './delimited'
 import { finishTable, SheetReadError, SHEET_READ_MESSAGES, type SheetRow, type SheetTable } from './table'
 import { readXlsx } from './xlsx-reader'
+
+/** ClickUp's current export is cleaned as it is read (`clickup-current-export.ts`); any other file is as it was written. */
+const asRead = (table: SheetTable): SheetTable =>
+  isClickUpCurrentExport(table.headers) ? normaliseClickUpCurrentExport(table) : table
 
 /**
  * §2.4 — what the picker offers. `.xls` is listed so the person can choose it
@@ -80,7 +85,7 @@ export async function readSheetFile(fileName: string, bytes: Uint8Array): Promis
   if (ext === '.xls' || startsWith(bytes, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])) {
     throw new SheetReadError('xls_unsupported', SHEET_READ_MESSAGES.xls_unsupported)
   }
-  if (startsWith(bytes, [0x50, 0x4b, 0x03, 0x04])) return readXlsx(bytes)
+  if (startsWith(bytes, [0x50, 0x4b, 0x03, 0x04])) return asRead(await readXlsx(bytes))
   if (ext === '.xlsx' || ext === '.xlsm') throw new SheetReadError('unreadable', SHEET_READ_MESSAGES.unreadable)
   if (!['.csv', '.tsv', '.txt', '.json'].includes(ext)) {
     throw new SheetReadError('unsupported_type', SHEET_READ_MESSAGES.unsupported_type)
@@ -88,6 +93,6 @@ export async function readSheetFile(fileName: string, bytes: Uint8Array): Promis
   const text = decodeText(bytes)
   const firstLine = text.split(/\r?\n/, 1)[0] ?? ''
   if (firstLine.includes('\u0000')) throw new SheetReadError('unreadable', SHEET_READ_MESSAGES.unreadable)
-  if (ext === '.json') return readJsonSheet(text)
-  return readDelimited(text, ext === '.tsv' ? '\t' : undefined)
+  if (ext === '.json') return asRead(readJsonSheet(text))
+  return asRead(readDelimited(text, ext === '.tsv' ? '\t' : undefined))
 }

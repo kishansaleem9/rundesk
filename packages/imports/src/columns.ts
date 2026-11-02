@@ -22,6 +22,7 @@ export type TaskColumnKey =
   | 'checklist'
   | 'taskType'
   | 'list'
+  | 'location'
 
 export type ColumnKind = 'text' | 'id' | 'idList' | 'people' | 'status' | 'date' | 'priority' | 'list' | 'duration' | 'taskType'
 
@@ -53,6 +54,10 @@ export const TASK_COLUMNS: readonly TaskColumn[] = [
   { key: 'checklist', label: 'Checklist', required: false, kind: 'list', multi: true },
   { key: 'taskType', label: 'Task Type', required: false, kind: 'taskType', multi: false },
   { key: 'list', label: 'List', required: false, kind: 'text', multi: false },
+  // A RUNDESK extension: where the task lives, `Space > Folder > List` or
+  // `Space > List`, as ClickUp's current export writes its Home Location. Each
+  // Folder becomes a project and each List a List in it; it wins over `List`.
+  { key: 'location', label: 'List location', required: false, kind: 'text', multi: false },
 ] as const
 
 export const columnByKey = (key: string): TaskColumn | undefined => TASK_COLUMNS.find((c) => c.key === key)

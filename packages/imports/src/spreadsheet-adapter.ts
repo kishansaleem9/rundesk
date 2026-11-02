@@ -4,8 +4,8 @@
  * trusts the browser's verdict), and turns the valid rows into bundle records.
  */
 
-import { emptyBundle, type BundleTask, type RundeskImportBundle } from './bundle'
-import { rowDraft, rowLabel, validateGrid, type GridColumn, type GridContext, type GridRow } from './grid'
+import { emptyBundle, type BundleFolder, type BundleList, type BundleSpace, type BundleTask, type RundeskImportBundle } from './bundle'
+import { rowDraft, rowLabel, validateGrid, type GridColumn, type GridContext, type GridRow, type TaskDraft } from './grid'
 
 export type SpreadsheetReport = {
   /** Rows not imported, with every reason. */
@@ -15,6 +15,44 @@ export type SpreadsheetReport = {
 }
 
 export const listSourceId = (name: string) => `list:${name.trim().toLowerCase()}`
+
+const pathKey = (parts: string[]) => parts.map((p) => p.trim().toLowerCase()).join(' > ')
+
+/**
+ * The Spaces, Folders and Lists the rows name. A `List location` of
+ * `Space > Folder > List` names all three (`Space > List`, a List straight in
+ * its Space), each keyed by its whole path, so two Lists of one name in
+ * different Folders stay two. Without one, the `List` cell names a List alone,
+ * as it always has.
+ */
+class Places {
+  readonly spaces = new Map<string, BundleSpace>()
+  readonly folders = new Map<string, BundleFolder>()
+  readonly lists = new Map<string, BundleList>()
+
+  listOf(d: TaskDraft): string | undefined {
+    const parts = d.location
+    if (parts && parts.length > 1) {
+      const [space, ...rest] = parts
+      const spaceSourceId = `space:${pathKey([space])}`
+      if (!this.spaces.has(spaceSourceId)) this.spaces.set(spaceSourceId, { sourceId: spaceSourceId, name: space })
+      const folderParts = rest.slice(0, -1)
+      let folderSourceId: string | undefined
+      if (folderParts.length) {
+        folderSourceId = `folder:${pathKey([space, ...folderParts])}`
+        if (!this.folders.has(folderSourceId)) this.folders.set(folderSourceId, { sourceId: folderSourceId, spaceSourceId, name: folderParts.join(' / ') })
+      }
+      const sourceId = `list:${pathKey(parts)}`
+      if (!this.lists.has(sourceId)) this.lists.set(sourceId, { sourceId, spaceSourceId, folderSourceId, name: rest[rest.length - 1] })
+      return sourceId
+    }
+    const name = parts?.[0] ?? d.list
+    if (!name) return undefined
+    const sourceId = listSourceId(name)
+    if (!this.lists.has(sourceId)) this.lists.set(sourceId, { sourceId, name })
+    return sourceId
+  }
+}
 
 export function spreadsheetBundle(
   rows: GridRow[],
@@ -26,7 +64,7 @@ export function spreadsheetBundle(
   const report: SpreadsheetReport = { skipped: [], warnings: [] }
   const labelOf = new Map(rows.map((r, i) => [r.key, rowLabel(r, i)]))
 
-  const lists = new Map<string, string>()
+  const places = new Places()
   const statuses = new Map<string, string>()
   const types = new Map<string, string>()
   const tags = new Map<string, string>()
@@ -45,7 +83,7 @@ export function spreadsheetBundle(
       if (i.severity === 'info') report.warnings.push({ ref, column: i.column, message: i.message })
     }
     const d = rowDraft(row, columns, ctx, issues)
-    if (d.list) lists.set(listSourceId(d.list), d.list)
+    const listSource = places.listOf(d)
     if (d.status) statuses.set(d.status.toLowerCase(), d.status)
     if (d.taskType) types.set(d.taskType.toLowerCase(), d.taskType)
     for (const t of d.tags) tags.set(t.toLowerCase(), t)
@@ -57,7 +95,7 @@ export function spreadsheetBundle(
     tasks.set(row.key, {
       sourceId: row.key,
       sourceRef: ref,
-      listSourceId: d.list ? listSourceId(d.list) : undefined,
+      listSourceId: listSource,
       name: d.name,
       description: d.description,
       statusName: d.status,
@@ -72,7 +110,7 @@ export function spreadsheetBundle(
       fields: d.custom,
       comments: [],
       attachments: [],
-      checklists: d.checklist ? [d.checklist] : [],
+      checklists: d.checklists,
       timeEntries: d.timeTrackedMs ? [{ durationMs: d.timeTrackedMs }] : [],
       relationships: [],
       subtaskNames: d.subtaskNames,
@@ -97,7 +135,9 @@ export function spreadsheetBundle(
     }
   }
 
-  bundle.lists = [...lists].map(([sourceId, name]) => ({ sourceId, name }))
+  bundle.spaces = [...places.spaces.values()]
+  bundle.folders = [...places.folders.values()]
+  bundle.lists = [...places.lists.values()]
   bundle.statuses = [...statuses.values()].map((name) => ({ sourceId: `status:${name.toLowerCase()}`, name }))
   bundle.taskTypes = [...types.values()].map((name) => ({ sourceId: `type:${name.toLowerCase()}`, name }))
   bundle.tags = [...tags.values()].map((name) => ({ sourceId: `tag:${name.toLowerCase()}`, name }))

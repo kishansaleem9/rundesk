@@ -25,9 +25,9 @@ export function splitMulti(value: string, delimiter: string): string[] {
 const PRIORITY_BY_NUMBER: Record<string, Priority> = { '1': 'urgent', '2': 'high', '3': 'normal', '4': 'low' }
 const PRIORITY_WORDS: readonly Priority[] = ['urgent', 'high', 'normal', 'low']
 
-/** `1` Urgent … `4` Low, and (a RUNDESK extension) the words themselves, any case. */
+/** `1` Urgent … `4` Low (`2.0` as a spreadsheet may write it), and (a RUNDESK extension) the words themselves, any case. */
 export function parsePriority(raw: string): Parsed<Priority> {
-  const v = raw.trim().toLowerCase()
+  const v = raw.trim().toLowerCase().replace(/^([1-4])\.0+$/, '$1')
   const byNumber = PRIORITY_BY_NUMBER[v]
   if (byNumber) return ok(byNumber)
   if ((PRIORITY_WORDS as readonly string[]).includes(v)) return ok(v as Priority)
@@ -42,10 +42,17 @@ const UNIT_MS: Record<string, number> = {
   s: 1_000, sec: 1_000, secs: 1_000, second: 1_000, seconds: 1_000,
 }
 
-/** A duration in milliseconds: `2h 30m`, `150m`, `2:30` (h:mm), or a bare integer of ms. */
+/**
+ * A duration in milliseconds: `2h 30m`, `150m`, `2:30` (h:mm), or a bare
+ * number of ms — also as a spreadsheet may write one (`900000.0`, `9.0E5`).
+ */
 export function parseDuration(raw: string): Parsed<number> {
   const v = raw.trim().toLowerCase()
   if (/^\d+$/.test(v)) return ok(Number(v))
+  if (/^\d+\.0+$/.test(v) || /^\d+(\.\d+)?e\+?\d+$/.test(v)) {
+    const n = Number(v)
+    if (Number.isFinite(n) && Number.isSafeInteger(Math.round(n))) return ok(Math.round(n))
+  }
   const clock = /^(\d+):(\d{2})(?::(\d{2}))?$/.exec(v)
   if (clock) {
     if (Number(clock[2]) > 59 || Number(clock[3] ?? 0) > 59) return fail(`"${raw.trim()}" is not a duration.`)

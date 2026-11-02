@@ -21,11 +21,13 @@ import { readDelimited } from './delimited'
 
 const ctx: GridContext = { dateFormat: 'ymd', delimiter: ',' }
 
-test('the grid’s columns are §2.3’s, in its order', () => {
+test('the grid’s columns are §2.3’s, in its order, then List location', () => {
   assert.deepEqual(
     TASK_COLUMNS.map((c) => c.label + (c.required ? '*' : '')),
     ['Task Name*', 'Task ID', 'Subtask IDs', 'Description content', 'Task assignee', 'Status', 'Due Date', 'Start Date',
-      'Date Created', 'Priority', 'Tags', 'Time Estimate', 'Time Tracked', 'Subtask Names', 'Checklist', 'Task Type', 'List'],
+      'Date Created', 'Priority', 'Tags', 'Time Estimate', 'Time Tracked', 'Subtask Names', 'Checklist', 'Task Type', 'List',
+      // RUNDESK's one addition, after §2.3's: where a task lives, as ClickUp's current export writes it.
+      'List location'],
   )
 })
 
@@ -94,7 +96,7 @@ test('Parent ID is folded into Subtask IDs, cells are judged, rows become a bund
   assert.equal(draft.priority, 'urgent')
   assert.deepEqual(draft.tags, ['a', 'b'])
   assert.equal(draft.timeEstimateMs, 9_000_000)
-  assert.deepEqual(draft.checklist, { name: 'Prep', items: [{ content: 'book room', done: true }, { content: 'send invites', done: false }] })
+  assert.deepEqual(draft.checklists, [{ name: 'Prep', items: [{ content: 'book room', done: true }, { content: 'send invites', done: false }] }])
   assert.deepEqual(draft.custom, { 'new:Budget': 12.5 })
 
   const { bundle, report } = spreadsheetBundle(rows, columns, ctx)

@@ -2113,6 +2113,19 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # ClickUp's current export (`Task Content`, `Home Location`, JSON cells,
+      # `null` for nothing), taken through Settings › Imports / Exports into a
+      # Space as the owner takes theirs, and read back by SQL: each Folder a
+      # project, each List in its Folder's, descriptions as text, every
+      # checklist, dates to the millisecond, the Free plan's fallback, and the
+      # undo of what it made (`found-02-nov/clickup-current-export-unread`).
+      - name: ClickUp's current export, imported as it is written
+        timeout-minutes: 10
+        run: node test/e2e/clickup-current-export.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §V2-S13 frame `12:05` — Create › Imports › Document files. The load-
       # bearing check is a ROUND TRIP (file → Doc → export → the same file),
       # because an importer that dumped everything into one paragraph passes

@@ -142,7 +142,12 @@ function cellIssues(row: GridRow, columns: GridColumn[], ctx: GridContext): Cell
       const name = raw.trim()
       if (!name) issues.push({ column: col.key, severity: 'invalid', message: 'Task Name is required.' })
       else if (name.length > MAX_TASK_NAME) {
-        issues.push({ column: col.key, severity: 'invalid', message: `Task Name is ${name.length} characters; the limit is ${MAX_TASK_NAME}.` })
+        // A long name is a long first line, not a bad row: the task is imported under its first 500 characters.
+        issues.push({
+          column: col.key,
+          severity: 'info',
+          message: `Task Name is ${name.length} characters, so it was shortened to the first ${MAX_TASK_NAME}.`,
+        })
       }
       continue
     }
@@ -225,6 +230,61 @@ export function parseChecklistCell(raw: string, delimiter: string): ChecklistDra
   return items.length ? { name, items } : null
 }
 
+/** One checklist item as a JSON cell writes it: its text, or `{ name, resolved }`. */
+function checklistItem(item: unknown): { content: string; done: boolean } | null {
+  const text = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? String(v) : '').replace(/\\r\\n|\\n|\\r|\s+/g, ' ').trim()
+  if (item && typeof item === 'object' && !Array.isArray(item)) {
+    const o = item as Record<string, unknown>
+    const content = text(o.name ?? o.content ?? o.text)
+    return content ? { content, done: o.resolved === true || o.checked === true || o.done === true } : null
+  }
+  const content = text(item)
+  return content ? { content, done: false } : null
+}
+
+/**
+ * A Checklist cell → its checklists. ClickUp's current export writes JSON:
+ * `{"Checklist":["item","item"]}`, one key per checklist (a task can have
+ * several), and no done marks, so every item comes in not done. A JSON list is
+ * one checklist. Anything else is the classic `[name: item (done), item]`.
+ */
+export function parseChecklists(raw: string, delimiter: string): ChecklistDraft[] {
+  const v = raw.trim()
+  if (!v) return []
+  if (v.startsWith('{') || v.startsWith('[')) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(v)
+    } catch {
+      parsed = undefined // the classic form, read below
+    }
+    if (parsed && typeof parsed === 'object') {
+      const named: Array<[string, unknown]> = Array.isArray(parsed) ? [['Checklist', parsed]] : Object.entries(parsed)
+      return named.flatMap(([name, items]) => {
+        const kept = (Array.isArray(items) ? items : [items]).map(checklistItem).filter((i): i is { content: string; done: boolean } => i !== null)
+        return kept.length ? [{ name: name.replace(/\\r\\n|\\n|\\r|\s+/g, ' ').trim() || 'Checklist', items: kept }] : []
+      })
+    }
+  }
+  const one = parseChecklistCell(raw, delimiter)
+  return one ? [one] : []
+}
+
+/** A List location (`Space > Folder > List`, `Space > List`) → its parts; a cell with no ` > ` is a List's name alone. */
+export function locationParts(raw: string): string[] {
+  return raw
+    .split(/\s+>\s+/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+}
+
+/** The first `max` characters, never half of a character written as two. */
+function clip(text: string, max: number): string {
+  if (text.length <= max) return text
+  const cut = /[\uD800-\uDBFF]/.test(text[max - 1]) ? max - 1 : max
+  return text.slice(0, cut).trimEnd()
+}
+
 export type TaskDraft = {
   key: string
   line?: number
@@ -240,9 +300,11 @@ export type TaskDraft = {
   timeEstimateMs?: number
   timeTrackedMs?: number
   subtaskNames: string[]
-  checklist?: ChecklistDraft
+  checklists: ChecklistDraft[]
   taskType?: string
   list?: string
+  /** `List location`'s parts: `[Space, Folder…, List]`, `[Space, List]` or `[List]`. */
+  location?: string[]
   /** grid column key (`cf:<id>` / `new:<header>`) → parsed value. */
   custom: Record<string, CustomCellValue>
 }
@@ -267,6 +329,7 @@ export function rowDraft(row: GridRow, columns: GridColumn[], ctx: GridContext, 
   const typeRaw = get('taskType')
   const priorityRaw = get('priority')
   const priority = priorityRaw ? priorityOf(priorityRaw, ctx.valueMaps) : undefined
+  const location = locationParts(get('location'))
   const custom: Record<string, CustomCellValue> = {}
   for (const col of columns) {
     if (col.kind !== 'custom') continue
@@ -278,7 +341,7 @@ export function rowDraft(row: GridRow, columns: GridColumn[], ctx: GridContext, 
   return {
     key: row.key,
     line: row.line,
-    name: get('taskName'),
+    name: clip(get('taskName'), MAX_TASK_NAME),
     description: (dropped.has('description') ? '' : row.values.description ?? '').trim() || undefined,
     assignees: splitMulti(get('assignees'), ctx.delimiter),
     status: statusRaw ? (ctx.valueMaps?.status?.[lc(statusRaw)] ?? statusRaw) : undefined,
@@ -290,9 +353,10 @@ export function rowDraft(row: GridRow, columns: GridColumn[], ctx: GridContext, 
     timeEstimateMs: duration('timeEstimate'),
     timeTrackedMs: duration('timeTracked'),
     subtaskNames: splitMulti(get('subtaskNames'), ctx.delimiter),
-    checklist: parseChecklistCell(get('checklist'), ctx.delimiter) ?? undefined,
+    checklists: parseChecklists(get('checklist'), ctx.delimiter),
     taskType: typeRaw ? (ctx.valueMaps?.taskType?.[lc(typeRaw)] ?? typeRaw) : undefined,
     list: get('list') || undefined,
+    location: location.length ? location : undefined,
     custom,
   }
 }

@@ -286,6 +286,7 @@ export function SpreadsheetWizard({
             t('ie.what.checklists'),
             t('ie.what.taskTypes'),
             t('ie.what.lists'),
+            t('ie.what.locations'),
             t('ie.what.customFields'),
           ]}
           notImported={[
