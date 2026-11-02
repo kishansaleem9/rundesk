@@ -455,7 +455,8 @@ export class AuthService {
       const wsSlug = orgSlug
       const [workspace] = await tx
         .insert(workspaces)
-        .values({ organizationId: org.id, name: dto.organizationName, slug: wsSlug })
+        // Whoever signs up owns the workspace made for them (`found-02-nov/workspace-has-no-owner`).
+        .values({ organizationId: org.id, name: dto.organizationName, slug: wsSlug, ownerId: user.id })
         .returning()
 
       // 5. Make user workspace_admin

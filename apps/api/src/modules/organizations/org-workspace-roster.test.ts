@@ -66,8 +66,15 @@ describe('§G08 the org workspace roster is a roster', () => {
      * regardless of what the admin roster does.
      */
     const ws = read('apps/api/src/modules/workspaces/workspaces.service.ts')
-    const findBy = /async findByMember\(userId: string\) \{([\s\S]*?)\n {2}\}/.exec(ws)?.[1] ?? ''
-    assert.ok(findBy, 'could not find findByMember')
+    const listed = /async findByMember\(userId: string\) \{([\s\S]*?)\n {2}\}/.exec(ws)?.[1] ?? ''
+    assert.ok(listed, 'could not find findByMember')
+    /*
+     * Its rows are `membershipsOf`'s, read with each workspace's owner beside
+     * them (`found-02-nov/workspace-has-no-owner`): the query is asked there.
+     */
+    assert.match(listed, /this\.membershipsOf\(userId\)/, `findByMember does not read this member's memberships: ${listed.trim().slice(0, 200)}`)
+    const findBy = /private async membershipsOf\(userId: string\) \{([\s\S]*?)\n {2}\}/.exec(ws)?.[1] ?? ''
+    assert.ok(findBy, 'could not find membershipsOf')
     /*
      * The WHERE, not the mention.
      *

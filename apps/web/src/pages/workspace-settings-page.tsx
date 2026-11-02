@@ -3,7 +3,7 @@ import { AiCreditsCard } from '../components/ai-credits'
 import { AgentPerformanceCard } from '../components/agent-performance'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Dialog, DialogContent, DialogHeader, DialogTitle, Input, Label, Popover, PopoverContent, PopoverTrigger, Switch, cn, toast } from '@rundesk/ui'
+import { Button, Card, Dialog, DialogContent, DialogHeader, DialogTitle, Input, Label, Popover, PopoverContent, PopoverTrigger, Switch, Textarea, cn, toast } from '@rundesk/ui'
 import { Building2, Users, Plug, Shield, Tag, Trash2, Archive, RotateCcw, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Upload, CreditCard, ToggleRight, Layers, Sparkles, UserCog, Lock, Globe, Shapes, CalendarDays, Star, X, Megaphone, ScrollText, Eye, Import } from 'lucide-react'
 import { api, ApiError, downloadFile, refusalMessage } from '../lib/api'
 import { applyBrandColor } from '../lib/branding'
@@ -27,6 +27,10 @@ import type { FlagKey } from '@rundesk/feature-flags'
 import { InlineSkeleton } from '../components/loading-skeletons'
 import { WebhookSecretOnce } from '../components/webhook-secret-once'
 import { webhookEventLabel } from '../lib/webhook-events'
+import { WorkspaceAvatar } from '../components/workspace-avatar'
+import { DeleteWorkspaceDialog, LeaveWorkspaceDialog, TransferOwnershipDialog } from '../components/workspace-ownership-dialogs'
+import { WORKSPACE_NAME_MAX, characterCount, cleanWorkspaceName, workspaceNameProblem } from '../lib/workspace-name'
+import { parseEmailList } from '../lib/email-list'
 
 type Workspace = {
   id: string
@@ -64,6 +68,8 @@ type Member = {
   managerName?: string | null
   // What they may do where they only view (`found-25-sep/view-only-individual-permissions`).
   viewOnlyPermissions?: ViewOnlyPermissions
+  /** The workspace's owner: always an admin, removed by nobody (`found-02-nov/workspace-has-no-owner`). */
+  isOwner?: boolean
 }
 
 /**
@@ -768,29 +774,50 @@ function FeaturesTab({ workspaceId }: { workspaceId: string }) {
   )
 }
 
+/*
+ * THE COLOURS A WORKSPACE'S AVATAR IS OFFERED — ClickUp's picker offers a row
+ * of them and an upload (QA video, 2 November). The first is the app's own.
+ * Any other is one click on "Custom".
+ */
+const AVATAR_COLORS = ['#354fb0', '#7c5cff', '#2563eb', '#0891b2', '#059669', '#65a30d', '#ca8a04', '#ea580c', '#dc2626', '#db2777', '#9333ea', '#475569']
+
+/** What `GET /workspaces/:id` says the reader is to it. */
+type WorkspaceRead = Workspace & { ownerId?: string | null; isOwner?: boolean; actsAsOwner?: boolean }
+
+/**
+ * SETTINGS › GENERAL, AS CLICKUP LAYS IT OUT (QA WS-005 to WS-008, WS-015 to
+ * WS-019; `found-02-nov/settings-general-buries-name-and-logo`). General
+ * first — the workspace's avatar and its name, where they were below the plan,
+ * the billing, the id and the slug, and read as "not available" — then its
+ * custom branding, its plan, its details, and a Danger zone that offers its
+ * owner Transfer and Delete and everybody else Leave.
+ *
+ * The avatar saves as it is chosen (a colour, a picture, or neither), as
+ * ClickUp's does; the name saves from its own button, once it is a name the
+ * API keeps (`workspaceNameProblem`); the branding from the card's.
+ */
 function GeneralTab({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
   const { t } = useTranslation()
   const mayBill = usePermissions(workspaceId).can('workspace.billing') === true
   const wsQuery = useQuery({
     queryKey: ['workspace', workspaceId],
-    queryFn: () => api<Workspace>(`/workspaces/${workspaceId}`),
+    queryFn: () => api<WorkspaceRead>(`/workspaces/${workspaceId}`),
   })
   const [name, setName] = useState('')
   const [primaryColor, setPrimaryColor] = useState('')
   const [accentColor, setAccentColor] = useState('')
-  const [logoUrl, setLogoUrl] = useState('')
   const [customDomain, setCustomDomain] = useState('')
   const logoInputRef = useRef<HTMLInputElement>(null)
   const [logoUploading, setLogoUploading] = useState(false)
   const [logoError, setLogoError] = useState<string | null>(null)
+  const [dialog, setDialog] = useState<'leave' | 'transfer' | 'delete' | null>(null)
 
   useEffect(() => {
     if (wsQuery.data) {
       setName(wsQuery.data.name)
       setPrimaryColor(wsQuery.data.primaryColor ?? '')
       setAccentColor(wsQuery.data.accentColor ?? '')
-      setLogoUrl(wsQuery.data.logoUrl ?? '')
       setCustomDomain(wsQuery.data.customDomain ?? '')
     }
   }, [wsQuery.data])
@@ -803,27 +830,40 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
     applyAccentColor(accentColor || null)
   }, [accentColor])
 
-  const save = useMutation({
-    mutationFn: () =>
-      api<Workspace>(`/workspaces/${workspaceId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          name,
-          primaryColor: primaryColor || null,
-          accentColor: accentColor || null,
-          logoUrl: logoUrl || null,
-          customDomain: customDomain || null,
-        }),
-      }),
+  const saved = (updated: Workspace) => {
+    qc.setQueryData(['workspace', workspaceId], (prev: WorkspaceRead | undefined) => ({ ...prev, ...updated }))
+    qc.invalidateQueries({ queryKey: ['workspaces'] })
+    qc.invalidateQueries({ queryKey: ['workspace-branding', workspaceId] })
+  }
+  const patch = (body: Record<string, unknown>) => api<Workspace>(`/workspaces/${workspaceId}`, { method: 'PATCH', body })
+
+  // The avatar: a colour, a picture, or neither — each saved as it is chosen.
+  const saveAvatar = useMutation({
+    mutationFn: (body: { primaryColor?: string | null; logoUrl?: string | null }) => patch(body),
     onSuccess: (updated) => {
-      qc.setQueryData(['workspace', workspaceId], updated)
-      qc.invalidateQueries({ queryKey: ['workspaces'] })
-      qc.invalidateQueries({ queryKey: ['workspace-branding', workspaceId] })
+      saved(updated)
+      toast.success(t('settings.avatarSaved'))
+    },
+    onError: (e) => toast.error(refusalMessage(e, t('settings.avatarSaveFailed'))),
+  })
+
+  const saveName = useMutation({
+    mutationFn: () => patch({ name: cleanWorkspaceName(name) }),
+    onSuccess: (updated) => {
+      saved(updated)
+      setName(updated.name)
     },
   })
 
-  // §13.5 — direct-to-R2 logo upload, mirroring the avatar presign flow. On
-  // success we set the logoUrl field; the Save button persists it.
+  const saveBranding = useMutation({
+    mutationFn: () => patch({ accentColor: accentColor || null, customDomain: customDomain || null }),
+    onSuccess: saved,
+  })
+
+  // §13.5 — direct-to-R2 logo upload, mirroring the avatar presign flow. The
+  // picture is the avatar once it is stored (QA WS-006); a file of the wrong
+  // kind or size is refused before anything is sent, and the avatar it would
+  // have replaced stays (WS-007).
   const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml']
   const LOGO_MAX_BYTES = 5 * 1024 * 1024
   async function onLogoSelected(e: React.ChangeEvent<HTMLInputElement>) {
@@ -851,7 +891,7 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
         body: file,
       })
       if (!put.ok) throw new Error(`Storage upload failed (${put.status})`)
-      setLogoUrl(presign.publicUrl)
+      saveAvatar.mutate({ logoUrl: presign.publicUrl })
     } catch (err) {
       setLogoError(err instanceof ApiError ? err.message : t('settings.logoUploadError'))
     } finally {
@@ -864,55 +904,146 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['workspace', workspaceId] }),
   })
 
-  const archive = useMutation({
-    mutationFn: () => api(`/workspaces/${workspaceId}`, { method: 'DELETE' }),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['workspaces'] })
-      window.location.href = '/app'
-    },
-  })
-
   if (!wsQuery.data) return <Card className="p-6 text-sm text-muted-foreground"><InlineSkeleton /></Card>
+  const ws = wsQuery.data
 
-  const dirty =
-    name !== wsQuery.data.name ||
-    primaryColor !== (wsQuery.data.primaryColor ?? '') ||
-    accentColor !== (wsQuery.data.accentColor ?? '') ||
-    logoUrl !== (wsQuery.data.logoUrl ?? '') ||
-    customDomain !== (wsQuery.data.customDomain ?? '')
+  const nameProblem = workspaceNameProblem(name)
+  const nameDirty = cleanWorkspaceName(name) !== ws.name
+  const brandingDirty = accentColor !== (ws.accentColor ?? '') || customDomain !== (ws.customDomain ?? '')
+  const logoUrl = ws.logoUrl ?? ''
+  const colourShown = (primaryColor || ws.primaryColor || '').toLowerCase()
 
   return (
     <div className="space-y-5">
-    <PlanCard workspaceId={workspaceId} />
-    {/* The invoices, the plan's change and the payment portal are `workspace.billing`'s,
-        which General's own key (`workspace.manage`) does not carry. */}
-    {mayBill && <BillingCard workspaceId={workspaceId} />}
-    <Card className="p-6 space-y-5">
-      <div>
-        <Label>{t('settings.workspaceId')}</Label>
-        <Input value={wsQuery.data.id} readOnly className="font-mono text-xs" />
-      </div>
-      <div>
-        <Label>{t('settings.slug')}</Label>
-        <Input value={wsQuery.data.slug} readOnly className="font-mono text-xs" />
-      </div>
-      <div>
-        <Label htmlFor="name">{t('settings.name')}</Label>
-        <Input id="name" value={name} onChange={(e) => setName(e.target.value)} />
-      </div>
-      <div>
-        <Label htmlFor="primary">{t('settings.primaryColor')}</Label>
-        <div className="flex items-center gap-2">
-          <input
-            type="color"
-            aria-label={t('settings.brandColor')}
-            value={/^#[0-9a-f]{6}$/i.test(primaryColor) ? primaryColor : '#354fb0'}
-            onChange={(e) => setPrimaryColor(e.target.value)}
-            className="h-9 w-10 rounded border border-border bg-transparent p-0.5 cursor-pointer"
-          />
-          <Input id="primary" value={primaryColor} onChange={(e) => setPrimaryColor(e.target.value)} placeholder="#354fb0" />
+    <Card className="p-6 space-y-5" data-testid="settings-general">
+      <h2 className="text-sm font-semibold">{t('settings.generalSection')}</h2>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="min-w-0">
+          <Label>{t('settings.avatar')}</Label>
+          <p className="text-xs text-muted-foreground mt-0.5">{t('settings.avatarHint')}</p>
         </div>
-        <p className="text-xs text-muted-foreground mt-1">{t('settings.primaryColorHint')}</p>
+        {/* The picture's Upload and Remove sit beside the avatar, where they are
+            seen (QA WS-006: "not available to change the logo"); its colours
+            open from the avatar itself, as ClickUp's do. An upload, or none:
+            the API keeps a logo to images stored here
+            (`found-23-sep/avatar-and-logo-accept-any-url`), so there is no
+            address to type. */}
+        <div className="flex items-center gap-2" data-testid="settings-logo">
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                data-testid="settings-avatar"
+                aria-label={t('settings.avatarChange')}
+                className="rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <WorkspaceAvatar name={name || ws.name} logoUrl={logoUrl} color={primaryColor || ws.primaryColor} size="lg" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-64 p-3 space-y-3" data-testid="settings-avatar-panel">
+              <div className="text-xs font-medium">{t('settings.avatarColor')}</div>
+              <div className="grid grid-cols-6 gap-2">
+                {AVATAR_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    data-testid={`settings-avatar-color-${c.slice(1)}`}
+                    aria-label={c}
+                    aria-pressed={colourShown === c}
+                    disabled={saveAvatar.isPending}
+                    onClick={() => {
+                      setPrimaryColor(c)
+                      saveAvatar.mutate({ primaryColor: c })
+                    }}
+                    className={cn('h-7 w-7 rounded-full border border-black/10', colourShown === c && 'ring-2 ring-foreground ring-offset-2 ring-offset-card')}
+                    style={{ background: c }}
+                  />
+                ))}
+              </div>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="color"
+                  aria-label={t('settings.avatarCustomColor')}
+                  value={/^#[0-9a-f]{6}$/i.test(primaryColor) ? primaryColor : '#354fb0'}
+                  onChange={(e) => setPrimaryColor(e.target.value)}
+                  onBlur={(e) => {
+                    if (e.target.value.toLowerCase() !== (ws.primaryColor ?? '').toLowerCase()) saveAvatar.mutate({ primaryColor: e.target.value })
+                  }}
+                  className="h-7 w-9 cursor-pointer rounded border border-border bg-transparent p-0.5"
+                />
+                {t('settings.avatarCustomColor')}
+              </label>
+              {logoUrl ? <p className="text-[11px] text-muted-foreground">{t('settings.avatarColorUnderPicture')}</p> : null}
+            </PopoverContent>
+          </Popover>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 shrink-0"
+            data-testid="settings-avatar-upload"
+            onClick={() => logoInputRef.current?.click()}
+            disabled={logoUploading || saveAvatar.isPending}
+          >
+            <Upload className="h-3.5 w-3.5" />
+            {logoUploading ? t('settings.logoUploading') : t('settings.logoUpload')}
+          </Button>
+          {logoUrl ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0"
+              data-testid="settings-avatar-remove"
+              disabled={saveAvatar.isPending}
+              onClick={() => saveAvatar.mutate({ logoUrl: null })}
+            >
+              {t('settings.logoRemove')}
+            </Button>
+          ) : null}
+        </div>
+        <input
+          ref={logoInputRef}
+          type="file"
+          data-testid="settings-logo-file"
+          accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+          className="hidden"
+          onChange={onLogoSelected}
+        />
+      </div>
+      <p className="text-xs text-muted-foreground -mt-3">{t('settings.logoUploadHint')}</p>
+      {logoError && <p className="text-xs text-destructive -mt-3" data-testid="settings-logo-error">{logoError}</p>}
+
+      <form
+        className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (nameDirty && !nameProblem) saveName.mutate()
+        }}
+      >
+        <Label htmlFor="name" className="sm:pt-2.5">{t('settings.name')}</Label>
+        <div className="w-full sm:max-w-sm">
+          <div className="flex gap-2">
+            <Input id="name" value={name} aria-invalid={nameProblem ? true : undefined} onChange={(e) => setName(e.target.value)} />
+            {nameDirty && (
+              <Button type="submit" size="sm" className="shrink-0" data-testid="settings-name-save" disabled={!!nameProblem || saveName.isPending}>
+                {saveName.isPending ? t('common.saving') : t('common.save')}
+              </Button>
+            )}
+          </div>
+          <p className={cn('mt-1 text-xs', nameProblem ? 'text-destructive' : 'text-muted-foreground')} data-testid="settings-name-hint">
+            {nameProblem
+              ? t(nameProblem)
+              : saveName.error
+                ? refusalMessage(saveName.error, t('settings.nameSaveFailed'))
+                : t('settings.nameCount', { n: characterCount(cleanWorkspaceName(name)), max: WORKSPACE_NAME_MAX })}
+          </p>
+        </div>
+      </form>
+    </Card>
+
+    <Card className="p-6 space-y-5" data-testid="settings-branding">
+      <div>
+        <h2 className="text-sm font-semibold">{t('settings.customBranding')}</h2>
+        <p className="text-xs text-muted-foreground mt-0.5">{t('settings.customBrandingHint')}</p>
       </div>
       <div>
         <Label htmlFor="accent">{t('settings.accentColor')}</Label>
@@ -932,60 +1063,25 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
         <p className="text-xs text-muted-foreground mt-1">{t('settings.accentColorHint')}</p>
       </div>
       <div>
-        {/* An upload, or none: the API keeps a logo to images stored here
-            (`found-23-sep/avatar-and-logo-accept-any-url`), so there is no
-            address to type. */}
-        <Label>{t('settings.logo')}</Label>
-        <div className="flex items-center gap-2" data-testid="settings-logo">
-          {logoUrl ? (
-            <img src={logoUrl} alt={t('settings.logoAlt')} className="h-9 w-9 rounded object-contain border border-border" />
-          ) : null}
-          <input
-            ref={logoInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
-            className="hidden"
-            onChange={onLogoSelected}
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 shrink-0"
-            onClick={() => logoInputRef.current?.click()}
-            disabled={logoUploading}
-          >
-            <Upload className="h-3.5 w-3.5" />
-            {logoUploading ? t('settings.logoUploading') : t('settings.logoUpload')}
-          </Button>
-          {logoUrl ? (
-            <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setLogoUrl('')}>
-              {t('settings.logoRemove')}
-            </Button>
-          ) : null}
-        </div>
-        <p className="text-xs text-muted-foreground mt-1">{t('settings.logoUploadHint')}</p>
-        {logoError && <p className="text-xs text-destructive mt-1">{logoError}</p>}
-      </div>
-      <div>
         <Label htmlFor="domain">{t('settings.customDomain')}</Label>
         <div className="flex items-center gap-2">
           <Input id="domain" value={customDomain} onChange={(e) => setCustomDomain(e.target.value)} placeholder="rundesk.example.com" />
-          {wsQuery.data.customDomain && (
-            wsQuery.data.customDomainVerified ? (
+          {ws.customDomain && (
+            ws.customDomainVerified ? (
               <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-600">{t('settings.verified')}</span>
             ) : (
               <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600">{t('settings.unverified')}</span>
             )
           )}
         </div>
-        {wsQuery.data.customDomain && !wsQuery.data.customDomainVerified && wsQuery.data.customDomainToken && (
+        {ws.customDomain && !ws.customDomainVerified && ws.customDomainToken && (
           <div className="mt-2 rounded-md border border-border/60 bg-card/40 p-3 text-xs space-y-1.5">
             <div className="text-muted-foreground">
               {t('settings.dnsInstructions')}
             </div>
             <div className="font-mono">
-              <div>{t('settings.dnsHost')}: <span className="text-foreground">_rundesk-verify.{wsQuery.data.customDomain}</span></div>
-              <div>{t('settings.dnsValue')}: <span className="text-foreground">{wsQuery.data.customDomainToken}</span></div>
+              <div>{t('settings.dnsHost')}: <span className="text-foreground">_rundesk-verify.{ws.customDomain}</span></div>
+              <div>{t('settings.dnsValue')}: <span className="text-foreground">{ws.customDomainToken}</span></div>
             </div>
             <div className="flex items-center gap-2 pt-1">
               <Button size="sm" variant="outline" onClick={() => verifyDomain.mutate()} disabled={verifyDomain.isPending}>
@@ -1001,35 +1097,85 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
 
       <div className="flex items-center justify-between pt-3 border-t border-border">
         <span className="text-xs">
-          {save.isSuccess && <span className="text-emerald-600">{t('settings.saved')}</span>}
-          {save.error instanceof ApiError && <span className="text-destructive">{save.error.message}</span>}
+          {saveBranding.isSuccess && !brandingDirty && <span className="text-emerald-600">{t('settings.saved')}</span>}
+          {saveBranding.error && <span className="text-destructive">{refusalMessage(saveBranding.error, t('settings.brandingSaveFailed'))}</span>}
         </span>
-        <Button onClick={() => save.mutate()} disabled={!dirty || save.isPending} size="sm">
-          {save.isPending ? t('common.saving') : t('settings.saveChanges')}
+        <Button onClick={() => saveBranding.mutate()} disabled={!brandingDirty || saveBranding.isPending} size="sm">
+          {saveBranding.isPending ? t('common.saving') : t('settings.saveChanges')}
         </Button>
       </div>
+    </Card>
 
-      <div className="pt-4 mt-2 border-t border-destructive/30">
-        <p className="text-sm font-semibold text-destructive">{t('settings.dangerZone')}</p>
-        <div className="mt-2 flex items-center justify-between gap-4">
-          <span className="text-xs text-muted-foreground">
-            {t('settings.archiveDesc')}
-          </span>
+    <PlanCard workspaceId={workspaceId} />
+    {/* The invoices, the plan's change and the payment portal are `workspace.billing`'s,
+        which General's own key (`workspace.manage`) does not carry. */}
+    {mayBill && <BillingCard workspaceId={workspaceId} />}
+
+    <Card className="p-6 space-y-4">
+      <h2 className="text-sm font-semibold">{t('settings.details')}</h2>
+      <div>
+        <Label>{t('settings.workspaceId')}</Label>
+        <Input value={ws.id} readOnly className="font-mono text-xs" />
+      </div>
+      <div>
+        <Label>{t('settings.slug')}</Label>
+        <Input value={ws.slug} readOnly className="font-mono text-xs" />
+      </div>
+    </Card>
+
+    {/* The Danger zone: Transfer and Delete for its owner, Leave for everybody else;
+        the owner's Leave says why not yet (QA WS-016). */}
+    <Card className="p-6 border-destructive/30" data-testid="settings-danger-zone">
+      <h2 className="text-sm font-semibold text-destructive">{t('settings.dangerZone')}</h2>
+      <div className="mt-3 divide-y divide-border">
+        {ws.actsAsOwner && (
+          <div className="flex items-center justify-between gap-4 py-3">
+            <div className="min-w-0">
+              <div className="text-sm font-medium">{t('settings.transferTitle')}</div>
+              <p className="text-xs text-muted-foreground">{t('settings.transferDesc')}</p>
+            </div>
+            <Button variant="outline" size="sm" className="shrink-0" data-testid="settings-transfer-ownership" onClick={() => setDialog('transfer')}>
+              {t('settings.transferButton')}
+            </Button>
+          </div>
+        )}
+        <div className="flex items-center justify-between gap-4 py-3">
+          <div className="min-w-0">
+            <div className="text-sm font-medium">{t('settings.leaveTitle')}</div>
+            <p className="text-xs text-muted-foreground">{ws.isOwner ? t('settings.leaveOwnerDesc') : t('settings.leaveDesc')}</p>
+          </div>
           <Button
             variant="outline"
             size="sm"
-            className="border-destructive/50 text-destructive hover:bg-destructive/10 shrink-0"
-            disabled={archive.isPending}
-            onClick={() => {
-              if (window.confirm(t('settings.archiveConfirm', { name: wsQuery.data!.name })))
-                archive.mutate()
-            }}
+            className="shrink-0 border-destructive/50 text-destructive hover:bg-destructive/10"
+            data-testid="settings-leave-workspace"
+            onClick={() => setDialog('leave')}
           >
-            {archive.isPending ? t('settings.archiving') : t('settings.archiveWorkspace')}
+            {t('settings.leaveButton')}
           </Button>
         </div>
+        {ws.actsAsOwner && (
+          <div className="flex items-center justify-between gap-4 py-3">
+            <div className="min-w-0">
+              <div className="text-sm font-medium">{t('settings.deleteTitle')}</div>
+              <p className="text-xs text-muted-foreground">{t('settings.deleteDesc')}</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0 border-destructive/50 text-destructive hover:bg-destructive/10"
+              data-testid="settings-delete-workspace"
+              onClick={() => setDialog('delete')}
+            >
+              {t('settings.deleteButton')}
+            </Button>
+          </div>
+        )}
       </div>
     </Card>
+    {dialog === 'leave' && <LeaveWorkspaceDialog workspace={ws} isOwner={ws.isOwner === true} onClose={() => setDialog(null)} />}
+    {dialog === 'transfer' && <TransferOwnershipDialog workspace={ws} onClose={() => setDialog(null)} />}
+    {dialog === 'delete' && <DeleteWorkspaceDialog workspace={ws} onClose={() => setDialog(null)} />}
     </div>
   )
 }
@@ -1069,16 +1215,35 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
 
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState('member')
+  const [inviteProblems, setInviteProblems] = useState<Array<{ email: string; reason: string }>>([])
+  const inviteList = parseEmailList(inviteEmail)
 
+  /*
+   * SEVERAL AT ONCE (QA WS-010, `found-02-nov/invite-one-address-at-a-time`):
+   * pasted separated by commas, spaces or lines. Each is invited on its own,
+   * so one that is wrong — not an address, or somebody already here — is said
+   * beside its address, and the rest still go. What was not sent stays in the
+   * box to be put right; what was sent leaves it.
+   */
   const invite = useMutation({
-    mutationFn: () =>
-      api(`/invitations`, {
-        method: 'POST',
-        body: { email: inviteEmail, workspaceId, role: inviteRole },
-      }),
-    onSuccess: () => {
-      setInviteEmail('')
-      toast.success(t('settings.inviteSent'))
+    mutationFn: async () => {
+      const { valid, invalid } = parseEmailList(inviteEmail)
+      const problems = invalid.map((email) => ({ email, reason: t('settings.inviteNotAddress') }))
+      let sent = 0
+      for (const email of valid) {
+        try {
+          await api(`/invitations`, { method: 'POST', body: { email, workspaceId, role: inviteRole } })
+          sent += 1
+        } catch (e) {
+          problems.push({ email, reason: refusalMessage(e, t('settings.inviteFailed')) })
+        }
+      }
+      return { sent, problems }
+    },
+    onSuccess: ({ sent, problems }) => {
+      setInviteProblems(problems)
+      setInviteEmail(problems.map((p) => p.email).join(', '))
+      if (sent > 0) toast.success(tCount('settings.invitesSent', sent))
       qc.invalidateQueries({ queryKey: ['workspace-invitations', workspaceId] })
     },
   })
@@ -1175,18 +1340,27 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
         </div>
 
         <form
-          className="flex gap-2"
+          className="flex items-start gap-2"
           onSubmit={(e) => {
             e.preventDefault()
-            if (inviteEmail.includes('@')) invite.mutate()
+            if (inviteList.valid.length + inviteList.invalid.length > 0) invite.mutate()
           }}
         >
-          <Input
-            placeholder={t('settings.inviteEmailPlaceholder')}
+          <Textarea
+            aria-label={t('settings.inviteEmailsLabel')}
+            data-testid="settings-invite-emails"
+            placeholder={t('settings.inviteEmailsPlaceholder')}
             value={inviteEmail}
+            rows={inviteEmail.includes('\n') ? 3 : 1}
             onChange={(e) => setInviteEmail(e.target.value)}
-            className="flex-1"
-            type="email"
+            onKeyDown={(e) => {
+              // Enter sends, as the one-line box did; Shift+Enter starts a new line.
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                e.currentTarget.form?.requestSubmit()
+              }
+            }}
+            className="min-h-9 flex-1 resize-y py-2"
           />
           <select
             value={inviteRole}
@@ -1197,13 +1371,21 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
               <option key={r.value} value={r.value}>{t(r.labelKey)}</option>
             ))}
           </select>
-          <Button type="submit" disabled={!inviteEmail.includes('@') || invite.isPending}>
+          <Button type="submit" disabled={inviteList.valid.length + inviteList.invalid.length === 0 || invite.isPending}>
             {invite.isPending ? t('settings.sending') : t('settings.invite')}
           </Button>
         </form>
-        
-        {invite.error instanceof ApiError && (
-          <p className="text-xs text-destructive mt-2">{invite.error.message}</p>
+        <p className="text-xs text-muted-foreground mt-1.5">
+          {inviteList.valid.length > 1 ? tCount('settings.inviteWillSend', inviteList.valid.length) : t('settings.inviteSeveralHint')}
+        </p>
+        {inviteProblems.length > 0 && (
+          <ul className="mt-2 space-y-0.5 text-xs text-destructive" data-testid="settings-invite-problems">
+            {inviteProblems.map((p) => (
+              <li key={p.email} data-testid="settings-invite-problem">
+                <span className="font-medium">{p.email}</span> — {p.reason}
+              </li>
+            ))}
+          </ul>
         )}
       </Card>
       )}
@@ -1294,8 +1476,17 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
               <div className="h-9 w-9 rounded-full bg-brand-300 text-foreground flex items-center justify-center text-sm font-semibold">
                 {m.displayName.charAt(0).toUpperCase()}
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium truncate">{m.displayName}</div>
+              {/* Never narrower than a name: a member's row carries the view-only
+                  button as well, and at 1440 px the name went to nothing. */}
+              <div className="flex-1 min-w-[7rem]">
+                <div className="flex items-center gap-1.5 text-sm font-medium">
+                  <span className="truncate">{m.displayName}</span>
+                  {m.isOwner && (
+                    <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300" data-testid="settings-member-owner">
+                      {t('settings.ownerBadge')}
+                    </span>
+                  )}
+                </div>
                 <div className="text-xs text-muted-foreground truncate">{m.email}</div>
                 {(m.teams?.length ?? 0) > 0 && (
                   <div className="mt-1 flex flex-wrap gap-1">
@@ -1310,7 +1501,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
                   </div>
                 )}
               </div>
-              <div className="hidden xl:block w-44 shrink-0 text-[11px] leading-tight text-muted-foreground">
+              <div className="hidden 2xl:block w-44 shrink-0 text-[11px] leading-tight text-muted-foreground">
                 <div>
                   {m.lastSeenAt
                     ? t('settings.lastActive', { when: new Date(m.lastSeenAt).toLocaleDateString() })
@@ -1368,7 +1559,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
                   onChange={(change) => updateViewOnly.mutate({ userId: m.userId, change })}
                 />
               )}
-              {mayChangeRole && withinRank(own, m.role) ? (
+              {mayChangeRole && withinRank(own, m.role) && !m.isOwner ? (
                 <select
                   value={m.role}
                   data-testid="settings-member-role"
@@ -1380,11 +1571,15 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
                   ))}
                 </select>
               ) : (
-                <span className="text-xs text-muted-foreground px-2" data-testid="settings-member-role-read">
+                <span
+                  className="text-xs text-muted-foreground px-2"
+                  data-testid="settings-member-role-read"
+                  title={m.isOwner ? t('settings.ownerLocked') : undefined}
+                >
                   {t((ROLES.find((r) => r.value === m.role)?.labelKey ?? 'settings.roleMember') as TranslationKey)}
                 </span>
               )}
-              {mayRemove && withinRank(own, m.role) && (
+              {mayRemove && withinRank(own, m.role) && !m.isOwner && (
                 <button
                   onClick={() => {
                     if (confirm(t('settings.removeMemberConfirm', { name: m.displayName }))) remove.mutate(m.userId)

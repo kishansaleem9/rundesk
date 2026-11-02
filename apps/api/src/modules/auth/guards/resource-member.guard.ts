@@ -8,7 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { and, eq, sql } from 'drizzle-orm'
-import { spaces, projects, lists, tasks, goals, sprints, taskViews, labels, workspaceMembers } from '@rundesk/db'
+import { spaces, projects, lists, tasks, goals, sprints, taskViews, labels, workspaceMembers, workspaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../../common/database/database.module'
 import {
@@ -69,11 +69,16 @@ export class ResourceMemberGuard implements CanActivate {
     }
 
     const [member] = await this.db
-      .select({ role: workspaceMembers.role })
+      .select({ role: workspaceMembers.role, isArchived: workspaces.isArchived })
       .from(workspaceMembers)
+      .innerJoin(workspaces, eq(workspaces.id, workspaceMembers.workspaceId))
       .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, user.id)))
       .limit(1)
     if (!member) throw new ForbiddenException('You are not a member of this workspace')
+    // A deleted (archived) workspace's spaces, lists and tasks go with it, for
+    // its members, at once (QA WS-018; `found-02-nov/archived-workspace-still-opens`),
+    // as `WorkspaceMemberGuard` refuses the workspace itself.
+    if (member.isArchived === true) throw new NotFoundException('Workspace not found')
 
     // What the resource's place says, refused in the words of the first that refuses.
     let refusal: string | null = null

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle, Input, Label, cn } from '@rundesk/ui'
 import { Briefcase, GraduationCap, User as UserIcon } from 'lucide-react'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { cleanWorkspaceName, workspaceNameProblem } from '../lib/workspace-name'
 
 /**
  * §7 — creating a workspace, the way she walks through it.
@@ -77,7 +78,8 @@ export function CreateWorkspaceFlow({
   }, [open])
 
   const index = STEPS.indexOf(step)
-  const finish = (draft: WorkspaceDraft) => onFinish(draft)
+  const nameProblem = workspaceNameProblem(name)
+  const finish = (draft: WorkspaceDraft) => onFinish({ ...draft, name: cleanWorkspaceName(draft.name) })
   const matches = TOOLS.filter((tool) => tool.toLowerCase().includes(toolQuery.trim().toLowerCase()))
 
   return (
@@ -105,7 +107,7 @@ export function CreateWorkspaceFlow({
             className="space-y-3"
             onSubmit={(e) => {
               e.preventDefault()
-              if (name.trim().length >= 2) setStep('purpose')
+              if (!nameProblem) setStep('purpose')
             }}
           >
             <div className="space-y-1.5">
@@ -117,9 +119,14 @@ export function CreateWorkspaceFlow({
                 onChange={(e) => setName(e.target.value)}
                 placeholder={t('workspaceFlow.namePlaceholder')}
                 data-testid="workspace-name"
+                aria-invalid={name && nameProblem ? true : undefined}
               />
+              {/* The API's own rule (QA WS-002), said before Next rather than after the last step. */}
+              {name && nameProblem && (
+                <p className="text-xs text-destructive" data-testid="workspace-name-problem">{t(nameProblem)}</p>
+              )}
             </div>
-            <Button type="submit" className="w-full" disabled={name.trim().length < 2} data-testid="workspace-next">
+            <Button type="submit" className="w-full" disabled={!!nameProblem} data-testid="workspace-next">
               {t('workspaceFlow.next')}
             </Button>
           </form>

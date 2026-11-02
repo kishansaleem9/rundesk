@@ -21,6 +21,7 @@ import { WebhooksService } from '../webhooks/webhooks.service'
 import { PlansService } from '../plans/plans.service'
 import { seedListStatuses } from '../lists/list-statuses.defaults'
 import { isPublicImagePath, publicImagePath } from '../../common/storage/public-images.controller'
+import { cleanWorkspaceName, leaveRefusal, ownerProtected, transferRefusal } from './workspace-ownership'
 
 const BASE_SLUG_FALLBACK = 'workspace'
 
@@ -35,6 +36,9 @@ const LOGO_CONTENT_TYPES: Record<string, string> = {
   'image/gif': 'gif',
   'image/svg+xml': 'svg',
 }
+
+/** A user id, before it is compared with a uuid column (which refuses anything else with a 500). */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /** Hard cap on an uploaded workspace logo. */
 export const MAX_LOGO_BYTES = 5 * 1024 * 1024 // 5 MB
@@ -206,8 +210,27 @@ export class WorkspacesService {
    * reading of a list that a security decision is taken from.
    */
   async findByMember(userId: string) {
+    const listed = await this.membershipsOf(userId)
+    // Who owns each, so the list says Owner and offers Leave only where it is allowed.
+    const owners = await this.effectiveOwners(listed.map((r) => r.workspace.id))
+    return listed.map((r) => {
+      const ownerId = owners.get(r.workspace.id) ?? null
+      return { ...r, workspace: { ...r.workspace, ownerId }, isOwner: ownerId === userId }
+    })
+  }
+
+  private async membershipsOf(userId: string) {
     const rows = await this.db
-      .select({ workspace: workspaces, role: workspaceMembers.role })
+      .select({
+        workspace: workspaces,
+        role: workspaceMembers.role,
+        // ClickUp's My Workspaces says how many people each has. The outer
+        // table is named, not interpolated: Drizzle writes a column bare where
+        // it judges one table is read, and a bare "id" inside a join of two is
+        // ambiguous (measured: every sign-in answered 500).
+        memberCount: sql<number>`(select count(*)::int from workspace_members m join users u on u.id = m.user_id
+          where m.workspace_id = "workspaces"."id" and u.is_agent = false)`,
+      })
       .from(workspaceMembers)
       .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
       .where(and(eq(workspaceMembers.userId, userId), eq(workspaces.isArchived, false)))
@@ -215,8 +238,75 @@ export class WorkspacesService {
     return rows.map((r) => ({ ...r, workspace: withoutDomainToken(r.workspace) }))
   }
 
-  /** Soft-delete (archive) a workspace so it disappears from members' lists. */
+  /**
+   * WHO OWNS EACH WORKSPACE (`found-02-nov/workspace-has-no-owner`): the
+   * person `owner_id` names while they are still a member of it; otherwise —
+   * their account gone, or a row made before the column, or by a seed — its
+   * earliest admin who is a person, which is whoever made it while they stay.
+   * One read for any number of workspaces.
+   */
+  async effectiveOwners(workspaceIds: string[]): Promise<Map<string, string | null>> {
+    if (workspaceIds.length === 0) return new Map()
+    // Every table aliased: a column interpolated into a subquery of a one-table
+    // read is written bare, and "id" is then ambiguous between `m` and `u`.
+    const rows = (await this.db.execute(sql`
+      select w.id as "workspaceId", coalesce(
+        (select m.user_id from workspace_members m where m.workspace_id = w.id and m.user_id = w.owner_id),
+        (select m.user_id from workspace_members m join users u on u.id = m.user_id
+          where m.workspace_id = w.id and m.role = 'workspace_admin' and u.is_agent = false
+          order by m.joined_at asc, m.id asc limit 1)
+      ) as "ownerId"
+      from workspaces w
+      where w.id in (${sql.join(workspaceIds.map((id) => sql`${id}::uuid`), sql`, `)})
+    `)) as unknown as Array<{ workspaceId: string; ownerId: string | null }>
+    return new Map(rows.map((r) => [r.workspaceId, r.ownerId ?? null]))
+  }
+
+  async ownerOf(workspaceId: string): Promise<string | null> {
+    return (await this.effectiveOwners([workspaceId])).get(workspaceId) ?? null
+  }
+
+  /**
+   * WHO MAY DO WHAT ONLY THE OWNER DOES — delete the workspace, archive it, hand
+   * it over: its owner; an owner of the organization it belongs to, who owns
+   * every workspace in it (as deleting one for good has always asked); a
+   * platform admin. ClickUp gives these to the Workspace owner alone, and no
+   * permission key carries them, so no role can be granted them.
+   */
+  private async actsAsOwner(ws: { id: string; organizationId: string }, actor: { id?: string; role?: string | null }): Promise<boolean> {
+    if (actor.role === 'super_admin') return true
+    if (!actor.id) return false
+    if ((await this.ownerOf(ws.id)) === actor.id) return true
+    return (await this.organizationsOwnedBy(actor.id)).includes(ws.organizationId)
+  }
+
+  /** What the reader is to the workspace, for its settings page. */
+  async ownershipFor(workspaceId: string, actor: { id: string; role?: string | null }) {
+    const [ws] = await this.db
+      .select({ id: workspaces.id, organizationId: workspaces.organizationId })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+    if (!ws) throw new NotFoundException('Workspace not found')
+    const ownerId = await this.ownerOf(ws.id)
+    return { ownerId, isOwner: ownerId === actor.id, actsAsOwner: await this.actsAsOwner(ws, actor) }
+  }
+
+  /**
+   * ARCHIVE A WORKSPACE — Settings › General's "Delete Workspace" (QA WS-018).
+   * Its owner's (`actsAsOwner`): ClickUp's "Only the Workspace owner can delete
+   * a Workspace", where `workspace.manage` let any admin do it. It leaves every
+   * member's list and nobody opens it (`WorkspaceMemberGuard`); its owner
+   * restores it from Settings › Archived, or deletes it for good there.
+   */
   async archiveWorkspace(workspaceId: string, actor?: AuditActor) {
+    const [ws] = await this.db
+      .select({ id: workspaces.id, organizationId: workspaces.organizationId })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+    if (!ws) throw new NotFoundException('Workspace not found')
+    if (actor && !(await this.actsAsOwner(ws, actor))) {
+      throw new ForbiddenException('Only the workspace’s owner can delete it')
+    }
     const [row] = await this.db
       .update(workspaces)
       .set({ isArchived: true, updatedAt: new Date() })
@@ -269,12 +359,13 @@ export class WorkspacesService {
       .where(and(eq(workspaceMembers.userId, userId), eq(workspaces.isArchived, true)))
       .orderBy(desc(workspaces.updatedAt))
     // Whether this reader may delete each one for good: the same rule
-    // `deleteForGood` asks, so the page offers it where the route accepts it.
+    // `deleteForGood` asks (`actsAsOwner`), so the page offers it where the route accepts it.
     const owned = new Set(await this.organizationsOwnedBy(userId))
+    const owners = await this.effectiveOwners(rows.map((r) => r.workspace.id))
     return rows.map((r) => ({
       ...r,
       workspace: withoutDomainToken(r.workspace),
-      mayDeleteForGood: accountRole === 'super_admin' || owned.has(r.workspace.organizationId),
+      mayDeleteForGood: accountRole === 'super_admin' || owned.has(r.workspace.organizationId) || owners.get(r.workspace.id) === userId,
     }))
   }
 
@@ -292,10 +383,10 @@ export class WorkspacesService {
    *
    * ClickUp ("Delete a Workspace"): only the Workspace owner, from the
    * Workspace's Settings, with its name typed to confirm, and it cannot be
-   * recovered. A workspace here belongs to an organization, and the
-   * organization's owners are its owners (whoever creates a workspace in a new
-   * organization is made one); a platform admin as well. Only an ARCHIVED
-   * workspace: archiving is the step that can be undone, and this one cannot.
+   * recovered. Its owner (`found-02-nov/workspace-has-no-owner`), and the
+   * owners of the organization it belongs to, who own every workspace in it;
+   * a platform admin as well (`actsAsOwner`). Only an ARCHIVED workspace:
+   * archiving is the step that can be undone, and this one cannot.
    *
    * Every row that hangs off the workspace goes with it: 77 of the 78 keys to
    * `workspaces` cascade, and `ai_usage` keeps its rows for the bill with the
@@ -308,8 +399,7 @@ export class WorkspacesService {
       .from(workspaces)
       .where(eq(workspaces.id, workspaceId))
     if (!ws) throw new NotFoundException('Workspace not found')
-    const owns = actor.role === 'super_admin' || (await this.organizationsOwnedBy(actor.id ?? '')).includes(ws.organizationId)
-    if (!owns) throw new ForbiddenException('Only an owner of the workspace’s organization deletes it for good')
+    if (!(await this.actsAsOwner(ws, actor))) throw new ForbiddenException('Only the workspace’s owner deletes it for good')
     if (!ws.isArchived) throw new BadRequestException('Archive the workspace first: only an archived workspace is deleted for good')
     if (typeof confirmName !== 'string' || confirmName !== ws.name) {
       throw new BadRequestException('Type the workspace’s name exactly as it is to delete it for good')
@@ -532,6 +622,14 @@ export class WorkspacesService {
     for (const key of ['name', 'logoUrl', 'primaryColor', 'accentColor'] as const) {
       if (patch[key] !== undefined) set[key] = patch[key]
     }
+    // A rename is held to the creation's rule (QA WS-002), and the name kept is
+    // the cleaned one: the settings save stored whatever arrived — nothing,
+    // spaces, a hundred characters (`found-02-nov/workspace-name-unchecked`).
+    if (patch.name !== undefined) {
+      const named = cleanWorkspaceName(patch.name)
+      if (!named.ok) throw new BadRequestException(named.reason)
+      set.name = named.name
+    }
     // A logo is one we store, or none — or the one already saved.
     if (patch.logoUrl !== undefined && patch.logoUrl !== null && !isPublicImagePath(patch.logoUrl, 'workspace-logos/')) {
       const [current] = await this.db.select({ logoUrl: workspaces.logoUrl }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1)
@@ -574,7 +672,7 @@ export class WorkspacesService {
       resourceId: workspaceId,
       description: `Workspace settings updated`,
       metadata: {
-        name: patch.name ?? null,
+        name: (set.name as string | undefined) ?? null,
         logoUrl: patch.logoUrl ?? null,
         primaryColor: patch.primaryColor ?? null,
         accentColor: patch.accentColor ?? null,
@@ -884,6 +982,8 @@ export class WorkspacesService {
     // The manager is always another member of this same workspace, so the name
     // comes from the rows we already have rather than a second join.
     const nameByUser = new Map(rows.map((row) => [row.userId, row.displayName || row.email]))
+    // The owner, so People says Owner and offers no Remove or role change on them.
+    const ownerId = await this.ownerOf(workspaceId)
 
     return rows.map(({ organizationId: _organizationId, viewOnlyTimeEstimates, viewOnlyTimeTracking, viewOnlyTags, viewOnlyCreateViews, ...row }) => {
       const invite = inviteByUser.get(row.userId)
@@ -891,6 +991,7 @@ export class WorkspacesService {
         ...row,
         viewOnlyPermissions: viewOnlyPermissionsOf({ viewOnlyTimeEstimates, viewOnlyTimeTracking, viewOnlyTags, viewOnlyCreateViews }),
         managerName: row.managerId ? nameByUser.get(row.managerId) ?? null : null,
+        isOwner: row.userId === ownerId,
         invitedAt: invite?.invitedAt ?? null,
         invitedByName: invite?.invitedByName ?? null,
         invitedByEmail: invite?.invitedByEmail ?? null,
@@ -1059,6 +1160,9 @@ export class WorkspacesService {
     // Neither the role they hold nor the one given may be above the changer's:
     // nobody makes somebody an admin, or unmakes one, from below.
     await this.assertWithinRank(workspaceId, actor, [role, previous?.role ?? null], 'change a member to or from')
+    // The owner is always an admin: nobody demotes them, not even themself.
+    const kept = ownerProtected(userId, await this.ownerOf(workspaceId), { role })
+    if (kept) throw new BadRequestException(kept)
     // Never let the last workspace admin be demoted out of the workspace.
     if (previous?.role === 'workspace_admin' && role !== 'workspace_admin') {
       const admins = await this.db
@@ -1176,6 +1280,10 @@ export class WorkspacesService {
   async removeMember(workspaceId: string, userId: string, actor?: AuditActor) {
     const member = await this.getMembership(workspaceId, userId)
     await this.assertWithinRank(workspaceId, actor, [member?.role ?? null], 'remove a member who is')
+    // Nobody removes the owner: ClickUp's owner is removed by nobody, and leaves
+    // only once they have handed the workspace over.
+    const kept = ownerProtected(userId, await this.ownerOf(workspaceId), { remove: true })
+    if (kept) throw new BadRequestException(kept)
     if (member?.role === 'workspace_admin') {
       const admins = await this.db
         .select({ userId: workspaceMembers.userId })
@@ -1185,15 +1293,7 @@ export class WorkspacesService {
         throw new BadRequestException('Cannot remove the last workspace admin')
       }
     }
-    // Their reports would otherwise point at someone no longer on the roster,
-    // which hides that whole subtree. Orphan them to the root instead.
-    await this.db
-      .update(workspaceMembers)
-      .set({ managerId: null })
-      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.managerId, userId)))
-    await this.db
-      .delete(workspaceMembers)
-      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+    await this.dropMembership(workspaceId, userId)
     await this.security.logAuditEvent({
       workspaceId,
       actorId: actor?.id,
@@ -1212,6 +1312,105 @@ export class WorkspacesService {
     return { ok: true }
   }
 
+  /** Take somebody off a workspace's roster: removed by an admin, or leaving. */
+  private async dropMembership(workspaceId: string, userId: string) {
+    // Their reports would otherwise point at someone no longer on the roster,
+    // which hides that whole subtree. Orphan them to the root instead.
+    await this.db
+      .update(workspaceMembers)
+      .set({ managerId: null })
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.managerId, userId)))
+    await this.db
+      .delete(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+  }
+
+  /**
+   * LEAVE A WORKSPACE (QA WS-015, WS-016; ClickUp's "Leave a Workspace", from
+   * My Settings › Workspaces — `found-02-nov/workspace-leave-unbuilt`). Anybody
+   * but its owner, who transfers it first; and not the last admin of one with
+   * no owner. What they made stays, as ClickUp keeps a leaver's tasks and
+   * comments; what goes is what an admin's removal takes: their place on the
+   * roster, and the reports who answered to them here.
+   */
+  async leave(workspaceId: string, actor: AuditActor) {
+    const [ws] = await this.db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, workspaceId))
+    if (!ws) throw new NotFoundException('Workspace not found')
+    const membership = await this.getMembership(workspaceId, actor.id)
+    const [admins] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.role, 'workspace_admin' as any)))
+    const refusal = leaveRefusal(actor.id, {
+      ownerId: await this.ownerOf(workspaceId),
+      role: membership?.role ?? null,
+      admins: admins?.n ?? 0,
+    })
+    if (refusal) throw membership ? new ConflictException(refusal) : new NotFoundException(refusal)
+    await this.dropMembership(workspaceId, actor.id)
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId: actor.id,
+      actorEmail: actor.email,
+      ipAddress: actor.ip,
+      action: 'member.left',
+      resourceType: 'user',
+      resourceId: actor.id,
+      description: 'Left the workspace',
+      metadata: { role: membership?.role ?? null },
+    })
+    void this.fireWebhook(workspaceId, 'member.removed', { workspaceId, userId: actor.id, actorId: actor.id, left: true })
+    return { ok: true }
+  }
+
+  /**
+   * TRANSFER A WORKSPACE'S OWNERSHIP (QA WS-017; ClickUp's "Transfer Workspace
+   * ownership": only the current owner starts it, picks the new owner from the
+   * people in the workspace and confirms, and the previous owner becomes an
+   * admin — `found-02-nov/workspace-transfer-unbuilt`). Here whoever acts as
+   * its owner (`actsAsOwner`), to a member who is not a guest, confirmed with
+   * the workspace's name typed exactly (`transferRefusal`). The owner is always
+   * an admin, so the new one is made one; the previous one, still a member,
+   * stays one.
+   */
+  async transferOwnership(workspaceId: string, toUserId: unknown, confirmName: unknown, actor: AuditActor) {
+    const [ws] = await this.db
+      .select({ id: workspaces.id, name: workspaces.name, organizationId: workspaces.organizationId })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+    if (!ws) throw new NotFoundException('Workspace not found')
+    if (!(await this.actsAsOwner(ws, actor))) throw new ForbiddenException('Only the workspace’s owner can transfer its ownership')
+    const ownerId = await this.ownerOf(ws.id)
+    const [to] = typeof toUserId === 'string' && UUID_PATTERN.test(toUserId)
+      ? await this.db
+          .select({ userId: workspaceMembers.userId, role: workspaceMembers.role, isAgent: users.isAgent })
+          .from(workspaceMembers)
+          .innerJoin(users, eq(users.id, workspaceMembers.userId))
+          .where(and(eq(workspaceMembers.workspaceId, ws.id), eq(workspaceMembers.userId, toUserId)))
+      : []
+    const refusal = transferRefusal({ workspaceName: ws.name, confirmName, ownerId, to: to ?? null })
+    if (refusal || !to) throw new BadRequestException(refusal ?? 'The new owner must be a member of this workspace')
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(workspaceMembers)
+        .set({ role: 'workspace_admin' })
+        .where(and(eq(workspaceMembers.workspaceId, ws.id), inArray(workspaceMembers.userId, ownerId ? [to.userId, ownerId] : [to.userId])))
+      await tx.update(workspaces).set({ ownerId: to.userId, updatedAt: new Date() }).where(eq(workspaces.id, ws.id))
+    })
+    await this.security.logAuditEvent({
+      workspaceId: ws.id,
+      actorId: actor.id,
+      actorEmail: actor.email,
+      ipAddress: actor.ip,
+      action: 'workspace.ownership_transferred',
+      resourceType: 'workspace',
+      resourceId: ws.id,
+      description: 'Workspace ownership transferred',
+      metadata: { from: ownerId, to: to.userId, newOwnerRoleWas: to.role },
+    })
+    return { ok: true, ownerId: to.userId }
+  }
+
   async create(
     userId: string,
     dto: CreateWorkspaceDto & {
@@ -1221,7 +1420,11 @@ export class WorkspacesService {
       comingFrom?: string | null
     },
   ) {
-    const requestedSlug = slugify(dto.slug ?? dto.name)
+    // The name as it is kept (QA WS-002): trimmed, never blank, 2 to 60 characters.
+    const named = cleanWorkspaceName(dto.name)
+    if (!named.ok) throw new BadRequestException(named.reason)
+    const name = named.name
+    const requestedSlug = slugify(dto.slug ?? name)
     const finalSlug = await this.reserveUniqueSlug(requestedSlug)
 
     return this.db.transaction(async (tx) => {
@@ -1253,7 +1456,7 @@ export class WorkspacesService {
         } else {
           const [org] = await tx
             .insert(organizations)
-            .values({ name: dto.name, slug: finalSlug })
+            .values({ name, slug: finalSlug })
             .returning()
           orgId = org.id
           await tx.insert(organizationMembers).values({
@@ -1268,8 +1471,10 @@ export class WorkspacesService {
         .insert(workspaces)
         .values({
           organizationId: orgId,
-          name: dto.name,
+          name,
           slug: finalSlug,
+          // Whoever makes it owns it (`found-02-nov/workspace-has-no-owner`).
+          ownerId: userId,
           logoUrl: dto.logoUrl,
           primaryColor: dto.primaryColor,
           // §7 — kept, not discarded. Asking and then throwing the answer away
@@ -1339,7 +1544,10 @@ export class WorkspacesService {
   }
 
   async createPersonalWorkspace(userId: string, displayName: string) {
-    const name = `${displayName.split(' ')[0] || 'My'}'s Workspace`
+    // A first word long enough to make the name pass sixty characters is cut,
+    // by characters, so a signup never fails on the name it was given.
+    const first = Array.from(displayName.trim().split(/\s+/)[0] || 'My').slice(0, 40).join('')
+    const name = `${first}'s Workspace`
     try {
       return await this.create(userId, { name })
     } catch (err) {

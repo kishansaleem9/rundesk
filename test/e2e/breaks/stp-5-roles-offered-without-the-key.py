@@ -3,8 +3,9 @@
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-settings-page.tsx'
 s = io.open(p, encoding='utf-8').read()
-a = '              {mayChangeRole && withinRank(own, m.role) ? (\n'
-b = '              {(mayChangeRole || true) && withinRank(own, m.role) ? (\n'
+# Re-anchored 2 November: the owner's row offers no role to change (`found-02-nov/workspace-has-no-owner`).
+a = '              {mayChangeRole && withinRank(own, m.role) && !m.isOwner ? (\n'
+b = '              {(mayChangeRole || true) && withinRank(own, m.role) && !m.isOwner ? (\n'
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 s = s.replace(a, b)
 io.open(p, 'w', encoding='utf-8').write(s)

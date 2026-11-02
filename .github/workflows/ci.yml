@@ -4392,6 +4392,20 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # A workspace has an owner (QA WS-002 to WS-019, 2 November): whoever
+      # makes it; the name's rules; Settings › General opening on its avatar
+      # and name; Transfer and Delete its owner's, with its name typed; Leave
+      # everybody else's, from Profile › Workspaces; a deleted workspace gone
+      # for its members at once; several invitations at once; one workspace's
+      # task not reached from another (`found-02-nov/workspace-has-no-owner`).
+      - name: A workspace's owner transfers or deletes it, and everybody else leaves it
+        if: needs.changes.outputs.full == 'true' || contains(needs.changes.outputs.suites, '|workspace-ownership|')
+        timeout-minutes: 15
+        run: node test/e2e/workspace-ownership.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # The create modal's Create Task ▾: ClickUp's four endings, each making
       # one task and leaving the modal and the page as its name says, and the
       # primary button as it was (row-730-create-task-chevron).

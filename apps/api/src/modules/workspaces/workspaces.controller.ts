@@ -15,6 +15,7 @@ import { isManagerRole } from '../../common/permissions/item-visibility'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { CreateWorkspaceDto } from './dto/create-workspace.dto'
 import { canCreateWorkspace } from './workspace-creation-policy'
+import { AllowArchivedWorkspace } from '../../common/decorators/allow-archived-workspace.decorator'
 
 @ApiTags('workspaces')
 @ApiBearerAuth()
@@ -56,8 +57,13 @@ export class WorkspacesController {
   @Get(':workspaceId')
   @UseGuards(WorkspaceMemberGuard)
   @ApiOperation({ summary: 'Get a workspace by id (must be a member)' })
-  async getOne(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string, @Req() req: any) {
-    const ws = await this.workspacesService.findById(workspaceId)
+  async getOne(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string, @Req() req: any, @CurrentUser() user: any) {
+    const found = await this.workspacesService.findById(workspaceId)
+    if (!found) throw new NotFoundException('Workspace not found')
+    // Who owns it, and what that makes the reader: Settings › General shows
+    // the owner Delete and Transfer, and everybody else Leave.
+    const { ownerId, isOwner, actsAsOwner } = await this.workspacesService.ownershipFor(workspaceId, { id: user.id, role: user.role })
+    const ws = { ...found, ownerId, isOwner, actsAsOwner }
     // The domain's verification secret goes to the people who may change the
     // domain — the same roles `PATCH` admits — and to nobody else.
     return isManagerRole(req.workspaceMember?.role) ? ws : withoutDomainToken(ws)
@@ -146,25 +152,53 @@ export class WorkspacesController {
   }
 
   @Delete(':workspaceId')
-  // `workspace.manage` — rename, logo, domain, archive, restore — as the catalog
-  // says; `WorkspaceAdminGuard` admitted managers (`role-editor-offers-unenforced-permissions`).
-  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
-  @RequirePermissions('workspace.manage')
-  @ApiOperation({ summary: 'Archive (soft-delete) a workspace' })
+  // Settings › General's "Delete Workspace": its owner's (`archiveWorkspace`,
+  // QA WS-018). No permission key — `workspace.manage` let any admin do it, and
+  // ClickUp gives it to the Workspace owner alone, so no role can be granted it.
+  @UseGuards(WorkspaceMemberGuard)
+  @ApiOperation({ summary: 'Archive (soft-delete) a workspace — its owner’s' })
   async archive(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @CurrentUser() user: any,
     @Ip() ip: string,
   ) {
-    return this.workspacesService.archiveWorkspace(workspaceId, { id: user.id, email: user.email, ip })
+    return this.workspacesService.archiveWorkspace(workspaceId, { id: user.id, email: user.email, ip, role: user.role })
+  }
+
+  @Post(':workspaceId/leave')
+  // Anybody in it but its owner (`leave`, QA WS-015/WS-016): a guard of its
+  // own would only say what the service already asks.
+  @UseGuards(WorkspaceMemberGuard)
+  @ApiOperation({ summary: 'Leave a workspace (anybody but its owner, who transfers it first)' })
+  async leave(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @CurrentUser() user: any,
+    @Ip() ip: string,
+  ) {
+    return this.workspacesService.leave(workspaceId, { id: user.id, email: user.email, ip, role: user.role })
+  }
+
+  @Post(':workspaceId/transfer-ownership')
+  // Its owner's, to a member who is not a guest, confirmed by the workspace's
+  // name (`transferOwnership`, QA WS-017). No permission key, as for deleting it.
+  @UseGuards(WorkspaceMemberGuard)
+  @ApiOperation({ summary: 'Transfer a workspace’s ownership to another member (its owner)' })
+  async transferOwnership(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @Body() body: { userId?: unknown; confirmName?: unknown },
+    @CurrentUser() user: any,
+    @Ip() ip: string,
+  ) {
+    return this.workspacesService.transferOwnership(workspaceId, body?.userId, body?.confirmName, { id: user.id, email: user.email, ip, role: user.role })
   }
 
   @Delete(':workspaceId/permanent')
-  // An owner of the workspace's organization, or a platform admin, and only an
+  // Its owner, an owner of its organization, or a platform admin, and only an
   // archived workspace, confirmed by its name (`deleteForGood`). No permission
   // key: ClickUp gives this to the owner alone, and a key would let a role grant it.
   @UseGuards(WorkspaceMemberGuard)
-  @ApiOperation({ summary: 'Delete an archived workspace for good (its organization’s owner)' })
+  @AllowArchivedWorkspace()
+  @ApiOperation({ summary: 'Delete an archived workspace for good (its owner)' })
   async deleteForGood(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Body() body: { confirmName?: unknown },
@@ -175,9 +209,11 @@ export class WorkspacesController {
   }
 
   @Post(':workspaceId/restore')
-  // `workspace.manage` — rename, logo, domain, archive, restore — as the catalog
+  // `workspace.manage` — rename, logo, domain, restore — as the catalog
   // says; `WorkspaceAdminGuard` admitted managers (`role-editor-offers-unenforced-permissions`).
+  // Archived, it answers nothing else (`WorkspaceMemberGuard`).
   @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @AllowArchivedWorkspace()
   @RequirePermissions('workspace.manage')
   @ApiOperation({ summary: 'Restore an archived workspace' })
   async restore(

@@ -67,7 +67,7 @@ export type PermissionDef = {
 
 export const PERMISSION_CATALOG: readonly PermissionDef[] = [
   // Workspace
-  { key: 'workspace.manage',     label: 'Manage workspace settings',  description: 'Rename, set logo, change colour, archive', category: 'Workspace' },
+  { key: 'workspace.manage',     label: 'Manage workspace settings',  description: 'Rename, set logo, change colour, restore an archived one', category: 'Workspace' },
   { key: 'workspace.billing',    label: 'Manage billing',             description: 'View invoices, change plan, manage payment method', category: 'Workspace' },
   // ClickUp: exporting the workspace's data and its people, and importing, are the owner's and
   // admins' (help centre, "Import and export feature availability and limits"); a custom role can grant them.

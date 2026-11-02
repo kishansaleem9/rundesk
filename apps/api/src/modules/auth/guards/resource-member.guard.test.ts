@@ -144,3 +144,10 @@ test('populates req.workspaceMember for super_admin (so PermissionsGuard has wor
   assert.equal(await g.canActivate(ctx), true)
   assert.deepEqual(req.workspaceMember, { workspaceId: WS, userId: 'root', role: 'super_admin' })
 })
+
+// `found-02-nov/archived-workspace-still-opens` — a deleted (archived)
+// workspace's spaces, lists and tasks go with it for its members.
+test('REJECTS a member when the resource’s workspace is archived', async () => {
+  const g = new ResourceMemberGuard(makeDb([{ w: WS }], [{ role: 'member', isArchived: true }]))
+  await assert.rejects(() => g.canActivate(ctxFor({ id: 'u', role: 'member' }, { spaceId: SPACE })), NotFoundException)
+})

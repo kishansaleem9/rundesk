@@ -62,6 +62,15 @@ export const workspaces = pgTable('workspaces', {
   customDomainToken:    text('custom_domain_token'),
   customDomainVerified: boolean('custom_domain_verified').notNull().default(false),
   isArchived:     boolean('is_archived').notNull().default(false),
+  /**
+   * WHO OWNS IT — ClickUp's Workspace owner, one person (QA WS-015–018,
+   * `found-02-nov/workspace-has-no-owner`): whoever made it, until they hand it
+   * over. Only the owner deletes the workspace or transfers it, the owner never
+   * leaves it (they transfer it first), and nobody removes or demotes them.
+   * Null when the owner's account is gone or for a row made before the column;
+   * the earliest admin then answers for it (`effectiveOwners`). Made by 0201.
+   */
+  ownerId:        uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
   // Commercial plan tier (Plan §14.1). Defaults to 'enterprise' so the internal
   // tool keeps every feature + unlimited limits — gating is opt-in SaaS
   // scaffolding that never restricts an enterprise workspace. Tier definitions

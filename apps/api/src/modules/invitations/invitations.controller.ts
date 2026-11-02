@@ -1,5 +1,5 @@
 import { roleRank } from '../../common/permissions/workspace-roles'
-import { Controller, Post, Get, Body, Param, UseGuards, Delete, Query, Req, Res, Inject, NotFoundException, ForbiddenException, HttpCode, HttpStatus } from '@nestjs/common'
+import { Controller, Post, Get, Body, Param, UseGuards, Delete, Query, Req, Res, Inject, NotFoundException, ForbiddenException, HttpCode, HttpStatus, BadRequestException, ConflictException } from '@nestjs/common'
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger'
 import { ConfigService } from '@nestjs/config'
 import type { FastifyReply } from 'fastify'
@@ -16,6 +16,8 @@ import { JwtService } from '@nestjs/jwt'
 import { CustomRolesService } from '../custom-roles/custom-roles.service'
 import { RateLimit, RateLimitGuard } from '../../common/guards/rate-limit.guard'
 import { AUTH_ROUTE_LIMITS } from '../../common/guards/auth-route-limits'
+import { isEmailAddress } from '../../common/email-address'
+import { sameEmail } from '../../common/sql/same-email'
 
 @ApiTags('invitations')
 @Controller('invitations')
@@ -92,6 +94,20 @@ export class InvitationsController {
     if (roleRank(body.role ?? 'member') > own) {
       throw new ForbiddenException(`You cannot invite ${String(body.role)}: it is above your own role`)
     }
+    // An address, or nothing is made (QA WS-010, `found-02-nov/invitation-takes-any-text`):
+    // any text was stored and mailed. Several pasted at once are sent one by
+    // one, so each that is wrong is refused on its own.
+    const email = typeof body.email === 'string' ? body.email.trim() : ''
+    if (!isEmailAddress(email)) throw new BadRequestException(`“${String(body.email ?? '')}” is not an email address`)
+    // Nobody is invited to where they already are.
+    const { users } = await import('@rundesk/db')
+    const [already] = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .innerJoin(workspaceMembers, and(eq(workspaceMembers.userId, users.id), eq(workspaceMembers.workspaceId, body.workspaceId)))
+      .where(sameEmail(users.email, email))
+      .limit(1)
+    if (already) throw new ConflictException(`${email} is already a member of this workspace`)
 
     // 1. Find organization for this workspace
     // We'll use the raw DB for a quick lookup
@@ -108,7 +124,7 @@ export class InvitationsController {
     // We map workspace role to org role (defaulting to member)
     // and store the workspace membership in the invitation payload
     return this.invitationsService.create(ws.organizationId, user.id, {
-      email: body.email,
+      email,
       orgRole: 'member',
       workspaceMemberships: [{ workspaceId: body.workspaceId, role: body.role }],
     })

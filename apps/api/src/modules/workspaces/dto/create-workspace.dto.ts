@@ -1,9 +1,13 @@
 import { IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator'
 
 export class CreateWorkspaceDto {
+  /*
+   * 2 to 60 characters as a person counts them, trimmed, never blank: the
+   * service asks `cleanWorkspaceName` (QA WS-002), which counts an emoji as one
+   * character where `MaxLength` counted two. This bound only keeps a payload sane.
+   */
   @IsString()
-  @MinLength(2)
-  @MaxLength(60)
+  @MaxLength(400)
   name!: string
 
   @IsOptional()

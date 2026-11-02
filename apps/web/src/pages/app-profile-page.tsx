@@ -1,9 +1,12 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Input, Label, PersonAvatar, cn } from '@rundesk/ui'
-import { User, Lock, ShieldCheck, Bell, Globe, Camera, Trash2, CalendarClock, Monitor, Sun, Moon, Sparkles, Download, AlertTriangle, Copy, Check , Loader2, Building2 } from 'lucide-react'
-import { api, ApiError } from '../lib/api'
+import { Button, Card, Input, Label, PersonAvatar, cn, toast } from '@rundesk/ui'
+import { User, Lock, ShieldCheck, Bell, Globe, Camera, Trash2, CalendarClock, Monitor, Sun, Moon, Sparkles, Download, AlertTriangle, Copy, Check , Loader2, Building2, Plus, Settings } from 'lucide-react'
+import { api, ApiError, refusalMessage } from '../lib/api'
+import { WorkspaceAvatar } from '../components/workspace-avatar'
+import { LeaveWorkspaceDialog } from '../components/workspace-ownership-dialogs'
+import { CreateWorkspaceFlow, type WorkspaceDraft } from '../components/create-workspace-flow'
 import { useAuthStore } from '../store/auth'
 import { useThemeStore, type Theme } from '../store/theme'
 import { LanguageSwitcher } from '../components/language-switcher'
@@ -171,37 +174,79 @@ function putFileWithProgress(args: {
 }
 
 type WorkspaceEntry = {
-  workspace: { id: string; name: string; slug: string }
+  workspace: { id: string; name: string; slug: string; organizationId?: string; logoUrl?: string | null; primaryColor?: string | null }
   role: string
+  /** This reader owns it (`found-02-nov/workspace-has-no-owner`). */
+  isOwner?: boolean
+  memberCount?: number
 }
 
 /**
- * G08-9 [08:35] — every workspace this account belongs to, in one place.
+ * G08-9 [08:35] — every workspace this account belongs to, in one place; and,
+ * as ClickUp's My Workspaces has it (QA video, 2 November; WS-015, WS-016):
+ * New Workspace above the list, and on each row its avatar, how many people
+ * it has, Owner where it is yours, a gear to its settings for whoever runs it,
+ * and Leave — which, for its owner, says to transfer it first.
  *
  * The data and the grid already existed at `/app`, and were effectively
  * unreachable: that route redirects straight into the workspace when you have
- * exactly one, and nothing in the app links to it. So "which workspaces am I
- * in, and as what?" had no answer you could navigate to — only a page that
- * bounced you off itself.
- *
- * Read-only on purpose. Leaving a workspace and changing your own role are
- * both decisions with consequences for other people, and neither belongs
- * behind a list you opened to answer a question.
+ * exactly one, and nothing in the app links to it. Leaving was kept off this
+ * list as a decision with consequences for other people; it is behind a
+ * dialog that says what it costs, and the owner cannot leave at all.
  */
 function WorkspacesTab() {
-  const { t } = useTranslation()
+  const { t, tCount } = useTranslation()
   const navigate = useNavigate()
+  const qc = useQueryClient()
+  const setWorkspaces = useAuthStore((s) => s.setWorkspaces)
   const query = useQuery({
     queryKey: ['workspaces'],
     queryFn: () => api<WorkspaceEntry[]>('/workspaces'),
   })
   const entries = query.data ?? []
+  const [leaving, setLeaving] = useState<WorkspaceEntry | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  // The sidebar's own creation flow, and the same reading of the list after it.
+  const create = async (values: WorkspaceDraft) => {
+    setSaving(true)
+    try {
+      const created = await api<{ id: string }>('/workspaces', {
+        method: 'POST',
+        body: {
+          name: values.name,
+          ...(values.purpose ? { purpose: values.purpose } : {}),
+          ...(values.comingFrom ? { comingFrom: values.comingFrom } : {}),
+        },
+      })
+      const rows = await api<WorkspaceEntry[]>('/workspaces')
+      qc.setQueryData(['workspaces'], rows)
+      setWorkspaces(
+        rows
+          .filter((r) => r.workspace?.id)
+          .map((r) => ({ id: r.workspace.id, name: r.workspace.name, slug: r.workspace.slug, organizationId: r.workspace.organizationId ?? '', role: r.role })),
+      )
+      setCreating(false)
+      navigate({ to: '/app/$workspaceId', params: { workspaceId: created.id } })
+    } catch (err) {
+      toast.error(refusalMessage(err, t('nav.createWorkspaceError')))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <Card className="p-6 space-y-4" data-testid="profile-workspaces">
-      <div>
-        <h2 className="text-base font-semibold">{t('profile.tabWorkspaces')}</h2>
-        <p className="text-sm text-muted-foreground mt-0.5">{t('profile.workspacesSubtitle')}</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold">{t('profile.tabWorkspaces')}</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">{t('profile.workspacesSubtitle')}</p>
+        </div>
+        <Button size="sm" variant="outline" className="shrink-0 gap-1.5" data-testid="profile-workspace-new" onClick={() => setCreating(true)}>
+          <Plus className="h-3.5 w-3.5" />
+          {t('profile.workspacesNew')}
+        </Button>
       </div>
 
       {query.isLoading && <InlineSkeleton />}
@@ -219,19 +264,59 @@ function WorkspacesTab() {
             data-testid={`profile-workspace-${entry.workspace.id}`}
             className="flex items-center gap-3 py-3"
           >
+            <WorkspaceAvatar name={entry.workspace.name} logoUrl={entry.workspace.logoUrl} color={entry.workspace.primaryColor} />
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium text-foreground">{entry.workspace.name}</div>
+              <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+                <span className="truncate">{entry.workspace.name}</span>
+                {entry.isOwner && (
+                  <span
+                    className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300"
+                    data-testid={`profile-workspace-owner-${entry.workspace.id}`}
+                  >
+                    {t('profile.workspacesOwner')}
+                  </span>
+                )}
+              </div>
               <div className="truncate text-xs text-muted-foreground">
                 {/* The role is the half of this that is not obvious from the
                     sidebar, and the reason to come here at all. */}
                 <span className="capitalize">{entry.role.replace(/_/g, ' ')}</span>
+                {typeof entry.memberCount === 'number' && (
+                  <>
+                    <span className="mx-1.5 opacity-50">·</span>
+                    <span>{tCount('profile.workspacesPeople', entry.memberCount)}</span>
+                  </>
+                )}
                 <span className="mx-1.5 opacity-50">·</span>
                 <span className="font-mono">{entry.workspace.slug}</span>
               </div>
             </div>
+            {(entry.isOwner || entry.role === 'workspace_admin') && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 w-8 shrink-0 p-0 text-muted-foreground"
+                aria-label={t('profile.workspacesSettings', { name: entry.workspace.name })}
+                title={t('profile.workspacesSettings', { name: entry.workspace.name })}
+                data-testid={`profile-workspace-settings-${entry.workspace.id}`}
+                onClick={() => navigate({ to: '/app/$workspaceId/settings', params: { workspaceId: entry.workspace.id } })}
+              >
+                <Settings className="h-4 w-4" />
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"
+              className="shrink-0 border-destructive/40 text-destructive hover:bg-destructive/10"
+              data-testid={`profile-workspace-leave-${entry.workspace.id}`}
+              onClick={() => setLeaving(entry)}
+            >
+              {t('profile.workspacesLeave')}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="shrink-0"
               data-testid={`profile-workspace-open-${entry.workspace.id}`}
               onClick={() =>
                 navigate({ to: '/app/$workspaceId', params: { workspaceId: entry.workspace.id } })
@@ -242,6 +327,14 @@ function WorkspacesTab() {
           </li>
         ))}
       </ul>
+      {leaving && (
+        <LeaveWorkspaceDialog
+          workspace={{ id: leaving.workspace.id, name: leaving.workspace.name }}
+          isOwner={leaving.isOwner === true}
+          onClose={() => setLeaving(null)}
+        />
+      )}
+      <CreateWorkspaceFlow open={creating} onOpenChange={setCreating} submitting={saving} onFinish={create} />
     </Card>
   )
 }
